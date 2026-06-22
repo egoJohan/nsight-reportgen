@@ -38,10 +38,5 @@ def build_radar(ctx: RenderContext):
         cd,
     )
     for i, ser in enumerate(gf.chart.plots[0].series):
-        try:
-            ser.format.line.color.rgb = RGBColor.from_string(ctx.style.color_for(i))
-        except Exception:
-            # Fallback: use fill color if line color API is not available for radar
-            ser.format.fill.solid()
-            ser.format.fill.fore_color.rgb = RGBColor.from_string(ctx.style.color_for(i))
+        ser.format.line.color.rgb = RGBColor.from_string(ctx.style.color_for(i))
     return gf
