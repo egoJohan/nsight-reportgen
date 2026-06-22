@@ -57,4 +57,4 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
                     fonts[cls] = (fn, sz)
                 except (AttributeError, IndexError):
                     pass
-    return TemplateStyleSpec(prs.slide_width, prs.slide_height, slots, fonts, list(_DEFAULT_PALETTE))
+    return TemplateStyleSpec(prs.slide_width, prs.slide_height, slots, fonts, list(_DEFAULT_PALETTE), spec_source=str(template_path))
