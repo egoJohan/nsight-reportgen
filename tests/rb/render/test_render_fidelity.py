@@ -36,10 +36,10 @@ from reportbuilder.testing.fixtures import known_series
 def _multi_segment_series() -> SeriesResult:
     """Multi-segment series for radar (and multi-series element tests).
 
-    3 categories × 2 segments (SegA, SegB).
+    3 categories × 3 segments (SegA, SegB, Total) — contract-conformant.
     """
     categories = ("Cat1", "Cat2", "Cat3")
-    segments = ("SegA", "SegB")
+    segments = ("SegA", "SegB", "Total")
     cells = {
         ("Cat1", "SegA"): Cell(pct=70.0, count=7.0, mean=None),
         ("Cat2", "SegA"): Cell(pct=50.0, count=5.0, mean=None),
@@ -47,20 +47,26 @@ def _multi_segment_series() -> SeriesResult:
         ("Cat1", "SegB"): Cell(pct=40.0, count=4.0, mean=None),
         ("Cat2", "SegB"): Cell(pct=60.0, count=6.0, mean=None),
         ("Cat3", "SegB"): Cell(pct=20.0, count=2.0, mean=None),
+        ("Cat1", "Total"): Cell(pct=55.0, count=11.0, mean=None),
+        ("Cat2", "Total"): Cell(pct=55.0, count=11.0, mean=None),
+        ("Cat3", "Total"): Cell(pct=25.0, count=5.0, mean=None),
     }
     return SeriesResult(
         categories=categories,
         segments=segments,
         cells=cells,
-        base_n={"SegA": 10, "SegB": 10},
+        base_n={"SegA": 10, "SegB": 10, "Total": 20},
         statistic="pct",
     )
 
 
 def _scatter_series() -> SeriesResult:
-    """2-segment series for scatter; segments are the x and y axes."""
+    """2-segment series for scatter; segments are the x and y axes plus Total.
+
+    Contract-conformant: segments always includes "Total".
+    """
     categories = ("P1", "P2", "P3")
-    segments = ("x_val", "y_val")
+    segments = ("x_val", "y_val", "Total")
     cells = {
         ("P1", "x_val"): Cell(pct=10.0, count=10.0, mean=None),
         ("P2", "x_val"): Cell(pct=20.0, count=20.0, mean=None),
@@ -68,12 +74,15 @@ def _scatter_series() -> SeriesResult:
         ("P1", "y_val"): Cell(pct=15.0, count=15.0, mean=None),
         ("P2", "y_val"): Cell(pct=25.0, count=25.0, mean=None),
         ("P3", "y_val"): Cell(pct=35.0, count=35.0, mean=None),
+        ("P1", "Total"): Cell(pct=10.0, count=10.0, mean=None),
+        ("P2", "Total"): Cell(pct=20.0, count=20.0, mean=None),
+        ("P3", "Total"): Cell(pct=30.0, count=30.0, mean=None),
     }
     return SeriesResult(
         categories=categories,
         segments=segments,
         cells=cells,
-        base_n={"x_val": 3, "y_val": 3},
+        base_n={"x_val": 3, "y_val": 3, "Total": 3},
         statistic="pct",
     )
 
@@ -262,9 +271,9 @@ def test_native_elements_present(chart_type, tmp_path):
         )
 
     # --- N annotation textbox ---
-    # add_n_annotation writes N=<base_n> where base_n uses "Total" key or the first
-    # available segment key (fallback for multi-segment series without "Total").
-    base_n_val = fixture.base_n.get("Total", next(iter(fixture.base_n.values())))
+    # add_n_annotation writes N=<base_n["Total"]>; the contract guarantees "Total"
+    # is always present in base_n.
+    base_n_val = fixture.base_n["Total"]
     n_annotation_found = False
     for slide in prs.slides:
         for shape in slide.shapes:

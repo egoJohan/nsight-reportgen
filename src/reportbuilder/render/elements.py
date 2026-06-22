@@ -114,9 +114,9 @@ def add_n_annotation(ctx: RenderContext) -> None:
 
     txBox = ctx.slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
-    # "Total" is the conventional key; fall back to the first key for multi-segment
-    # series that don't carry a "Total" segment.
-    base_n = ctx.series.base_n.get("Total", next(iter(ctx.series.base_n.values())))
+    # The SeriesResult contract guarantees base_n always contains "Total".
+    # A KeyError here correctly signals a contract violation rather than hiding it.
+    base_n = ctx.series.base_n["Total"]
     tf.text = f"N={base_n}"
 
     font_name, font_size = ctx.style.font_for("n_annotation")
