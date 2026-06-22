@@ -74,12 +74,22 @@ class TestDataHiveClientMethods(unittest.TestCase):
                 weight=None
             )
 
+    def test_get_material_raises_not_implemented(self):
+        """get_material raises NotImplementedError."""
+        with self.assertRaises(NotImplementedError):
+            self.client.get_material(material_id="material_1")
+
+    def test_delete_report_raises_not_implemented(self):
+        """delete_report raises NotImplementedError."""
+        with self.assertRaises(NotImplementedError):
+            self.client.delete_report(report_doc_id="report_1")
+
 
 class TestDataHiveClientMockability(unittest.TestCase):
     """Test that DataHiveClient is mockable with spec."""
 
     def test_magic_mock_spec_has_all_methods(self):
-        """MagicMock(spec=DataHiveClient) has all 6 methods."""
+        """MagicMock(spec=DataHiveClient) has all 8 methods."""
         mock = MagicMock(spec=DataHiveClient)
 
         # Verify all methods are present in the spec
@@ -89,6 +99,8 @@ class TestDataHiveClientMockability(unittest.TestCase):
         self.assertTrue(hasattr(mock, "save_report"))
         self.assertTrue(hasattr(mock, "load_report"))
         self.assertTrue(hasattr(mock, "aggregate"))
+        self.assertTrue(hasattr(mock, "get_material"))
+        self.assertTrue(hasattr(mock, "delete_report"))
 
         # Verify we can call them without errors (they are mocks)
         mock.create_case(name="test")
@@ -97,6 +109,8 @@ class TestDataHiveClientMockability(unittest.TestCase):
         mock.save_report(case_id="1", report_id=None, report_json="{}", readable="r")
         mock.load_report(report_doc_id="1")
         mock.aggregate(material_id="1", group_by=[], filters={})
+        mock.get_material(material_id="1")
+        mock.delete_report(report_doc_id="1")
 
 
 if __name__ == "__main__":

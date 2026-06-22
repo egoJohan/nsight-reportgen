@@ -129,7 +129,7 @@ def set_grouping(
                 return {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
         # Defensive: apply_groups always produces exactly the requested group; this is an internal error.
         raise HTTPException(
-            status_code=422,
+            status_code=500,
             detail=(
                 f"The variables {list(body.variables)} could not be resolved to a multi group "
                 "after grouping. This is an internal error."

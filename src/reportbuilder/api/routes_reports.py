@@ -20,6 +20,15 @@ reports_router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+def _readable(report: Report) -> str:
+    """Return the human-readable summary string for a report."""
+    return (
+        f"{report.name}: {len(report.charts)} charts ["
+        + ",".join(c.chart_type for c in report.charts)
+        + "]"
+    )
+
+
 def _canonicalize(body: dict) -> tuple[Report, str, str]:
     """Parse body → Report; return (report, report_json, readable).
     Raises HTTP 422 if the body is not a valid Report definition."""
@@ -28,12 +37,7 @@ def _canonicalize(body: dict) -> tuple[Report, str, str]:
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid report definition: {exc}") from exc
     report_json = report_to_json(report)
-    readable = (
-        f"{report.name}: {len(report.charts)} charts ["
-        + ",".join(c.chart_type for c in report.charts)
-        + "]"
-    )
-    return report, report_json, readable
+    return report, report_json, _readable(report)
 
 
 # ---------------------------------------------------------------------------
@@ -104,10 +108,5 @@ def duplicate_report(
     src = report_from_json(client.load_report(report_id))
     new_report: Report = dataclasses.replace(src, name=body.name)
     new_json = report_to_json(new_report)
-    readable = (
-        f"{new_report.name}: {len(new_report.charts)} charts ["
-        + ",".join(c.chart_type for c in new_report.charts)
-        + "]"
-    )
-    new_id = client.save_report(case_id, None, new_json, readable)
+    new_id = client.save_report(case_id, None, new_json, _readable(new_report))
     return {"report_id": new_id}
