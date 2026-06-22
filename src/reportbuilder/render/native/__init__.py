@@ -9,6 +9,7 @@ from reportbuilder.render.native.bar import (  # noqa: F401
 from reportbuilder.render.native.line import build_line  # noqa: F401
 from reportbuilder.render.native.pie import build_pie  # noqa: F401
 from reportbuilder.render.native.doughnut import build_doughnut  # noqa: F401
+from reportbuilder.render.native.radar import build_radar  # noqa: F401
 
 # Canonical key per plan §C1 (vertical_bar = COLUMN). Task 5.4 converges to
 # the RenderContext (ctx) signature; build_column_chart remains importable for
@@ -21,4 +22,5 @@ NATIVE_BUILDERS: dict[str, object] = {
     "line": build_line,
     "pie": build_pie,
     "doughnut": build_doughnut,
+    "radar": build_radar,
 }
