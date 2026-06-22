@@ -9,6 +9,7 @@ render_to_file: convenience wrapper that saves to disk and returns the path
 from __future__ import annotations
 
 from pptx import Presentation
+from pptx.exc import PackageNotFoundError
 from pptx.util import Inches
 
 from reportbuilder.model.report import Report
@@ -49,7 +50,7 @@ def render_report(
     if spec_source and spec_source not in ("generic", "attendo-interim-proxy"):
         try:
             prs = Presentation(spec_source)
-        except Exception:
+        except (FileNotFoundError, PackageNotFoundError):
             prs = None
     if prs is None:
         prs = Presentation()

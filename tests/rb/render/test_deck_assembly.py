@@ -18,6 +18,7 @@ from pptx.presentation import Presentation as PrsClass
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.oxml.ns import qn
 
+from reportbuilder.model.report import Report, ChartSpec, SortSpec, NumberFormat, ElementToggles
 from reportbuilder.render.base import StyleSpec
 from reportbuilder.render.deck import render_report, render_to_file
 from reportbuilder.testing.fixtures import one_chart_report, two_chart_report, known_series
@@ -206,3 +207,51 @@ def test_render_report_two_charts_native():
     for slide in prs.slides:
         assert _slide_has_chart(slide), "Each slide should have a native chart"
         assert _slide_picture_count(slide) == 0, "No pictures in native mode"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: distinct question_refs — each ref resolves to its own series
+# ---------------------------------------------------------------------------
+
+def _make_chart(question_ref: str, slot: str) -> ChartSpec:
+    return ChartSpec(
+        question_ref=question_ref,
+        chart_type="vertical_bar",
+        statistic="pct",
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"),
+        template_slot=slot,
+        elements=ElementToggles(),
+    )
+
+
+def test_render_report_distinct_question_refs():
+    """Two ChartSpecs with DISTINCT question_refs each resolve to their own series.
+
+    Exercises the series_by_ref[spec.question_ref] lookup path with two different
+    keys ("q1" and "age"), proving no KeyError occurs and each chart renders.
+    """
+    report = Report(
+        name="distinct-refs",
+        render_mode="native",
+        template_ref="t.pptx",
+        charts=(
+            _make_chart("q1", "slot1"),
+            _make_chart("age", "slot2"),
+        ),
+    )
+    series_by_ref = {"q1": known_series(), "age": known_series()}
+    style = StyleSpec()
+
+    prs = render_report(report, series_by_ref, style)
+
+    assert isinstance(prs, PrsClass)
+    # Two distinct refs → two slides (fallback slot path adds one slide per chart)
+    assert len(prs.slides) == 2
+
+    chart_count = sum(1 for slide in prs.slides if _slide_has_chart(slide))
+    assert chart_count == 2, f"Expected 2 chart slides, got {chart_count}"
+
+    pic_count = sum(_slide_picture_count(slide) for slide in prs.slides)
+    assert pic_count == 0, f"Expected 0 pictures in native mode, got {pic_count}"
