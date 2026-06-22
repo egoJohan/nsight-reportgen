@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 import pandas as pd
 import pyreadstat
@@ -10,6 +11,51 @@ from reportbuilder.model.report import (
     Report, ChartSpec, SortSpec, NumberFormat, ElementToggles, report_to_json,
 )
 from reportbuilder.stats.series import Cell, SeriesResult
+
+# ---------------------------------------------------------------------------
+# Golden bindings for the Attendo aided-awareness question.
+# Copied VERBATIM from src/nsight/attendo_bindings.py (Task 1.4).
+# Do NOT import that module — these are data constants for reportbuilder tests.
+# ---------------------------------------------------------------------------
+
+# brand -> SPSS variable name (var18 grid, one checkbox per brand).
+ATTENDO_AIDED_VARS: dict[str, str] = {
+    "Attendo": "var18O45",
+    "Esperi": "var18O46",
+    "Rinnekodit": "var18O51",
+    "Validia": "var18O52",
+    "Onnikodit": "var18O48",
+    "Mainio-kodit": "var18O47",
+    "Ykköskodit": "var18O49",
+    "Humana": "var18O50",
+    "En mitään näistä": "var18O53",
+}
+
+# Deck ground truth (slide idx 14, series "Marraskuu 2025"), as whole percents.
+DECK_AIDED_AWARENESS: dict[str, int] = {
+    "Attendo": 86,
+    "Esperi": 75,
+    "Rinnekodit": 42,
+    "Validia": 33,
+    "Onnikodit": 26,
+    "Mainio-kodit": 22,
+    "Ykköskodit": 15,
+    "Humana": 13,
+    "En mitään näistä": 5,
+}
+
+
+def aided_question(model: QuestionModel) -> tuple[QuestionModel, Question]:
+    """Build the aided-awareness multi question with brand-named member labels.
+    Returns (model2, question). (golden bindings copied from nsight/attendo_bindings.py)"""
+    new_vars = dict(model.variables)
+    members = []
+    for brand, varname in ATTENDO_AIDED_VARS.items():
+        new_vars[varname] = replace(model.variables[varname], label=brand)
+        members.append(varname)
+    model2 = QuestionModel(variables=new_vars, questions=[])
+    q = Question(qid="aided", kind="multi", variables=tuple(members), text="Aided awareness")
+    return model2, q
 
 
 def tiny_question_model() -> QuestionModel:
