@@ -2,6 +2,7 @@
 from fastapi import FastAPI
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.routes_cases import cases_router
 from reportbuilder.store.datahive_client import DataHiveClient
 
 
@@ -18,6 +19,9 @@ def create_app(client: DataHiveClient | None = None) -> FastAPI:
     def health() -> dict:
         """Health check endpoint."""
         return {"status": "ok"}
+
+    # Include routers
+    app.include_router(cases_router)
 
     # Inject the client if provided
     if client is not None:
