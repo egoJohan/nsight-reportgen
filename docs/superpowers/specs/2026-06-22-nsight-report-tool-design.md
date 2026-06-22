@@ -19,7 +19,7 @@ composes/saves/edits/duplicates multiple PowerPoint reports, previews them on sc
 exports **editable PPT + PDF**. This is a generic interactive tool — there is no
 natural-language brief, no LLM-written narrative, and no target of *reproducing a specific
 deck's data/narrative* (that deck-reproduction goal belonged to the earlier prototype, a
-different product). Charts must still follow a **styling/layout spec** (REQ-C-27); that is a
+different product). Charts must still follow a **styling/layout spec** (REQ-C-27a/b); that is a
 generic "match the house style" requirement, distinct from reproducing a particular deck. We
 use the Attendo deck only as a *proxy* for that style spec until the formal one exists (R4).
 
@@ -262,7 +262,7 @@ stray slides/shapes. Asserted in render-validation.
 
 - Single source: report → **`.pptx`** → **LibreOffice headless** `--convert-to pdf` →
   **`.pdf`**. Preview = display that PDF (reuse Prima Volta `pdf_view`). The user-selectable
-  **PPT vs PDF view** (REQ-C-19) is two *views of the same artifact* — a slide-deck view
+  **PPT vs PDF view** (REQ-C-19b) is two *views of the same artifact* — a slide-deck view
   (one slide per page, PPT-style) vs a continuous PDF-page view; both derive from the one PDF,
   so **preview *is* the output**.
 - Both `.pptx` and `.pdf` stored as datahive artifact docs and downloadable.
@@ -308,7 +308,7 @@ stray slides/shapes. Asserted in render-validation.
   (verified pre-rasterization, per §10).
 - **Conversion fidelity:** `pdftotext` data-label numbers from the rendered `.pdf` ==
   SeriesResult — the layer that actually guards LibreOffice drift.
-- **PPT opens cleanly (REQ-C-29):** OOXML schema validation + python-pptx re-open without
+- **PPT opens cleanly (REQ-C-29a):** OOXML schema validation + python-pptx re-open without
   exception (no PowerPoint-in-CI dependency).
 - **datahive integration:** project create / attach material+report / list / recall round-trip
   + **exact JSON round-trip via `reference_id`/`reveal_source`** (the new D3 wiring), test hive.
