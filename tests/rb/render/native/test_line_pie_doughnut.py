@@ -2,7 +2,9 @@
 
 Covers: build_line (LINE_MARKERS), build_pie (PIE, per-point colors),
 build_doughnut (DOUGHNUT, per-point colors).
-REQ-C-13, C-24b/c/f.
+REQ-C-13, REQ-C-24b (chart-type elements/points count matches categories),
+REQ-C-24c (axis values), REQ-C-24e (category names == value labels),
+REQ-C-24f (category numeric values as data labels).
 """
 from __future__ import annotations
 import pytest

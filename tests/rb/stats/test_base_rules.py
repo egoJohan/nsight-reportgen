@@ -28,7 +28,7 @@ def _var(name: str, missing: frozenset[float] = frozenset()) -> Variable:
 # ---------------------------------------------------------------------------
 
 def test_single_base_excludes_nan_and_user_missing():
-    """Valid = non-NaN and not in user-missing set. (REQ-C-16, MV-01/02)"""
+    """Valid = non-NaN and not in user-missing set. (REQ-C-16, REQ-MV-01, REQ-MV-02, REQ-M-01)"""
     df = pd.DataFrame({"q1": [1.0, 2.0, 1.0, 99.0, np.nan]})
     result = single_base(df, _var("q1", missing=frozenset({99.0})))
     # Valid rows: 1.0, 2.0, 1.0 → 3; 99.0 excluded by user-missing; NaN excluded as Sysmis

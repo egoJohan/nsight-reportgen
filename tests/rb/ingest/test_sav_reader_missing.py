@@ -1,4 +1,8 @@
-"""Tests for Task 2.2: read_sav — user-missing codes and Sysmis."""
+"""Tests for Task 2.2: read_sav — user-missing codes and Sysmis.
+
+Covers REQ-D-06 (per-question missing-values definition) and
+REQ-MV-02 (two kinds of missing: Sysmis and user-defined).
+"""
 from __future__ import annotations
 
 import numpy as np
@@ -23,13 +27,13 @@ def sav_with_missing(tmp_path):
 
 
 def test_user_missing_code_in_missing_values(sav_with_missing):
-    """User-defined missing code 99 must appear in missing_values."""
+    """User-defined missing code 99 must appear in missing_values. (REQ-D-06, REQ-MV-02)"""
     _, model = read_sav(sav_with_missing)
     assert model.variable("q1").missing_values == frozenset({99.0})
 
 
 def test_sysmis_is_nan_in_dataframe(sav_with_missing):
-    """Sysmis row stays as NaN in the DataFrame."""
+    """Sysmis row stays as NaN in the DataFrame. (REQ-MV-02)"""
     df, _ = read_sav(sav_with_missing)
     assert pd.isna(df["q1"].iloc[3])
 

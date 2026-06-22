@@ -43,6 +43,7 @@ def test_pct_zero_base():
 # ---------------------------------------------------------------------------
 
 def test_count_round_up_vs_nearest():
+    """Counts are whole numbers; configurable round-up supported. (REQ-N-03)"""
     assert count_value(4.2, _fmt()) == 4.0            # round-to-nearest
     assert count_value(4.2, _fmt(count_round_up=True)) == 5.0   # ceil
     assert count_value(4.0, _fmt(count_round_up=True)) == 4.0   # ceil of whole number
@@ -54,6 +55,7 @@ def test_count_round_up_vs_nearest():
 # ---------------------------------------------------------------------------
 
 def test_mean_excludes_missing_and_decimals():
+    """Means are shown with configurable decimal format; missing excluded. (REQ-N-02)"""
     s = pd.Series([10.0, 20.0, 99.0, 30.0])
     # 99.0 is a missing value → mean of {10, 20, 30} = 20.0
     assert mean(s, _SCALE_VAR, _fmt(mean_decimals=1)) == 20.0

@@ -104,6 +104,7 @@ class TestNumberFormatCode:
 
 class TestTitleApplied:
     def test_title_applied(self):
+        """Chart title (image/chart title) is applied when toggle is on. (REQ-C-24a)"""
         from reportbuilder.render.elements import apply_elements
         _, slide = _make_prs_and_slide()
         chart = _make_column_chart(slide)
@@ -140,6 +141,12 @@ class TestTitleApplied:
 
 class TestDataLabelsAndLegendToggle:
     def test_all_toggles_on(self):
+        """Data labels, legend, and axis names are applied when toggles are on.
+
+        Covers: REQ-C-24b (chart-type elements/series), REQ-C-24c (axis values),
+        REQ-C-24d (axis names), REQ-C-24e (category names), REQ-C-24f (data labels),
+        REQ-C-24g (legend).
+        """
         from reportbuilder.render.elements import apply_elements
         _, slide = _make_prs_and_slide()
         chart = _make_column_chart(slide)
@@ -204,6 +211,7 @@ class TestNAndFilterAnnotations:
         return count
 
     def test_n_annotation_added_when_toggle_on(self):
+        """Sample size N annotation is added when toggle is on. (REQ-C-24h)"""
         from reportbuilder.render.elements import add_n_annotation
         _, slide = _make_prs_and_slide()
         elements = ElementToggles(n=True, title=False, legend=False, axis_names=False,
@@ -230,6 +238,7 @@ class TestNAndFilterAnnotations:
         assert len(slide.shapes) == initial_count
 
     def test_filter_annotation_added_when_toggle_and_classifying_var_on(self):
+        """Filter (classifying) variable annotation is added when toggle and var are set. (REQ-C-24i)"""
         from reportbuilder.render.elements import add_filter_annotation
         _, slide = _make_prs_and_slide()
         elements = ElementToggles(filter_var=True, title=False, legend=False, axis_names=False,

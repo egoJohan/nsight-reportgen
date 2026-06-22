@@ -166,7 +166,12 @@ class TestReport:
     """Test Report frozen dataclass."""
 
     def test_report_holds_charts_and_render_mode(self):
-        """Verify Report holds a tuple of ChartSpec and render_mode."""
+        """Verify Report holds a tuple of ChartSpec and render_mode. (REQ-C-17, REQ-D-03)
+
+        Report.template_ref captures which PPT template to use (REQ-C-17: various
+        templates); ChartSpec.question_ref captures the variable name reference
+        (REQ-D-03: report creation is based on variable names).
+        """
         chart1 = ChartSpec(
             question_ref="Q1",
             chart_type="bar",

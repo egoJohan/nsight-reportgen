@@ -1,4 +1,11 @@
-"""Tests for Task 2.1: read_sav — variables, labels, value labels, measurement."""
+"""Tests for Task 2.1: read_sav — variables, labels, value labels, measurement.
+
+Covers REQ-C-02 (ingest captures definitions: names, labels, values, value labels),
+REQ-D-01 (observation matrix shape preserved through ingest),
+REQ-D-02 (numeric values handled uniformly),
+REQ-D-04 (variable labels provide question text),
+REQ-D-05 (value labels define explanation texts).
+"""
 from __future__ import annotations
 
 import pandas as pd
@@ -31,23 +38,27 @@ def test_returns_dataframe_and_question_model(synthetic_sav):
 
 
 def test_dataframe_shape(synthetic_sav):
+    """Observation matrix shape (rows = respondents, cols = variables) is preserved. (REQ-D-01, REQ-D-02)"""
     df, _ = read_sav(synthetic_sav)
     assert list(df.columns) == ["q1", "age"]
     assert len(df) == 4
 
 
 def test_variable_names(synthetic_sav):
+    """Variable names are captured by read_sav. (REQ-C-02, REQ-D-03)"""
     _, model = read_sav(synthetic_sav)
     assert set(model.variables) == {"q1", "age"}
 
 
 def test_variable_label(synthetic_sav):
+    """Variable labels (description texts) are captured. (REQ-C-02, REQ-D-04)"""
     _, model = read_sav(synthetic_sav)
     assert model.variable("q1").label == "Overall satisfaction"
     assert model.variable("age").label == "Respondent age"
 
 
 def test_value_labels_q1(synthetic_sav):
+    """Value labels are captured per variable. (REQ-C-02, REQ-D-05)"""
     _, model = read_sav(synthetic_sav)
     assert model.variable("q1").value_labels == (
         ValueLabel(1.0, "Poor"),

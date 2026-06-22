@@ -150,7 +150,10 @@ SERIES_MATCH_TYPES = [
 
 @pytest.mark.parametrize("chart_type", SERIES_MATCH_TYPES)
 def test_native_series_match(chart_type, tmp_path):
-    """Embedded OOXML data for each native chart type matches its SeriesResult.
+    """Embedded OOXML data for each native chart type matches its SeriesResult. (REQ-C-23b)
+
+    Verifies that all key chart properties (type, data, colors, labels, legend, axes)
+    are live OOXML chart attributes — not flattened — and thus editable post-generation.
 
     For most types: single-segment series (Yes 60 / No 40).
     For radar: multi-segment series (3 categories × 2 segments).

@@ -102,7 +102,11 @@ def _one_chart_report() -> Report:
 
 
 def test_dual_view_same_artifact(tmp_path):
-    """slide_view and page_view yield the same PNG set over a 2-chart deck (REQ-C-19a/b)."""
+    """slide_view and page_view yield the same PNG set over a 2-chart deck.
+
+    Both PPT-style (slide-per-page) and PDF-style (continuous) pagination views
+    are selectable and operate over the same PDF artifact. (REQ-C-19a, REQ-C-19b)
+    """
     model, data = _two_chart_model_and_data()
     report = _two_chart_report()
 

@@ -2,7 +2,7 @@
 
 Covers: xy_chart_data (pairs mapped), build_scatter (XY_SCATTER / c:scatterChart,
 zero pictures), ValueError when scatter_xy is None, registry entry.
-REQ-C-13, C-24c/d.
+REQ-C-13, REQ-C-24c (axis values), REQ-C-24d (axis names).
 """
 from __future__ import annotations
 import pytest

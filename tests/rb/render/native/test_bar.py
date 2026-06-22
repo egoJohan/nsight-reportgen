@@ -1,7 +1,7 @@
 """TDD tests for native bar chart builders (Task 5.5).
 
 Covers: build_horizontal_bar, build_stacked_vertical_bar, build_stacked_horizontal_bar.
-REQ-C-13, C-24b/g.
+REQ-C-13, REQ-C-24b (chart-type elements: bars/series present), REQ-C-24g (legend).
 """
 from __future__ import annotations
 import pytest

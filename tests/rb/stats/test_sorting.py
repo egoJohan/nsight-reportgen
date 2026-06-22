@@ -15,6 +15,7 @@ ROWS = [
 
 
 def test_default_is_pct_descending():
+    """Default sort basis is percentage magnitude (most common case). (REQ-S-03, REQ-C-26)"""
     result = sort_categories(ROWS, SortSpec(basis="pct"))
     assert result == ["Mid", "High", "Low"]
 
@@ -30,6 +31,7 @@ def test_count_and_mean_bases():
 
 
 def test_topbox_sum_uses_topbox_value():
+    """Sort by top-box sum (e.g. 4+5 on a 5-point scale) is supported. (REQ-S-02)"""
     # Mid=80, High=80 (tie) → stable data order → Mid before High; Low=70 last
     result = sort_categories(ROWS, SortSpec(basis="topbox_sum", topbox_codes=(2.0, 3.0)))
     assert result == ["Mid", "High", "Low"]

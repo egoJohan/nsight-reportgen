@@ -80,7 +80,7 @@ def multi_model() -> QuestionModel:
 # ---------------------------------------------------------------------------
 
 def test_single_pct_excludes_missing_and_sorts_by_pct(single_model):
-    """compute() on a single question:
+    """compute() on a single question: (REQ-M-01, REQ-M-04)
     - excludes user-missing code (99) and NaN from both counts and base
     - base_n["Total"] == 4  (rows with value 1 or 2 only)
     - categories sorted descending by pct: ("Good", "Poor")
