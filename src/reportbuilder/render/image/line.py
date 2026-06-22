@@ -39,8 +39,3 @@ def build_image_line(ctx) -> None:
 
     png = render_png(fig)
     place_picture(ctx, png)
-
-
-# Register in IMAGE_BUILDERS
-from reportbuilder.render.image import IMAGE_BUILDERS  # noqa: E402
-IMAGE_BUILDERS["line"] = build_image_line

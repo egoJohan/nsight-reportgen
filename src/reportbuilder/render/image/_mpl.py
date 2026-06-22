@@ -4,6 +4,7 @@ Sets the Agg backend at module level before importing pyplot so that callers
 can safely import this module in headless/test environments without a display.
 """
 from __future__ import annotations
+import os
 import tempfile
 import matplotlib
 matplotlib.use("Agg")
@@ -22,7 +23,8 @@ def new_figure(ctx):
 
 def render_png(fig) -> str:
     """Save figure to a temp PNG file and close it. Returns the file path."""
-    path = tempfile.mktemp(suffix=".png")
+    fd, path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return path

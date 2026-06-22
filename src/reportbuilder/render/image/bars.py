@@ -149,11 +149,3 @@ def build_image_bar_stacked(ctx) -> None:
 
     png = render_png(fig)
     place_picture(ctx, png)
-
-
-# Register in IMAGE_BUILDERS
-from reportbuilder.render.image import IMAGE_BUILDERS  # noqa: E402
-IMAGE_BUILDERS["vertical_bar"] = build_image_column
-IMAGE_BUILDERS["horizontal_bar"] = build_image_bar
-IMAGE_BUILDERS["stacked_vertical_bar"] = build_image_column_stacked
-IMAGE_BUILDERS["stacked_horizontal_bar"] = build_image_bar_stacked
