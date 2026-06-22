@@ -1,6 +1,7 @@
 """Report definition model (design §8)."""
 from __future__ import annotations
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
@@ -47,3 +48,41 @@ class Report:
     render_mode: str                            # "native" | "image" (per report)
     template_ref: str
     charts: tuple[ChartSpec, ...]
+
+
+def report_to_json(report: Report) -> str:
+    """Serialize a Report to a canonical JSON string (tuples become JSON arrays)."""
+    return json.dumps(asdict(report), ensure_ascii=False, sort_keys=True)
+
+
+def report_from_json(data: dict | str) -> Report:
+    """Rebuild a Report from JSON (str or already-parsed dict), restoring tuples."""
+    d = json.loads(data) if isinstance(data, str) else data
+
+    def _chart(c: dict) -> ChartSpec:
+        nf = c["number_format"]
+        so = c["sort"]
+        el = c["elements"]
+        sx = c.get("scatter_xy")
+        return ChartSpec(
+            question_ref=c["question_ref"],
+            chart_type=c["chart_type"],
+            statistic=c["statistic"],
+            classifying_var=c.get("classifying_var"),
+            number_format=NumberFormat(**nf),
+            sort=SortSpec(
+                basis=so["basis"],
+                topbox_codes=tuple(so.get("topbox_codes", ())),
+                descending=so.get("descending", True),
+            ),
+            template_slot=c["template_slot"],
+            elements=ElementToggles(**el),
+            scatter_xy=tuple(sx) if sx is not None else None,
+        )
+
+    return Report(
+        name=d["name"],
+        render_mode=d["render_mode"],
+        template_ref=d["template_ref"],
+        charts=tuple(_chart(c) for c in d["charts"]),
+    )
