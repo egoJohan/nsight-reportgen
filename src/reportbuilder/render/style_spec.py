@@ -1,6 +1,7 @@
 """Load a StyleSpec (fonts/colors/slots) from a template .pptx (REQ-C-25/27a)."""
 from __future__ import annotations
 from pptx import Presentation
+from reportbuilder import config
 from reportbuilder.render.base import Slot, StyleSpec
 
 _DEFAULT_FONTS: dict[str, tuple[str, int]] = {
@@ -58,3 +59,12 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
                 except (AttributeError, IndexError):
                     pass
     return TemplateStyleSpec(prs.slide_width, prs.slide_height, slots, fonts, list(_DEFAULT_PALETTE), spec_source=str(template_path))
+
+
+def attendo_interim_spec() -> TemplateStyleSpec:
+    """Interim proxy style spec from the Attendo deck. Satisfies REQ-C-27a (renders
+    against *a* spec); REQ-C-27b (match the *client's* spec) remains BLOCKED — marked
+    via spec_source/matches_client_spec."""
+    spec = load_style_spec(str(config.ATTENDO_TEMPLATE))
+    spec.spec_source = "attendo-interim-proxy"
+    return spec
