@@ -10,6 +10,15 @@ import os
 import shutil
 import subprocess
 
+def pdf_page_count(pdf_path: str) -> int:
+    """Page count via poppler `pdfinfo`. (REQ-C-21/28a)"""
+    proc = subprocess.run(["pdfinfo", pdf_path], capture_output=True, text=True, check=True)
+    for line in proc.stdout.splitlines():
+        if line.startswith("Pages:"):
+            return int(line.split(":", 1)[1].strip())
+    raise RuntimeError("pdfinfo: no Pages line in output")
+
+
 def pptx_to_pdf(pptx_path: str, out_dir: str) -> str:
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if soffice is None:
