@@ -27,6 +27,19 @@ RUBRICS: dict[str, str] = {
         "no garbled text, no obvious rendering artefacts.\n"
         "FAIL if any single criterion above is violated."
     ),
+    "REQ-C-28b": (
+        "You are judging a multi-page rendered survey report PDF for presentation quality "
+        "(REQ-C-28b).\n"
+        "PASS only if ALL of the following hold on every page:\n"
+        "1. No text labels overlap each other or overlap the plotted bars/lines/segments.\n"
+        "2. No category label, axis label, legend label, or data label is truncated or "
+        "clipped at any edge of the chart or slide.\n"
+        "3. Every data label is fully legible (no overlap with its bar, no cut-off at "
+        "the slide boundary).\n"
+        "4. The overall slide layout looks clean and presentation-quality — appropriate "
+        "whitespace, no garbled text, no visible rendering artefacts.\n"
+        "FAIL if any single criterion above is violated on any page."
+    ),
 }
 
 def rubric_for(requirement_id: str) -> str:
