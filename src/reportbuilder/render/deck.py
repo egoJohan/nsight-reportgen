@@ -9,6 +9,7 @@ render_to_file: convenience wrapper that saves to disk and returns the path
 from __future__ import annotations
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.exc import PackageNotFoundError
 from pptx.util import Inches
 
@@ -17,6 +18,59 @@ from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
 from reportbuilder.render.image import IMAGE_BUILDERS
 from reportbuilder.render.native import NATIVE_BUILDERS
+
+
+# ---------------------------------------------------------------------------
+# Completeness and purity guards (REQ-C-18, REQ-C-23a)
+# ---------------------------------------------------------------------------
+
+class CompletenessError(Exception):
+    """Generated deck doesn't match the report definition (REQ-C-18)."""
+
+
+class NativePurityError(Exception):
+    """A native-mode report has a picture shape in a chart slot (REQ-C-23a)."""
+
+
+def _count_chart_shapes(prs: Presentation) -> tuple[int, int]:
+    """Return (chart_count, picture_count) across all slides in *prs*."""
+    charts = sum(
+        1 for s in prs.slides for sh in s.shapes if getattr(sh, "has_chart", False)
+    )
+    pics = sum(
+        1 for s in prs.slides for sh in s.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+    )
+    return charts, pics
+
+
+def assert_complete(prs: Presentation, report: Report) -> None:
+    """The deck contains exactly one rendered chart object per ChartSpec, nothing extra.
+
+    Native mode: counts c:chart shapes.  Image mode: counts PICTURE shapes.
+    Raises CompletenessError if the tally doesn't match len(report.charts). (REQ-C-18)
+    """
+    charts, pics = _count_chart_shapes(prs)
+    rendered = charts if report.render_mode == "native" else pics
+    expected = len(report.charts)
+    if rendered != expected:
+        raise CompletenessError(
+            f"expected {expected} {report.render_mode} chart objects, found {rendered}"
+        )
+
+
+def assert_no_pictures_in_chart_slots(prs: Presentation, report: Report, style=None) -> None:
+    """Native-mode reports must contain ZERO picture shapes (editability gate, REQ-C-23a).
+
+    No-op for image mode (image reports legitimately use pictures).
+    """
+    if report.render_mode != "native":
+        return
+    _charts, pics = _count_chart_shapes(prs)
+    if pics > 0:
+        raise NativePurityError(
+            f"native-mode report has {pics} picture shape(s) in chart slots"
+        )
 
 
 def render_report(
@@ -85,6 +139,8 @@ def render_report(
         else:
             IMAGE_BUILDERS[spec.chart_type](ctx)
 
+    assert_complete(prs, report)
+    assert_no_pictures_in_chart_slots(prs, report, style)
     return prs
 
 
