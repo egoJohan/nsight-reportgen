@@ -43,9 +43,10 @@ def test_pct_zero_base():
 # ---------------------------------------------------------------------------
 
 def test_count_round_up_vs_nearest():
-    assert count_value(4.2, _fmt()) == 4            # round-to-nearest
-    assert count_value(4.2, _fmt(count_round_up=True)) == 5   # ceil
-    assert count_value(4.0, _fmt(count_round_up=True)) == 4   # ceil of whole number
+    assert count_value(4.2, _fmt()) == 4.0            # round-to-nearest
+    assert count_value(4.2, _fmt(count_round_up=True)) == 5.0   # ceil
+    assert count_value(4.0, _fmt(count_round_up=True)) == 4.0   # ceil of whole number
+    assert isinstance(count_value(4.2, _fmt()), float)
 
 
 # ---------------------------------------------------------------------------
@@ -57,3 +58,17 @@ def test_mean_excludes_missing_and_decimals():
     # 99.0 is a missing value → mean of {10, 20, 30} = 20.0
     assert mean(s, _SCALE_VAR, _fmt(mean_decimals=1)) == 20.0
     assert mean(s, _SCALE_VAR, _fmt(mean_decimals=2)) == 20.0
+
+
+def test_mean_empty_series():
+    """Empty series should return 0.0."""
+    assert mean(pd.Series([], dtype=float), _SCALE_VAR, _fmt()) == 0.0
+
+
+def test_mean_nan_only_series():
+    """Series with only NaN values should return 0.0."""
+    assert mean(
+        pd.Series([float("nan"), float("nan")]),
+        _SCALE_VAR,
+        _fmt(),
+    ) == 0.0
