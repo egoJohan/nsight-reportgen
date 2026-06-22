@@ -40,7 +40,7 @@ def build_image_funnel(ctx) -> None:
     ax.xaxis.set_visible(False)
 
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
 
     png = render_png(fig)
     place_picture(ctx, png)

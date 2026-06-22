@@ -42,9 +42,11 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
         tf = chart.chart_title.text_frame
         tf.text = title
         font_name, font_size = ctx.style.font_for("title")
-        run = tf.paragraphs[0].runs[0]
-        run.font.name = font_name
-        run.font.size = Pt(font_size)
+        runs = tf.paragraphs[0].runs
+        if runs:
+            run = runs[0]
+            run.font.name = font_name
+            run.font.size = Pt(font_size)
 
     # --- Data labels ---
     if elements.data_labels:

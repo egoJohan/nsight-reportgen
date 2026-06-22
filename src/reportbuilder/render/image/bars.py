@@ -40,7 +40,7 @@ def build_image_column(ctx) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(cats, fontsize=8)
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     if ctx.spec.elements.legend and n_segs > 1:
         ax.legend(fontsize=7)
 
@@ -75,7 +75,7 @@ def build_image_bar(ctx) -> None:
     ax.set_yticks(y)
     ax.set_yticklabels(cats, fontsize=8)
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     if ctx.spec.elements.legend and n_segs > 1:
         ax.legend(fontsize=7)
 
@@ -109,7 +109,7 @@ def build_image_column_stacked(ctx) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(cats, fontsize=8)
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     if ctx.spec.elements.legend and len(segs) > 1:
         ax.legend(fontsize=7)
 
@@ -143,7 +143,7 @@ def build_image_bar_stacked(ctx) -> None:
     ax.set_yticks(y)
     ax.set_yticklabels(cats, fontsize=8)
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     if ctx.spec.elements.legend and len(segs) > 1:
         ax.legend(fontsize=7)
 

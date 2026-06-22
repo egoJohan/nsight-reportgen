@@ -33,7 +33,7 @@ def build_image_line(ctx) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(cats, fontsize=8)
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     if ctx.spec.elements.legend and len(segs) > 1:
         ax.legend(fontsize=7)
 

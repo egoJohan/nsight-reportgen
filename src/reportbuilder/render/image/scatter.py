@@ -45,7 +45,7 @@ def build_image_scatter(ctx) -> None:
         ax.set_ylabel(y_seg, fontsize=8)
 
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
 
     png = render_png(fig)
     place_picture(ctx, png)

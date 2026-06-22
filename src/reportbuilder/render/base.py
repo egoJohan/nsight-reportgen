@@ -32,6 +32,7 @@ class RenderContext:
     spec: ChartSpec
     series: SeriesResult
     fmt: NumberFormat
+    title: str = ""       # chart title text (Task 5.14)
 
 class ChartRenderer(Protocol):
     def render(self, ctx: RenderContext) -> None: ...

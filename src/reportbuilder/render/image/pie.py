@@ -24,7 +24,7 @@ def build_image_pie(ctx) -> None:
         autopct="%1.0f%%" if ctx.spec.elements.data_labels else None,
     )
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     png = render_png(fig)
     place_picture(ctx, png)
 
@@ -42,6 +42,6 @@ def build_image_doughnut(ctx) -> None:
         wedgeprops=dict(width=0.4),
     )
     if ctx.spec.elements.title:
-        ax.set_title("")
+        ax.set_title(ctx.title)
     png = render_png(fig)
     place_picture(ctx, png)
