@@ -33,6 +33,10 @@ class DataHiveClient:
         """Return the exact report-definition JSON for a report doc. (REQ-C-08)"""
         raise NotImplementedError
 
+    def get_material(self, material_id: str) -> bytes:
+        """Return the raw stored bytes of a material doc (e.g. the .sav). (REQ-C-05)"""
+        raise NotImplementedError
+
     def aggregate(self, material_id: str, group_by: list[str], filters: dict,
                   weight: str | None = None) -> dict:
         """Generic filtered GROUP BY / cross-tab cell counts over a tabular material. (D1)"""

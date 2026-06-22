@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_cases import cases_router
 from reportbuilder.api.routes_materials import materials_router
+from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.store.datahive_client import DataHiveClient
 
 
@@ -24,6 +25,7 @@ def create_app(client: DataHiveClient | None = None) -> FastAPI:
     # Include routers
     app.include_router(cases_router)
     app.include_router(materials_router)
+    app.include_router(questions_router)
 
     # Inject the client if provided
     if client is not None:
