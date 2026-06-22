@@ -155,8 +155,21 @@ class TestDataLabelsAndLegendToggle:
         assert dl.number_format == '0"%"'
         assert dl.number_format_is_linked is False
 
+        # Data-label font
+        dl_name, dl_size = ctx.style.font_for("data_labels")
+        assert dl.font.name == dl_name
+        assert dl.font.size == Pt(dl_size)
+
         # Legend
         assert chart.has_legend is True
+
+        # Legend font
+        leg_name, leg_size = ctx.style.font_for("legend")
+        assert chart.legend.font.name == leg_name
+        assert chart.legend.font.size == Pt(leg_size)
+
+        # axis_names must NOT create a value-axis title
+        assert chart.value_axis.has_title is False
 
     def test_all_toggles_off(self):
         from reportbuilder.render.elements import apply_elements

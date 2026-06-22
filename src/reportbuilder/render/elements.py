@@ -73,12 +73,9 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
     # --- Axis names / tick labels ---
     if elements.axis_names:
         try:
-            va = chart.value_axis
-            va.has_title = True
-            # Leave axis_title text empty (per spec)
             vfont_name, vfont_size = ctx.style.font_for("axis_values")
-            va.tick_labels.font.name = vfont_name
-            va.tick_labels.font.size = Pt(vfont_size)
+            chart.value_axis.tick_labels.font.name = vfont_name
+            chart.value_axis.tick_labels.font.size = Pt(vfont_size)
 
             cfont_name, cfont_size = ctx.style.font_for("category_names")
             chart.category_axis.tick_labels.font.name = cfont_name
