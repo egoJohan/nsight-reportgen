@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import tempfile
+from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
@@ -78,7 +79,7 @@ def list_questions(
 class GroupingRequest(BaseModel):
     """Request body for PUT /materials/{material_id}/grouping."""
     variables: list[str]
-    kind: str  # "single" | "multi"
+    kind: Literal["single", "multi"]
 
 
 @questions_router.put("/materials/{material_id}/grouping")
@@ -94,16 +95,32 @@ def set_grouping(
     base = _load_singles(material_id, client)
 
     if body.kind == "multi":
-        grouped_model = apply_groups(base, [tuple(body.variables)])
-        # Find the question whose variables match the requested set
         var_set = tuple(body.variables)
+        # Validate that the requested variables form a recognised multi group.
+        # suggest_multi_groups enforces shared-prefix + binary-variable eligibility;
+        # if the requested tuple is not among the suggested groups it is not a valid
+        # multi group and we must fail explicitly rather than silently group anything.
+        eligible_groups = suggest_multi_groups(base)
+        if var_set not in eligible_groups:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"The variables {list(body.variables)} do not form a multi group. "
+                    "Ensure they share a common prefix and are all binary (0/1) variables."
+                ),
+            )
+        grouped_model = apply_groups(base, [var_set])
         for q in grouped_model.questions:
             if q.variables == var_set:
                 return {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
-        # Fallback: return first multi question (should not happen)
-        for q in grouped_model.questions:
-            if q.kind == "multi":
-                return {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
+        # Should be unreachable after the eligibility check above.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"The variables {list(body.variables)} could not be resolved to a multi group "
+                "after grouping. This is an internal error."
+            ),
+        )
 
     # kind == "single": return individual single question(s) for each requested variable
     result = []

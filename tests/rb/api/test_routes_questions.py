@@ -154,6 +154,27 @@ def test_put_grouping_multi_returns_multi_question(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_put_grouping_multi_unmatched_variables_returns_422(tmp_path) -> None:
+    """PUT /materials/{material_id}/grouping with kind=multi and variables that do NOT form a
+    recognized multi group must return 422 — no silent wrong-result fallback. The variables
+    'q1_1' and 'age' share no common prefix, so apply_groups will not produce a group matching
+    that exact tuple, triggering the explicit HTTPException. (REQ-C-06)"""
+    singles = _make_singles_model()
+
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    tc = TestClient(app)
+
+    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
+        mock_singles.return_value = singles
+        response = tc.put(
+            "/materials/mat-1/grouping",
+            json={"variables": ["q1_1", "age"], "kind": "multi"},
+        )
+
+    assert response.status_code == 422
+
+
 def test_put_grouping_single_returns_single_questions(tmp_path) -> None:
     """PUT /materials/{material_id}/grouping with kind=single returns single question entries for
     each supplied variable. Stateless preview — no persistence. (REQ-C-06)"""
