@@ -51,17 +51,22 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
     # --- Data labels ---
     if elements.data_labels:
         plot = chart.plots[0]
-        plot.has_data_labels = True
-        dl = plot.data_labels
-        dl.number_format = number_format_code(ctx.fmt, ctx.spec.statistic)
-        dl.number_format_is_linked = False
         try:
-            dl.position = XL_LABEL_POSITION.OUTSIDE_END
-        except (ValueError, AttributeError):
+            plot.has_data_labels = True
+            dl = plot.data_labels
+            dl.number_format = number_format_code(ctx.fmt, ctx.spec.statistic)
+            dl.number_format_is_linked = False
+            try:
+                dl.position = XL_LABEL_POSITION.OUTSIDE_END
+            except (ValueError, AttributeError):
+                pass
+            font_name, font_size = ctx.style.font_for("data_labels")
+            dl.font.name = font_name
+            dl.font.size = Pt(font_size)
+        except AttributeError:
+            # Some plot types (e.g. XyPlot / CT_ScatterChart) don't support dLbls
+            # in python-pptx; skip silently.
             pass
-        font_name, font_size = ctx.style.font_for("data_labels")
-        dl.font.name = font_name
-        dl.font.size = Pt(font_size)
 
     # --- Legend ---
     if elements.legend:
@@ -82,7 +87,9 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
             cfont_name, cfont_size = ctx.style.font_for("category_names")
             chart.category_axis.tick_labels.font.name = cfont_name
             chart.category_axis.tick_labels.font.size = Pt(cfont_size)
-        except AttributeError:
+        except (AttributeError, ValueError):
+            # pie / doughnut / radar / scatter have no value_axis or category_axis;
+            # python-pptx raises ValueError("chart has no value axis") for those types.
             pass
 
 
@@ -107,7 +114,9 @@ def add_n_annotation(ctx: RenderContext) -> None:
 
     txBox = ctx.slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
-    base_n = ctx.series.base_n["Total"]
+    # "Total" is the conventional key; fall back to the first key for multi-segment
+    # series that don't carry a "Total" segment.
+    base_n = ctx.series.base_n.get("Total", next(iter(ctx.series.base_n.values())))
     tf.text = f"N={base_n}"
 
     font_name, font_size = ctx.style.font_for("n_annotation")

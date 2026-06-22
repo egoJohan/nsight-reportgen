@@ -3,12 +3,27 @@ from __future__ import annotations
 import re
 import pdfplumber
 from pptx import Presentation
+from pptx.oxml.ns import qn
 from reportbuilder.stats.series import SeriesResult
 
 _NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
 
+
+def _xy_x_values(series_el) -> list[float]:
+    """Extract x values from an XY scatter series element via c:xVal."""
+    xVal = series_el.find(".//" + qn("c:xVal"))
+    if xVal is None:
+        return []
+    return [float(pt.text) for pt in xVal.findall(".//" + qn("c:v")) if pt.text is not None]
+
+
 def numbers_from_pptx(pptx_path: str) -> dict:
-    """Read native chart series values: {series_name: [float, ...]}."""
+    """Read native chart series values: {series_name: [float, ...]}.
+
+    For XY scatter charts, both x values and y values are included in the
+    returned list (x values first, then y values) so that assert_series_match
+    can verify the complete data payload.
+    """
     prs = Presentation(pptx_path)
     out: dict[str, list[float]] = {}
     for slide in prs.slides:
@@ -17,7 +32,10 @@ def numbers_from_pptx(pptx_path: str) -> dict:
                 continue
             for plot in shape.chart.plots:
                 for series in plot.series:
-                    out[series.name] = [float(v) for v in series.values]
+                    y_vals = [float(v) for v in series.values]
+                    # For XY scatter, also extract x values from the OOXML element.
+                    x_vals = _xy_x_values(series._element)
+                    out[series.name] = x_vals + y_vals if x_vals else y_vals
     return out
 
 def numbers_from_pdf(pdf_path: str) -> list[float]:
