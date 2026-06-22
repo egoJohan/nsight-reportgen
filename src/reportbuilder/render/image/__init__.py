@@ -18,6 +18,8 @@ from reportbuilder.render.image.pie import (  # noqa: F401
 )
 from reportbuilder.render.image.radar import build_image_radar  # noqa: F401
 from reportbuilder.render.image.scatter import build_image_scatter  # noqa: F401
+from reportbuilder.render.image.funnel import build_image_funnel  # noqa: F401
+from reportbuilder.render.image.combo import build_image_combo  # noqa: F401
 
 IMAGE_BUILDERS: dict[str, object] = {
     "vertical_bar": build_image_column,
@@ -29,4 +31,6 @@ IMAGE_BUILDERS: dict[str, object] = {
     "doughnut": build_image_doughnut,
     "radar": build_image_radar,
     "scatter": build_image_scatter,
+    "funnel": build_image_funnel,
+    "combo": build_image_combo,
 }
