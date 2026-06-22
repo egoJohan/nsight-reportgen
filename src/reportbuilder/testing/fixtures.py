@@ -45,6 +45,37 @@ DECK_AIDED_AWARENESS: dict[str, int] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Golden bindings for the Attendo general-opinion question (M-2).
+# Copied VERBATIM from src/nsight/attendo_bindings.py (Task 3.7).
+# Do NOT import that module — these are data constants for reportbuilder tests.
+# ---------------------------------------------------------------------------
+
+# SPSS variable names for private/public opinion questions (slide idx 17).
+OPINION_PRIVATE_VAR: str = "var20"
+OPINION_PUBLIC_VAR: str = "var21"
+
+# Chart series label -> SPSS code mapping.
+OPINION_SERIES_CODES: dict[str, float] = {
+    "Erittäin huono": 10054.0,
+    "Huono": 10055.0,
+    "Hyvä": 10056.0,
+    "Erittäin hyvä": 10057.0,
+    "En osaa sanoa": 10058.0,
+}
+
+# Deck chart series proportions (slide idx 17, current wave).
+DECK_OPINION_DIST: dict[str, dict[str, float]] = {
+    "private": {"Erittäin huono": 0.05, "Huono": 0.26, "Hyvä": 0.47,
+                "Erittäin hyvä": 0.10, "En osaa sanoa": 0.12},
+    "public": {"Erittäin huono": 0.06, "Huono": 0.26, "Hyvä": 0.51,
+               "Erittäin hyvä": 0.07, "En osaa sanoa": 0.10},
+}
+
+# Deck positive % shown in TextBox (slide idx 17): Hyvä + Erittäin hyvä.
+DECK_OPINION_POSITIVE: dict[str, int] = {"private": 58, "public": 58}
+
+
 def aided_question(model: QuestionModel) -> tuple[QuestionModel, Question]:
     """Build the aided-awareness multi question with brand-named member labels.
     Returns (model2, question). (golden bindings copied from nsight/attendo_bindings.py)"""
