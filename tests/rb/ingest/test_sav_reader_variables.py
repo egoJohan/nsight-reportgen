@@ -77,6 +77,7 @@ def test_missing_values_empty_frozenset(synthetic_sav):
     assert model.variable("age").missing_values == frozenset()
 
 
-def test_questions_list_empty(synthetic_sav):
+def test_questions_list_populated(synthetic_sav):
+    # Task 2.3: questions are now populated — one per variable
     _, model = read_sav(synthetic_sav)
-    assert model.questions == []
+    assert len(model.questions) == 2

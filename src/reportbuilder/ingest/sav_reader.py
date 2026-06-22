@@ -1,12 +1,17 @@
-"""SAV reader — Task 2.1/2.2: variables, labels, value labels, measurement, missing codes."""
+"""SAV reader — Task 2.1/2.2/2.3: variables, labels, value labels, measurement, missing codes, single questions."""
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pandas as pd
 import pyreadstat
 
-from reportbuilder.model.question import QuestionModel, Variable, ValueLabel
+from reportbuilder.model.question import QuestionModel, Question, Variable, ValueLabel
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or name.lower()
 
 
 def _measurement(spss_measure: str) -> str:
@@ -45,5 +50,9 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             value_labels=vls,
             missing_values=_user_missing(missing_ranges.get(name)),
         )
-    model = QuestionModel(variables=variables, questions=[])
+    questions = [
+        Question(qid=_slug(name), kind="single", variables=(name,), text=variables[name].label)
+        for name in df.columns
+    ]
+    model = QuestionModel(variables=variables, questions=questions)
     return df, model
