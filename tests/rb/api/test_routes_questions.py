@@ -156,9 +156,9 @@ def test_put_grouping_multi_returns_multi_question(tmp_path) -> None:
 
 def test_put_grouping_multi_unmatched_variables_returns_422(tmp_path) -> None:
     """PUT /materials/{material_id}/grouping with kind=multi and variables that do NOT form a
-    recognized multi group must return 422 — no silent wrong-result fallback. The variables
-    'q1_1' and 'age' share no common prefix, so apply_groups will not produce a group matching
-    that exact tuple, triggering the explicit HTTPException. (REQ-C-06)"""
+    valid multi group must return 422 — no silent wrong-result fallback. The variables 'q1_1'
+    and 'age' fail validation because 'age' is a scale variable; scale variables are not
+    allowed in a multi-response group. (REQ-C-06)"""
     singles = _make_singles_model()
 
     mock_client = Mock()
@@ -173,6 +173,30 @@ def test_put_grouping_multi_unmatched_variables_returns_422(tmp_path) -> None:
         )
 
     assert response.status_code == 422
+
+
+def test_put_grouping_multi_order_independent_returns_200(tmp_path) -> None:
+    """PUT /materials/{material_id}/grouping with kind=multi must accept variables in any order
+    and return 200 with kind=multi and both variables present. Reversed order (q1_2, q1_1)
+    vs file order (q1_1, q1_2) must NOT produce a spurious 422. (REQ-C-06, M-02)"""
+    singles = _make_singles_model()
+
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    tc = TestClient(app)
+
+    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
+        mock_singles.return_value = singles
+        response = tc.put(
+            "/materials/mat-1/grouping",
+            json={"variables": ["q1_2", "q1_1"], "kind": "multi"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "multi"
+    assert "q1_1" in body["variables"]
+    assert "q1_2" in body["variables"]
 
 
 def test_put_grouping_single_returns_single_questions(tmp_path) -> None:

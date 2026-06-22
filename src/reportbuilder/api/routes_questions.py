@@ -96,24 +96,38 @@ def set_grouping(
 
     if body.kind == "multi":
         var_set = tuple(body.variables)
-        # Validate that the requested variables form a recognised multi group.
-        # suggest_multi_groups enforces shared-prefix + binary-variable eligibility;
-        # if the requested tuple is not among the suggested groups it is not a valid
-        # multi group and we must fail explicitly rather than silently group anything.
-        eligible_groups = suggest_multi_groups(base)
-        if var_set not in eligible_groups:
+        # Order-independent binary-eligibility validation (REQ-C-06, M-02):
+        # A valid multi group requires >=2 variables, all known, none of them a scale.
+        if len(var_set) < 2:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"The variables {list(body.variables)} do not form a multi group. "
-                    "Ensure they share a common prefix and are all binary (0/1) variables."
+                    f"A multi group requires at least 2 variables; got {list(body.variables)}."
+                ),
+            )
+        unknown = [v for v in var_set if v not in base.variables]
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Unknown variable(s) {unknown} — not present in the material."
+                ),
+            )
+        scale_vars = [v for v in var_set if base.variables[v].measurement == "scale"]
+        if scale_vars:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Scale variable(s) {scale_vars} cannot be members of a multi group. "
+                    "Multi-response groups must be binary/categorical tick-box variables."
                 ),
             )
         grouped_model = apply_groups(base, [var_set])
+        var_set_sorted = tuple(sorted(var_set))
         for q in grouped_model.questions:
-            if q.variables == var_set:
+            if q.kind == "multi" and tuple(sorted(q.variables)) == var_set_sorted:
                 return {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
-        # Should be unreachable after the eligibility check above.
+        # Defensive: apply_groups always produces exactly the requested group; this is an internal error.
         raise HTTPException(
             status_code=422,
             detail=(
