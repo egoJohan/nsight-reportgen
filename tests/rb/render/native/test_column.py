@@ -206,7 +206,7 @@ def test_value_for_none_guard():
         base_n={"Total": 0},
         statistic="pct",
     )
-    result = _value_for(series, "A", "Total")
+    result = _value_for(series, "A", "Total", "pct")
     assert result == 0.0, f"expected 0.0 for None cell, got {result}"
 
 
@@ -266,10 +266,36 @@ def test_build_vertical_bar_native_and_colored():
     )
 
 
-# Test 5.4.4: registry points to build_vertical_bar (alias for clarity)
-def test_registry_vertical_bar_key_is_ctx_builder_alias():
-    """NATIVE_BUILDERS['vertical_bar'] is build_vertical_bar (ctx-signature)."""
-    from reportbuilder.render.native import NATIVE_BUILDERS
-    from reportbuilder.render.native.column import build_vertical_bar
+# Test 5.4.4: series_chart_data honors an explicitly-passed statistic
+def test_series_chart_data_honors_explicit_statistic():
+    """series_chart_data uses the passed statistic, not series.statistic.
 
-    assert NATIVE_BUILDERS["vertical_bar"] is build_vertical_bar
+    Build a SeriesResult where pct and count differ, call series_chart_data
+    with statistic='count', and assert the series values equal the COUNT values.
+    """
+    from reportbuilder.render.native.column import series_chart_data
+
+    categories = ("Yes", "No")
+    segment = "Total"
+    cells = {
+        ("Yes", segment): Cell(pct=60.0, count=120.0, mean=None),
+        ("No", segment): Cell(pct=40.0, count=80.0, mean=None),
+    }
+    # series.statistic is "pct" — if the parameter were ignored, values would be pct
+    s = SeriesResult(
+        categories=categories,
+        segments=(segment,),
+        cells=cells,
+        base_n={segment: 200},
+        statistic="pct",
+    )
+
+    cd = series_chart_data(s, "count")
+
+    series_list = list(cd)
+    assert len(series_list) == 1
+    values = list(series_list[0].values)
+    assert values == [120.0, 80.0], (
+        f"expected count values [120.0, 80.0], got {values} — "
+        "statistic parameter must override series.statistic"
+    )

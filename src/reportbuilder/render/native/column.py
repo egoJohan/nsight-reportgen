@@ -12,9 +12,9 @@ from reportbuilder.stats.series import SeriesResult
 _C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
 
-def _value_for(series: SeriesResult, cat: str, seg: str) -> float:
+def _value_for(series: SeriesResult, cat: str, seg: str, statistic: str) -> float:
     cell = series.cell(cat, seg)
-    v = getattr(cell, series.statistic)
+    v = getattr(cell, statistic)
     return float(v) if v is not None else 0.0   # None-cell guard (spike carry-forward #1)
 
 
@@ -26,7 +26,7 @@ def series_chart_data(series: SeriesResult, statistic: str) -> CategoryChartData
     cd = CategoryChartData()
     cd.categories = series.categories
     for seg in series.segments:
-        cd.add_series(seg, tuple(_value_for(series, c, seg) for c in series.categories))
+        cd.add_series(seg, tuple(_value_for(series, c, seg, statistic) for c in series.categories))
     return cd
 
 
