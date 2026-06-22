@@ -1,5 +1,12 @@
 """Native chart builders registry (design §9a). Keys are canonical chart_type ids."""
 from __future__ import annotations
+
+
+class NativeUnsupportedError(Exception):
+    """Raised when a chart type is not supported in native render mode."""
+    pass
+
+
 from reportbuilder.render.native.column import build_column_chart, build_vertical_bar  # noqa: F401
 from reportbuilder.render.native.bar import (  # noqa: F401
     build_horizontal_bar,
@@ -12,6 +19,7 @@ from reportbuilder.render.native.doughnut import build_doughnut  # noqa: F401
 from reportbuilder.render.native.radar import build_radar  # noqa: F401
 from reportbuilder.render.native.scatter import build_scatter  # noqa: F401
 from reportbuilder.render.native.funnel import build_funnel  # noqa: F401
+from reportbuilder.render.native.combo import build_combo_native  # noqa: F401
 
 # Canonical key per plan §C1 (vertical_bar = COLUMN). Task 5.4 converges to
 # the RenderContext (ctx) signature; build_column_chart remains importable for
@@ -27,4 +35,5 @@ NATIVE_BUILDERS: dict[str, object] = {
     "radar": build_radar,
     "scatter": build_scatter,
     "funnel": build_funnel,
+    "combo": build_combo_native,
 }
