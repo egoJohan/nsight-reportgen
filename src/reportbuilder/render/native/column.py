@@ -1,17 +1,34 @@
 """De-novo native column chart with injected manual layout + data-label pos (R3)."""
 from __future__ import annotations
 from pptx.chart.data import CategoryChartData
+from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE
 from pptx.oxml import parse_xml
 from pptx.oxml.ns import qn
+from reportbuilder.render.base import RenderContext
 from reportbuilder.render.layout import solve_column_layout
 from reportbuilder.stats.series import SeriesResult
 
 _C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
+
 def _value_for(series: SeriesResult, cat: str, seg: str) -> float:
     cell = series.cell(cat, seg)
-    return float(getattr(cell, series.statistic))
+    v = getattr(cell, series.statistic)
+    return float(v) if v is not None else 0.0   # None-cell guard (spike carry-forward #1)
+
+
+def series_chart_data(series: SeriesResult, statistic: str) -> CategoryChartData:
+    """Shared helper: build CategoryChartData from a SeriesResult.
+
+    Reused by native builders for all chart types (Task 5.4).
+    """
+    cd = CategoryChartData()
+    cd.categories = series.categories
+    for seg in series.segments:
+        cd.add_series(seg, tuple(_value_for(series, c, seg) for c in series.categories))
+    return cd
+
 
 def _manual_layout_xml(x: float, y: float, w: float, h: float) -> str:
     return (
@@ -21,6 +38,7 @@ def _manual_layout_xml(x: float, y: float, w: float, h: float) -> str:
         f'<c:x val="{x}"/><c:y val="{y}"/><c:w val="{w}"/><c:h val="{h}"/>'
         '</c:manualLayout></c:layout>'
     )
+
 
 def _dlbls_xml() -> str:
     return (
@@ -32,11 +50,10 @@ def _dlbls_xml() -> str:
         '</c:dLbls>'
     )
 
+
 def build_column_chart(slide, slot, series: SeriesResult, *, point_size: int = 10):
-    cd = CategoryChartData()
-    cd.categories = series.categories
-    for seg in series.segments:
-        cd.add_series(seg, tuple(_value_for(series, c, seg) for c in series.categories))
+    """Low-level column chart builder — positional signature kept for spike compat."""
+    cd = series_chart_data(series, series.statistic)
     gf = slide.shapes.add_chart(
         XL_CHART_TYPE.COLUMN_CLUSTERED, slot.left, slot.top, slot.width, slot.height, cd,
     )
@@ -55,4 +72,19 @@ def build_column_chart(slide, slot, series: SeriesResult, *, point_size: int = 1
         first_axid.addprevious(dlbls)
     else:
         bar_chart.append(dlbls)
+    return gf
+
+
+def build_vertical_bar(ctx: RenderContext):
+    """RenderContext-based builder for vertical bar (column) charts.
+
+    Creates the chart, applies series colors from ctx.style, and returns the
+    graphic frame. Does NOT call apply_elements — DECK assembly (Task 5.14)
+    applies elements/annotations using the returned chart.
+    """
+    gf = build_column_chart(ctx.slide, ctx.slot, ctx.series)
+    chart = gf.chart
+    for i, ser in enumerate(chart.plots[0].series):
+        ser.format.fill.solid()
+        ser.format.fill.fore_color.rgb = RGBColor.from_string(ctx.style.color_for(i))
     return gf

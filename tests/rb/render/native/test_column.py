@@ -1,14 +1,16 @@
-"""TDD tests for native column chart builder (Task 1.2, R3 feasibility gate)."""
+"""TDD tests for native column chart builder (Task 1.2 + Task 5.4)."""
 from __future__ import annotations
 import io
 import pytest
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
 from pptx.util import Inches
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from reportbuilder.render.base import Slot
+from reportbuilder.render.base import Slot, RenderContext, StyleSpec
 from reportbuilder.stats.series import Cell, SeriesResult
+from reportbuilder.testing.fixtures import known_series, one_chart_report
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -51,15 +53,15 @@ def _make_slot() -> Slot:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: registry key
+# Test 1: registry key (updated: NATIVE_BUILDERS["vertical_bar"] = build_vertical_bar)
 # ---------------------------------------------------------------------------
 
-def test_registry_key():
-    """NATIVE_BUILDERS['vertical_bar'] must be build_column_chart."""
+def test_registry_vertical_bar_is_ctx_builder():
+    """NATIVE_BUILDERS['vertical_bar'] must be build_vertical_bar (ctx-based builder)."""
     from reportbuilder.render.native import NATIVE_BUILDERS
-    from reportbuilder.render.native.column import build_column_chart
+    from reportbuilder.render.native.column import build_vertical_bar
 
-    assert NATIVE_BUILDERS["vertical_bar"] is build_column_chart
+    assert NATIVE_BUILDERS["vertical_bar"] is build_vertical_bar
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +170,106 @@ def test_save_and_reopen_without_error():
     # Must not raise
     prs2 = Presentation(buf)
     assert len(prs2.slides) == 1, "reopened presentation must have 1 slide"
+
+
+# ---------------------------------------------------------------------------
+# Task 5.4 — New tests
+# ---------------------------------------------------------------------------
+
+# Test 5.4.1: series_chart_data maps SeriesResult
+def test_series_chart_data_maps_seriesresult():
+    """series_chart_data with known_series() → categories=('Yes','No'), Total values=[60.0,40.0]."""
+    from reportbuilder.render.native.column import series_chart_data
+
+    s = known_series()
+    cd = series_chart_data(s, s.statistic)
+
+    cat_labels = tuple(c.label for c in cd.categories)
+    assert cat_labels == ("Yes", "No"), f"got categories: {cat_labels}"
+    # cd is CategoryChartData; iterate series to find 'Total'
+    series_list = list(cd)
+    assert len(series_list) == 1, f"expected 1 series, got {len(series_list)}"
+    total_series = series_list[0]
+    assert total_series.name == "Total"
+    assert list(total_series.values) == [60.0, 40.0], f"got {list(total_series.values)}"
+
+
+# Test 5.4.2: _value_for None guard
+def test_value_for_none_guard():
+    """_value_for returns 0.0 when the statistic value on a Cell is None."""
+    from reportbuilder.render.native.column import _value_for
+
+    series = SeriesResult(
+        categories=("A",),
+        segments=("Total",),
+        cells={("A", "Total"): Cell(pct=None, count=None, mean=None)},
+        base_n={"Total": 0},
+        statistic="pct",
+    )
+    result = _value_for(series, "A", "Total")
+    assert result == 0.0, f"expected 0.0 for None cell, got {result}"
+
+
+# Test 5.4.3: build_vertical_bar — native chart, colored series, zero pictures
+def test_build_vertical_bar_native_and_colored():
+    """build_vertical_bar(ctx) returns gf with correct values, colored series, no PICTURE shapes."""
+    from reportbuilder.render.native.column import build_vertical_bar
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slot = Slot(
+        slide_index=0,
+        left=Inches(1),
+        top=Inches(1),
+        width=Inches(8),
+        height=Inches(5),
+        name="slot1",
+    )
+    style = StyleSpec()
+    spec = one_chart_report().charts[0]
+    s = known_series()
+    ctx = RenderContext(
+        slide=slide,
+        slot=slot,
+        style=style,
+        spec=spec,
+        series=s,
+        fmt=spec.number_format,
+    )
+
+    gf = build_vertical_bar(ctx)
+
+    # Graphic frame is a chart
+    assert gf.has_chart, "shape must be a chart graphic frame"
+
+    chart = gf.chart
+    plot = chart.plots[0]
+
+    # Correct series values
+    assert list(plot.series[0].values) == [60.0, 40.0], (
+        f"expected [60.0, 40.0], got {list(plot.series[0].values)}"
+    )
+
+    # Series fill color matches style.color_for(0)
+    expected_rgb = RGBColor.from_string(style.color_for(0))
+    actual_rgb = plot.series[0].format.fill.fore_color.rgb
+    assert actual_rgb == expected_rgb, (
+        f"expected RGB {expected_rgb}, got {actual_rgb}"
+    )
+
+    # Zero PICTURE shapes on the slide
+    picture_shapes = [
+        sh for sh in slide.shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+    ]
+    assert picture_shapes == [], (
+        f"Found {len(picture_shapes)} PICTURE shapes — chart must be native"
+    )
+
+
+# Test 5.4.4: registry points to build_vertical_bar (alias for clarity)
+def test_registry_vertical_bar_key_is_ctx_builder_alias():
+    """NATIVE_BUILDERS['vertical_bar'] is build_vertical_bar (ctx-signature)."""
+    from reportbuilder.render.native import NATIVE_BUILDERS
+    from reportbuilder.render.native.column import build_vertical_bar
+
+    assert NATIVE_BUILDERS["vertical_bar"] is build_vertical_bar
