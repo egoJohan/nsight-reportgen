@@ -11,6 +11,22 @@ RUBRICS: dict[str, str] = {
         "4. The chart reads as clean and presentation-quality.\n"
         "FAIL if any label is overlapping, truncated, clipped, or illegible."
     ),
+    "REQ-C-24": (
+        "You are judging a rendered survey chart exported to PNG for chart cleanliness "
+        "(REQ-C-24).\n"
+        "PASS only if ALL of the following hold:\n"
+        "1. The chart renders the correct requested chart type (e.g. bar, horizontal bar, "
+        "radar, funnel, or combo as specified in extra_context).\n"
+        "2. All data labels are fully legible and non-overlapping — no label overlaps "
+        "another label, a bar segment, a line, or the chart boundary.\n"
+        "3. No category label, axis label, or legend label is truncated or clipped at any "
+        "edge of the chart or slide.\n"
+        "4. A legend is present and legible when the chart has 2 or more data series.\n"
+        "5. An N= annotation (sample size) is visible somewhere on the slide.\n"
+        "6. The chart reads as clean and presentation-quality — no overlapping elements, "
+        "no garbled text, no obvious rendering artefacts.\n"
+        "FAIL if any single criterion above is violated."
+    ),
 }
 
 def rubric_for(requirement_id: str) -> str:
