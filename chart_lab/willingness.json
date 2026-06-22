@@ -1,0 +1,64 @@
+{
+  "categories": [
+    "Julkiset hoivapalvelut",
+    "Attendo",
+    "Esperi",
+    "Rinnekodit",
+    "Onnikodit",
+    "Mainio-kodit",
+    "Validia",
+    "Ykköskodit",
+    "Humana",
+    "En mitään näistä"
+  ],
+  "series": {
+    "Marraskuu 2025": [
+      37,
+      29,
+      18,
+      18,
+      17,
+      13,
+      11,
+      11,
+      9,
+      30
+    ],
+    "Toukokuu 2025": [
+      40,
+      25,
+      19,
+      18,
+      17,
+      12,
+      12,
+      9,
+      8,
+      30
+    ],
+    "Marraskuu 2024": [
+      39,
+      27,
+      18,
+      18,
+      15,
+      16,
+      12,
+      13,
+      11,
+      27
+    ],
+    "Toukokuu 2024": [
+      41,
+      26,
+      18,
+      20,
+      16,
+      12,
+      null,
+      12,
+      8,
+      31
+    ]
+  }
+}

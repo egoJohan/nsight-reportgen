@@ -1,0 +1,21 @@
+{
+  "base": "Kaikki vastaajat, n=1001",
+  "gender": {
+    "Mies": 48,
+    "Nainen": 52
+  },
+  "age": {
+    "25-34": 19,
+    "35-44": 21,
+    "45-54": 20,
+    "55-64": 20,
+    "65-74": 20
+  },
+  "region": {
+    "Pääkaupunkiseudulla": 24,
+    "Muualla Etelä-Suomessa": 20,
+    "Länsi-Suomessa": 33,
+    "Pohjois-Suomessa": 13,
+    "Itä-Suomessa": 11
+  }
+}

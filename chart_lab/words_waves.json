@@ -1,0 +1,189 @@
+{
+  "question": "Millä kolmella sanalla kuvailisit mielikuvaasi Attendosta?",
+  "base": "kaikki vastaajat, n=863",
+  "waves": {
+    "Toukokuu 2024": [
+      [
+        "Kallis",
+        188
+      ],
+      [
+        "Kiireinen",
+        68
+      ],
+      [
+        "Ahne",
+        59
+      ],
+      [
+        "Hyvä",
+        52
+      ],
+      [
+        "Luotettava",
+        49
+      ],
+      [
+        "Huono",
+        43
+      ],
+      [
+        "Välinpitämätön",
+        32
+      ],
+      [
+        "Välittävä",
+        30
+      ],
+      [
+        "Iso",
+        28
+      ],
+      [
+        "Yksityinen",
+        28
+      ]
+    ],
+    "Marraskuu 2024": [
+      [
+        "Kallis",
+        166
+      ],
+      [
+        "Kiireinen",
+        53
+      ],
+      [
+        "Huono",
+        48
+      ],
+      [
+        "Luotettava",
+        48
+      ],
+      [
+        "Ahne",
+        41
+      ],
+      [
+        "Tunnettu",
+        34
+      ],
+      [
+        "Välittävä",
+        34
+      ],
+      [
+        "Hyvä",
+        31
+      ],
+      [
+        "Yksityinen",
+        30
+      ],
+      [
+        "Välinpitämätön",
+        28
+      ]
+    ],
+    "Toukokuu 2025": [
+      [
+        "Kallis",
+        189
+      ],
+      [
+        "Huono",
+        81
+      ],
+      [
+        "Ahne",
+        60
+      ],
+      [
+        "Hyvä",
+        58
+      ],
+      [
+        "Kiireinen",
+        54
+      ],
+      [
+        "Luotettava",
+        38
+      ],
+      [
+        "Välinpitämätön",
+        38
+      ],
+      [
+        "Välittävä",
+        31
+      ],
+      [
+        "Laadukas",
+        25
+      ],
+      [
+        "Iso",
+        24
+      ]
+    ],
+    "Marraskuu 2025": [
+      [
+        "Kallis",
+        185
+      ],
+      [
+        "Huono",
+        75
+      ],
+      [
+        "Kiireinen",
+        66
+      ],
+      [
+        "Luotettava",
+        61
+      ],
+      [
+        "Hyvä",
+        60
+      ],
+      [
+        "Ahne",
+        57
+      ],
+      [
+        "Iso",
+        36
+      ],
+      [
+        "Tunnettu",
+        32
+      ],
+      [
+        "Välittävä",
+        32
+      ],
+      [
+        "Huolehtiva",
+        27
+      ]
+    ]
+  },
+  "sentiment": {
+    "Kallis": "kielteinen",
+    "Huono": "kielteinen",
+    "Kiireinen": "kielteinen",
+    "Ahne": "kielteinen",
+    "Välinpitämätön": "kielteinen",
+    "Luotettava": "myönteinen",
+    "Hyvä": "myönteinen",
+    "Tunnettu": "myönteinen",
+    "Välittävä": "myönteinen",
+    "Huolehtiva": "myönteinen",
+    "Laadukas": "myönteinen",
+    "Iso": "neutraali",
+    "Yksityinen": "neutraali"
+  }
+}

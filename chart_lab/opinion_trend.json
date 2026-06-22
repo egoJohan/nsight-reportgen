@@ -1,0 +1,46 @@
+{
+  "categories": [
+    "Yksityiset palveluntarjoajat",
+    "Julkinen palveluntarjoaja"
+  ],
+  "current_levels": {
+    "Erittäin huono": [
+      5,
+      6
+    ],
+    "Huono": [
+      26,
+      26
+    ],
+    "Hyvä": [
+      47,
+      51
+    ],
+    "Erittäin hyvä": [
+      10,
+      7
+    ],
+    "En osaa sanoa": [
+      12,
+      10
+    ]
+  },
+  "positive_trend": {
+    "Yksityiset palveluntarjoajat": {
+      "Toukokuu 2024": 53,
+      "Marraskuu 2024": 53,
+      "Toukokuu 2025": 52,
+      "Marraskuu 2025": 58
+    },
+    "Julkinen palveluntarjoaja": {
+      "Toukokuu 2024": 57,
+      "Marraskuu 2024": 57,
+      "Toukokuu 2025": 55,
+      "Marraskuu 2025": 58
+    }
+  },
+  "change_vs_prev": {
+    "Yksityiset palveluntarjoajat": "+6 %",
+    "Julkinen palveluntarjoaja": "+3 %"
+  }
+}

@@ -1,0 +1,13 @@
+{"meta": {"question": "Millä kolmella sanalla kuvailisit mielikuvaasi Attendosta?",
+  "base": "kaikki vastaajat, n=863", "wave": "Marraskuu 2025"},
+ "words": [
+  {"word":"Kallis","count":185,"sentiment":"kielteinen"},
+  {"word":"Huono","count":75,"sentiment":"kielteinen"},
+  {"word":"Kiireinen","count":66,"sentiment":"kielteinen"},
+  {"word":"Luotettava","count":61,"sentiment":"myönteinen"},
+  {"word":"Hyvä","count":60,"sentiment":"myönteinen"},
+  {"word":"Ahne","count":57,"sentiment":"kielteinen"},
+  {"word":"Iso","count":36,"sentiment":"neutraali"},
+  {"word":"Tunnettu","count":32,"sentiment":"myönteinen"},
+  {"word":"Välittävä","count":32,"sentiment":"myönteinen"},
+  {"word":"Huolehtiva","count":27,"sentiment":"myönteinen"}]}

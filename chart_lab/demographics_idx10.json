@@ -1,0 +1,125 @@
+[
+  {
+    "name": "Kaavio 14",
+    "categories": [
+      "As a man",
+      "As a woman"
+    ],
+    "series": {
+      "Kaikki vastaajat, n=1001": [
+        48,
+        52
+      ],
+      "Kokemusta omaavat, n=636": [
+        50,
+        50
+      ],
+      "Ei kokemusta, 45v +, n=229": [
+        59,
+        40
+      ],
+      "Suosittelijat, n=249": [
+        57,
+        43
+      ],
+      "Ammattilaiset, n=216": [
+        20,
+        79
+      ]
+    }
+  },
+  {
+    "name": "Content Placeholder 17",
+    "categories": [
+      "Kaikki vastaajat, n=1001",
+      "Kokemusta omaavat, n=636",
+      "Ei kokemusta, 45v +, n=229",
+      "Suosittelijat, n=249",
+      "Ammattilaiset, n=216"
+    ],
+    "series": {
+      "25-34": [
+        19,
+        24,
+        0,
+        27,
+        31
+      ],
+      "35-44": [
+        21,
+        26,
+        0,
+        26,
+        29
+      ],
+      "45-54": [
+        20,
+        17,
+        32,
+        16,
+        17
+      ],
+      "55-64": [
+        20,
+        17,
+        34,
+        14,
+        13
+      ],
+      "65-74": [
+        20,
+        17,
+        34,
+        17,
+        10
+      ]
+    }
+  },
+  {
+    "name": "Content Placeholder 9",
+    "categories": [
+      "Pääkaupunkiseudulla",
+      "Muualla Etelä-Suomessa",
+      "Länsi-Suomessa",
+      "Pohjois-Suomessa",
+      "Itä-Suomessa"
+    ],
+    "series": {
+      "Kaikki vastaajat, n=1001": [
+        24,
+        20,
+        33,
+        13,
+        11
+      ],
+      "Kokemusta omaavat, n=636": [
+        25,
+        19,
+        33,
+        13,
+        10
+      ],
+      "Ei kokemusta, 45v +, n=229": [
+        27,
+        22,
+        28,
+        11,
+        12
+      ],
+      "Suosittelijat, n=249": [
+        27,
+        20,
+        30,
+        12,
+        10
+      ],
+      "Ammattilaiset, n=216": [
+        18,
+        21,
+        35,
+        14,
+        12
+      ]
+    }
+  }
+]

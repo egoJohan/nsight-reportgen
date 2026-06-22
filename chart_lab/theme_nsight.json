@@ -1,0 +1,14 @@
+{
+  "_comment": "nSight client theme — the ONLY place nSight identity lives. Swap this file for another client.",
+  "background": "#F4EFE6",
+  "accent": "#2F6F8F",
+  "accent_dark": "#13615E",
+  "ink": "#2B2B2B",
+  "muted": "#8A857B",
+  "palette": ["#2F6F8F", "#D9508A", "#E29B2E", "#4E8A4E", "#7E5BA6", "#C04A3B", "#3FA9A0", "#6B7C45"],
+  "diverging": {"neg": ["#B23A3A", "#E08A6E"], "pos": ["#86B36A", "#3F7D4E"], "neutral": "#BDB6A8"},
+  "ramp": ["#CFE6E2", "#8FBFBC", "#3F8C86", "#13615E"],
+  "font": "Liberation Sans",
+  "locale": "fi",
+  "currency": null
+}

@@ -1,0 +1,30 @@
+{
+  "slide": 17,
+  "shape": "Content Placeholder 11",
+  "categories": [
+    "Yksityiset palveluntarjoajat",
+    "Julkinen palveluntarjoaja"
+  ],
+  "series": {
+    "Erittäin huono": [
+      5,
+      6
+    ],
+    "Huono": [
+      26,
+      26
+    ],
+    "Hyvä": [
+      47,
+      51
+    ],
+    "Erittäin hyvä": [
+      10,
+      7
+    ],
+    "En osaa sanoa": [
+      12,
+      10
+    ]
+  }
+}

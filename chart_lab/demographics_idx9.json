@@ -1,0 +1,53 @@
+[
+  {
+    "name": "Kaavio 14",
+    "categories": [
+      "As a man",
+      "As a woman"
+    ],
+    "series": {
+      "All respondents, n=1008": [
+        48,
+        52
+      ]
+    }
+  },
+  {
+    "name": "Content Placeholder 17",
+    "categories": [
+      "25-34",
+      "35-44",
+      "45-54",
+      "55-64",
+      "65-74"
+    ],
+    "series": {
+      "All respondents, n=1008": [
+        19,
+        21,
+        20,
+        20,
+        20
+      ]
+    }
+  },
+  {
+    "name": "Content Placeholder 9",
+    "categories": [
+      "Pääkaupunkiseudulla",
+      "Muualla Etelä-Suomessa",
+      "Länsi-Suomessa",
+      "Pohjois-Suomessa",
+      "Itä-Suomessa"
+    ],
+    "series": {
+      "All respondents, n=1008": [
+        24,
+        20,
+        33,
+        13,
+        11
+      ]
+    }
+  }
+]

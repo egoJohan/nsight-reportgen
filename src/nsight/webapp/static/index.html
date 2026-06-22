@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fi">
+<head><meta charset="utf-8"><title>nSight deck generator</title>
+<style>body{font-family:system-ui;max-width:760px;margin:40px auto}button{padding:8px 16px}
+.score{font-size:2rem;font-weight:700}.bad{color:#b00}.ok{color:#070}li{font-family:monospace}</style>
+</head>
+<body>
+<h1>nSight deck generator</h1>
+<label>Data <select id="sav"></select></label>
+<label>Brief <select id="brief"></select></label>
+<button id="go">Generate</button>
+<div id="status"></div>
+<div id="result" hidden>
+  <p class="score" id="score"></p>
+  <p><a id="dl" href="/api/download">Download .pptx</a></p>
+  <details><summary>Mismatches</summary><ul id="miss"></ul></details>
+</div>
+<script>
+async function load(){const r=await fetch('/api/inputs');const j=await r.json();
+ for(const s of j.savs){sav.add(new Option(s,s))}
+ for(const b of j.briefs){brief.add(new Option(b,b))}}
+go.onclick=async()=>{status.textContent='Generating…';result.hidden=true;
+ const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({sav:sav.value,brief:brief.value})});
+ const j=await r.json();status.textContent='';result.hidden=false;
+ score.textContent='Chart fidelity: '+j.chart_score+'%';
+ score.className='score '+(j.chart_score>=90?'ok':'bad');
+ miss.innerHTML='';for(const m of j.mismatches){const li=document.createElement('li');li.textContent=m;miss.appendChild(li)}}
+load();
+</script>
+</body></html>
