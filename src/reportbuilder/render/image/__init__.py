@@ -12,6 +12,12 @@ from reportbuilder.render.image.bars import (  # noqa: F401
     build_image_bar_stacked,
 )
 from reportbuilder.render.image.line import build_image_line  # noqa: F401
+from reportbuilder.render.image.pie import (  # noqa: F401
+    build_image_pie,
+    build_image_doughnut,
+)
+from reportbuilder.render.image.radar import build_image_radar  # noqa: F401
+from reportbuilder.render.image.scatter import build_image_scatter  # noqa: F401
 
 IMAGE_BUILDERS: dict[str, object] = {
     "vertical_bar": build_image_column,
@@ -19,4 +25,8 @@ IMAGE_BUILDERS: dict[str, object] = {
     "stacked_vertical_bar": build_image_column_stacked,
     "stacked_horizontal_bar": build_image_bar_stacked,
     "line": build_image_line,
+    "pie": build_image_pie,
+    "doughnut": build_image_doughnut,
+    "radar": build_image_radar,
+    "scatter": build_image_scatter,
 }
