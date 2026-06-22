@@ -37,6 +37,10 @@ class DataHiveClient:
         """Return the raw stored bytes of a material doc (e.g. the .sav). (REQ-C-05)"""
         raise NotImplementedError
 
+    def delete_report(self, report_doc_id: str) -> None:
+        """Delete a report doc. (REQ-C-12)"""
+        raise NotImplementedError
+
     def aggregate(self, material_id: str, group_by: list[str], filters: dict,
                   weight: str | None = None) -> dict:
         """Generic filtered GROUP BY / cross-tab cell counts over a tabular material. (D1)"""
