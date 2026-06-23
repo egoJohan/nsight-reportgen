@@ -32,7 +32,7 @@ def run_fidelity_gate(report: Report, model: QuestionModel, data,
         for spec in report.charts:
             recomputed = compute(model.question(spec.question_ref), spec, data, model)
             # every value of `series` must be reproduced by recompute (identity within tol)
-            extracted = {seg: [getattr(recomputed.cell(c, seg), recomputed.statistic) or 0.0
+            extracted = {seg: [recomputed.cell(c, seg).value(recomputed.statistic) or 0.0
                                for c in recomputed.categories]
                          for seg in recomputed.segments}
             assert_series_match(extracted, series, tol=tol)

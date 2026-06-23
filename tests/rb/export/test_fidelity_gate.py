@@ -8,11 +8,14 @@ from __future__ import annotations
 import dataclasses
 import shutil
 
+import pandas as pd
 import pytest
 
 from reportbuilder.export.fidelity_gate import run_fidelity_gate
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.pptx_build import build_pptx
+from reportbuilder.model.report import ChartSpec, ElementToggles, NumberFormat, Report, SortSpec
+from reportbuilder.stats.engine import compute
 from reportbuilder.testing.fixtures import (
     known_series,
     one_chart_report,
@@ -102,6 +105,87 @@ def test_gate_image_layer3_fails_on_wrong_series(tmp_path):
         cells=tampered_cells,
         base_n={"Total": original.base_n["Total"] + 50},
     )
+
+    with pytest.raises(AssertionError):
+        run_fidelity_gate(image_report, model, data, pptx, None, tampered)
+
+
+# ---------------------------------------------------------------------------
+# Test 5: image mode — layer 3 passes for non-core summary stat (median) (REQ-C-20)
+# ---------------------------------------------------------------------------
+
+def test_gate_image_layer3_median_passes(tmp_path):
+    """Layer-3 fidelity gate passes for statistic='median' over a scale variable.
+
+    This is the regression test for the missed getattr() call site in
+    fidelity_gate.py:35 — before the fix, getattr(cell, 'median') raised
+    AttributeError because median is stored in cell.extra, not as a named field.
+    After the fix, cell.value('median') is used and the gate passes. (REQ-C-20)
+    """
+    model, data = tiny_model_and_data()
+    # age column: [30, 40, 50, 60, 70] -> median = 50.0
+    median_spec = ChartSpec(
+        question_ref="age",
+        chart_type="vertical_bar",
+        statistic="median",
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"),
+        template_slot="slot1",
+        elements=ElementToggles(),
+    )
+    image_report = Report(
+        name="MedianImageTest",
+        render_mode="image",
+        template_ref="t.pptx",
+        charts=(median_spec,),
+    )
+    pptx = build_pptx(image_report, model, data, str(tmp_path / "r.pptx"))
+
+    # Build the series that would have fed the builder
+    age_q = model.question("age")
+    series = compute(age_q, median_spec, data, model)
+
+    # Should NOT raise — cell.value('median') routes through extra, not getattr
+    run_fidelity_gate(image_report, model, data, pptx, None, series)
+
+
+# ---------------------------------------------------------------------------
+# Test 6: image mode — layer 3 raises on tampered median series (REQ-C-20)
+# ---------------------------------------------------------------------------
+
+def test_gate_image_layer3_median_fails_on_tamper(tmp_path):
+    """Layer-3 fidelity gate raises AssertionError when the median series is tampered. (REQ-C-20)"""
+    model, data = tiny_model_and_data()
+    median_spec = ChartSpec(
+        question_ref="age",
+        chart_type="vertical_bar",
+        statistic="median",
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"),
+        template_slot="slot1",
+        elements=ElementToggles(),
+    )
+    image_report = Report(
+        name="MedianImageTamper",
+        render_mode="image",
+        template_ref="t.pptx",
+        charts=(median_spec,),
+    )
+    pptx = build_pptx(image_report, model, data, str(tmp_path / "r.pptx"))
+
+    age_q = model.question("age")
+    original = compute(age_q, median_spec, data, model)
+
+    # Tamper: replace the median extra value with an incorrect one (+999)
+    tampered_cells = {
+        key: dataclasses.replace(cell, extra=tuple(
+            (k, (v or 0.0) + 999.0) for k, v in cell.extra
+        ))
+        for key, cell in original.cells.items()
+    }
+    tampered = dataclasses.replace(original, cells=tampered_cells)
 
     with pytest.raises(AssertionError):
         run_fidelity_gate(image_report, model, data, pptx, None, tampered)
