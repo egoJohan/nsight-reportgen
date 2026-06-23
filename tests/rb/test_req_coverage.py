@@ -55,9 +55,8 @@ DEFERRED_ALLOWLIST: dict[str, str] = {
     "REQ-U-10": "UI terminology lint over UI strings; no backend equivalent; deferred to Phase 8",
     "REQ-U-11": "DEFER† in catalog; UI usability acceptance; deferred to Phase 8 Flutter tests",
     "REQ-U-12": "UI requirement; tests land in ui/test with Phase 8 (Flutter), currently deferred",
-    # --- Presentation-quality judge assertions: land with Phase 9.1/9.2 ---
     # REQ-C-28b covered by @pytest.mark.judge test in tests/rb/e2e/test_pipeline_synthetic.py
-    "REQ-C-29b": "presentation-quality judge assertion; @pytest.mark.judge test lands with Phase 9.1/9.2",
+    # REQ-C-29b covered by @pytest.mark.judge test in tests/rb/e2e/test_pipeline_attendo.py
 }
 
 
