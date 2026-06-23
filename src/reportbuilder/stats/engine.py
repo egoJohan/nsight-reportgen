@@ -11,7 +11,36 @@ from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.stats.sorting import sort_categories
-from reportbuilder.stats.statistics import pct, count_value
+from reportbuilder.stats.statistics import pct, count_value, mean
+
+
+def _mean(question: Question, spec: ChartSpec, data: pd.DataFrame,
+          model: QuestionModel) -> SeriesResult:
+    """Compute a mean SeriesResult — one category × segments with cell.mean.
+
+    Works for both pure scale variables (no value labels) and categorical
+    variables with numeric codes (mean-Likert). (REQ-C-15, REQ-N-02)
+    """
+    var = model.variable(question.variables[0])   # single var; multi: first var
+    label = question.text or var.label
+    fmt = spec.number_format
+    if spec.classifying_var:
+        bases = segment_bases(data, var, spec.classifying_var)   # {"Total":N, "1":N, ...}
+        seg_codes = pd.to_numeric(data[spec.classifying_var], errors="coerce")
+        segments = tuple(s for s in bases if s != "Total") + ("Total",)
+        cells: dict[tuple[str, str], Cell] = {}
+        for seg in segments:
+            vals = (data[var.name] if seg == "Total"
+                    else data.loc[seg_codes == float(seg), var.name])
+            cells[(label, seg)] = Cell(pct=None, count=None, mean=mean(vals, var, fmt))
+        base_n = {s: bases.get(s, 0) for s in segments}
+    else:
+        segments = ("Total",)
+        cells = {(label, "Total"): Cell(pct=None, count=None,
+                                        mean=mean(data[var.name], var, fmt))}
+        base_n = {"Total": single_base(data, var)}
+    return SeriesResult(categories=(label,), segments=segments, cells=cells,
+                        base_n=base_n, statistic="mean")
 
 
 def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
@@ -68,6 +97,8 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
+    if spec.statistic == "mean":
+        return _mean(question, spec, data, model)
     if question.kind == "multi":
         return _multi(question, spec, data, model)
     return _single(question, spec, data, model)
