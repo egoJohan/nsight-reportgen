@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses
 import shutil
 
-import pandas as pd
 import pytest
 
 from reportbuilder.export.fidelity_gate import run_fidelity_gate
