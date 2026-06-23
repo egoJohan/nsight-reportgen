@@ -53,11 +53,10 @@ def numbers_from_pdf(pdf_path: str) -> list[float]:
     return nums
 
 def _expected_values(series: SeriesResult) -> list[float]:
-    attr = {"pct": "pct", "count": "count", "mean": "mean"}[series.statistic]
     vals: list[float] = []
     for cat in series.categories:
         for seg in series.segments:
-            v = getattr(series.cell(cat, seg), attr)
+            v = series.cell(cat, seg).value(series.statistic)
             if v is not None:
                 vals.append(float(v))
     return vals

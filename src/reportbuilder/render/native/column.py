@@ -14,7 +14,7 @@ _C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
 def _value_for(series: SeriesResult, cat: str, seg: str, statistic: str) -> float:
     cell = series.cell(cat, seg)
-    v = getattr(cell, statistic)
+    v = cell.value(statistic)
     return float(v) if v is not None else 0.0   # None-cell guard (spike carry-forward #1)
 
 

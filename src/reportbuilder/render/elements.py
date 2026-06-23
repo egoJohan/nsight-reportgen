@@ -9,6 +9,8 @@ from pptx.enum.chart import XL_LABEL_POSITION, XL_LEGEND_POSITION
 
 from reportbuilder.model.report import NumberFormat
 from reportbuilder.render.base import RenderContext
+import reportbuilder.stats.statistics  # noqa: F401 — ensure built-in registrations are loaded
+import reportbuilder.stats.registry as _registry
 
 
 # ---------------------------------------------------------------------------
@@ -16,12 +18,11 @@ from reportbuilder.render.base import RenderContext
 # ---------------------------------------------------------------------------
 
 def number_format_code(fmt: NumberFormat, statistic: str) -> str:
-    """Return an Excel-style number format string for use in pptx data labels."""
-    if statistic == "pct":
-        return "0" + ("." + "0" * fmt.pct_decimals if fmt.pct_decimals else "") + '"%"'
-    if statistic == "mean":
-        return "0" + ("." + "0" * fmt.mean_decimals if fmt.mean_decimals else "")
-    return "0"
+    """Return an Excel-style number format string for use in pptx data labels.
+
+    Delegates to the statistic registry so new statistics need no code here.
+    """
+    return _registry.statistic(statistic).fmt_code(fmt)
 
 
 # ---------------------------------------------------------------------------

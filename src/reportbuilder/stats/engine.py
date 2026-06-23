@@ -9,17 +9,22 @@ from reportbuilder.model.question import Question, QuestionModel
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
+from reportbuilder.stats.registry import statistic as get_statistic
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.stats.sorting import sort_categories
-from reportbuilder.stats.statistics import pct, count_value, mean
+from reportbuilder.stats.statistics import pct, count_value, summary_value
+# Import statistics module to trigger built-in registrations
+import reportbuilder.stats.statistics  # noqa: F401
 
 
-def _mean(question: Question, spec: ChartSpec, data: pd.DataFrame,
-          model: QuestionModel) -> SeriesResult:
-    """Compute a mean SeriesResult — one category × segments with cell.mean.
+def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
+             model: QuestionModel, stat) -> SeriesResult:
+    """Compute a summary-statistic SeriesResult — one category × segments.
 
-    Works for both pure scale variables (no value labels) and categorical
-    variables with numeric codes (mean-Likert). (REQ-C-15, REQ-N-02)
+    Works for any registered summary statistic (mean, median, sum, …).
+    For mean: stores value in the named `mean` field for backward-compat.
+    For others: stores in cell.extra so cell.value(stat.name) retrieves it.
+    (REQ-C-15, REQ-N-02)
     """
     var = model.variable(question.variables[0])   # single var; multi: first var
     label = question.text or var.label
@@ -32,15 +37,25 @@ def _mean(question: Question, spec: ChartSpec, data: pd.DataFrame,
         for seg in segments:
             vals = (data[var.name] if seg == "Total"
                     else data.loc[seg_codes == float(seg), var.name])
-            cells[(label, seg)] = Cell(pct=None, count=None, mean=mean(vals, var, fmt))
+            v = summary_value(vals, var, fmt, stat)
+            if stat.name == "mean":
+                cells[(label, seg)] = Cell(pct=None, count=None, mean=v)
+            else:
+                cells[(label, seg)] = Cell(pct=None, count=None, mean=None,
+                                           extra=((stat.name, v),))
         base_n = {s: bases.get(s, 0) for s in segments}
     else:
         segments = ("Total",)
-        cells = {(label, "Total"): Cell(pct=None, count=None,
-                                        mean=mean(data[var.name], var, fmt))}
+        vals = data[var.name]
+        v = summary_value(vals, var, fmt, stat)
+        if stat.name == "mean":
+            cells = {(label, "Total"): Cell(pct=None, count=None, mean=v)}
+        else:
+            cells = {(label, "Total"): Cell(pct=None, count=None, mean=None,
+                                            extra=((stat.name, v),))}
         base_n = {"Total": single_base(data, var)}
     return SeriesResult(categories=(label,), segments=segments, cells=cells,
-                        base_n=base_n, statistic="mean")
+                        base_n=base_n, statistic=stat.name)
 
 
 def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
@@ -97,8 +112,9 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
-    if spec.statistic == "mean":
-        return _mean(question, spec, data, model)
+    stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
+    if stat.family == "summary":
+        return _summary(question, spec, data, model, stat)
     if question.kind == "multi":
         return _multi(question, spec, data, model)
     return _single(question, spec, data, model)

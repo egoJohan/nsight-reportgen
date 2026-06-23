@@ -45,7 +45,7 @@ def build_funnel(ctx: RenderContext):
     """
     series = ctx.series
     values = tuple(
-        float(getattr(series.cell(c, "Total"), series.statistic) or 0.0)
+        float(series.cell(c, "Total").value(series.statistic) or 0.0)
         for c in series.categories
     )
     spacers = funnel_spacer_values(values)

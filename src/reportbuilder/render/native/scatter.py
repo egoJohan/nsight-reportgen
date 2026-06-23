@@ -20,8 +20,8 @@ def xy_chart_data(series: SeriesResult, scatter_xy: tuple[str, str]) -> XyChartD
     xd = XyChartData()
     s = xd.add_series("points")
     for cat in series.categories:
-        x = getattr(series.cell(cat, x_seg), series.statistic)
-        y = getattr(series.cell(cat, y_seg), series.statistic)
+        x = series.cell(cat, x_seg).value(series.statistic)
+        y = series.cell(cat, y_seg).value(series.statistic)
         s.add_data_point(float(x), float(y))
     return xd
 

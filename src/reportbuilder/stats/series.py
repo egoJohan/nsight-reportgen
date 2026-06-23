@@ -5,9 +5,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Cell:
-    pct: float | None       # 0..100
-    count: float | None
-    mean: float | None
+    pct: float | None = None        # 0..100
+    count: float | None = None
+    mean: float | None = None
+    extra: tuple[tuple[str, float | None], ...] = ()  # registered non-core stat values
+
+    def value(self, stat: str) -> float | None:
+        """Return the cell value for the given statistic name."""
+        if stat in ("pct", "count", "mean"):
+            return getattr(self, stat)
+        return dict(self.extra).get(stat)
 
 
 @dataclass(frozen=True)

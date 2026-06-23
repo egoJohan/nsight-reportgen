@@ -23,3 +23,40 @@ def mean(values: pd.Series, var: Variable, fmt: NumberFormat) -> float:
     s = pd.to_numeric(values, errors="coerce")
     s = s[s.notna() & ~s.isin(var.missing_values)]
     return round(float(s.mean()), fmt.mean_decimals) if len(s) else 0.0
+
+
+def summary_value(values: pd.Series, var: Variable, fmt: NumberFormat, stat) -> float:
+    """Aggregate a series using stat.summary_fn, excluding missing/NaN values. (REQ-C-15)"""
+    s = pd.to_numeric(values, errors="coerce")
+    s = s[s.notna() & ~s.isin(var.missing_values)]
+    return round(float(stat.summary_fn(s)), fmt.mean_decimals) if len(s) else 0.0
+
+
+# ---------------------------------------------------------------------------
+# Built-in statistic registrations (done here to avoid circular imports —
+# registry.py must not import from statistics.py).
+# ---------------------------------------------------------------------------
+from reportbuilder.stats.registry import (  # noqa: E402
+    Statistic, register, _pct_fmt, _dec_fmt, _int_fmt,
+)
+
+register(Statistic(
+    "pct", "distribution", _pct_fmt,
+    cell_fn=lambda c, base, fmt: pct(c, base, fmt),
+))
+register(Statistic(
+    "count", "distribution", _int_fmt,
+    cell_fn=lambda c, base, fmt: count_value(c, fmt),
+))
+register(Statistic(
+    "mean", "summary", _dec_fmt,
+    summary_fn=lambda s: float(s.mean()),
+))
+register(Statistic(
+    "median", "summary", _dec_fmt,
+    summary_fn=lambda s: float(s.median()),
+))
+register(Statistic(
+    "sum", "summary", _dec_fmt,
+    summary_fn=lambda s: float(s.sum()),
+))

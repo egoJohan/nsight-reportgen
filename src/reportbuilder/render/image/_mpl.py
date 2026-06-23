@@ -53,7 +53,7 @@ def series_values(series):
     segs = list(series.segments)
     data = {
         seg: [
-            float(getattr(series.cell(c, seg), series.statistic) or 0.0)
+            float(series.cell(c, seg).value(series.statistic) or 0.0)
             for c in cats
         ]
         for seg in segs
