@@ -35,7 +35,11 @@ def numbers_from_pptx(pptx_path: str) -> dict:
                     y_vals = [float(v) for v in series.values]
                     # For XY scatter, also extract x values from the OOXML element.
                     x_vals = _xy_x_values(series._element)
-                    out[series.name] = x_vals + y_vals if x_vals else y_vals
+                    vals = x_vals + y_vals if x_vals else y_vals
+                    # Accumulate rather than overwrite: multi-chart decks where >1
+                    # chart shares a series name (e.g. "Total") must pool their values
+                    # so assert_series_match (a membership check) sees them all.
+                    out.setdefault(series.name, []).extend(vals)
     return out
 
 def numbers_from_pdf(pdf_path: str) -> list[float]:
