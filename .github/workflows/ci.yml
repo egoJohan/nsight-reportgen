@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master, nsight-report-tool]
+  pull_request:
+
+# Three lanes (Phase 9.5):
+#  - objective:   unit + render + the synthetic E2E. Always runs. Needs LibreOffice
+#                 (pptx -> pdf) + poppler so the E2E/fidelity tests run fully rather
+#                 than skipping.
+#  - judge:       Claude-as-judge tests. Self-gate: each test skips without
+#                 ANTHROPIC_API_KEY, so the lane is a no-op (all skipped) on forks /
+#                 when the secret is unset.
+#  - integration: real-asset / live-datahive tests. Self-gate: skip without the
+#                 Attendo .sav (NSIGHT_TEST_HIVE_URL for the hive round-trip).
+
+jobs:
+  objective:
+    name: Objective (unit + render + E2E)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LibreOffice + poppler (pptx->pdf, pdf text)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice poppler-utils
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Run objective suite
+        run: uv run pytest tests/rb -m "not judge and not integration" -q
+      # Flutter UI tests land with Phase 8 (ui/ is not scaffolded yet):
+      # - name: Flutter widget + integration tests
+      #   run: cd ui && flutter test
+
+  judge:
+    name: Judge (Claude-as-judge; skips without ANTHROPIC_API_KEY)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LibreOffice + poppler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice poppler-utils
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Run judge lane (tests self-skip without the API key)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: uv run pytest tests/rb -m "judge" -q
+
+  integration:
+    name: Integration (real assets / test hive; skips when absent)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LibreOffice + poppler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice poppler-utils
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync dependencies
+        run: uv sync --extra dev
+      - name: Run integration lane (tests self-skip without hive/assets)
+        env:
+          NSIGHT_TEST_HIVE_URL: ${{ secrets.NSIGHT_TEST_HIVE_URL }}
+          NSIGHT_TEST_HIVE_TOKEN: ${{ secrets.NSIGHT_TEST_HIVE_TOKEN }}
+        run: uv run pytest tests/rb -m "integration" -q
