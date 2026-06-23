@@ -4,31 +4,21 @@ pptx_to_pdf, asserting number fidelity in native and image render modes.
 Charts in this E2E:
   1. q1  — single-choice question (Yes/No), statistic="pct"
   2. m   — multi-group question (m1 + m2 binary tick-boxes), statistic="pct"
-
-DEFERRED (engine limitation):
-  A third chart for the scale variable ``age`` (statistic="mean") is intentionally
-  omitted.  The statistics engine's ``compute`` function builds chart categories by
-  enumerating a variable's ``value_labels``; a pure scale variable (no value labels)
-  yields an empty SeriesResult, and the ``mean`` statistic is not wired into the
-  engine's ``compute`` path.  This chart kind is deferred pending engine support for
-  mean/scale series (REQ-C-15 follow-up).  Do NOT modify the engine in this task.
+  3. age — pure scale variable (no value labels), statistic="mean"; mean of
+           [30,40,50,60,70] = 50.0.  Covers REQ-C-15 end-to-end.
 
 Fidelity architecture notes (relevant to the assertions below):
 
-  (A) PPTX / numbers_from_pptx collision: ``numbers_from_pptx`` keys extracted
-      series values by *series name*.  Both q1 and the multi chart produce a segment
-      named ``"Total"``, so the second chart's values overwrite the first in the
-      returned dict.  The raw PPTX DOES contain correct data on both slides (verified
-      by per-slide inspection), but the extraction utility cannot surface both without
-      a dict-key collision.  Consequence: the PPTX pool-based check is reliable only
-      for the multi chart (last in the file).  For the q1 chart the PPTX pool is used
-      as a best-effort check; the authoritative per-chart verification is the native
-      PDF text layer (see B).
+  (A) PPTX / numbers_from_pptx accumulation: ``numbers_from_pptx`` now accumulates
+      series values by series name (pooling across slides), so the flat pool contains
+      values from all three charts.  The PPTX pool is used as a best-effort membership
+      check; the authoritative per-chart verification for native mode is the PDF text
+      layer (see B).
 
   (B) Native PDF / numbers_from_pdf: LibreOffice converts native PPTX to PDF while
       preserving data-label text as selectable PDF text.  The native PDF text pool
-      contains axis ticks and data labels from BOTH slides, making it the reliable
-      combined fidelity check for native mode.
+      contains axis ticks and data labels from ALL slides, making it the reliable
+      combined fidelity check for native mode (q1 pct, multi pct, and age mean).
 
   (C) Image PDF / numbers_from_pdf: Image mode renders each chart as a matplotlib
       PNG embedded in the slide.  LibreOffice cannot extract text from a raster PNG,
@@ -37,7 +27,7 @@ Fidelity architecture notes (relevant to the assertions below):
       page count only (REQ-C-21) and relies on the preceding native-mode run for
       value fidelity coverage.
 
-Requirements covered: REQ-C-18, REQ-C-21, REQ-C-22, REQ-C-28b.
+Requirements covered: REQ-C-15, REQ-C-18, REQ-C-21, REQ-C-22, REQ-C-28b.
 """
 from __future__ import annotations
 
@@ -77,7 +67,7 @@ _skip_api_key = pytest.mark.skipif(_NO_API_KEY, reason="ANTHROPIC_API_KEY not se
 
 
 # ---------------------------------------------------------------------------
-# Chart-spec builder
+# Chart-spec builders
 # ---------------------------------------------------------------------------
 
 def _chart_spec(question_ref: str, slot: str) -> ChartSpec:
@@ -85,6 +75,19 @@ def _chart_spec(question_ref: str, slot: str) -> ChartSpec:
         question_ref=question_ref,
         chart_type="vertical_bar",
         statistic="pct",
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"),
+        template_slot=slot,
+        elements=ElementToggles(),
+    )
+
+
+def _mean_chart_spec(question_ref: str, slot: str) -> ChartSpec:
+    return ChartSpec(
+        question_ref=question_ref,
+        chart_type="vertical_bar",
+        statistic="mean",
         classifying_var=None,
         number_format=NumberFormat(),
         sort=SortSpec(basis="data_order"),
@@ -101,9 +104,10 @@ def _chart_spec(question_ref: str, slot: str) -> ChartSpec:
 def test_pipeline_synthetic_both_modes(mode, tmp_path):
     """Full pipeline: synthetic SAV → PPTX → PDF, number fidelity in native + image mode.
 
-    REQ-C-18: completed deck contains all requested charts (2 slides).
+    REQ-C-15: scale/mean chart (age, mean=50.0) is rendered end-to-end.
+    REQ-C-18: completed deck contains all requested charts (3 slides).
     REQ-C-21: PDF is produced and its page count matches the chart count.
-    REQ-C-22: rendered data values (pct) match the engine-computed series within tolerance.
+    REQ-C-22: rendered data values (pct + mean) match engine-computed series within tolerance.
     """
     # --- Ingest ---
     path = synthetic_sav(tmp_path)
@@ -113,7 +117,7 @@ def test_pipeline_synthetic_both_modes(mode, tmp_path):
     groups = suggest_multi_groups(model)
     model = apply_groups(model, groups)
 
-    # Sanity: model must contain exactly q1 (single) + multi question for m1/m2.
+    # Sanity: model must contain q1 (single) + multi question for m1/m2 + age (scale).
     questions_by_qid = {q.qid: q for q in model.questions}
     assert "q1" in questions_by_qid, "q1 question missing from grouped model"
     multi_questions = [q for q in model.questions if q.kind == "multi"]
@@ -126,7 +130,13 @@ def test_pipeline_synthetic_both_modes(mode, tmp_path):
     q1_qid = questions_by_qid["q1"].qid   # "q1"
     multi_qid = multi_q.qid               # "m" (derived from prefix of m1)
 
-    # --- Build 2-chart report ---
+    # Resolve age qid from model: find the single question whose variables == ("age",).
+    age_question = next(
+        q for q in model.questions if q.variables == ("age",)
+    )
+    age_qid = age_question.qid  # "age"
+
+    # --- Build 3-chart report ---
     report = Report(
         name="synthetic-e2e",
         render_mode=mode,
@@ -134,6 +144,7 @@ def test_pipeline_synthetic_both_modes(mode, tmp_path):
         charts=(
             _chart_spec(q1_qid, "slot1"),
             _chart_spec(multi_qid, "slot2"),
+            _mean_chart_spec(age_qid, "slot3"),
         ),
     )
 
@@ -149,11 +160,11 @@ def test_pipeline_synthetic_both_modes(mode, tmp_path):
     assert os.path.isfile(pdf), f"pptx_to_pdf did not produce a file: {pdf}"
 
     # --- Page count == number of charts (REQ-C-21) ---
-    assert pdf_page_count(pdf) == 2, (
-        f"Expected 2 PDF pages (one per chart), got {pdf_page_count(pdf)}"
+    assert pdf_page_count(pdf) == 3, (
+        f"Expected 3 PDF pages (one per chart), got {pdf_page_count(pdf)}"
     )
 
-    # --- Compute engine series for fidelity checks (REQ-C-22) ---
+    # --- Compute engine series for fidelity checks (REQ-C-22, REQ-C-15) ---
     q1_question = model.question(q1_qid)
     q1_spec = report.charts[0]
     series_q1 = compute(q1_question, q1_spec, df, model)
@@ -162,27 +173,31 @@ def test_pipeline_synthetic_both_modes(mode, tmp_path):
     multi_spec = report.charts[1]
     series_multi = compute(multi_question, multi_spec, df, model)
 
+    age_spec = report.charts[2]
+    series_age = compute(age_question, age_spec, df, model)
+    # The age series has one cell: cell("Age"/"Age", "Total").mean == 50.0
+    # (mean of [30,40,50,60,70]).
+
     if mode == "native":
         # --- Native-mode PPTX chart-data check ---
-        # numbers_from_pptx keys by series name; both charts produce a "Total"
-        # segment so only the last chart's values survive in the dict (see module
-        # docstring note A).  We assert both series against the flat pool — this
-        # catches the multi chart values reliably; for q1 the PDF check below is
-        # the authoritative verification.
+        # numbers_from_pptx now accumulates values across slides (see module
+        # docstring note A), so the flat pool covers all three charts.
         pptx_pool = numbers_from_pptx(pptx)
         assert_series_match(pptx_pool, series_multi)
+        assert_series_match(pptx_pool, series_age)
 
         # --- Native-mode PDF text-layer check (authoritative combined check) ---
         # LibreOffice preserves data-label text; the PDF pool contains axis ticks
-        # and data labels from ALL slides, covering both charts (see note B).
+        # and data labels from ALL slides, covering all three charts (see note B).
         pdf_nums = numbers_from_pdf(pdf)
         assert_series_match({"pdf": pdf_nums}, series_q1)
         assert_series_match({"pdf": pdf_nums}, series_multi)
+        assert_series_match({"pdf": pdf_nums}, series_age)
 
     # Image mode: page count already verified above; PDF text layer is empty for
     # rasterized image-mode charts (see module docstring note C) — no further
     # number assertion is possible.  Native mode run above provides value-fidelity
-    # coverage for REQ-C-22.
+    # coverage for REQ-C-22 and REQ-C-15.
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +224,10 @@ def test_pipeline_synthetic_judge(tmp_path):
     multi_q = next(q for q in model.questions if q.kind == "multi")
     q1_qid = "q1"
     multi_qid = multi_q.qid
+    age_q = next(q for q in model.questions if q.variables == ("age",))
+    age_qid = age_q.qid
 
-    # --- Build native report ---
+    # --- Build native report (3-chart deck) ---
     report = Report(
         name="synthetic-judge",
         render_mode="native",
@@ -218,6 +235,7 @@ def test_pipeline_synthetic_judge(tmp_path):
         charts=(
             _chart_spec(q1_qid, "slot1"),
             _chart_spec(multi_qid, "slot2"),
+            _mean_chart_spec(age_qid, "slot3"),
         ),
     )
     pptx = build_pptx(report, model, df, str(tmp_path / "judge_deck.pptx"))
