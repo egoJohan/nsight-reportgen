@@ -115,17 +115,7 @@ class DataHiveClient:
         self._raise_for_status(resp)
         return resp.json()["reference_id"]
 
-    def load_report(self, report_doc_id: str) -> str:
-        """Requires case-scoped variant; call load_report_in_case instead. (REQ-C-08)
-
-        The GET /docs/{reference_id} endpoint is scoped under a project, so the
-        project/case id is mandatory.  Use load_report_in_case(case_id, report_doc_id).
-        """
-        raise RuntimeError(
-            "load_report requires the case id; call load_report_in_case(case_id, report_doc_id) instead."
-        )
-
-    def load_report_in_case(self, case_id: str, report_doc_id: str) -> str:
+    def load_report(self, case_id: str, report_doc_id: str) -> str:
         """Return the exact report-definition JSON for a report doc. (REQ-C-08)
 
         GET /api/v1/projects/{case_id}/docs/{report_doc_id} → {"text": <json>}.
@@ -134,13 +124,7 @@ class DataHiveClient:
         self._raise_for_status(resp)
         return resp.json()["text"]
 
-    def delete_report(self, report_doc_id: str) -> None:
-        """Requires case-scoped variant; call delete_report_in_case instead. (REQ-C-12)"""
-        raise RuntimeError(
-            "delete_report requires the case id; call delete_report_in_case(case_id, report_doc_id) instead."
-        )
-
-    def delete_report_in_case(self, case_id: str, report_doc_id: str) -> None:
+    def delete_report(self, case_id: str, report_doc_id: str) -> None:
         """Delete a report doc. (REQ-C-12)
 
         DELETE /api/v1/projects/{case_id}/docs/{report_doc_id} → 2xx.

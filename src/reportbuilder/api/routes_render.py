@@ -43,7 +43,7 @@ def orchestrate_render(
     (REQ-C-19, REQ-C-21, REQ-C-22)
     """
     # 1. Load and parse the report definition
-    report = report_from_json(client.load_report(report_id))
+    report = report_from_json(client.load_report(case_id, report_id))
 
     # 2. Fetch material bytes, write to temp .sav, ingest
     raw = client.get_material(material_id)

@@ -83,10 +83,10 @@ class FakeHive:
         self.reports[rid] = report_json
         return rid
 
-    def load_report(self, report_doc_id: str) -> str:
+    def load_report(self, case_id: str, report_doc_id: str) -> str:
         return self.reports[report_doc_id]
 
-    def delete_report(self, report_doc_id: str) -> None:
+    def delete_report(self, case_id: str, report_doc_id: str) -> None:
         self.reports.pop(report_doc_id, None)
 
     def aggregate(self, *args, **kwargs):
@@ -203,7 +203,7 @@ def test_api_full_chain(tmp_path):
     assert dup_id != report_id, "Duplicate must have a different report_id"
 
     # Verify the stored duplicate has name "E2E copy"
-    dup_json = hive.load_report(dup_id)
+    dup_json = hive.load_report(case_id, dup_id)
     assert report_from_json(dup_json).name == "E2E copy", (
         f"Duplicate report name should be 'E2E copy'; stored JSON: {dup_json}"
     )

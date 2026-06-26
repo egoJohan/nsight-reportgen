@@ -42,8 +42,8 @@ def client() -> DataHiveClient:
 # ---------------------------------------------------------------------------
 
 def test_create_save_load_delete_roundtrip(client: DataHiveClient):
-    """Full round-trip: create_case → save_report → load_report_in_case (byte-exact) →
-    delete_report_in_case → list_cases shows the case.
+    """Full round-trip: create_case → save_report → load_report (byte-exact) →
+    delete_report → list_cases shows the case.
     REQ-C-03/07/08/12.
     """
     # 1. Create case  (REQ-C-03/07)
@@ -61,7 +61,7 @@ def test_create_save_load_delete_roundtrip(client: DataHiveClient):
     # The GET /projects/{case_id}/docs/{ref_id} endpoint is being added datahive-side.
     # If it isn't deployed yet it will 404/405; gate/skip gracefully.
     try:
-        loaded = client.load_report_in_case(case_id, ref_id)
+        loaded = client.load_report(case_id, ref_id)
     except RuntimeError as exc:
         msg = str(exc)
         if "404" in msg or "405" in msg:
@@ -80,7 +80,7 @@ def test_create_save_load_delete_roundtrip(client: DataHiveClient):
         )
 
     # 4. Delete report  (REQ-C-12)
-    client.delete_report_in_case(case_id, ref_id)
+    client.delete_report(case_id, ref_id)
 
     # 5. list_cases shows the case  (REQ-C-07)
     cases = client.list_cases()

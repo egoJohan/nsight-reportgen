@@ -161,7 +161,7 @@ def test_orchestrate_render_wiring() -> None:
 
     assert result == {"pptx": "/t/deck.pptx", "pdf": "/t/deck.pdf", "preview": ["/t/p1.png"]}
 
-    mock_client.load_report.assert_called_once_with("rep-3")
+    mock_client.load_report.assert_called_once_with("case-3", "rep-3")
     mock_client.get_material.assert_called_once_with("mat-3")
     mock_read_sav.assert_called_once()
     mock_build_pptx.assert_called_once()

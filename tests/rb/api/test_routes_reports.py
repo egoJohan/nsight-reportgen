@@ -172,4 +172,4 @@ def test_delete_report_calls_delete_and_returns_2xx() -> None:
 
     resp = client.delete("/cases/case-42/reports/rep-del")
     assert resp.status_code in (200, 204), resp.text
-    mock.delete_report.assert_called_once_with("rep-del")
+    mock.delete_report.assert_called_once_with("case-42", "rep-del")

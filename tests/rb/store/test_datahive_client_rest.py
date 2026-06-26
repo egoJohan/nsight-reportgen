@@ -150,11 +150,11 @@ def test_save_report_uses_explicit_reference_id():
 
 
 # ---------------------------------------------------------------------------
-# 5. load_report_in_case — byte-exact round-trip  (REQ-C-08)
+# 5. load_report — byte-exact round-trip  (REQ-C-08)
 # ---------------------------------------------------------------------------
 
-def test_load_report_in_case_returns_text_verbatim():
-    """load_report_in_case GETs the docs endpoint and returns the 'text' field verbatim.
+def test_load_report_returns_text_verbatim():
+    """load_report GETs the docs endpoint and returns the 'text' field verbatim.
     Byte-exact round-trip: the text returned must equal what was originally stored.
     REQ-C-08.
     """
@@ -172,23 +172,16 @@ def test_load_report_in_case_returns_text_verbatim():
         })
 
     client = _make_client(handler)
-    result = client.load_report_in_case(_CASE, _REF)
+    result = client.load_report(_CASE, _REF)
     assert result == stored_text  # byte-exact
 
 
-def test_load_report_raises_clear_error():
-    """load_report (no case_id) raises RuntimeError directing callers to use the case-scoped variant."""
-    client = _make_client(lambda r: httpx.Response(200))
-    with pytest.raises(RuntimeError, match="load_report_in_case"):
-        client.load_report(_REF)
-
-
 # ---------------------------------------------------------------------------
-# 6. delete_report_in_case  (REQ-C-12)
+# 6. delete_report  (REQ-C-12)
 # ---------------------------------------------------------------------------
 
-def test_delete_report_in_case_issues_delete():
-    """delete_report_in_case issues DELETE to the right path.  REQ-C-12."""
+def test_delete_report_issues_delete():
+    """delete_report issues DELETE to the right path.  REQ-C-12."""
     called: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -199,15 +192,8 @@ def test_delete_report_in_case_issues_delete():
         return httpx.Response(204)
 
     client = _make_client(handler)
-    client.delete_report_in_case(_CASE, _REF)
+    client.delete_report(_CASE, _REF)
     assert called == ["yes"]
-
-
-def test_delete_report_raises_clear_error():
-    """delete_report (no case_id) raises RuntimeError directing callers to use the case-scoped variant."""
-    client = _make_client(lambda r: httpx.Response(200))
-    with pytest.raises(RuntimeError, match="delete_report_in_case"):
-        client.delete_report(_REF)
 
 
 # ---------------------------------------------------------------------------

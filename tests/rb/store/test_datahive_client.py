@@ -1,13 +1,9 @@
 """Tests for DataHiveClient interface — updated for Slice 1.
 
-Slice 1 implements: create_case, list_cases, save_report, load_report_in_case,
-delete_report_in_case, aggregate (6 methods).
+Slice 1 implements: create_case, list_cases, save_report, load_report,
+delete_report, aggregate (6 methods).
 
 Still raising NotImplementedError (Slice 2): attach_material, get_material.
-
-load_report / delete_report (no case-id forms) raise RuntimeError (not NotImplementedError)
-because they require the case-scoped variant — they are not unimplemented, just
-require different call patterns.
 """
 import unittest
 from unittest.mock import MagicMock
@@ -60,15 +56,13 @@ class TestDataHiveClientNotImplemented(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self.client.get_material(material_id="material_1")
 
-    def test_load_report_raises_runtime_error_directing_to_case_variant(self):
-        """load_report (no case_id) raises RuntimeError asking caller to use load_report_in_case."""
-        with self.assertRaises(RuntimeError, msg="should mention load_report_in_case"):
-            self.client.load_report(report_doc_id="report_1")
+    def test_load_report_is_callable_with_case_id(self):
+        """load_report(case_id, report_doc_id) exists and is callable (Slice 1)."""
+        self.assertTrue(callable(self.client.load_report))
 
-    def test_delete_report_raises_runtime_error_directing_to_case_variant(self):
-        """delete_report (no case_id) raises RuntimeError asking caller to use delete_report_in_case."""
-        with self.assertRaises(RuntimeError, msg="should mention delete_report_in_case"):
-            self.client.delete_report(report_doc_id="report_1")
+    def test_delete_report_is_callable_with_case_id(self):
+        """delete_report(case_id, report_doc_id) exists and is callable (Slice 1)."""
+        self.assertTrue(callable(self.client.delete_report))
 
 
 class TestDataHiveClientMockability(unittest.TestCase):
@@ -82,8 +76,8 @@ class TestDataHiveClientMockability(unittest.TestCase):
         self.assertTrue(hasattr(mock, "create_case"))
         self.assertTrue(hasattr(mock, "list_cases"))
         self.assertTrue(hasattr(mock, "save_report"))
-        self.assertTrue(hasattr(mock, "load_report_in_case"))
-        self.assertTrue(hasattr(mock, "delete_report_in_case"))
+        self.assertTrue(hasattr(mock, "load_report"))
+        self.assertTrue(hasattr(mock, "delete_report"))
         self.assertTrue(hasattr(mock, "aggregate"))
 
         # Slice 2 (still present as NotImplementedError)
@@ -95,8 +89,8 @@ class TestDataHiveClientMockability(unittest.TestCase):
         mock.list_cases()
         mock.attach_material(case_id="1", name="m", sav_bytes=b"x", codebook_summary="s")
         mock.save_report(case_id="1", report_id=None, report_json="{}", readable="r")
-        mock.load_report_in_case(case_id="1", report_doc_id="r1")
-        mock.delete_report_in_case(case_id="1", report_doc_id="r1")
+        mock.load_report(case_id="1", report_doc_id="r1")
+        mock.delete_report(case_id="1", report_doc_id="r1")
         mock.aggregate(material_id="1", group_by=[], filters=[])
         mock.get_material(material_id="1")
 

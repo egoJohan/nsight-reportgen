@@ -77,7 +77,7 @@ def get_report(
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Return the exact report definition JSON (parsed) for a report doc. (REQ-C-08)"""
-    raw = client.load_report(report_id)
+    raw = client.load_report(case_id, report_id)
     return json.loads(raw)
 
 
@@ -88,7 +88,7 @@ def delete_report(
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Delete a report doc. (REQ-C-12)"""
-    client.delete_report(report_id)
+    client.delete_report(case_id, report_id)
     return {"deleted": report_id}
 
 
@@ -105,7 +105,7 @@ def duplicate_report(
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Duplicate a report under a new name; returns the new report_id. (REQ-C-09)"""
-    src = report_from_json(client.load_report(report_id))
+    src = report_from_json(client.load_report(case_id, report_id))
     new_report: Report = dataclasses.replace(src, name=body.name)
     new_json = report_to_json(new_report)
     new_id = client.save_report(case_id, None, new_json, _readable(new_report))
