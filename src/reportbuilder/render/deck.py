@@ -17,6 +17,7 @@ from reportbuilder.model.report import Report
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
 from reportbuilder.render.image import IMAGE_BUILDERS
+from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
 from reportbuilder.render.native import NATIVE_BUILDERS
 
 
@@ -113,7 +114,7 @@ def render_report(
 
     for spec in report.charts:
         # --- Resolve slot and slide ---
-        slot = _resolve_slot(prs, style, spec.template_slot)
+        slot = _resolve_slot(prs, style, spec.template_slot, report.render_mode)
         # slide_index may reference an existing slide or was just appended
         slide = prs.slides[slot.slide_index]
 
@@ -137,6 +138,9 @@ def render_report(
             add_n_annotation(ctx)
             add_filter_annotation(ctx)
         else:
+            # Add house-style slide chrome first so chart image lands on top
+            # (REQ-C-24a/h, REQ-C-25, REQ-C-27a, REQ-D-04)
+            add_image_slide_chrome(ctx)
             IMAGE_BUILDERS[spec.chart_type](ctx)
 
     assert_complete(prs, report)
@@ -161,12 +165,16 @@ def render_to_file(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_slot(prs: Presentation, style, slot_name: str) -> Slot:
+def _resolve_slot(prs: Presentation, style, slot_name: str,
+                  render_mode: str = "native") -> Slot:
     """Return a Slot for *slot_name*, falling back to a new blank slide.
 
     Tries style.slot(slot_name) first.  If that raises KeyError (slot not in
     template) or AttributeError (base StyleSpec has no slot() method), a fresh
     blank slide is appended to *prs* and a synthesised Slot is returned.
+
+    For image mode, the slot starts lower on the slide to leave room for the
+    house-style title / accent chrome added by add_image_slide_chrome.
     """
     try:
         return style.slot(slot_name)
@@ -177,6 +185,17 @@ def _resolve_slot(prs: Presentation, style, slot_name: str) -> Slot:
     layout = prs.slide_layouts[6]  # blank layout
     slide = prs.slides.add_slide(layout)
     slide_index = len(prs.slides) - 1
+
+    if render_mode == "image":
+        # Leave ~1.9" at top for house-style title chrome (REQ-C-24a, REQ-D-04)
+        return Slot(
+            slide_index=slide_index,
+            left=int(Inches(0.62)),
+            top=int(Inches(1.9)),
+            width=int(Inches(8.8)),
+            height=int(Inches(4.9)),
+            name=slot_name,
+        )
     return Slot(
         slide_index=slide_index,
         left=int(Inches(0.8)),

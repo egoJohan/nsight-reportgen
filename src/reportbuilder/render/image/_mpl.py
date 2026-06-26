@@ -10,22 +10,31 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+from reportbuilder.render.house_style import register_fonts, CREAM
+
 _EMU_PER_IN = 914400.0
 
 
 def new_figure(ctx):
-    """Create a matplotlib Figure/Axes sized to ctx.slot (min 2×1.5 inches)."""
-    w_in = max(2.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(1.5, ctx.slot.height / _EMU_PER_IN)
-    fig, ax = plt.subplots(figsize=(w_in, h_in), dpi=150)
+    """Create a matplotlib Figure/Axes sized to ctx.slot, with nSight house style applied.
+
+    Applies cream background and Liberation Sans font (REQ-C-25/27a).
+    Minimum size enforced to maintain legibility at any slot dimension.
+    """
+    register_fonts()
+    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    fig, ax = plt.subplots(figsize=(w_in, h_in), dpi=200)
+    fig.patch.set_facecolor(CREAM)
+    ax.set_facecolor(CREAM)
     return fig, ax
 
 
 def render_png(fig) -> str:
-    """Save figure to a temp PNG file and close it. Returns the file path."""
+    """Save figure to a temp PNG file at high quality and close it. Returns the file path."""
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+    fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
     return path
 
