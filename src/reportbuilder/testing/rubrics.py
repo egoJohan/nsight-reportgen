@@ -2,6 +2,39 @@
 from __future__ import annotations
 
 RUBRICS: dict[str, str] = {
+    "REQ-C-05": (
+        "You are judging a screenshot of a survey question browser panel "
+        "(REQ-C-05).\n"
+        "PASS only if ALL of the following hold:\n"
+        "1. Questions are displayed in a clear list — one row per question.\n"
+        "2. Each row shows readable question text (not placeholder boxes, "
+        "even if using a fallback font).\n"
+        "3. Each row has an obvious single/multi control (e.g. a segmented "
+        "button or toggle labelled 'single' / 'multi') so a survey analyst "
+        "can classify each question.\n"
+        "4. A sort control is visible somewhere in the panel (e.g. a "
+        "dropdown labelled 'Sort by:').\n"
+        "5. A survey analyst could scan and understand the question list "
+        "at a glance.\n"
+        "FAIL if the question list is absent, unreadable, or lacks the "
+        "single/multi control or sort control."
+    ),
+    "REQ-U-11": (
+        "You are judging a screenshot of a report builder screen "
+        "(REQ-U-11).\n"
+        "PASS only if ALL of the following hold:\n"
+        "1. A question list is visible (on the left or in a panel) so the "
+        "user can choose which questions to chart.\n"
+        "2. At least one chart card (or the equivalent configuration area) "
+        "is visible with a chart-type control (e.g. a dropdown labelled "
+        "'Chart type').\n"
+        "3. A statistic control (e.g. 'Statistic' dropdown) is present per "
+        "chart card.\n"
+        "4. The layout makes it clear — even to a non-technical user — how "
+        "to pick a question and configure the resulting chart.\n"
+        "FAIL if the question list is missing, if no chart configuration "
+        "controls are visible, or if the layout is confusing."
+    ),
     "R3-LAYOUT": (
         "You are judging a single rendered survey chart for layout cleanliness.\n"
         "PASS only if ALL hold:\n"
