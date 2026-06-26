@@ -8,7 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/data_area.dart';
+import '../reports/report_builder.dart';
 import '../reports/reports_list.dart';
+import '../reports/providers/reports_provider.dart';
 import 'providers/selected_case_provider.dart';
 
 /// Detail pane for the selected case.
@@ -53,7 +55,19 @@ class CaseDetail extends ConsumerWidget {
             child: TabBarView(
               children: [
                 DataArea(caseId: caseRecord.id),              // Task 8.5
-                ReportsList(caseId: caseRecord.id),           // Task 8.6
+                // Task 8.6 list / Task 8.7 builder (switch on selected report)
+                Consumer(
+                  builder: (context, ref, _) {
+                    final selectedId = ref.watch(selectedReportProvider);
+                    if (selectedId != null) {
+                      return ReportBuilder(
+                        caseId: caseRecord.id,
+                        reportId: selectedId,
+                      );
+                    }
+                    return ReportsList(caseId: caseRecord.id);
+                  },
+                ),
               ],
             ),
           ),

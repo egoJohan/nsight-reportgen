@@ -84,21 +84,65 @@ class ChartSpecDef {
       );
 
   /// Produces the exact snake_case keys the backend's report_from_json expects.
+  ///
+  /// `classifying_var` and `scatter_xy` are always emitted (may be null).
+  /// `template_slot` is emitted when set (auto-assigned in [ReportDef.toJson]).
   Map<String, dynamic> toJson() {
     final m = <String, dynamic>{
       'question_ref': questionRef,
       'chart_type': chartType,
     };
     if (statistic != null) m['statistic'] = statistic;
-    if (classifyingVar != null) m['classifying_var'] = classifyingVar;
+    // Always emit classifying_var — null means no segmentation.
+    m['classifying_var'] = classifyingVar;
     if (numberFormat != null) m['number_format'] = numberFormat;
     if (sort != null) m['sort'] = sort;
     if (templateSlot != null) m['template_slot'] = templateSlot;
     if (elements != null) m['elements'] = elements;
-    if (scatterXy != null) m['scatter_xy'] = scatterXy;
+    // Always emit scatter_xy — null for non-scatter charts.
+    m['scatter_xy'] = scatterXy;
     return m;
   }
+
+  /// Returns a copy with the given fields replaced.
+  ChartSpecDef copyWith({
+    String? questionRef,
+    String? chartType,
+    Object? statistic = _sentinel,
+    Object? classifyingVar = _sentinel,
+    Object? numberFormat = _sentinel,
+    Object? sort = _sentinel,
+    Object? templateSlot = _sentinel,
+    Object? elements = _sentinel,
+    Object? scatterXy = _sentinel,
+  }) =>
+      ChartSpecDef(
+        questionRef: questionRef ?? this.questionRef,
+        chartType: chartType ?? this.chartType,
+        statistic:
+            statistic == _sentinel ? this.statistic : statistic as String?,
+        classifyingVar: classifyingVar == _sentinel
+            ? this.classifyingVar
+            : classifyingVar as String?,
+        numberFormat: numberFormat == _sentinel
+            ? this.numberFormat
+            : numberFormat as Map<String, dynamic>?,
+        sort: sort == _sentinel ? this.sort : sort as Map<String, dynamic>?,
+        templateSlot: templateSlot == _sentinel
+            ? this.templateSlot
+            : templateSlot as String?,
+        elements: elements == _sentinel
+            ? this.elements
+            : elements as Map<String, dynamic>?,
+        scatterXy: scatterXy == _sentinel
+            ? this.scatterXy
+            : scatterXy as Map<String, dynamic>?,
+      );
 }
+
+/// Sentinel object used by [ChartSpecDef.copyWith] to distinguish null from
+/// "not provided".
+const Object _sentinel = Object();
 
 /// A full report definition — sent to and received from the backend.
 class ReportDef {
@@ -124,10 +168,15 @@ class ReportDef {
       );
 
   /// Produces the exact snake_case keys the backend's report_from_json expects.
+  ///
+  /// `template_slot` is auto-assigned to `s{index+1}` by chart card position.
   Map<String, dynamic> toJson() => {
         'name': name,
         'render_mode': renderMode,
         'template_ref': templateRef,
-        'charts': charts.map((c) => c.toJson()).toList(),
+        'charts': [
+          for (var i = 0; i < charts.length; i++)
+            charts[i].copyWith(templateSlot: 's${i + 1}').toJson(),
+        ],
       };
 }
