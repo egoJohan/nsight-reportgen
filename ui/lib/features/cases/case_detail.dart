@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/data_area.dart';
 import 'providers/selected_case_provider.dart';
 
 /// Detail pane for the selected case.
@@ -47,11 +48,11 @@ class CaseDetail extends ConsumerWidget {
               Tab(text: 'Reports'),
             ],
           ),
-          const Expanded(
+          Expanded(
             child: TabBarView(
               children: [
-                Center(child: Text('Data area')),    // Task 8.5: real Data browser
-                Center(child: Text('Reports area')), // Task 8.6: real Reports tab
+                DataArea(caseId: caseRecord.id),              // Task 8.5
+                const Center(child: Text('Reports area')),    // Task 8.6
               ],
             ),
           ),

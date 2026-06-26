@@ -67,8 +67,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // First tab (Data) is active by default.
-      expect(find.text('Data area'), findsOneWidget);
+      // First tab (Data) is active by default — DataArea shows upload button
+      // when no material is active (Task 8.5).
+      expect(find.text('Upload .sav'), findsOneWidget);
     });
 
     testWidgets('tapping Reports tab shows Reports area', (tester) async {
