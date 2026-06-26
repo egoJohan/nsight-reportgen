@@ -42,19 +42,10 @@ for _ui_dir in (_REPO_ROOT / "ui" / "test", _REPO_ROOT / "ui" / "integration_tes
 # Policy: only add entries here if NO current-scope backend test can cover them.
 # If a covering test exists, backfill the REQ- marker instead.
 DEFERRED_ALLOWLIST: dict[str, str] = {
-    # --- UI requirements: Flutter/widget tests land in ui/test with Phase 8 ---
-    "REQ-U-01": "UI acceptance umbrella; backend REST is covered; Flutter widget test deferred to Phase 8",
-    "REQ-U-02": "UI keyboard/mouse control; purely UI acceptance; deferred to Phase 8 Flutter tests",
-    "REQ-U-03": "UI consistency review; no automatable backend equivalent; deferred to Phase 8",
-    "REQ-U-04": "UI requirement; tests land in ui/test with Phase 8 (Flutter), currently deferred",
-    "REQ-U-05": "UI requirement; tests land in ui/test with Phase 8 (Flutter), currently deferred",
-    "REQ-U-06": "UI requirement; tests land in ui/test with Phase 8 (Flutter), currently deferred",
-    "REQ-U-07": "DEFER† in catalog; UI window management; deferred to Phase 8 Flutter tests",
-    "REQ-U-08": "DEFER† in catalog; UI window sizing; deferred to Phase 8 Flutter tests",
-    "REQ-U-09": "DEFER† in catalog; UI close icon; deferred to Phase 8 Flutter tests",
-    "REQ-U-10": "UI terminology lint over UI strings; no backend equivalent; deferred to Phase 8",
-    # REQ-U-11 removed: covered by tests/rb/test_ui_judge.py (REQ-U-11 token in docstring)
-    "REQ-U-12": "UI requirement; tests land in ui/test with Phase 8 (Flutter), currently deferred",
+    # --- UI requirements: only review/NFR items with no automatable test remain ---
+    # REQ-U-01..02, REQ-U-04..11 are now credited from ui/test/*.dart (Phase 8 Flutter tests).
+    "REQ-U-03": "UI-consistency review against a UI-pattern checklist — human review acceptance, no automatable test.",
+    "REQ-U-12": "UI-extensibility NFR — review acceptance, no automatable test.",
     # REQ-C-28b covered by @pytest.mark.judge test in tests/rb/e2e/test_pipeline_synthetic.py
     # REQ-C-29b covered by @pytest.mark.judge test in tests/rb/e2e/test_pipeline_attendo.py
 }
@@ -75,9 +66,15 @@ def _collect_covered() -> set[str]:
 
     This file (test_req_coverage.py) is excluded from the scan because it
     contains REQ-<id> strings as allowlist dict keys, not as test markers.
+
+    Python test dirs are scanned for ``*.py``; Flutter ui test dirs are also
+    scanned for ``*.dart`` (Phase-8 Flutter tests live under ui/test/).
     """
+    _UI_DIRS = {_REPO_ROOT / "ui" / "test", _REPO_ROOT / "ui" / "integration_test"}
+
     covered: set[str] = set()
     for base in _TEST_DIRS:
+        # Python files — always scan these
         for py_file in base.rglob("*.py"):
             if py_file.resolve() == _THIS_FILE:
                 continue  # skip this file — it holds the allowlist, not markers
@@ -86,6 +83,16 @@ def _collect_covered() -> set[str]:
             except (OSError, UnicodeDecodeError):
                 continue
             covered.update(_REQ_TOKEN_RE.findall(text))
+
+        # Dart files — only for Flutter ui test dirs
+        if base in _UI_DIRS:
+            for dart_file in base.rglob("*.dart"):
+                try:
+                    text = dart_file.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                covered.update(_REQ_TOKEN_RE.findall(text))
+
     return covered
 
 
