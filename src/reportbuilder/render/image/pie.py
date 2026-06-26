@@ -27,6 +27,7 @@ from reportbuilder.render.image._mpl import (
 from reportbuilder.render.house_style import (
     register_fonts, series_colors, INK, MUTED, CREAM,
 )
+from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 
 _EMU_PER_IN = 914400.0
 
@@ -56,10 +57,13 @@ def build_image_pie(ctx) -> None:
     Uses the first segment's values.  Slices are coloured with the teal ramp;
     percentage labels use autopct outside each slice.  The figure is rendered
     square and centred in the slot so the pie is circular, not oval.
+    The "Not answered" slice is rendered in MUTED grey (R4.2).
     """
     cats, segs, data = series_values(ctx.series)
     vals = data[segs[0]]
     clrs = series_colors(len(cats))
+    # R4.2: override "Not answered" slice colour with MUTED grey.
+    clrs = [MUTED if c == NOT_ANSWERED_LABEL else clr for c, clr in zip(cats, clrs)]
 
     fig, ax = _make_square_fig_ax(ctx)
 
@@ -92,10 +96,13 @@ def build_image_doughnut(ctx) -> None:
 
     Pie with a central hole (width=0.40).  Slices use the teal ramp;
     pct labels sit inside each arc segment.  Rendered square and centred.
+    The "Not answered" slice is rendered in MUTED grey (R4.2).
     """
     cats, segs, data = series_values(ctx.series)
     vals = data[segs[0]]
     clrs = series_colors(len(cats))
+    # R4.2: override "Not answered" slice colour with MUTED grey.
+    clrs = [MUTED if c == NOT_ANSWERED_LABEL else clr for c, clr in zip(cats, clrs)]
 
     fig, ax = _make_square_fig_ax(ctx)
 

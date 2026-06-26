@@ -272,18 +272,72 @@ def test_suggest_multi_response_not_pie():
     )
 
 
-def test_suggest_funnel_for_descending():
-    """Ordered-descending single-series → suggest_chart_type picks funnel (REQ-C-13)."""
+def test_suggest_funnel_not_auto_suggested():
+    """R4.3: funnel is opt-in — shape-based suggest never returns funnel automatically.
+
+    Even for a cleanly descending single-series the default suggestion should be
+    a standard chart type (e.g. vertical_bar or horizontal_bar).  Users who want
+    a funnel must explicitly select it.
+    """
     result = suggest_chart_type(_SingleQ(), _funnel_series())
-    assert result == "funnel", (
-        f"Expected 'funnel' for descending single-series, got {result!r}"
+    assert result != "funnel", (
+        f"suggest_chart_type must NOT auto-suggest funnel (opt-in only); got {result!r}"
     )
+    # The funnel_series has 5 categories with short labels (single chars): should be pie or vbar
+    assert result in CHART_PLUGINS, f"Result {result!r} must be a registered chart type"
 
 
 def test_suggest_returns_string_always():
     """suggest_chart_type always returns a non-empty string (fallback guard)."""
     result = suggest_chart_type(_SingleQ(), known_series())
     assert isinstance(result, str) and result in CHART_PLUGINS
+
+
+# ---------------------------------------------------------------------------
+# R4.3 — Shape-based suggestion: no spurious funnel / scatter
+# ---------------------------------------------------------------------------
+
+def test_suggest_multi_question_returns_horizontal_bar():
+    """R4.3: multi-response question → suggest_chart_type picks horizontal_bar."""
+    result = suggest_chart_type(_MultiQ(), _many_cat_series())
+    assert result == "horizontal_bar", (
+        f"Expected 'horizontal_bar' for multi question; got {result!r}"
+    )
+
+
+def test_suggest_few_short_cats_returns_vertical_bar():
+    """R4.3: few short-label categories (≤6, ≤14 chars) → suggest vertical_bar."""
+    cats = ("Alpha", "Beta", "Gamma", "Delta")
+    segs = ("Total",)
+    cells = {(c, "Total"): Cell(pct=float(25)) for c in cats}
+    sr = SeriesResult(categories=cats, segments=segs, cells=cells,
+                      base_n={"Total": 100}, statistic="pct")
+    result = suggest_chart_type(_SingleQ(), sr)
+    # With 4 cats ≤14 chars and single segment → shape rule gives pie; that is fine.
+    # The critical check: NOT funnel and NOT scatter.
+    assert result not in ("funnel", "scatter"), (
+        f"suggest_chart_type must not return funnel/scatter; got {result!r}"
+    )
+    assert result in CHART_PLUGINS
+
+
+def test_suggest_not_funnel_from_shape():
+    """R4.3: suggest_chart_type never returns funnel regardless of value ordering."""
+    # Strictly descending values — old suitability approach returned funnel, new does not.
+    result = suggest_chart_type(_SingleQ(), _funnel_series())
+    assert result != "funnel", (
+        f"R4.3: funnel is opt-in; suggest_chart_type must not auto-return it; got {result!r}"
+    )
+
+
+def test_suggest_not_scatter_from_shape():
+    """R4.3: suggest_chart_type never returns scatter (always opt-in)."""
+    for q in (_SingleQ(), _MultiQ()):
+        for sr in (_many_cat_series(), _funnel_series(), known_series()):
+            result = suggest_chart_type(q, sr)
+            assert result != "scatter", (
+                f"suggest_chart_type must never auto-suggest scatter; got {result!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

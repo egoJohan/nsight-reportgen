@@ -14,8 +14,15 @@ House style applied:
 - Auto-orientation: build_image_column switches to horizontal bars when there
   are > 6 categories or any label exceeds 14 characters to avoid x-label
   overlap. Explicit horizontal_bar / vertical_bar requests are always honoured.
+- Long-label handling (R4.1): horizontal-bar y-axis labels are wrapped to at
+  most 2 lines of ~22 chars; vertical-bar x-axis labels are truncated at 42
+  chars.  Both use '…' to indicate clipped text.
+- "Not answered" coloring (R4.2): bars whose category matches NOT_ANSWERED_LABEL
+  are rendered in MUTED grey so non-response reads as distinct from real data.
 """
 from __future__ import annotations
+
+import textwrap
 
 import numpy as np
 from reportbuilder.render.image._mpl import (
@@ -24,6 +31,36 @@ from reportbuilder.render.image._mpl import (
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
 )
+from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
+
+# ---------------------------------------------------------------------------
+# Label-length constants (R4.1)
+# ---------------------------------------------------------------------------
+_LABEL_WRAP_WIDTH: int = 22   # max chars per line for horizontal-bar y-axis labels
+_LABEL_MAX_CHARS: int = 42    # truncation threshold for vertical-bar x-axis labels
+
+
+# ---------------------------------------------------------------------------
+# Label helpers (R4.1 — long-label fix)
+# ---------------------------------------------------------------------------
+
+def _wrap_label(text: str) -> str:
+    """Wrap a y-axis label for horizontal bars to at most 2 lines of _LABEL_WRAP_WIDTH chars.
+
+    Labels that already fit on one line (≤ _LABEL_WRAP_WIDTH chars) are returned
+    unchanged.  Longer text is broken at word boundaries; text that still cannot
+    fit in 2 lines is terminated with '…' on the second line.
+    """
+    if len(text) <= _LABEL_WRAP_WIDTH:
+        return text
+    return textwrap.fill(text, width=_LABEL_WRAP_WIDTH, max_lines=2, placeholder="…")
+
+
+def _truncate_label(text: str, max_chars: int = _LABEL_MAX_CHARS) -> str:
+    """Truncate an x-axis label for vertical bars to *max_chars*, appending '…' if clipped."""
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1] + "…"
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +160,11 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     for i, seg in enumerate(segs):
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * width if n_segs > 1 else 0.0
+        # R4.2: "Not answered" bar gets MUTED grey; all others get the series colour.
+        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         bars = ax.bar(
             x + offset, vals, width=width,
-            label=seg, color=clrs[i], edgecolor="none", zorder=3,
+            label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
         for bar, v in zip(bars, vals):
@@ -138,8 +177,10 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
 
+    # R4.1: truncate long x-axis labels so they don't crowd the plot.
+    display_cats = [_truncate_label(c) for c in cats]
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, fontsize=11.5, color=INK)
+    ax.set_xticklabels(display_cats, fontsize=11.5, color=INK)
     _apply_column_style(ax, max_val)
 
     if ctx.spec.elements.legend and n_segs > 1:
@@ -176,9 +217,11 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
+        # R4.2: "Not answered" bar gets MUTED grey; all others get the series colour.
+        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         ax.barh(
             ys, vals, height=height,
-            label=seg, color=clrs[i], edgecolor="none", zorder=3,
+            label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
         for yi, v in zip(ys, vals):
@@ -190,8 +233,10 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
 
+    # R4.1: wrap long y-axis labels to ≤ 2 lines so bars always have room.
+    display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
-    ax.set_yticklabels(cats, fontsize=11.5, color=INK)
+    ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, max_val)
 
@@ -220,7 +265,9 @@ def build_image_column_stacked(ctx) -> None:
 
     for i, seg in enumerate(segs):
         vals = np.array([v or 0.0 for v in data[seg]])
-        bars = ax.bar(x, vals, bottom=bottoms, label=seg, color=clrs[i],
+        # R4.2: "Not answered" category bars get MUTED grey.
+        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
+        bars = ax.bar(x, vals, bottom=bottoms, label=seg, color=bar_clrs,
                       edgecolor="none", zorder=3)
         for bar, v, b in zip(bars, vals, bottoms):
             mid = b + v / 2
@@ -233,8 +280,10 @@ def build_image_column_stacked(ctx) -> None:
                 )
         bottoms = bottoms + vals
 
+    # R4.1: truncate long x-axis labels.
+    display_cats = [_truncate_label(c) for c in cats]
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, fontsize=11.5, color=INK)
+    ax.set_xticklabels(display_cats, fontsize=11.5, color=INK)
     _apply_column_style(ax, max_val)
 
     if ctx.spec.elements.legend and len(segs) > 1:
@@ -263,7 +312,9 @@ def build_image_bar_stacked(ctx) -> None:
 
     for i, seg in enumerate(segs):
         vals = np.array([v or 0.0 for v in data[seg]])
-        ax.barh(y, vals, left=lefts, label=seg, color=clrs[i],
+        # R4.2: "Not answered" category bars get MUTED grey.
+        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
+        ax.barh(y, vals, left=lefts, label=seg, color=bar_clrs,
                 edgecolor="none", zorder=3)
         for yi, v, l in zip(y, vals, lefts):
             mid = l + v / 2
@@ -276,8 +327,10 @@ def build_image_bar_stacked(ctx) -> None:
                 )
         lefts = lefts + vals
 
+    # R4.1: wrap long y-axis labels.
+    display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
-    ax.set_yticklabels(cats, fontsize=11.5, color=INK)
+    ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, max_val)
 

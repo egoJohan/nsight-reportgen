@@ -78,19 +78,44 @@ def plugin(chart_type: str) -> ChartPlugin:
 
 
 def suggest_chart_type(question, series: SeriesResult) -> str:
-    """Return the chart_type with the highest suitability score for the inputs.
+    """Return a chart_type for *question* using question-shape heuristics (R4.3).
 
-    Scores of None (e.g. pie on multi-response) are excluded.
-    Falls back to 'horizontal_bar' if all types score None.
+    Shape-based approach: the suggestion is driven by what the question *is*
+    (kind, category count, label lengths) rather than by synthetic data values.
+    This prevents false funnel suggestions when values happen to be equal/ordered.
+
+    Funnel, radar, and scatter are NEVER auto-suggested — they are opt-in chart
+    types that require deliberate selection.
+
+    Rules (applied in order of precedence):
+    - multi-response (tickbox set)               → horizontal_bar
+    - categories contain time/wave labels        → line
+    - > 6 categories or any label > 14 chars     → horizontal_bar
+    - single segment AND ≤ 4 categories          → pie
+    - default (few short labels)                 → vertical_bar
     """
-    scores: dict[str, float] = {}
-    for t, p in CHART_PLUGINS.items():
-        score = p.suitability(question, series)
-        if score is not None:
-            scores[t] = score
-    if not scores:
+    kind = getattr(question, "kind", "single")
+    cats = list(series.categories)
+    segs = list(series.segments)
+
+    # multi-response → always horizontal bar (many categories, one checkbox each)
+    if kind == "multi":
         return "horizontal_bar"
-    return max(scores, key=lambda k: scores[k])
+
+    # time-wave labels → line chart
+    if any(_TIME_RE.search(c) for c in cats):
+        return "line"
+
+    # many categories or long labels → horizontal bar for readability
+    if len(cats) > 6 or any(len(c) > 14 for c in cats):
+        return "horizontal_bar"
+
+    # parts-of-whole: single segment with few categories → pie
+    if len(segs) == 1 and len(cats) <= 4:
+        return "pie"
+
+    # default: vertical bar for few short labels
+    return "vertical_bar"
 
 
 # ---------------------------------------------------------------------------
