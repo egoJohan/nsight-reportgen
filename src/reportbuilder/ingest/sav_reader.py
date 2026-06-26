@@ -1,4 +1,9 @@
-"""SAV reader — Task 2.1/2.2/2.3: variables, labels, value labels, measurement, missing codes, single questions."""
+"""SAV reader — Task 2.1/2.2/2.3: variables, labels, value labels, measurement, missing codes, single questions.
+
+A0.1 — Metadata curation (REQ-C-05): survey-platform system variables (Response ID,
+IP Address, dates, session/contact ids, pid/psid, etc.) are excluded from `questions`
+but kept in `variables` so downstream code can still access them by name.
+"""
 from __future__ import annotations
 
 import pathlib
@@ -30,6 +35,87 @@ def _user_missing(ranges: list | None) -> frozenset[float]:
     return frozenset(codes)
 
 
+# ---------------------------------------------------------------------------
+# A0.1 — Metadata / system-variable detection (REQ-C-05)
+# ---------------------------------------------------------------------------
+
+# Known survey-platform system variable names (case-insensitive exact match).
+# Extend this list when new platform exports are onboarded.
+_METADATA_NAMES: frozenset[str] = frozenset({
+    # SmartSurvey / generic V-prefixed system fields
+    "vrid",
+    "vdatesub",
+    "vstatus",
+    "vcid",
+    "vsessionid",
+    "vip",
+    "vlong",
+    "vlat",
+    "vgeocountry",
+    "vgeocity",
+    "vgeoregion",
+    "vpostal",
+    "vcomment",
+    "vreferer",
+    "vuseragent",
+    "vlanguage",
+})
+
+# Exact label strings (case-insensitive, stripped) that signal a metadata variable.
+# Use exact-label matching to stay conservative — a label like "Employment Status"
+# will NOT match the entry "status" because the full string differs.
+_METADATA_LABEL_EXACT: frozenset[str] = frozenset({
+    "response id",
+    "respondent",
+    "date submitted",
+    "submitted",
+    "status",
+    "contact id",
+    "session id",
+    "sessionid",
+    "ip address",
+    "url",
+    "referer",
+    "referrer",
+    "email",
+    "collector",
+    "duration",
+    "started",
+    "ended",
+    "timestamp",
+    "weight",
+    "pid",
+    "psid",
+    "language",
+    "longitude",
+    "latitude",
+    "user agent",
+    "comments",
+})
+
+
+def _is_metadata(name: str, label: str) -> bool:
+    """Return True if this variable is a survey-platform metadata/system field.
+
+    Checks against:
+    - _METADATA_NAMES: known system variable names (case-insensitive).
+    - _METADATA_LABEL_EXACT: exact label strings that identify metadata.
+
+    Conservative by design: uses exact-match on labels so real questions
+    (e.g. label "Employment Status") are not accidentally dropped.
+    (REQ-C-05)
+    """
+    if name.lower() in _METADATA_NAMES:
+        return True
+    if label.lower().strip() in _METADATA_LABEL_EXACT:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Public reader
+# ---------------------------------------------------------------------------
+
 def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
     df, meta = pyreadstat.read_sav(str(path), apply_value_formats=False, user_missing=True)
     labels = dict(meta.column_names_to_labels)
@@ -50,9 +136,14 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             value_labels=vls,
             missing_values=_user_missing(missing_ranges.get(name)),
         )
+
+    # A0.1: build questions from non-metadata variables only.
+    # Metadata variables remain accessible in `variables` but are excluded
+    # from `questions` to keep the question browser clean (REQ-C-05).
     questions = [
         Question(qid=_slug(name), kind="single", variables=(name,), text=variables[name].label)
         for name in df.columns
+        if not _is_metadata(name, variables[name].label)
     ]
     model = QuestionModel(variables=variables, questions=questions)
     return df, model
