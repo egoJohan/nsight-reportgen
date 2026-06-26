@@ -10,6 +10,7 @@ import 'chart_spec_editor.dart';
 import 'providers/builder_provider.dart';
 import 'providers/reports_provider.dart';
 import 'question_pick_list.dart';
+import 'report_preview.dart';
 
 /// Breakpoint below which the two panels are stacked vertically.
 const _kNarrowBreakpoint = 700.0;
@@ -40,6 +41,9 @@ class _ReportBuilderState extends ConsumerState<ReportBuilder> {
   final _nameController = TextEditingController();
   bool _nameInitialized = false;
   bool _saving = false;
+  /// When true, the Preview panel (REportPreview) is shown instead of the
+  /// question/chart-card panels. (REQ-C-19a / REQ-C-21)
+  bool _showPreview = false;
 
   @override
   void initState() {
@@ -83,9 +87,14 @@ class _ReportBuilderState extends ConsumerState<ReportBuilder> {
         _buildTopBar(context, draft),
         const Divider(height: 1),
         Expanded(
-          child: isNarrow
-              ? _buildNarrowBody(context, draft)
-              : _buildWideBody(context, draft),
+          child: _showPreview
+              ? ReportPreview(
+                  caseId: widget.caseId,
+                  reportId: widget.reportId,
+                )
+              : (isNarrow
+                  ? _buildNarrowBody(context, draft)
+                  : _buildWideBody(context, draft)),
         ),
       ],
     );
@@ -153,12 +162,14 @@ class _ReportBuilderState extends ConsumerState<ReportBuilder> {
             label: const Text('Save'),
           ),
 
-          // Render — placeholder, wired in Task 8.8
+          // Render / Build toggle — shows/hides the preview panel. (REQ-C-21)
           ElevatedButton.icon(
             key: const Key('render_button'),
-            onPressed: null, // disabled until 8.8
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Render'),
+            onPressed: () => setState(() => _showPreview = !_showPreview),
+            icon: Icon(
+              _showPreview ? Icons.edit : Icons.play_arrow,
+            ),
+            label: Text(_showPreview ? 'Build' : 'Render'),
           ),
         ],
       ),

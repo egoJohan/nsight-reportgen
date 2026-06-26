@@ -228,6 +228,21 @@ class NsightApi {
   // Render
   // ---------------------------------------------------------------------------
 
+  /// Downloads the preview PDF for a rendered report.
+  /// [GET /cases/{caseId}/reports/{reportId}/preview.pdf]
+  /// Returns the raw PDF bytes.
+  Future<List<int>> getPreviewPdf(String caseId, String reportId) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        '/cases/$caseId/reports/$reportId/preview.pdf',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data as List<int>;
+    } on DioException catch (e) {
+      _throw(e);
+    }
+  }
+
   /// Renders a report to pptx/pdf/slides preview.
   /// [POST /cases/{caseId}/reports/{reportId}/render]
   /// Returns `{pptx, pdf, preview:[...]}`.
