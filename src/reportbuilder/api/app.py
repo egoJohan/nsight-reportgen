@@ -1,5 +1,6 @@
 """FastAPI app skeleton + dependency injection seam for report builder API."""
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_cases import cases_router
@@ -7,7 +8,7 @@ from reportbuilder.api.routes_materials import materials_router
 from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
-from reportbuilder.store.datahive_client import DataHiveClient
+from reportbuilder.store.datahive_client import DataHiveClient, DataHiveError
 
 
 def create_app(client: DataHiveClient | None = None) -> FastAPI:
@@ -17,6 +18,18 @@ def create_app(client: DataHiveClient | None = None) -> FastAPI:
     Registers GET /health -> {"status": "ok"}. Later tasks add routers via app.include_router."""
 
     app = FastAPI()
+
+    # Map DataHive errors to meaningful HTTP responses (REQ-C-30):
+    # propagate client-error statuses so the UI can react (auth/not-found/bad-request);
+    # collapse datahive 5xx / unexpected to 502 (bad upstream).
+    @app.exception_handler(DataHiveError)
+    async def _dh_err(request, exc: DataHiveError) -> JSONResponse:
+        _client_statuses = (400, 401, 403, 404, 409, 422)
+        status = exc.status_code if exc.status_code in _client_statuses else 502
+        return JSONResponse(
+            status_code=status,
+            content={"detail": f"datahive: {exc.body}"[:500]},
+        )
 
     # Register the health check endpoint
     @app.get("/health")

@@ -14,6 +14,17 @@ import uuid
 import httpx
 
 
+class DataHiveError(RuntimeError):
+    """Raised when DataHive returns a non-2xx response."""
+
+    def __init__(self, status_code: int, body: str, method: str = "", url: str = ""):
+        self.status_code = status_code
+        self.body = body
+        self.method = method
+        self.url = url
+        super().__init__(f"DataHive error {status_code} {method} {url}: {body!r}")
+
+
 class DataHiveClient:
     """Client for datahive's projects app (Case/Material/Report) + aggregation primitive."""
 
@@ -63,10 +74,11 @@ class DataHiveClient:
 
     def _raise_for_status(self, resp: httpx.Response) -> None:
         if resp.is_error:
-            snippet = resp.text[:200]
-            raise RuntimeError(
-                f"DataHive error {resp.status_code} {resp.request.method} "
-                f"{resp.request.url}: {snippet!r}"
+            raise DataHiveError(
+                resp.status_code,
+                resp.text,
+                resp.request.method,
+                str(resp.request.url),
             )
 
     # ------------------------------------------------------------------
