@@ -212,3 +212,24 @@ implemented over REST.
 3. **Deployment routing/auth.** Does the nSight backend call the datahive service directly (its own
    URL) or via egoHive's `/api/v1/dh/{path}` gateway? Needs a service token + the tenant it implies,
    and the `template_ref` for `create_case` (the generic `dataset-report-study` study template).
+
+---
+
+## ADDENDUM 2 (2026-06-26) — materials need the binary-blob primitive exposed over REST
+
+datahive already has the RIGHT primitive for byte-exact binary materials, at the **service layer**:
+`datahive/projects/service.py::attach_raw_blob(*, project_id, label, name, reference_id, data: bytes)`
+→ `{doc_id, reference_id, size}` (versioned-replace; native binary, sealed at rest, **not**
+base64-into-text) and `read_raw_blob(*, reference_id) -> bytes` (byte-exact, reference_id-addressable,
+workspace-scoped). **Neither is exposed over REST yet** (nor MCP) — same gap pattern as `read_raw_doc`.
+
+To let the nSight backend store/fetch the raw `.sav` byte-exact over REST (so the in-process engine —
+full statistic registry — keeps working), expose those two primitives generically:
+- `POST /api/v1/projects/{project_id}/blobs` — multipart `{file, label, name, reference_id}` →
+  `{reference_id, doc_id, size}` (delegates to `attach_raw_blob`). Backs `attach_material`.
+- `GET /api/v1/projects/blobs/{reference_id}` — returns the raw bytes (delegates to `read_raw_blob`,
+  which is reference-id-addressable, no project needed). Backs `get_material(material_id)`.
+- (optional) `DELETE /api/v1/projects/blobs/{reference_id}`.
+
+These are generic ("blob", "reference_id") — guardrail-clean. The nSight client (Slice 2) is built
+against exactly these shapes and its live test skips the blob steps until they deploy.
