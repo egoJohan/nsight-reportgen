@@ -46,9 +46,10 @@ void main() {
       await tester.pumpWidget(_harness());
       await tester.pumpAndSettle();
 
-      // Assert — list placeholder, detail placeholder, and icon rail are present.
+      // Assert — list pane, empty-state detail pane, and icon rail are present.
       expect(find.text('Cases'), findsOneWidget);
-      expect(find.text('Detail'), findsOneWidget);
+      // No case selected yet → empty state (REQ-U-04).
+      expect(find.text('Select a case'), findsOneWidget);
       expect(find.byType(IconRail), findsOneWidget);
 
       // Bottom nav must NOT be visible in desktop mode.

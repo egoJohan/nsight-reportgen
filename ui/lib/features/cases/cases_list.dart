@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/models.dart';
 import 'new_case_dialog.dart';
 import 'providers/cases_provider.dart';
+import 'providers/selected_case_provider.dart';
 
 /// Displays the list of cases from [casesProvider].
 ///
@@ -41,10 +42,18 @@ class CasesList extends ConsumerWidget {
           Expanded(
             child: ListView.builder(
               itemCount: cases.length,
-              itemBuilder: (ctx, i) => ListTile(
-                title: Text(cases[i].name),
-                onTap: () => onSelect?.call(cases[i]),
-              ),
+              itemBuilder: (ctx, i) {
+                final selected = ref.watch(selectedCaseProvider);
+                final isSelected = selected?.id == cases[i].id;
+                return ListTile(
+                  title: Text(cases[i].name),
+                  selected: isSelected,
+                  onTap: () {
+                    ref.read(selectedCaseProvider.notifier).select(cases[i]);
+                    onSelect?.call(cases[i]);
+                  },
+                );
+              },
             ),
           ),
         ],

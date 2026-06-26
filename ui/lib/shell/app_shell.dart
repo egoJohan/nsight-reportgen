@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/theme.dart';
+import '../features/cases/case_detail.dart';
 import '../features/cases/cases_list.dart';
+import '../features/cases/providers/selected_case_provider.dart';
 import 'bottom_nav.dart';
 import 'icon_rail.dart';
 
@@ -61,7 +64,17 @@ class _AppShellState extends State<AppShell> {
     return Expanded(
       child: Container(
         color: NSightColors.background,
-        child: Center(child: Text('Detail', style: _labelStyle())),
+        child: Consumer(
+          builder: (context, ref, _) {
+            final selected = ref.watch(selectedCaseProvider);
+            if (selected == null) {
+              return Center(
+                child: Text('Select a case', style: _labelStyle()),
+              );
+            }
+            return const CaseDetail();
+          },
+        ),
       ),
     );
   }
