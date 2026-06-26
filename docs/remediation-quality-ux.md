@@ -56,6 +56,24 @@ A8. **Per-question statistic option (percentage / count / mean).** Each question
     renders correct whole-number counts (count number-format) and to **mean** the mean value. Pair it
     with the A3 per-question number-format control. (REQ-C-15, REQ-M-04, REQ-N)
 
+## Track A9 — Graph styles as PLUGINS (architecture, user-required)
+
+Every graph style is a self-contained **plugin**, registered into one chart-renderer registry
+(formalizing today's split `NATIVE_BUILDERS` / `IMAGE_BUILDERS` dicts). Mirrors the statistic
+registry pattern.
+
+A `ChartPlugin` bundles:
+- `id` (canonical chart_type) + human `label`,
+- `native_build(ctx)` and `image_build(ctx)` renderers (one or both),
+- `suitability(question, series) -> float|None` — how appropriate this style is for a given
+  question/data shape (drives the wizard's **smart default graph type**; None = not applicable, e.g.
+  pie on multi-response),
+- `requires` (e.g. scatter needs `scatter_xy`), `defaults`, and house-style hooks.
+
+`register(ChartPlugin(...))` per style; the deck/builder/wizard read the registry (no hardcoded
+chart-type lists anywhere). Adding a new graph style = drop in one plugin module + one register call.
+Each style's house-style rendering (Track A1/A5/R1) lives in its plugin. (REQ-C-13, REQ-C-30)
+
 ## Track B0 — Wizard workflow (the UX redesign blueprint, user-approved direction)
 
 Replace the feature-by-feature tabs with a guided **wizard**. Question-level config lives on the
