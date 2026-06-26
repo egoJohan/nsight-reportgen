@@ -115,9 +115,13 @@ def test_get_questions_field_values(tmp_path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["questions"] == [
-        {"qid": "v1", "kind": "single", "variables": ["v1"], "text": "Satisfaction"}
-    ]
+    assert len(body["questions"]) == 1
+    q = body["questions"][0]
+    # Check the core fields (W1 adds suggested_chart_type + missing_values; allow those)
+    assert q["qid"] == "v1"
+    assert q["kind"] == "single"
+    assert q["variables"] == ["v1"]
+    assert q["text"] == "Satisfaction"
 
 
 # ---------------------------------------------------------------------------
