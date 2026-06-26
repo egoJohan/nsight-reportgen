@@ -233,3 +233,21 @@ full statistic registry — keeps working), expose those two primitives generica
 
 These are generic ("blob", "reference_id") — guardrail-clean. The nSight client (Slice 2) is built
 against exactly these shapes and its live test skips the blob steps until they deploy.
+
+---
+
+## ADDENDUM 3 (2026-06-26) — list a project's docs (for report listing)
+
+The nSight UI needs to **list the reports in a case** (and re-open them after reload). Today the
+projects REST surface has no doc-listing: `GET /projects/{id}` (project_status) returns required-doc
+**counts** by label, not the docs themselves. So persistent report listing isn't possible over REST.
+
+Add a generic listing endpoint:
+- `GET /api/v1/projects/{project_id}/docs?label=report` →
+  `{"docs": [{"reference_id", "name", "label"}, ...]}` — lists the project's docs (optionally
+  filtered by `label`), delegating to a service method that enumerates `doc:<label>` records under
+  the project path branch (the data already exists — `_load_project` / the project's path children
+  are what `project_status` counts). Generic ("docs", "label", "reference_id"); guardrail-clean.
+
+This is the third and last read surface nSight needs; with the doc-read (addendum 1), blob
+read/write (addendum 2), and this listing, the full Case/Material/Report loop works over REST.
