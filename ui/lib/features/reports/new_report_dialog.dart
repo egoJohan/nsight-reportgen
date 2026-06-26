@@ -1,10 +1,11 @@
-// Dialog for creating a new report: name + render-mode selector.
-// REQ-U-06
+// Dialog for creating a new report: name only (image mode is always used).
+// REQ-U-06 / D-06
 
 import 'package:flutter/material.dart';
 
-/// Dialog that collects a report [name] and [renderMode] ('native' or 'image').
+/// Dialog that collects a report [name].
 ///
+/// Always uses [renderMode] = 'image' (native rendering is dropped in W4 / D-06).
 /// Pops with a `(String name, String renderMode)` record when the user taps
 /// Create, or with null when the user cancels.
 ///
@@ -18,7 +19,6 @@ class NewReportDialog extends StatefulWidget {
 
 class _NewReportDialogState extends State<NewReportDialog> {
   final _nameController = TextEditingController();
-  String _renderMode = 'native';
 
   @override
   void dispose() {
@@ -32,27 +32,11 @@ class _NewReportDialogState extends State<NewReportDialog> {
 
     return AlertDialog(
       title: const Text('New report'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _nameController,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Name'),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 16),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'native', label: Text('native')),
-              ButtonSegment(value: 'image', label: Text('image')),
-            ],
-            selected: {_renderMode},
-            onSelectionChanged: (sel) =>
-                setState(() => _renderMode = sel.first),
-          ),
-        ],
+      content: TextField(
+        controller: _nameController,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Name'),
+        onChanged: (_) => setState(() {}),
       ),
       actions: [
         TextButton(
@@ -62,7 +46,7 @@ class _NewReportDialogState extends State<NewReportDialog> {
         TextButton(
           onPressed: canCreate
               ? () => Navigator.of(context)
-                  .pop((_nameController.text.trim(), _renderMode))
+                  .pop((_nameController.text.trim(), 'image'))
               : null,
           child: const Text('Create'),
         ),

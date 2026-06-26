@@ -1,5 +1,6 @@
-// Screenshot tests: renders QuestionBrowser, ReportBuilder, and the W2
-// ReportWizard steps to PNG files for the Claude-as-judge UI quality gate.
+// Screenshot tests: renders QuestionBrowser (data_area.png), NewReportDialog
+// (new_report_dialog.png), ReportBuilder, and the W2/W3 ReportWizard steps
+// to PNG files for the Claude-as-judge UI quality gate.
 //
 // Writes to build/screenshots/ (gitignored).  The Python test
 // tests/rb/test_ui_judge.py reads those PNGs and calls judge_image.
@@ -7,6 +8,8 @@
 // REQ-C-05 — question browser organises survey questions clearly.
 // REQ-U-11 — report builder / wizard usability for non-technical users.
 // W2      — wizard_select.png (step 1) + wizard_configure.png (step 2).
+// W4      — data_area.png (kind badges + missing-value chips).
+//            new_report_dialog.png (image-only, no render-mode selector).
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -22,6 +25,7 @@ import 'package:nsight_ui/core/models/models.dart';
 import 'package:nsight_ui/core/providers/api_provider.dart';
 import 'package:nsight_ui/features/data/data_area.dart';
 import 'package:nsight_ui/features/data/providers/material_provider.dart';
+import 'package:nsight_ui/features/reports/new_report_dialog.dart';
 import 'package:nsight_ui/features/reports/providers/builder_provider.dart';
 import 'package:nsight_ui/features/reports/providers/reports_provider.dart';
 import 'package:nsight_ui/features/reports/report_builder.dart';
@@ -62,6 +66,12 @@ class _ScreenshotFakeApi extends FakeNsightApi {
         variables: ['q1'],
         text: 'Overall satisfaction with the service',
         suggestedChartType: 'horizontal_bar',
+        // W4.3: missing-value entry so the "Not answered" chip appears
+        // in the data_area.png screenshot.
+        missingValues: [
+          MissingValue(code: '99', label: 'Not applicable'),
+          MissingValue(code: '0', label: 'No answer'),
+        ],
       ),
       QuestionItem(
         qid: 'q2',
@@ -448,10 +458,8 @@ void main() {
           ),
         ),
       );
-      // Do NOT use pumpAndSettle() — SegmentedButton selection animations run
-      // indefinitely in a large 1200×900 viewport with many rows.  Two pumps
-      // are enough: the first flushes the async listQuestions future; the
-      // second advances the clock past the SegmentedButton animation (200ms).
+      // Two pumps: the first flushes the async listQuestions future; the
+      // second advances the clock past any pending animations.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -462,7 +470,21 @@ void main() {
         reason: 'REQ-C-05: question text must be visible in the browser',
       );
 
-      await _captureScreenshot(tester, qbKey, 'question_browser.png');
+      // W4.2: kind badge must be visible.
+      expect(
+        find.text('Single'),
+        findsWidgets,
+        reason: 'W4.2: kind badge must appear in the data area',
+      );
+
+      // W4.3: missing-value chip must be visible (q1 has missingValues).
+      expect(
+        find.textContaining('Not answered'),
+        findsWidgets,
+        reason: 'W4.3: missing-value chip must appear in data_area.png',
+      );
+
+      await _captureScreenshot(tester, qbKey, 'data_area.png');
 
       // Unmount the QB widget tree fully before mounting the RB tree.
       // ProviderScope does not allow changing the number of overrides between
@@ -507,6 +529,69 @@ void main() {
       );
 
       await _captureScreenshot(tester, rbKey, 'report_builder.png');
+    },
+  );
+
+  // ── NewReportDialog screenshot (W4) ─────────────────────────────────────────
+  //
+  // Produces new_report_dialog.png — the image-only dialog with no render-mode
+  // selector. Demonstrates W4.1 (native/image choice removed). (D-06)
+  testWidgets(
+    'Screenshot: NewReportDialog (W4 — image-only, no render-mode selector)',
+    (tester) async {
+      // Desktop viewport — 800×600 logical pixels (dialog fits well).
+      tester.view.physicalSize = const Size(800, 600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final dialogKey = GlobalKey();
+
+      // Render the dialog as an overlay inside a minimal MaterialApp scaffold.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RepaintBoundary(
+              key: dialogKey,
+              child: Center(
+                child: SizedBox(
+                  width: 400,
+                  child: Material(
+                    // Provide a Navigator so pop() works inside the dialog.
+                    child: Navigator(
+                      onGenerateRoute: (_) => MaterialPageRoute(
+                        builder: (_) => const Scaffold(
+                          body: Center(
+                            child: NewReportDialog(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Enter a name so the Create button is enabled (more realistic screenshot).
+      await tester.enterText(find.byType(TextField), 'Q4 Insights');
+      await tester.pump();
+
+      // W4.1: no render-mode selector (no SegmentedButton).
+      expect(
+        find.byType(SegmentedButton<String>),
+        findsNothing,
+        reason: 'W4.1: new_report_dialog must have no render-mode selector',
+      );
+
+      // Create button must be visible and enabled.
+      expect(find.text('Create'), findsOneWidget);
+
+      await _captureScreenshot(tester, dialogKey, 'new_report_dialog.png');
     },
   );
 

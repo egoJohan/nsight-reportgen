@@ -89,10 +89,12 @@ Widget _harness(
 void main() {
   group('ReportsList — add report (REQ-U-06, REQ-C-07)', () {
     testWidgets(
-        'tapping Add opens dialog; entering name + native mode calls '
-        'createReport and shows the new row', (tester) async {
+        'tapping Add opens dialog (image-only, W4); entering name calls '
+        'createReport with renderMode==image and shows the new row',
+        (tester) async {
       // REQ-U-06 — the user can create a report from the Reports tab.
       // REQ-C-07 — createReport is called on the API.
+      // W4 / D-06 — dialog has no render-mode selector; always uses 'image'.
       final fake = _FakeNsightApi();
       await tester.pumpWidget(_harness(fake));
       await tester.pumpAndSettle();
@@ -106,9 +108,11 @@ void main() {
 
       expect(find.text('New report'), findsOneWidget);
 
-      // Verify both render-mode segments are shown.
-      expect(find.text('native'), findsOneWidget);
-      expect(find.text('image'), findsOneWidget);
+      // No render-mode selector should be present (W4 / D-06).
+      expect(find.text('native'), findsNothing,
+          reason: 'W4: native render-mode selector must be removed');
+      expect(find.byType(SegmentedButton<String>), findsNothing,
+          reason: 'W4: no SegmentedButton in the new-report dialog');
 
       // Enter a name; Create is disabled while the field is empty (pre-existing
       // behaviour verified by the dialog's own state — we test it implicitly
@@ -116,18 +120,22 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Q4 Insights');
       await tester.pump();
 
-      // Tap Create (native is already the default selection).
+      // Tap Create.
       await tester.tap(find.widgetWithText(TextButton, 'Create'));
       await tester.pumpAndSettle();
 
       // Dialog dismissed.
       expect(find.text('New report'), findsNothing);
 
-      // API was called with the correct arguments. (REQ-C-07)
+      // API was called with renderMode == 'image'. (REQ-C-07, W4)
       expect(fake.createCalls, hasLength(1));
       expect(fake.createCalls.first.caseId, 'c1');
       expect(fake.createCalls.first.def.name, 'Q4 Insights');
-      expect(fake.createCalls.first.def.renderMode, 'native');
+      expect(
+        fake.createCalls.first.def.renderMode,
+        'image',
+        reason: 'W4 / D-06: new reports must always use renderMode == image',
+      );
 
       // The new row appears in the list. (REQ-U-06)
       expect(find.text('Q4 Insights'), findsOneWidget);

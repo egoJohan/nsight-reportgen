@@ -1,5 +1,9 @@
-// Widget tests for DataArea / QuestionBrowser — Task 8.5.
-// REQ-U-05 / REQ-C-05 / REQ-C-06 / REQ-C-26.
+// Widget tests for DataArea / QuestionBrowser — W4 update.
+// REQ-U-05 / REQ-C-05 / REQ-C-26 / D-06.
+//
+// The single/multi SegmentedButton toggle has been removed (D-06 / W4.2):
+// replaced by a read-only auto-detected kind badge ("Single" / "Multi · N opts").
+// W4.3: missing-value mappings appear as "Special values → Not answered: …".
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -14,17 +18,14 @@ import 'package:nsight_ui/features/data/providers/material_provider.dart';
 import 'package:nsight_ui/features/data/question_browser.dart';
 
 // ---------------------------------------------------------------------------
-// Fake API (REQ-C-05 / REQ-C-06)
+// Fake API (REQ-C-05)
 // ---------------------------------------------------------------------------
 
 class _FakeNsightApi extends NsightApi {
   _FakeNsightApi() : super(dio: Dio(), baseUrl: 'http://fake');
 
-  /// Captured arguments from [setGrouping] calls. (REQ-C-06)
-  final List<List<String>> capturedVariables = [];
-  final List<String> capturedKinds = [];
-
-  /// REQ-C-05 — fixed two-item list used across all question-browser tests.
+  /// REQ-C-05 — two questions: one single (no missing values), one multi
+  /// (with missing values) to exercise W4.2 + W4.3.
   @override
   Future<List<QuestionItem>> listQuestions(String materialId) async => [
         const QuestionItem(
@@ -38,25 +39,11 @@ class _FakeNsightApi extends NsightApi {
           kind: 'multi',
           variables: ['m1', 'm2'],
           text: 'Channels',
+          missingValues: [
+            MissingValue(code: '99', label: 'En tiedä'),
+          ],
         ),
       ];
-
-  /// REQ-C-06 — capture the call and return an updated item.
-  @override
-  Future<QuestionItem> setGrouping(
-    String materialId,
-    List<String> variables,
-    String kind,
-  ) async {
-    capturedVariables.add(variables);
-    capturedKinds.add(kind);
-    return QuestionItem(
-      qid: variables.first,
-      kind: kind,
-      variables: variables,
-      text: '',
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,48 +110,71 @@ void main() {
       expect(find.text('Channels'), findsOneWidget);
     });
 
-    testWidgets('each row contains a single/multi SegmentedButton',
-        (tester) async {
-      // REQ-C-05 — each question row has a kind toggle.
+    testWidgets(
+        'each row shows a read-only kind badge; no SegmentedButton present '
+        '(D-06 / W4.2)', (tester) async {
+      // D-06 — the broken single/multi toggle must be gone; kind badge shown.
       final fake = _FakeNsightApi();
       await tester.pumpWidget(_harness(fake, materialId: 'mat-1'));
       await tester.pumpAndSettle();
 
-      // Two rows → two SegmentedButtons.
-      expect(find.byType(SegmentedButton<String>), findsNWidgets(2));
+      // No SegmentedButton present (the old toggle is removed).
+      expect(find.byType(SegmentedButton<String>), findsNothing);
 
-      // Both 'single' and 'multi' segment labels appear (one per button each).
-      expect(find.text('single'), findsNWidgets(2));
-      expect(find.text('multi'), findsNWidgets(2));
+      // "Single" badge appears for q1.
+      expect(find.text('Single'), findsOneWidget);
+
+      // "Multi · 2 opts" badge appears for the multi question.
+      expect(find.text('Multi · 2 opts'), findsOneWidget);
+    });
+
+    testWidgets('multi badge text includes variable count (W4.2)',
+        (tester) async {
+      final fake = _FakeNsightApi();
+      await tester.pumpWidget(_harness(fake, materialId: 'mat-1'));
+      await tester.pumpAndSettle();
+
+      // The multi question has 2 variables → badge shows "Multi · 2 opts".
+      expect(find.text('Multi · 2 opts'), findsOneWidget);
     });
 
     testWidgets(
-        'toggling a row SegmentedButton calls setGrouping with correct args',
+        'missing-value chip appears for questions with missingValues (W4.3)',
         (tester) async {
-      // REQ-C-06 — tapping the opposite kind segment calls the API.
+      // W4.3 — "Special values → Not answered: …" line must be visible.
       final fake = _FakeNsightApi();
       await tester.pumpWidget(_harness(fake, materialId: 'mat-1'));
       await tester.pumpAndSettle();
 
-      // Default sort is textAZ: Channels first, then Satisfaction.
-      // Tap the 'multi' segment in the Satisfaction row (currently 'single').
-      final satisfactionTile = find.ancestor(
-        of: find.text('Satisfaction'),
-        matching: find.byType(ListTile),
+      // The multi question has missingValues: [{code:'99', label:'En tiedä'}].
+      expect(
+        find.textContaining('Special values'),
+        findsOneWidget,
+        reason: 'W4.3: missing-value info must be visible for the multi row',
       );
-      expect(satisfactionTile, findsOneWidget);
+      expect(
+        find.textContaining('99 = En tiedä'),
+        findsOneWidget,
+        reason: 'W4.3: code and label must appear in the missing-value line',
+      );
 
-      final multiInSatisfaction = find.descendant(
-        of: satisfactionTile,
-        matching: find.text('multi'),
-      );
-      await tester.tap(multiInSatisfaction);
+      // The single question (no missing values) has no such line.
+      expect(find.textContaining('Not answered'), findsOneWidget,
+          reason: 'only one question has missing values');
+    });
+
+    testWidgets('auto-detected kind explainer is visible (W4.2)',
+        (tester) async {
+      // W4.2 — one-line explainer at the top of the Data area.
+      final fake = _FakeNsightApi();
+      await tester.pumpWidget(_harness(fake, materialId: 'mat-1'));
       await tester.pumpAndSettle();
 
-      // REQ-C-06 — setGrouping called with q1's variables and new kind.
-      expect(fake.capturedVariables, isNotEmpty);
-      expect(fake.capturedVariables.last, ['q1']);
-      expect(fake.capturedKinds.last, 'multi');
+      expect(
+        find.textContaining('auto-detected as Single'),
+        findsOneWidget,
+        reason: 'W4.2: explainer text must appear above the question list',
+      );
     });
 
     testWidgets('sort dropdown is visible when material is active',

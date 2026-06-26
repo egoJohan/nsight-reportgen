@@ -1,8 +1,10 @@
 // Full-app smoke test — drives the core flow through the real widget tree
 // using [FakeNsightApi] as the backend. REQ-U-01.
 //
-// Covered requirements: C-03 / C-05 / C-06 / C-07 / C-10 / C-11.
+// Covered requirements: C-03 / C-05 / C-07 / C-10 / C-11.
 // C-19 (render) is covered by report_preview_test.dart.
+// Note: C-06 (manual regroup) is a future feature; the kind badge (D-06/W4)
+// replaces the non-functional toggle.
 //
 // ── Flow (one testWidgets, five steps) ───────────────────────────────────────
 //
@@ -10,11 +12,11 @@
 //            (C-03 / C-07)
 //
 //  Step 2 — Data tab: questions are present (active material pre-seeded via
-//            _SeededMaterialNotifier); toggle 'Overall satisfaction' to 'multi'
-//            → assert setGrouping called.  (C-05 / C-06)
+//            _SeededMaterialNotifier); verify kind badges and explainer text.
+//            (C-05 / D-06 / W4.2)
 //
-//  Step 3 — Reports tab: create a report (name + native) → appears in list.
-//            (C-07)
+//  Step 3 — Reports tab: create a report (name, image-only, W4) → appears in
+//            list. (C-07)
 //
 //  Step 4 — Open the report → wizard (W2): check first question in the
 //            SelectStep, tap "Add selected →" → ConfigureStep appears with
@@ -129,7 +131,7 @@ void main() {
         expect(find.text('Reports'), findsOneWidget);
 
         // ================================================================
-        // Step 2 — Data tab: toggle a question to multi (C-05 / C-06)
+        // Step 2 — Data tab: kind badges + explainer (C-05 / D-06 / W4.2)
         // ================================================================
 
         // Data tab is active by default; active material is pre-seeded.
@@ -139,23 +141,18 @@ void main() {
         expect(find.text('Net promoter score'), findsOneWidget,
             reason: 'C-05: second question must also appear');
 
-        // Toggle 'Overall satisfaction' from 'single' → 'multi' (C-06).
-        final satisfactionTile = find.ancestor(
-          of: find.text('Overall satisfaction'),
-          matching: find.byType(ListTile),
-        );
-        final multiSegment = find.descendant(
-          of: satisfactionTile,
-          matching: find.text('multi'),
-        );
-        await tester.tap(multiSegment);
-        await tester.pumpAndSettle();
+        // D-06 / W4.2: read-only kind badges are shown (no SegmentedButton).
+        expect(find.text('Single'), findsWidgets,
+            reason: 'D-06: "Single" kind badge must appear in the browser');
+        expect(find.byType(SegmentedButton<String>), findsNothing,
+            reason: 'D-06: SegmentedButton toggle must be removed');
 
-        // C-06: setGrouping was called once with kind='multi'.
-        expect(fake.setGroupingCalls, hasLength(1),
-            reason: 'C-06: setGrouping must be called on kind toggle');
-        expect(fake.setGroupingCalls.first.kind, 'multi',
-            reason: 'C-06: kind argument must be "multi"');
+        // W4.2: auto-detect explainer text is visible.
+        expect(
+          find.textContaining('auto-detected as Single'),
+          findsOneWidget,
+          reason: 'W4.2: explainer must appear above the question list',
+        );
 
         // ================================================================
         // Step 3 — Reports tab: create a report (C-07)
@@ -170,7 +167,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('New report'), findsOneWidget);
 
-        // Enter name; 'native' render mode is the default selection.
+        // Enter name; render mode is always 'image' (W4 / D-06).
         await tester.enterText(find.byType(TextField).first, 'Smoke Report');
         await tester.pump();
         await tester.tap(find.widgetWithText(TextButton, 'Create'));

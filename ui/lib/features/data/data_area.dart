@@ -44,7 +44,7 @@ class _DataAreaState extends ConsumerState<DataArea> {
       );
     }
 
-    // Material active: sort dropdown + question browser.
+    // Material active: sort dropdown + explainer + question browser.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -69,6 +69,36 @@ class _DataAreaState extends ConsumerState<DataArea> {
                 onChanged: (v) {
                   if (v != null) setState(() => _sortMode = v);
                 },
+              ),
+            ],
+          ),
+        ),
+        // W4.2 / D-06 — explainer + "i" tooltip for auto-detected kind.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Questions are auto-detected as Single (one answer) or '
+                  'Multi (a tick-box set reported together).',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Tooltip(
+                message: 'Single: one survey variable, one response per '
+                    'respondent.\n'
+                    'Multi: several yes/no tick-boxes treated as one '
+                    'question.\n'
+                    'Grouping is detected automatically from the SPSS file.',
+                child: Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),

@@ -225,12 +225,13 @@ void main() {
     });
   });
 
-  // REQ-C-13 — combo disabled when render mode is native.
-  group('ReportBuilder — combo disabled in native mode (REQ-C-13)', () {
+  // REQ-C-13 — combo always available (image-only, W4 / D-06).
+  group('ReportBuilder — combo present in image mode (REQ-C-13)', () {
     testWidgets(
-        'switching to native render mode removes the combo option from the '
-        'chart-type dropdown', (tester) async {
-      // REQ-C-13 — combo chart type must not be available in native mode.
+        'combo chart type is always present in the dropdown (image-only, W4)',
+        (tester) async {
+      // W4 / D-06 — native mode is dropped; reports are always image.
+      // combo must always be available.
       final fake = _FakeNsightApi();
       await tester.pumpWidget(_harness(fake));
       await tester.pumpAndSettle();
@@ -241,31 +242,19 @@ void main() {
       await tester.tap(find.byKey(const Key('add_checked_button')));
       await tester.pumpAndSettle();
 
-      // In image mode: 11 items (combo included). (REQ-C-13)
-      final beforeSwitch =
-          _innerDropdown(tester, const Key('chart_type_dropdown'));
-      expect(beforeSwitch.items!.length, 11,
-          reason: '11 types in image mode (combo included)');
+      // Always 11 items including combo (image mode only). (REQ-C-13)
+      final inner = _innerDropdown(tester, const Key('chart_type_dropdown'));
+      expect(inner.items!.length, 11,
+          reason: '11 chart types in image mode (combo included)');
       expect(
-        beforeSwitch.items!.any((i) => i.value == 'combo'),
+        inner.items!.any((i) => i.value == 'combo'),
         isTrue,
-        reason: 'combo is present in image mode',
+        reason: 'W4: combo must always be present (image-only)',
       );
 
-      // Switch to native mode.
-      await tester.tap(find.text('native'));
-      await tester.pumpAndSettle();
-
-      // In native mode: 10 items (combo absent). (REQ-C-13)
-      final afterSwitch =
-          _innerDropdown(tester, const Key('chart_type_dropdown'));
-      expect(afterSwitch.items!.length, 10,
-          reason: '10 types in native mode (combo removed)');
-      expect(
-        afterSwitch.items!.any((i) => i.value == 'combo'),
-        isFalse,
-        reason: 'combo must be absent when renderMode is native (REQ-C-13)',
-      );
+      // No native/image toggle in the builder (W4 / D-06).
+      expect(find.byKey(const Key('render_mode_toggle')), findsNothing,
+          reason: 'W4: render-mode toggle must be removed from the builder');
     });
   });
 }

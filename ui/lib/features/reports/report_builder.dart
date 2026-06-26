@@ -21,8 +21,8 @@ const _kNarrowBreakpoint = 700.0;
 ///   appends chart cards. (REQ-C-11 / REQ-U-11)
 /// Right panel: [ReorderableListView] of [ChartSpecEditor] cards. (REQ-C-14/15)
 ///
-/// Top bar: editable name, render-mode toggle, Save, Render (placeholder),
-/// and a back button that returns to the [ReportsList]. (REQ-U-06)
+/// Top bar: editable name, Save, Render/Build toggle, and a back button that
+/// returns to the [ReportsList]. Reports are always rendered as images (W4). (REQ-U-06)
 class ReportBuilder extends ConsumerStatefulWidget {
   const ReportBuilder({
     super.key,
@@ -138,18 +138,6 @@ class _ReportBuilderState extends ConsumerState<ReportBuilder> {
               onChanged: (v) =>
                   ref.read(builderProvider.notifier).setName(v),
             ),
-          ),
-
-          // Render-mode toggle (REQ-C-13)
-          SegmentedButton<String>(
-            key: const Key('render_mode_toggle'),
-            segments: const [
-              ButtonSegment(value: 'native', label: Text('native')),
-              ButtonSegment(value: 'image', label: Text('image')),
-            ],
-            selected: {draft.renderMode},
-            onSelectionChanged: (sel) =>
-                ref.read(builderProvider.notifier).setMode(sel.first),
           ),
 
           // Save (REQ-C-10)
