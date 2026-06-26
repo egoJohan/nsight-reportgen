@@ -13,8 +13,17 @@ from reportbuilder.api.app import create_app
 from reportbuilder.config import datahive_client_from_env
 
 
+def _select_client():
+    """Demo mode (NSIGHT_DEMO=1) uses a self-contained in-memory store so the whole
+    flow runs with no datahive/token; otherwise build a real DataHiveClient from env."""
+    if os.environ.get("NSIGHT_DEMO") == "1":
+        from reportbuilder.store.memory_client import InMemoryDataHiveClient
+        return InMemoryDataHiveClient()
+    return datahive_client_from_env()  # None -> default real client (will fail until configured)
+
+
 def build_server_app():
-    app = create_app(client=datahive_client_from_env())  # None -> default real client (will 503-ish until configured)
+    app = create_app(client=_select_client())
     origins = os.environ.get("NSIGHT_CORS_ORIGINS", "*").split(",")
     app.add_middleware(
         CORSMiddleware,
