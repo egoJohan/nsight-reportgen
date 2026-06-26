@@ -11,6 +11,9 @@ import '../providers/reports_provider.dart';
 import '../../data/providers/material_provider.dart';
 import 'step_select.dart';
 import 'step_configure.dart';
+import 'step_review.dart';
+import 'step_slides.dart';
+import 'step_download.dart';
 
 // ---------------------------------------------------------------------------
 // Wizard step labels
@@ -175,6 +178,7 @@ class _ReportWizardState extends ConsumerState<ReportWizard> {
   // ── Step body ─────────────────────────────────────────────────────────────
 
   Widget _buildStepBody(BuildContext context, ReportDraft draft) {
+    final materialId = ref.watch(activeMaterialProvider);
     switch (_step) {
       case 0:
         return SelectStep(
@@ -182,11 +186,26 @@ class _ReportWizardState extends ConsumerState<ReportWizard> {
           onQuestionsAdded: () => setState(() => _step = 1),
         );
       case 1:
-        final materialId = ref.watch(activeMaterialProvider);
         return ConfigureStep(
           key: const Key('configure_step'),
           materialId: materialId,
           caseId: widget.caseId,
+        );
+      case 2:
+        return ReviewStep(
+          key: const Key('review_step'),
+          materialId: materialId,
+        );
+      case 3:
+        return SlidesStep(
+          key: const Key('slides_step'),
+          materialId: materialId,
+        );
+      case 4:
+        return DownloadStep(
+          key: const Key('download_step'),
+          caseId: widget.caseId,
+          reportId: widget.reportId,
         );
       default:
         return const _PlaceholderStep();
@@ -229,8 +248,12 @@ class _ReportWizardState extends ConsumerState<ReportWizard> {
             )
           else
             FilledButton(
-              onPressed: () => _save(context),
-              child: const Text('Finish'),
+              key: const Key('wizard_done_button'),
+              onPressed: () {
+                ref.read(builderProvider.notifier).reset();
+                ref.read(selectedReportProvider.notifier).select(null);
+              },
+              child: const Text('Done'),
             ),
         ],
       ),

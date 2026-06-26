@@ -142,3 +142,16 @@ def get_preview_pdf(case_id: str, report_id: str) -> FileResponse:
     if not pdf.exists():
         raise HTTPException(status_code=404, detail="not rendered yet")
     return FileResponse(str(pdf), media_type="application/pdf", filename="preview.pdf")
+
+
+_PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+
+@render_router.get("/cases/{case_id}/reports/{report_id}/preview.pptx")
+def get_preview_pptx(case_id: str, report_id: str) -> FileResponse:
+    """Stream the rendered PowerPoint deck for a report to the client browser.
+    Returns 404 when the report has not been rendered yet."""
+    pptx = render_output_dir(case_id, report_id) / "deck.pptx"
+    if not pptx.exists():
+        raise HTTPException(status_code=404, detail="not rendered yet")
+    return FileResponse(str(pptx), media_type=_PPTX_MEDIA_TYPE, filename="preview.pptx")

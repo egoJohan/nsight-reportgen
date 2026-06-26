@@ -112,3 +112,47 @@ def test_render_response_includes_pdf_url() -> None:
     call_kwargs = mock_orch.call_args[1]
     assert "out_dir" in call_kwargs
     assert call_kwargs["out_dir"].endswith("/c2/r2")
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — GET /cases/.../preview.pptx returns PPTX bytes
+# ---------------------------------------------------------------------------
+
+
+def test_get_preview_pptx_returns_file() -> None:
+    """GET preview.pptx for a rendered report streams bytes with the correct PPTX content-type."""
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    http = TestClient(app)
+
+    # Write a dummy PPTX into the deterministic dir
+    pptx_path = render_output_dir("c3", "r3") / "deck.pptx"
+    pptx_path.write_bytes(b"PK\x03\x04dummy-pptx")
+
+    try:
+        resp = http.get("/cases/c3/reports/r3/preview.pptx")
+    finally:
+        pptx_path.unlink(missing_ok=True)
+
+    assert resp.status_code == 200
+    assert (
+        "openxmlformats-officedocument.presentationml.presentation"
+        in resp.headers["content-type"]
+    )
+    assert resp.content == b"PK\x03\x04dummy-pptx"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — GET preview.pptx for an unrendered report → 404
+# ---------------------------------------------------------------------------
+
+
+def test_get_preview_pptx_404_when_not_rendered() -> None:
+    """GET preview.pptx for an unrendered report returns 404."""
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    http = TestClient(app)
+
+    resp = http.get("/cases/never-pptx-xxxx/reports/never-pptx-yyyy/preview.pptx")
+
+    assert resp.status_code == 404

@@ -27,6 +27,9 @@ import 'package:nsight_ui/features/reports/providers/reports_provider.dart';
 import 'package:nsight_ui/features/reports/report_builder.dart';
 import 'package:nsight_ui/features/reports/wizard/report_wizard.dart';
 import 'package:nsight_ui/features/reports/wizard/step_configure.dart';
+import 'package:nsight_ui/features/reports/wizard/step_review.dart';
+import 'package:nsight_ui/features/reports/wizard/step_slides.dart';
+import 'package:nsight_ui/features/reports/wizard/step_download.dart';
 
 import '../support/fake_nsight_api.dart';
 
@@ -246,6 +249,123 @@ class _WizardOnConfigureStep extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thin wrapper: renders ReviewStep inside a minimal wizard-style frame. (W3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _WizardOnReviewStep extends ConsumerWidget {
+  const _WizardOnReviewStep({required this.caseId, required this.reportId});
+  final String caseId;
+  final String reportId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final materialId = ref.watch(activeMaterialProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            children: [
+              const Icon(Icons.preview, size: 18),
+              const SizedBox(width: 8),
+              Text('Review — Chart Thumbnails',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text('Step 3 of 5',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.6))),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ReviewStep(
+            key: const Key('review_step'),
+            materialId: materialId,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thin wrapper: renders SlidesStep inside a minimal wizard-style frame. (W3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _WizardOnSlidesStep extends ConsumerWidget {
+  const _WizardOnSlidesStep({required this.caseId, required this.reportId});
+  final String caseId;
+  final String reportId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final materialId = ref.watch(activeMaterialProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            children: [
+              const Icon(Icons.slideshow, size: 18),
+              const SizedBox(width: 8),
+              Text('Slides — Edit Titles',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text('Step 4 of 5',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.6))),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: SlidesStep(
+            key: const Key('slides_step'),
+            materialId: materialId,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thin wrapper: renders DownloadStep inside a minimal wizard-style frame. (W3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _WizardOnDownloadStep extends StatelessWidget {
+  const _WizardOnDownloadStep({required this.caseId, required this.reportId});
+  final String caseId;
+  final String reportId;
+
+  @override
+  Widget build(BuildContext context) {
+    return DownloadStep(
+      key: const Key('download_step'),
+      caseId: caseId,
+      reportId: reportId,
     );
   }
 }
@@ -499,6 +619,141 @@ void main() {
       );
 
       await _captureScreenshot(tester, configKey, 'wizard_configure.png');
+    },
+  );
+
+  // ── Wizard W3 screenshots ────────────────────────────────────────────────────
+  //
+  // Produces wizard_review.png (Step 3 — Review), wizard_slides.png
+  // (Step 4 — Slides), and wizard_download.png (Step 5 — Download).
+  // All at 1300×900 logical pixels.
+  //
+  // Each screenshot uses _WizardSeededBuilderNotifier (3 pre-loaded chart
+  // cards) and _ScreenshotFakeApi via a thin wrapper widget that places the
+  // relevant step directly inside a minimal wizard-style frame — same pattern
+  // as wizard_configure.png.
+  testWidgets(
+    'Screenshots: Wizard Review/Slides/Download (W3)',
+    (tester) async {
+      // Desktop viewport — 1300×900 logical pixels.
+      tester.view.physicalSize = const Size(1300, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // ── wizard_review.png ─────────────────────────────────────────────────
+
+      final reviewKey = GlobalKey();
+      final reviewFake = _ScreenshotFakeApi();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nsightApiProvider.overrideWithValue(reviewFake),
+            activeMaterialProvider.overrideWith(_SeededMaterialNotifier.new),
+            builderProvider.overrideWith(_WizardSeededBuilderNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(
+                key: reviewKey,
+                child: const _WizardOnReviewStep(
+                  caseId: 'c1',
+                  reportId: 'r1',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(
+        find.byKey(const Key('review_grid')),
+        findsOneWidget,
+        reason: 'W3: ReviewStep grid must be visible for wizard_review.png',
+      );
+
+      await _captureScreenshot(tester, reviewKey, 'wizard_review.png');
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // ── wizard_slides.png ─────────────────────────────────────────────────
+
+      final slidesKey = GlobalKey();
+      final slidesFake = _ScreenshotFakeApi();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nsightApiProvider.overrideWithValue(slidesFake),
+            activeMaterialProvider.overrideWith(_SeededMaterialNotifier.new),
+            builderProvider.overrideWith(_WizardSeededBuilderNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(
+                key: slidesKey,
+                child: const _WizardOnSlidesStep(
+                  caseId: 'c1',
+                  reportId: 'r1',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(
+        find.byKey(const Key('slides_list')),
+        findsOneWidget,
+        reason: 'W3: SlidesStep list must be visible for wizard_slides.png',
+      );
+
+      await _captureScreenshot(tester, slidesKey, 'wizard_slides.png');
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // ── wizard_download.png ───────────────────────────────────────────────
+
+      final downloadKey = GlobalKey();
+      final downloadFake = _ScreenshotFakeApi();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nsightApiProvider.overrideWithValue(downloadFake),
+            activeMaterialProvider.overrideWith(_SeededMaterialNotifier.new),
+            builderProvider.overrideWith(_WizardSeededBuilderNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(
+                key: downloadKey,
+                child: const _WizardOnDownloadStep(
+                  caseId: 'c1',
+                  reportId: 'r1',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.byKey(const Key('generate_button')),
+        findsOneWidget,
+        reason:
+            'W3: Generate button must be visible for wizard_download.png',
+      );
+
+      await _captureScreenshot(tester, downloadKey, 'wizard_download.png');
     },
   );
 }

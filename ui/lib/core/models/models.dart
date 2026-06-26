@@ -96,7 +96,7 @@ const _kDefaultNumberFormatJson = <String, dynamic>{
 };
 
 const _kDefaultSortJson = <String, dynamic>{
-  'basis': 'data_order',
+  'basis': 'pct',  // REQ-S-03: default sort by percentage magnitude descending
   'topbox_codes': <dynamic>[],
   'descending': true,
 };
@@ -126,6 +126,8 @@ class ChartSpecDef {
     this.templateSlot,
     this.elements,
     this.scatterXy,
+    this.slideTitle,
+    this.slideDescription,
   });
 
   final String questionRef;
@@ -138,6 +140,10 @@ class ChartSpecDef {
   final Map<String, dynamic>? elements;
   /// Two-element [xVar, yVar] for scatter charts; null for all others.
   final List<String>? scatterXy;
+  /// Custom slide title (REQ-C-24a, D-04). When null the question text is used.
+  final String? slideTitle;
+  /// Optional subtitle shown under the slide title (REQ-C-24a, D-04).
+  final String? slideDescription;
 
   factory ChartSpecDef.fromJson(Map<String, dynamic> json) => ChartSpecDef(
         questionRef: json['question_ref'] as String,
@@ -150,6 +156,8 @@ class ChartSpecDef {
         elements: json['elements'] as Map<String, dynamic>?,
         scatterXy:
             (json['scatter_xy'] as List<dynamic>?)?.cast<String>(),
+        slideTitle: json['slide_title'] as String?,
+        slideDescription: json['slide_description'] as String?,
       );
 
   /// Produces the exact snake_case keys the backend's report_from_json expects.
@@ -176,6 +184,9 @@ class ChartSpecDef {
     if (templateSlot != null) m['template_slot'] = templateSlot;
     // Always emit scatter_xy — null for non-scatter charts.
     m['scatter_xy'] = scatterXy;
+    // Emit slide_title/description only when set (optional; null omitted).
+    if (slideTitle != null) m['slide_title'] = slideTitle;
+    if (slideDescription != null) m['slide_description'] = slideDescription;
     return m;
   }
 
@@ -190,6 +201,8 @@ class ChartSpecDef {
     Object? templateSlot = _sentinel,
     Object? elements = _sentinel,
     Object? scatterXy = _sentinel,
+    Object? slideTitle = _sentinel,
+    Object? slideDescription = _sentinel,
   }) =>
       ChartSpecDef(
         questionRef: questionRef ?? this.questionRef,
@@ -212,6 +225,12 @@ class ChartSpecDef {
         scatterXy: scatterXy == _sentinel
             ? this.scatterXy
             : scatterXy as List<String>?,
+        slideTitle: slideTitle == _sentinel
+            ? this.slideTitle
+            : slideTitle as String?,
+        slideDescription: slideDescription == _sentinel
+            ? this.slideDescription
+            : slideDescription as String?,
       );
 }
 

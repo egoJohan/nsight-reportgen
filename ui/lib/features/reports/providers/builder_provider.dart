@@ -46,7 +46,7 @@ const _kDefaultNumberFormat = <String, dynamic>{
 };
 
 const _kDefaultSort = <String, dynamic>{
-  'basis': 'data_order',
+  'basis': 'pct',  // REQ-S-03: default sort by percentage magnitude descending
   'topbox_codes': <dynamic>[],
   'descending': true,
 };

@@ -1,7 +1,7 @@
-// Widget tests for the report wizard — W2.
-// REQ-U-01 / REQ-U-11 / REQ-C-10..15 / REQ-C-26.
+// Widget tests for the report wizard — W2 + W3.
+// REQ-U-01 / REQ-U-11 / REQ-C-10..15 / REQ-C-26 / REQ-S-03 / REQ-U-06.
 //
-// Tests:
+// W2 tests:
 // WT-1  Select step lists questions with kind badges; "Add selected →" adds a
 //       card whose chart_type equals the question's suggestedChartType and
 //       advances to ConfigureStep. (REQ-C-11 / REQ-U-11)
@@ -11,6 +11,14 @@
 //       debounce; the fake API records it. (REQ-C-26)
 // WT-4  Wizard navigation: Next / Back buttons move between steps. (REQ-U-01)
 // WT-5  Save calls saveReport with the correct draft. (REQ-C-10)
+//
+// W3 tests:
+// WT-6  Default sort basis is "pct" for newly added charts. (REQ-S-03)
+// WT-7  slideTitle / slideDescription round-trip in ChartSpecDef JSON. (REQ-C-24a)
+// WT-8  ReviewStep shows thumbnails for every chart in the draft. (REQ-U-06)
+// WT-9  SlidesStep editing a slide title writes it to the chart spec. (REQ-U-06)
+// WT-10 DownloadStep Generate calls render then getPreviewPdf; Download buttons
+//       become enabled afterwards. (REQ-C-19 / REQ-C-21)
 
 import 'dart:typed_data';
 
@@ -23,6 +31,7 @@ import 'package:nsight_ui/core/models/models.dart';
 import 'package:nsight_ui/core/providers/api_provider.dart';
 import 'package:nsight_ui/core/services/nsight_api.dart';
 import 'package:nsight_ui/features/data/providers/material_provider.dart';
+import 'package:nsight_ui/features/reports/providers/builder_provider.dart';
 import 'package:nsight_ui/features/reports/wizard/report_wizard.dart';
 
 // ---------------------------------------------------------------------------
@@ -91,6 +100,45 @@ class _WizardFakeApi extends NsightApi {
     ReportDef def,
   ) async {
     saveCalls.add((caseId: caseId, reportId: reportId, def: def));
+  }
+
+  /// Calls recorded by [render]. (REQ-C-19)
+  final List<({String caseId, String reportId, String materialId})>
+      renderCalls = [];
+
+  @override
+  Future<Map<String, dynamic>> render(
+    String caseId,
+    String reportId,
+    String materialId, {
+    String view = 'slides',
+  }) async {
+    renderCalls.add(
+        (caseId: caseId, reportId: reportId, materialId: materialId));
+    return {
+      'pptx': 'deck.pptx',
+      'pdf': 'deck.pdf',
+      'preview': <dynamic>[],
+      'pdf_url': '/cases/$caseId/reports/$reportId/preview.pdf',
+    };
+  }
+
+  /// True once [getPreviewPdf] has been called. (REQ-C-21)
+  bool getPreviewPdfCalled = false;
+
+  @override
+  Future<List<int>> getPreviewPdf(String caseId, String reportId) async {
+    getPreviewPdfCalled = true;
+    return [37, 80, 68, 70]; // %PDF magic bytes
+  }
+
+  /// True once [getPreviewPptx] has been called.
+  bool getPreviewPptxCalled = false;
+
+  @override
+  Future<Uint8List> getPreviewPptx(String caseId, String reportId) async {
+    getPreviewPptxCalled = true;
+    return Uint8List.fromList([0x50, 0x4B]); // PK zip magic (pptx header)
   }
 }
 
@@ -419,4 +467,318 @@ void main() {
       },
     );
   });
+
+  // ── W3 tests ────────────────────────────────────────────────────────────────
+
+  // WT-6 — Default sort basis is "pct" (REQ-S-03)
+  group('W3/WT-6: Default sort basis (REQ-S-03)', () {
+    testWidgets(
+      'A newly added chart card has sort.basis == "pct" (REQ-S-03)',
+      (tester) async {
+        final fake = _WizardFakeApi();
+        await tester.pumpWidget(_harness(fake));
+        await tester.pumpAndSettle();
+
+        // Add q1 from SelectStep.
+        await tester.tap(find.byType(CheckboxListTile).first);
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('add_selected_button')));
+        await tester.pumpAndSettle();
+
+        // Save so we can inspect the saved def.
+        await tester.tap(find.byKey(const Key('wizard_save_button')));
+        await tester.pumpAndSettle();
+
+        expect(fake.saveCalls, hasLength(1));
+        final chart = fake.saveCalls.first.def.charts.first;
+        final sortJson = chart.sort;
+        expect(
+          sortJson,
+          isNotNull,
+          reason: 'sort field must be emitted',
+        );
+        expect(
+          sortJson!['basis'],
+          'pct',
+          reason:
+              'REQ-S-03: default sort must be pct (percentage magnitude)',
+        );
+      },
+    );
+  });
+
+  // WT-7 — slideTitle / slideDescription round-trip in ChartSpecDef (REQ-C-24a)
+  group('W3/WT-7: slideTitle/slideDescription round-trip (REQ-C-24a)', () {
+    test('toJson includes slide_title and slide_description when set', () {
+      const spec = ChartSpecDef(
+        questionRef: 'q1',
+        chartType: 'vertical_bar',
+        slideTitle: 'My custom title',
+        slideDescription: 'A brief description',
+      );
+      final json = spec.toJson();
+      expect(json['slide_title'], 'My custom title');
+      expect(json['slide_description'], 'A brief description');
+    });
+
+    test('toJson omits slide_title/description when null', () {
+      const spec =
+          ChartSpecDef(questionRef: 'q1', chartType: 'vertical_bar');
+      final json = spec.toJson();
+      expect(json.containsKey('slide_title'), isFalse);
+      expect(json.containsKey('slide_description'), isFalse);
+    });
+
+    test('fromJson round-trips slide_title and slide_description', () {
+      final json = {
+        'question_ref': 'q1',
+        'chart_type': 'vertical_bar',
+        'statistic': 'pct',
+        'classifying_var': null,
+        'number_format': {
+          'pct_decimals': 0,
+          'mean_decimals': 1,
+          'count_round_up': false,
+          'show_pct_sign': true,
+        },
+        'sort': {'basis': 'pct', 'topbox_codes': [], 'descending': true},
+        'template_slot': 's1',
+        'elements': {
+          'title': true,
+          'legend': true,
+          'n': true,
+          'axis_names': true,
+          'filter_var': true,
+          'data_labels': true,
+        },
+        'scatter_xy': null,
+        'slide_title': 'Round-trip title',
+        'slide_description': 'Round-trip desc',
+      };
+      final spec = ChartSpecDef.fromJson(json);
+      expect(spec.slideTitle, 'Round-trip title');
+      expect(spec.slideDescription, 'Round-trip desc');
+    });
+
+    test('copyWith preserves slideTitle/slideDescription', () {
+      const original = ChartSpecDef(
+        questionRef: 'q1',
+        chartType: 'vertical_bar',
+        slideTitle: 'Original',
+        slideDescription: 'Orig desc',
+      );
+      final updated = original.copyWith(slideTitle: 'Updated');
+      expect(updated.slideTitle, 'Updated');
+      expect(updated.slideDescription, 'Orig desc'); // unchanged
+    });
+  });
+
+  // WT-8 — ReviewStep shows thumbnails (REQ-U-06)
+  group('W3/WT-8: ReviewStep shows thumbnails (REQ-U-06)', () {
+    testWidgets(
+      'ReviewStep renders one thumbnail card per chart in the draft',
+      (tester) async {
+        // Use a fake that returns a 2-chart report from getReport so the
+        // wizard's initState.load() pre-populates the draft.
+        final fake = _W3FakeApi();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              nsightApiProvider.overrideWithValue(fake),
+              activeMaterialProvider
+                  .overrideWith(_SeededMaterialNotifier.new),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ReportWizard(caseId: 'c1', reportId: 'r1'),
+              ),
+            ),
+          ),
+        );
+        // Wait for load() to resolve.
+        await tester.pump();
+        await tester.pump();
+
+        // Navigate to Review step (step index 2 = Next × 2).
+        await tester.tap(find.byKey(const Key('wizard_nav_next')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('wizard_nav_next')));
+        await tester.pumpAndSettle();
+
+        // ReviewStep is visible.
+        expect(find.byKey(const Key('review_step')), findsOneWidget,
+            reason: 'W3: ReviewStep must render on step 2');
+
+        // One card per chart (2 charts).
+        expect(find.byKey(const Key('review_card_0')), findsOneWidget);
+        expect(find.byKey(const Key('review_card_1')), findsOneWidget);
+      },
+    );
+  });
+
+  // WT-9 — SlidesStep edits a slide title (REQ-U-06)
+  group('W3/WT-9: SlidesStep slide-title editing (REQ-U-06)', () {
+    testWidgets(
+      'Editing a slide title field writes slide_title to the chart spec',
+      (tester) async {
+        final fake = _W3FakeApi();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              nsightApiProvider.overrideWithValue(fake),
+              activeMaterialProvider
+                  .overrideWith(_SeededMaterialNotifier.new),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ReportWizard(caseId: 'c1', reportId: 'r1'),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        // Navigate to Slides step (step index 3 = Next × 3).
+        for (var i = 0; i < 3; i++) {
+          await tester.tap(find.byKey(const Key('wizard_nav_next')));
+          await tester.pumpAndSettle();
+        }
+
+        // SlidesStep is visible.
+        expect(find.byKey(const Key('slides_step')), findsOneWidget,
+            reason: 'W3: SlidesStep must render on step 3');
+
+        // Slide title field for card 0.
+        final titleField = find.byKey(const Key('slide_title_field_0'));
+        expect(titleField, findsOneWidget);
+
+        // Type a custom title.
+        await tester.enterText(titleField, 'My custom slide title');
+        await tester.pump();
+
+        // Check the builder state: builderProvider must have slide_title set.
+        final container = tester.element(find.byType(ReportWizard));
+        final ref = ProviderScope.containerOf(container);
+        final draft = ref.read(builderProvider);
+        expect(draft?.charts.first.slideTitle, 'My custom slide title',
+            reason:
+                'REQ-U-06: editing slide title must update ChartSpecDef.slideTitle');
+      },
+    );
+  });
+
+  // WT-10 — DownloadStep Generate calls render + download buttons appear (REQ-C-19)
+  group('W3/WT-10: DownloadStep generate + download buttons (REQ-C-19)', () {
+    testWidgets(
+      'Generate button calls render+getPreviewPdf; download buttons appear',
+      (tester) async {
+        final fake = _W3FakeApi();
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              nsightApiProvider.overrideWithValue(fake),
+              activeMaterialProvider
+                  .overrideWith(_SeededMaterialNotifier.new),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ReportWizard(caseId: 'c1', reportId: 'r1'),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        // Navigate to Download step (step index 4 = Next × 4).
+        for (var i = 0; i < 4; i++) {
+          await tester.tap(find.byKey(const Key('wizard_nav_next')));
+          await tester.pumpAndSettle();
+        }
+
+        // DownloadStep is visible.
+        expect(find.byKey(const Key('download_step')), findsOneWidget,
+            reason: 'W3: DownloadStep must render on step 4');
+
+        // Generate button is present and enabled.
+        final genBtn = find.byKey(const Key('generate_button'));
+        expect(genBtn, findsOneWidget);
+        expect(
+          tester.widget<FilledButton>(genBtn).onPressed,
+          isNotNull,
+          reason: 'Generate button must be enabled',
+        );
+
+        // Tap Generate.
+        await tester.tap(genBtn);
+        await tester.pumpAndSettle();
+
+        // render was called.
+        expect(
+          fake.renderCalls,
+          hasLength(1),
+          reason: 'REQ-C-19: Generate must call render',
+        );
+        expect(fake.renderCalls.first.caseId, 'c1');
+
+        // getPreviewPdf was called.
+        expect(
+          fake.getPreviewPdfCalled,
+          isTrue,
+          reason: 'REQ-C-21: Generate must fetch the PDF bytes',
+        );
+
+        // Download buttons now visible.
+        expect(
+          find.byKey(const Key('download_pdf_button')),
+          findsOneWidget,
+          reason: 'Download PDF button must appear after Generate',
+        );
+        expect(
+          find.byKey(const Key('download_pptx_button')),
+          findsOneWidget,
+          reason: 'Download PowerPoint button must appear after Generate',
+        );
+
+        // PDF view is shown (stub version).
+        expect(
+          find.byKey(const Key('download_pdf_view')),
+          findsOneWidget,
+          reason: 'PdfView must be shown after Generate',
+        );
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// W3-specific fake API: returns a 2-chart report from getReport so the
+// wizard's initState.load() pre-populates the draft. Also adds render and
+// getPreviewPdf/Pptx overrides.
+// ---------------------------------------------------------------------------
+
+class _W3FakeApi extends _WizardFakeApi {
+  @override
+  Future<ReportDef> getReport(String caseId, String reportId) async =>
+      const ReportDef(
+        name: 'W3 Test Report',
+        renderMode: 'image',
+        templateRef: 'default',
+        charts: [
+          ChartSpecDef(
+            questionRef: 'q1',
+            chartType: 'horizontal_bar',
+            statistic: 'pct',
+          ),
+          ChartSpecDef(
+            questionRef: 'q3',
+            chartType: 'vertical_bar',
+            statistic: 'pct',
+          ),
+        ],
+      );
 }

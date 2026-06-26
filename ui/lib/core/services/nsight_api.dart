@@ -269,6 +269,21 @@ class NsightApi {
     }
   }
 
+  /// Downloads the rendered PowerPoint deck for a report.
+  /// [GET /cases/{caseId}/reports/{reportId}/preview.pptx]
+  /// Returns raw PPTX bytes.
+  Future<Uint8List> getPreviewPptx(String caseId, String reportId) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        '/cases/$caseId/reports/$reportId/preview.pptx',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(res.data as List<int>);
+    } on DioException catch (e) {
+      _throw(e);
+    }
+  }
+
   /// Renders a report to pptx/pdf/slides preview.
   /// [POST /cases/{caseId}/reports/{reportId}/render]
   /// Returns `{pptx, pdf, preview:[...]}`.

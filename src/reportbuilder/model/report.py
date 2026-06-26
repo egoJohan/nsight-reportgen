@@ -42,6 +42,8 @@ class ChartSpec:
     elements: ElementToggles
     scatter_xy: tuple[str, str] | None = None   # scatter only (design §9a)
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
+    slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
+    slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,8 @@ def report_from_json(data: dict | str) -> Report:
             elements=ElementToggles(**el),
             scatter_xy=tuple(sx) if sx is not None else None,
             show_not_answered=c.get("show_not_answered", False),
+            slide_title=c.get("slide_title"),
+            slide_description=c.get("slide_description"),
         )
 
     return Report(

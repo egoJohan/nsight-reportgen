@@ -42,7 +42,7 @@ void main() {
       expect(json['statistic'], 'pct');
       expect((json['number_format'] as Map)['pct_decimals'], 0);
       expect((json['number_format'] as Map)['mean_decimals'], 1);
-      expect((json['sort'] as Map)['basis'], 'data_order');
+      expect((json['sort'] as Map)['basis'], 'pct'); // REQ-S-03: default is percentage
       expect((json['elements'] as Map)['title'], true);
       expect(json['classifying_var'], isNull);
       expect(json['scatter_xy'], isNull);
