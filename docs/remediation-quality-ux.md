@@ -19,9 +19,14 @@ A1. **Render INTO the template.** `orchestrate_render` currently calls `build_pp
 A2. **Slide title + question text + description.** Each slide shows the chart title, the **question
     text** (variable label, REQ-D-04), and an optional description/headline. Add these text boxes to
     the rendered slide. (REQ-C-24a, REQ-D-04)
-A3. **Automatic number format (default).** Add an `"auto"` number-format mode (the default): choose
-    pct/mean decimals + rounding from the value range (e.g. whole % when all ≥ ~10, one decimal when
-    values are small/close; means by spread). Keep manual override. (REQ-N-01/02/03)
+A3. **Automatic number format — a per-question option (default = Automatic).** Number format is a
+    **per-question / per-chart selectable option**, surfaced in the builder's chart config. The
+    default is **"Automatic"**: choose pct/mean decimals + rounding from the value range (e.g. whole %
+    when all ≥ ~10, one decimal when values are small/close; means by spread). The user can change it
+    per question to a manual format (explicit decimals, round-up). So `NumberFormat` gains a `mode`
+    (`"auto"` | `"manual"`); Automatic is computed at compute-time from the SeriesResult's value
+    range; manual uses the explicit decimals. Both the engine (data-label values) and the chart
+    number-format string honor it. (REQ-N-01/02/03)
 A4. **Default sort = percentage magnitude.** Change the builder/engine default `SortSpec.basis` from
     `data_order` to `pct` (descending). (REQ-S-03)
 A5. **Per-type quality + smart defaults.** Fix label handling (horizontal bar auto-preferred for
