@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/data_area.dart';
+import '../reports/reports_list.dart';
 import 'providers/selected_case_provider.dart';
 
 /// Detail pane for the selected case.
@@ -15,8 +16,8 @@ import 'providers/selected_case_provider.dart';
 /// Reads [selectedCaseProvider]; the shell guarantees this is non-null when
 /// [CaseDetail] is shown, so the `!` assertion below is safe.
 ///
-/// Tab 0 — "Data"    : placeholder; real Data browser implemented in Task 8.5.
-/// Tab 1 — "Reports" : placeholder; real Reports tab implemented in Task 8.6.
+/// Tab 0 — "Data"    : [DataArea] implemented in Task 8.5.
+/// Tab 1 — "Reports" : [ReportsList] implemented in Task 8.6.
 // TODO(8.6+): add dynamic open-report tabs after "Reports" by extending
 // DefaultTabController.length and appending entries to tabs / children.
 class CaseDetail extends ConsumerWidget {
@@ -52,7 +53,7 @@ class CaseDetail extends ConsumerWidget {
             child: TabBarView(
               children: [
                 DataArea(caseId: caseRecord.id),              // Task 8.5
-                const Center(child: Text('Reports area')),    // Task 8.6
+                ReportsList(caseId: caseRecord.id),           // Task 8.6
               ],
             ),
           ),

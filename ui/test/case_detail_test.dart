@@ -81,7 +81,8 @@ void main() {
       await tester.tap(find.text('Reports'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Reports area'), findsOneWidget);
+      // Reports tab now shows the real ReportsList (Task 8.6) — empty by default.
+      expect(find.text('No reports yet.'), findsOneWidget);
     });
 
     testWidgets('renders without errors for a valid CaseRecord', (tester) async {
