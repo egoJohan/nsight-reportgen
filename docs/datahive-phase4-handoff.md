@@ -164,3 +164,51 @@ until a `report` raw-doc is attached.
   in-memory fake. When the real REST client lands, nothing in the nSight routers changes.
 - Report definitions are **opaque JSON** to datahive — nSight serializes/deserializes them
   (`report_to_json` / `report_from_json`); datahive only stores and returns the exact string.
+
+---
+
+## ADDENDUM (2026-06-26) — verification against the deployed datahive
+
+Checked the running egoHive/datahive (`egohive-datahive` @ feat/build-targets). **The D1/D2/D3 work
+landed**: `datahive/api/routers/projects.py` (GET/POST `""`, GET `/{id}`, POST `/{id}/docs`, POST
+`/{id}/advance`, **DELETE `/{id}/docs/{reference_id}`** — the delete I flagged was added),
+`datahive/api/routers/aggregation.py` (`POST /api/v1/aggregation/{item_id}`), `aggregation/service.py`,
+`projects/service.py` (attach_raw_doc/read_raw_doc, binary blobs per "Decision #7"), and a
+`POST /api/v1/ingest/sav` returning `{item_id, codebook_item_id, num_variables, num_cases}`.
+
+Exact REST contract observed:
+- `POST /api/v1/projects` body `{name, template_ref, attributes?}`; `GET /api/v1/projects` →
+  `{count, projects:[…]}`; `GET /api/v1/projects/{id}` → status.
+- `POST /api/v1/projects/{id}/docs` body `{label, name, reference_id, text}` → `{reference_id}`
+  (docs stored as `doc:<label>` under the project path; versioned by caller `reference_id`).
+- `DELETE /api/v1/projects/{id}/docs/{reference_id}`.
+- `POST /api/v1/aggregation/{item_id}` body `{group_columns:[…], filters:[{…}]}` →
+  `{dimensions, cells, total}`.
+- `POST /api/v1/ingest/sav` multipart `{file, workspace_uuid?, survey_name?, regulatory_class,
+  allowed_groups?}` → `{item_id, …}`.
+- Auth: bearer token populates `request.state.auth`; **tenant is derived from the token**.
+
+### ⛔ Blocking gap for the REST integration: no read-back of opaque docs over REST
+`read_raw_doc` / `reveal_source` is exposed **only via the MCP tool `read_project_raw_doc`**, not
+REST. `projects.py` has no `GET /docs/{reference_id}`, and `items GET /{item_id}` is admin-only
+("no general download surface"). The design has the nSight **backend use REST** (MCP is for agents),
+so over REST today: `save_report` works but **`load_report` and `get_material` cannot read back** —
+breaking the byte-exact round-trip (REQ-C-08, the headline acceptance criterion).
+
+**Fix (small, datahive-side):** add `GET /api/v1/projects/{project_id}/docs/{reference_id}` →
+`{label, name, reference_id, text}` delegating to `service.read_raw_doc` (the MCP path already
+proves the resolution: `find_resource_record_by_reference_id` → `reveal_source`). Generic;
+mirrors the existing MCP tool. Until it exists, the nSight REST client's read methods cannot be
+implemented over REST.
+
+### Open mapping questions (need a product decision)
+1. **Material ↔ Case link.** `ingest/sav` takes `workspace_uuid`, not `project_id`; project docs
+   are `doc:<label>` under the project. Decide how a material binds to a case (ingest under the
+   project's workspace? + an attach_doc pointer to the `item_id`?), and what `material_id` the
+   nSight client should carry (the tabular `item_id` is what `/aggregation/{item_id}` needs).
+2. **Chart data path.** With `/ingest/sav` + `/aggregation/{item_id}` live, the nSight engine can
+   consume datahive GROUP-BY counts (D1) instead of round-tripping raw `.sav` bytes for in-process
+   `read_sav`. Pick the integration path (keeps `get_material` byte round-trip vs uses `aggregate`).
+3. **Deployment routing/auth.** Does the nSight backend call the datahive service directly (its own
+   URL) or via egoHive's `/api/v1/dh/{path}` gateway? Needs a service token + the tenant it implies,
+   and the `template_ref` for `create_case` (the generic `dataset-report-study` study template).
