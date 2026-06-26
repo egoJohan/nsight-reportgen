@@ -5,6 +5,14 @@ charts, squeezed/overlapping labels, no template, no titles/descriptions), and s
 were implemented too literally. This plan fixes both, with a **visual-verification gate** so no
 build is handed over for testing until its charts are reviewed against the original Attendo deck.
 
+## Guiding principle — it must LOOK GOOD (first-class acceptance criterion)
+Even as a prototype, both outputs must look polished:
+- **Generated decks**: Attendo-grade — branded template, correct chart types, clean labels,
+  headline + question text, consistent fonts/colors. Verified visually (A7) before any handoff.
+- **The Flutter UI itself**: clean, professional, consistent (Prima-Volta quality) — spacing,
+  typography, theme, empty/loading/error states. "Looks rough" is a bug, not a deferral.
+Nothing is handed over for testing until it visually passes against these bars.
+
 ## Benchmark
 The original Attendo deck (`input/Attendo Bränditutkimus Marraskuu 2025.pptx`) is the quality bar:
 headline insight + question text + branded, correctly-typed charts (often small-multiples) + logo/
