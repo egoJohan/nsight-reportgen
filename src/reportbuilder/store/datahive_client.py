@@ -1,9 +1,8 @@
 """DataHive REST client (D1/D2/D3) — the system-of-record contract the nSight backend
 depends on.
 
-Slice 1 (this implementation): projects, report opaque-doc round-trip, aggregate.
-Slice 2 (later): attach_material / get_material via /ingest/sav — datahive serves
-  data in-process from cache, so there is no byte-download endpoint by design.
+All 8 methods implemented: create_case, list_cases, save_report, load_report,
+delete_report, aggregate, attach_material, get_material.
 
 Auth: Authorization: Bearer <token>.  The tenant is derived from the token server-side.
 Base path: /api/v1.
@@ -172,23 +171,33 @@ class DataHiveClient:
         sav_bytes: bytes,
         codebook_summary: str,
     ) -> str:
-        """Attach a SAV material doc under a case; return the material doc id. (REQ-C-04)
+        """Attach a SAV binary blob under a case; return the material reference_id. (REQ-C-04)
 
-        Slice 2: materials via /ingest/sav; nSight serves data in-process from cache
-        — datahive has no byte-download by design.
+        POST /api/v1/projects/{case_id}/blobs — multipart form:
+          file part: (filename, sav_bytes, application/octet-stream)
+          data fields: label="material", name=name, reference_id=<generated>
+
+        `codebook_summary` is accepted for signature compatibility; it is not sent to the
+        blob endpoint (the codebook lives in the parsed model nSight builds in-process;
+        a later slice may push the tabular item via /ingest/sav for D1).
         """
-        raise NotImplementedError(
-            "Slice 2: materials via /ingest/sav; nSight serves data in-process from cache"
-            " — datahive has no byte-download by design."
+        reference_id = "material-" + uuid.uuid4().hex
+        fname = name or reference_id
+        resp = self._client.post(
+            f"/api/v1/projects/{case_id}/blobs",
+            files={"file": (fname, sav_bytes, "application/octet-stream")},
+            data={"label": "material", "name": name, "reference_id": reference_id},
         )
+        self._raise_for_status(resp)
+        data = resp.json()
+        return data.get("reference_id") or reference_id
 
     def get_material(self, material_id: str) -> bytes:
-        """Return the raw stored bytes of a material doc (e.g. the .sav). (REQ-C-05)
+        """Return the raw stored bytes of a material blob (e.g. the .sav). (REQ-C-05)
 
-        Slice 2: materials via /ingest/sav; nSight serves data in-process from cache
-        — datahive has no byte-download by design.
+        GET /api/v1/projects/blobs/{material_id} → raw bytes
+        (content-type: application/octet-stream — do NOT json-decode).
         """
-        raise NotImplementedError(
-            "Slice 2: materials via /ingest/sav; nSight serves data in-process from cache"
-            " — datahive has no byte-download by design."
-        )
+        resp = self._client.get(f"/api/v1/projects/blobs/{material_id}")
+        self._raise_for_status(resp)
+        return resp.content

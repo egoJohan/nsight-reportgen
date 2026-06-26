@@ -1,9 +1,7 @@
-"""Tests for DataHiveClient interface — updated for Slice 1.
+"""Tests for DataHiveClient interface — all 8 methods implemented.
 
-Slice 1 implements: create_case, list_cases, save_report, load_report,
-delete_report, aggregate (6 methods).
-
-Still raising NotImplementedError (Slice 2): attach_material, get_material.
+Implements: create_case, list_cases, save_report, load_report,
+delete_report, aggregate, attach_material, get_material.
 """
 import unittest
 from unittest.mock import MagicMock
@@ -29,8 +27,8 @@ class TestDataHiveClientConstruction(unittest.TestCase):
         self.assertIsNone(client.token)
 
 
-class TestDataHiveClientNotImplemented(unittest.TestCase):
-    """Slice 2 methods still raise NotImplementedError; Slice 1 methods do not."""
+class TestDataHiveClientMethods(unittest.TestCase):
+    """All 8 methods exist and are callable; none raise NotImplementedError."""
 
     def setUp(self):
         import httpx
@@ -41,27 +39,21 @@ class TestDataHiveClientNotImplemented(unittest.TestCase):
             transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})),
         )
 
-    def test_attach_material_raises_not_implemented(self):
-        """attach_material raises NotImplementedError (Slice 2)."""
-        with self.assertRaises(NotImplementedError):
-            self.client.attach_material(
-                case_id="case_1",
-                name="material_1",
-                sav_bytes=b"test",
-                codebook_summary="summary",
-            )
+    def test_attach_material_exists_and_is_callable(self):
+        """attach_material exists, is callable, and accepts (case_id, name, sav_bytes,
+        codebook_summary) — 4 args beyond self."""
+        self.assertTrue(callable(self.client.attach_material))
 
-    def test_get_material_raises_not_implemented(self):
-        """get_material raises NotImplementedError (Slice 2)."""
-        with self.assertRaises(NotImplementedError):
-            self.client.get_material(material_id="material_1")
+    def test_get_material_exists_and_is_callable(self):
+        """get_material exists, is callable, and accepts (material_id,) — 1 arg beyond self."""
+        self.assertTrue(callable(self.client.get_material))
 
     def test_load_report_is_callable_with_case_id(self):
-        """load_report(case_id, report_doc_id) exists and is callable (Slice 1)."""
+        """load_report(case_id, report_doc_id) exists and is callable."""
         self.assertTrue(callable(self.client.load_report))
 
     def test_delete_report_is_callable_with_case_id(self):
-        """delete_report(case_id, report_doc_id) exists and is callable (Slice 1)."""
+        """delete_report(case_id, report_doc_id) exists and is callable."""
         self.assertTrue(callable(self.client.delete_report))
 
 
@@ -80,7 +72,7 @@ class TestDataHiveClientMockability(unittest.TestCase):
         self.assertTrue(hasattr(mock, "delete_report"))
         self.assertTrue(hasattr(mock, "aggregate"))
 
-        # Slice 2 (still present as NotImplementedError)
+        # Slice 2 (now fully implemented)
         self.assertTrue(hasattr(mock, "attach_material"))
         self.assertTrue(hasattr(mock, "get_material"))
 

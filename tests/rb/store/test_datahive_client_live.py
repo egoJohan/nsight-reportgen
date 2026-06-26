@@ -8,7 +8,7 @@ Environment variables:
   NSIGHT_TEST_HIVE_TENANT   Tenant hint (informational; derived server-side from token).
   NSIGHT_TEST_HIVE_TEMPLATE Template ref override (default: wftemplate:dataset-report-study).
 
-REQ-C-03/07/08/12
+REQ-C-03/07/08/12/01/04/05
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import os
 import pytest
 
 from reportbuilder.store.datahive_client import DataHiveClient
+from reportbuilder.testing.fixtures import synthetic_sav_bytes
 
 # ---------------------------------------------------------------------------
 # Skip guard
@@ -81,6 +82,25 @@ def test_create_save_load_delete_roundtrip(client: DataHiveClient):
 
     # 4. Delete report  (REQ-C-12)
     client.delete_report(case_id, ref_id)
+
+    # 4b. Blob round-trip: attach_material → get_material (byte-exact)  (REQ-C-01/04/05)
+    # The blob endpoints are being added datahive-side; skip gracefully if not yet deployed.
+    sav_bytes = synthetic_sav_bytes()
+    try:
+        material_id = client.attach_material(case_id, "synthetic.sav", sav_bytes, "")
+        retrieved = client.get_material(material_id)
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "404" in msg or "405" in msg:
+            pytest.skip(
+                f"blob endpoints not yet deployed (server returned {msg[:120]})"
+            )
+        raise
+    else:
+        assert retrieved == sav_bytes, (
+            "Byte-exact blob round-trip failed:\n"
+            f"  uploaded {len(sav_bytes)} bytes, retrieved {len(retrieved)} bytes"
+        )
 
     # 5. list_cases shows the case  (REQ-C-07)
     cases = client.list_cases()
