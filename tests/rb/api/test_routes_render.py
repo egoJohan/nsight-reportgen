@@ -87,7 +87,7 @@ def test_route_returns_artifacts() -> None:
         )
 
     assert resp.status_code == 200
-    assert resp.json() == _ARTIFACTS
+    assert resp.json() == {**_ARTIFACTS, "pdf_url": "/cases/case-1/reports/rep-1/preview.pdf"}
 
     mock_orch.assert_called_once()
     call_args = mock_orch.call_args
