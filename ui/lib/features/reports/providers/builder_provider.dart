@@ -112,6 +112,32 @@ class ReportBuilderNotifier extends Notifier<ReportDraft?> {
     state = state!.copyWith(charts: [...state!.charts, ...newCards]);
   }
 
+  /// Appends chart cards for [items], using each question's
+  /// [QuestionItem.suggestedChartType] as the chart type. (W2 — REQ-U-01/11)
+  ///
+  /// Defaults: statistic pct, show_not_answered off, no classifying var.
+  void addQuestionsFromItems(List<QuestionItem> items) {
+    if (state == null) return;
+    final newCards = items
+        .map(
+          (q) => ChartSpecDef(
+            questionRef: q.qid,
+            chartType: q.suggestedChartType,
+            statistic: 'pct',
+            classifyingVar: null,
+            numberFormat: _kDefaultNumberFormat,
+            sort: _kDefaultSort,
+            elements: <String, dynamic>{
+              ..._kDefaultElements,
+              'not_answered': false,
+            },
+            scatterXy: null,
+          ),
+        )
+        .toList();
+    state = state!.copyWith(charts: [...state!.charts, ...newCards]);
+  }
+
   /// Replaces the card at [index] with [spec]. (REQ-C-14)
   void updateChart(int index, ChartSpecDef spec) {
     if (state == null) return;

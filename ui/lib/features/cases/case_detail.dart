@@ -10,10 +10,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/models.dart';
 import '../data/data_area.dart';
 import '../data/providers/material_provider.dart';
-import '../reports/report_builder.dart';
-import '../reports/reports_list.dart';
 import '../reports/providers/builder_provider.dart';
 import '../reports/providers/reports_provider.dart';
+import '../reports/reports_list.dart';
+import '../reports/wizard/report_wizard.dart';
 import 'providers/selected_case_provider.dart';
 
 /// Detail pane for the selected case.
@@ -77,7 +77,8 @@ class CaseDetail extends ConsumerWidget {
                     if (selectedId != null) {
                       // ValueKey ensures a fresh widget state when the report
                       // changes, resetting _nameInitialized. (FIX-2)
-                      return ReportBuilder(
+                      // W2: route to wizard instead of two-panel builder.
+                      return ReportWizard(
                         key: ValueKey(selectedId),
                         caseId: caseRecord.id,
                         reportId: selectedId,

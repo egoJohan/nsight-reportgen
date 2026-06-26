@@ -16,25 +16,58 @@ class CaseRecord {
   Map<String, dynamic> toJson() => {'id': id, 'name': name};
 }
 
+/// A missing-value entry returned alongside a question in W1.
+/// Each entry is a {code, label} pair surfaced by the backend.
+class MissingValue {
+  const MissingValue({required this.code, required this.label});
+
+  final String code;
+  final String label;
+
+  factory MissingValue.fromJson(Map<String, dynamic> json) => MissingValue(
+        code: json['code'] as String,
+        label: json['label'] as String,
+      );
+
+  Map<String, dynamic> toJson() => {'code': code, 'label': label};
+}
+
 /// A question item returned by GET /materials/{materialId}/questions.
+///
+/// W1 additions (optional, backward-compatible):
+/// - [suggestedChartType]: the backend's recommended chart type for this
+///   question; defaults to 'vertical_bar' when absent.
+/// - [missingValues]: list of missing-value codes/labels for the question.
 class QuestionItem {
   const QuestionItem({
     required this.qid,
     required this.kind,
     required this.variables,
     required this.text,
+    this.suggestedChartType = 'vertical_bar',
+    this.missingValues = const [],
   });
 
   final String qid;
   final String kind;
   final List<String> variables;
   final String text;
+  /// Backend-recommended chart type (W1). Defaults to 'vertical_bar'.
+  final String suggestedChartType;
+  /// Missing-value codes surfaced by the backend (W1).
+  final List<MissingValue> missingValues;
 
   factory QuestionItem.fromJson(Map<String, dynamic> json) => QuestionItem(
         qid: json['qid'] as String,
         kind: json['kind'] as String,
         variables: (json['variables'] as List<dynamic>).cast<String>(),
         text: json['text'] as String,
+        suggestedChartType:
+            (json['suggested_chart_type'] as String?) ?? 'vertical_bar',
+        missingValues: (json['missing_values'] as List<dynamic>?)
+                ?.map((e) => MissingValue.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
       );
 
   Map<String, dynamic> toJson() => {
@@ -42,6 +75,8 @@ class QuestionItem {
         'kind': kind,
         'variables': variables,
         'text': text,
+        'suggested_chart_type': suggestedChartType,
+        'missing_values': missingValues.map((e) => e.toJson()).toList(),
       };
 }
 

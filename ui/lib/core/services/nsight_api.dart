@@ -1,6 +1,8 @@
 // Dio-based client for the nSight REST API.
 // REQ-U-04 / C-03..22
 
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../models/models.dart';
@@ -219,6 +221,30 @@ class NsightApi {
         data: {'name': name},
       );
       return (res.data as Map<String, dynamic>)['report_id'] as String;
+    } on DioException catch (e) {
+      _throw(e);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Chart preview (W1/W2)
+  // ---------------------------------------------------------------------------
+
+  /// Posts one [ChartSpec] JSON to get a PNG preview thumbnail.
+  /// [POST /materials/{materialId}/preview-chart] → image/png bytes.
+  ///
+  /// Throws [NsightApiException] on non-200 or 422 (bad spec). (REQ-C-26)
+  Future<Uint8List> previewChart(
+    String materialId,
+    Map<String, dynamic> chartSpecJson,
+  ) async {
+    try {
+      final res = await _dio.post<List<int>>(
+        '/materials/$materialId/preview-chart',
+        data: chartSpecJson,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(res.data as List<int>);
     } on DioException catch (e) {
       _throw(e);
     }

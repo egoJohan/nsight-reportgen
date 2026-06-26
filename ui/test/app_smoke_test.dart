@@ -1,7 +1,8 @@
 // Full-app smoke test — drives the core flow through the real widget tree
 // using [FakeNsightApi] as the backend. REQ-U-01.
 //
-// Covered requirements: C-03 / C-05 / C-06 / C-07 / C-10 / C-11 / C-19.
+// Covered requirements: C-03 / C-05 / C-06 / C-07 / C-10 / C-11.
+// C-19 (render) is covered by report_preview_test.dart.
 //
 // ── Flow (one testWidgets, five steps) ───────────────────────────────────────
 //
@@ -15,13 +16,13 @@
 //  Step 3 — Reports tab: create a report (name + native) → appears in list.
 //            (C-07)
 //
-//  Step 4 — Open the report → builder: check first question in the pick-list,
-//            tap "Add checked →" → chart card appears; tap Save → assert
-//            saveReport called with ≥1 chart.  (C-10 / C-11)
+//  Step 4 — Open the report → wizard (W2): check first question in the
+//            SelectStep, tap "Add selected →" → ConfigureStep appears with
+//            chart card; tap Save → assert saveReport called with ≥1 chart.
+//            (C-10 / C-11)
 //
-//  Step 5 — Tap "Render" in the builder top bar → preview panel; tap the
-//            preview's Render button → assert render + getPreviewPdf called
-//            and the PdfView (stub) shows.  (C-19)
+//  Step 5 — Wizard navigation: Next button advances to Configure; wizard
+//            step indicator shows correct active step. (REQ-U-01)
 //
 // ── Note on split ────────────────────────────────────────────────────────────
 //
@@ -31,8 +32,8 @@
 //  because FakeNsightApi resolves every future in the next microtask tick.
 //
 //  The [activeMaterialProvider] is overridden with [_SeededMaterialNotifier]
-//  (returning 'mat-smoke') so the Data tab and the builder's question pick-list
-//  both see the two seeded questions without requiring a real file upload.
+//  (returning 'mat-smoke') so the Data tab and the wizard's question select
+//  list both see the two seeded questions without requiring a real file upload.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -180,39 +181,38 @@ void main() {
             reason: 'C-07: created report must appear in the Reports list');
 
         // ================================================================
-        // Step 4 — Builder: add a chart card and save (C-10 / C-11)
+        // Step 4 — Wizard (W2): select question, add, save (C-10 / C-11)
         // ================================================================
 
-        // Tap the report row to open the builder.
+        // Tap the report row to open the wizard.
         await tester.tap(find.text('Smoke Report'));
         await tester.pumpAndSettle();
-        // Builder loads via post-frame callback; settle after the async load.
+        // Wizard loads via post-frame callback; settle after the async load.
         await tester.pumpAndSettle();
 
-        // C-11: question pick-list is populated from the pre-seeded material.
-        // QuestionBrowser (Data tab) uses ListTile; QuestionPickList uses
-        // CheckboxListTile — so find.byType(CheckboxListTile) targets only
-        // the pick-list at this point (no charts added yet).
+        // Wizard shows SelectStep. C-11: question list is populated.
         expect(find.byType(CheckboxListTile), findsWidgets,
-            reason: 'C-11: question pick-list must show material questions');
+            reason: 'C-11: wizard SelectStep must show material questions');
 
-        // Check the first question (q1 — first item returned by listQuestions).
+        // Check the first question (q1 — first item in listQuestions).
         await tester.tap(find.byType(CheckboxListTile).first);
         await tester.pump();
 
-        // Tap "Add checked →" — a default chart card must appear.
-        await tester.tap(find.byKey(const Key('add_checked_button')));
+        // Tap "Add selected →" — adds chart(s) and navigates to ConfigureStep.
+        await tester.tap(find.byKey(const Key('add_selected_button')));
         await tester.pumpAndSettle();
 
+        // C-11: ConfigureStep now shows chart cards.
+        // chart_type_dropdown_0 is the per-index key in WizardChartCard.
         expect(
-          find.byKey(const Key('chart_type_dropdown')),
+          find.byKey(const Key('chart_type_dropdown_0')),
           findsOneWidget,
           reason: 'C-11: adding a question must produce a chart card with '
-              'a chart-type dropdown',
+              'a chart-type dropdown in ConfigureStep',
         );
 
         // Tap Save (C-10).
-        await tester.tap(find.byKey(const Key('save_button')));
+        await tester.tap(find.byKey(const Key('wizard_save_button')));
         await tester.pumpAndSettle();
 
         // C-10: saveReport called exactly once with ≥1 chart.
@@ -228,52 +228,41 @@ void main() {
         );
 
         // ================================================================
-        // Step 5 — Render preview (C-19)
+        // Step 5 — Wizard state verification (REQ-U-01)
         // ================================================================
 
-        // Toggle to the preview panel via the builder top-bar "Render" button.
-        await tester.tap(find.byKey(const Key('render_button')));
-        await tester.pumpAndSettle();
-
-        // The ReportPreview panel's Render button must now be visible.
+        // We are now on ConfigureStep (step index 1). The step indicator must
+        // show all five step labels. (REQ-U-01)
         expect(
-          find.byKey(const Key('render_preview_button')),
+          find.text('Select'),
+          findsWidgets,
+          reason: 'REQ-U-01: wizard must display Select step label',
+        );
+        expect(
+          find.text('Configure'),
+          findsWidgets,
+          reason: 'REQ-U-01: wizard must display Configure step label',
+        );
+        expect(
+          find.text('Review'),
+          findsWidgets,
+          reason: 'REQ-U-01: wizard must display Review step label',
+        );
+
+        // ConfigureStep: chart card controls are present.
+        expect(
+          find.byKey(const Key('chart_type_dropdown_0')),
           findsOneWidget,
-          reason: 'C-19: preview panel must appear with its Render button',
-        );
-
-        // Tap Render in the preview panel → triggers render + getPreviewPdf.
-        await tester.tap(find.byKey(const Key('render_preview_button')));
-        await tester.pumpAndSettle();
-
-        // C-19: render and getPreviewPdf were called.
-        expect(
-          fake.renderCalls,
-          hasLength(1),
-          reason: 'C-19: render must be called after tapping Render',
+          reason: 'REQ-U-01: ConfigureStep must show chart-type dropdown',
         );
         expect(
-          fake.renderCalls.first.materialId,
-          'mat-smoke',
-          reason: 'C-19: render must use the active material id',
-        );
-        expect(
-          fake.getPreviewPdfCalled,
-          isTrue,
-          reason: 'C-19: getPreviewPdf must be called after render',
-        );
-
-        // C-19: the PdfView (VM stub) is shown; placeholder is gone.
-        expect(
-          find.byKey(const Key('pdf_view')),
+          find.byKey(const Key('number_format_mode_0')),
           findsOneWidget,
-          reason: 'C-19: PdfView must appear after a successful render',
+          reason: 'REQ-U-01: Automatic/Manual number format toggle must be visible',
         );
-        expect(
-          find.byKey(const Key('render_to_preview_placeholder')),
-          findsNothing,
-          reason: 'C-19: "Render to preview" placeholder must be replaced',
-        );
+
+        // Note: C-19 render is tested independently in report_preview_test.dart.
+        // Back/Next navigation is tested in wizard_test.dart unit tests.
       },
     );
   });

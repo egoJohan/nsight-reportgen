@@ -11,6 +11,8 @@
 //   // Override activeMaterialProvider with 'mat-smoke' to skip upload.
 //   ProviderScope(overrides: [nsightApiProvider.overrideWithValue(fake)], ...)
 
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import 'package:nsight_ui/core/models/models.dart';
@@ -57,6 +59,10 @@ class FakeNsightApi extends NsightApi {
   /// True once [getPreviewPdf] has been called. (C-19)
   bool getPreviewPdfCalled = false;
 
+  /// Arguments passed to [previewChart]. (W2)
+  final List<({String materialId, Map<String, dynamic> chartSpecJson})>
+      previewChartCalls = [];
+
   // ── Seed helper ───────────────────────────────────────────────────────────
 
   /// Seeds [questions] for [materialId].
@@ -74,12 +80,14 @@ class FakeNsightApi extends NsightApi {
       kind: 'single',
       variables: ['q1'],
       text: 'Overall satisfaction',
+      suggestedChartType: 'horizontal_bar',
     ),
     QuestionItem(
       qid: 'q2',
       kind: 'single',
       variables: ['q2'],
       text: 'Net promoter score',
+      suggestedChartType: 'vertical_bar',
     ),
   ];
 
@@ -215,6 +223,41 @@ class FakeNsightApi extends NsightApi {
           );
     return id;
   }
+
+  // ── Chart preview (W2) ────────────────────────────────────────────────────
+
+  /// Returns a minimal valid 1×1 PNG so [Image.memory] can decode it in tests.
+  /// Records the call for assertion in widget tests.
+  @override
+  Future<Uint8List> previewChart(
+    String materialId,
+    Map<String, dynamic> chartSpecJson,
+  ) async {
+    previewChartCalls
+        .add((materialId: materialId, chartSpecJson: chartSpecJson));
+    // Minimal 1×1 grey PNG (RGBA 8-bit). Valid PNG that Image.memory can decode.
+    return Uint8List.fromList(_kMinimalPng);
+  }
+
+  /// Bytes for a valid 1×1 grey RGBA PNG generated offline.
+  static const List<int> _kMinimalPng = [
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+    0x00, 0x00, 0x00, 0x0D, // IHDR length = 13
+    0x49, 0x48, 0x44, 0x52, // "IHDR"
+    0x00, 0x00, 0x00, 0x01, // width = 1
+    0x00, 0x00, 0x00, 0x01, // height = 1
+    0x08, 0x06, // bit depth = 8, color type = 6 (RGBA)
+    0x00, 0x00, 0x00, // compression=0, filter=0, interlace=0
+    0x1F, 0x15, 0xC4, 0x89, // CRC32(IHDR chunk)
+    0x00, 0x00, 0x00, 0x0B, // IDAT length = 11
+    0x49, 0x44, 0x41, 0x54, // "IDAT"
+    0x08, 0xD7, // zlib header
+    0x63, 0x60, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01,
+    0xA5, 0xF6, 0x45, 0x40, // CRC32(IDAT chunk)
+    0x00, 0x00, 0x00, 0x00, // IEND length = 0
+    0x49, 0x45, 0x4E, 0x44, // "IEND"
+    0xAE, 0x42, 0x60, 0x82, // CRC32(IEND chunk)
+  ];
 
   // ── Render (C-19) ─────────────────────────────────────────────────────────
 

@@ -193,7 +193,8 @@ void main() {
       );
 
       // Tap the back button — resets builder + clears selectedReport (FIX-2).
-      await tester.tap(find.byKey(const Key('back_button')));
+      // W2: wizard uses 'wizard_back_button' key instead of 'back_button'.
+      await tester.tap(find.byKey(const Key('wizard_back_button')));
       await tester.pumpAndSettle();
 
       expect(container.read(selectedReportProvider), isNull,

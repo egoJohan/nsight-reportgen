@@ -1,11 +1,12 @@
-// Screenshot tests: renders QuestionBrowser and ReportBuilder to PNG files
-// for the Claude-as-judge UI quality gate (Task 8.11).
+// Screenshot tests: renders QuestionBrowser, ReportBuilder, and the W2
+// ReportWizard steps to PNG files for the Claude-as-judge UI quality gate.
 //
 // Writes to build/screenshots/ (gitignored).  The Python test
 // tests/rb/test_ui_judge.py reads those PNGs and calls judge_image.
 //
 // REQ-C-05 — question browser organises survey questions clearly.
-// REQ-U-11 — report builder usability for non-technical users.
+// REQ-U-11 — report builder / wizard usability for non-technical users.
+// W2      — wizard_select.png (step 1) + wizard_configure.png (step 2).
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -21,8 +22,11 @@ import 'package:nsight_ui/core/models/models.dart';
 import 'package:nsight_ui/core/providers/api_provider.dart';
 import 'package:nsight_ui/features/data/data_area.dart';
 import 'package:nsight_ui/features/data/providers/material_provider.dart';
+import 'package:nsight_ui/features/reports/providers/builder_provider.dart';
 import 'package:nsight_ui/features/reports/providers/reports_provider.dart';
 import 'package:nsight_ui/features/reports/report_builder.dart';
+import 'package:nsight_ui/features/reports/wizard/report_wizard.dart';
+import 'package:nsight_ui/features/reports/wizard/step_configure.dart';
 
 import '../support/fake_nsight_api.dart';
 
@@ -54,42 +58,49 @@ class _ScreenshotFakeApi extends FakeNsightApi {
         kind: 'single',
         variables: ['q1'],
         text: 'Overall satisfaction with the service',
+        suggestedChartType: 'horizontal_bar',
       ),
       QuestionItem(
         qid: 'q2',
         kind: 'single',
         variables: ['q2'],
         text: 'Net promoter score (0–10)',
+        suggestedChartType: 'vertical_bar',
       ),
       QuestionItem(
         qid: 'q3',
         kind: 'multi',
         variables: ['q3a', 'q3b', 'q3c'],
         text: 'Which channels did you use?',
+        suggestedChartType: 'stacked_horizontal_bar',
       ),
       QuestionItem(
         qid: 'q4',
         kind: 'single',
         variables: ['q4'],
         text: 'Likelihood to recommend to a colleague',
+        suggestedChartType: 'vertical_bar',
       ),
       QuestionItem(
         qid: 'q5',
         kind: 'single',
         variables: ['q5'],
         text: 'Brand awareness (aided)',
+        suggestedChartType: 'horizontal_bar',
       ),
       QuestionItem(
         qid: 'q6',
         kind: 'multi',
         variables: ['q6a', 'q6b'],
         text: 'Top reasons for satisfaction',
+        suggestedChartType: 'stacked_horizontal_bar',
       ),
       QuestionItem(
         qid: 'q7',
         kind: 'single',
         variables: ['q7'],
         text: 'Purchase intent in next 12 months',
+        suggestedChartType: 'vertical_bar',
       ),
     ]);
   }
@@ -115,6 +126,128 @@ class _ScreenshotFakeApi extends FakeNsightApi {
           ),
         ],
       );
+
+  /// Returns a minimal 1×1 PNG placeholder for live chart thumbnails. (W2)
+  @override
+  Future<Uint8List> previewChart(
+    String materialId,
+    Map<String, dynamic> chartSpecJson,
+  ) async {
+    // Minimal valid 1×1 grey RGBA PNG (same bytes as FakeNsightApi._kMinimalPng).
+    return Uint8List.fromList(const [
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x00, 0x00, 0x00, 0x0D,
+      0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01,
+      0x00, 0x00, 0x00, 0x01,
+      0x08, 0x06,
+      0x00, 0x00, 0x00,
+      0x1F, 0x15, 0xC4, 0x89,
+      0x00, 0x00, 0x00, 0x0B,
+      0x49, 0x44, 0x41, 0x54,
+      0x08, 0xD7,
+      0x63, 0x60, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x05, 0x00, 0x01,
+      0xA5, 0xF6, 0x45, 0x40,
+      0x00, 0x00, 0x00, 0x00,
+      0x49, 0x45, 0x4E, 0x44,
+      0xAE, 0x42, 0x60, 0x82,
+    ]);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Seeded builder notifier (for wizard screenshots with pre-loaded charts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Pre-seeds the builder draft with three chart cards so the wizard
+/// ConfigureStep screenshot shows realistic content. (W2)
+class _WizardSeededBuilderNotifier extends ReportBuilderNotifier {
+  @override
+  ReportDraft? build() => const ReportDraft(
+        name: 'Q3 Customer Survey',
+        renderMode: 'image',
+        charts: [
+          ChartSpecDef(
+            questionRef: 'q1',
+            chartType: 'horizontal_bar',
+            statistic: 'pct',
+          ),
+          ChartSpecDef(
+            questionRef: 'q3',
+            chartType: 'stacked_horizontal_bar',
+            statistic: 'pct',
+          ),
+          ChartSpecDef(
+            questionRef: 'q4',
+            chartType: 'vertical_bar',
+            statistic: 'pct',
+          ),
+        ],
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thin wrapper: renders ConfigureStep inside a minimal wizard-style frame.
+//
+// The builderProvider is seeded externally via the ProviderScope override, so
+// the ConfigureStep finds a non-null draft immediately. (W2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Shows ConfigureStep with a minimal header bar inside a Column, for use
+/// in the wizard_configure.png screenshot. (W2)
+class _WizardOnConfigureStep extends ConsumerWidget {
+  const _WizardOnConfigureStep({
+    required this.caseId,
+    required this.reportId,
+  });
+
+  final String caseId;
+  final String reportId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final materialId = ref.watch(activeMaterialProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Minimal header bar for visual context.
+        Container(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: Row(
+            children: [
+              const Icon(Icons.settings, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Configure — Chart Cards',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+              const Spacer(),
+              Text(
+                'Step 2 of 5',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.6),
+                    ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ConfigureStep(
+            key: const Key('configure_step'),
+            materialId: materialId,
+            caseId: caseId,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +291,7 @@ void main() {
     await loadAppFonts();
   });
 
-  // Both screenshots are captured in a single testWidgets block.
+  // Both QuestionBrowser + ReportBuilder screenshots are captured in one block.
   //
   // Background: toImage() + toByteData() use engine threads.  Running them
   // in tester.runAsync() (as golden_toolkit does) is correct.  However, the
@@ -254,6 +387,118 @@ void main() {
       );
 
       await _captureScreenshot(tester, rbKey, 'report_builder.png');
+    },
+  );
+
+  // ── Wizard screenshots (W2) ────────────────────────────────────────────────
+  //
+  // Produces wizard_select.png (Step 1 — Select) and wizard_configure.png
+  // (Step 2 — Configure with 3 pre-seeded chart cards).  Both are at
+  // 1300×900 logical pixels to match the W2 brief requirement.
+  //
+  // wizard_configure.png uses _WizardSeededBuilderNotifier to pre-seed the
+  // draft with 3 chart cards so we show ConfigureStep without needing to drive
+  // the UI through SelectStep.
+  testWidgets(
+    'Screenshots: Wizard Select (W2) and Wizard Configure (W2)',
+    (tester) async {
+      // Desktop viewport — 1300×900 logical pixels (per W2 brief).
+      tester.view.physicalSize = const Size(1300, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // ── Part 1: Wizard Select step (wizard_select.png) ──────────────────
+
+      final selectKey = GlobalKey();
+      final selectFake = _ScreenshotFakeApi();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nsightApiProvider.overrideWithValue(selectFake),
+            activeMaterialProvider.overrideWith(_SeededMaterialNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(
+                key: selectKey,
+                child: const ReportWizard(caseId: 'c1', reportId: 'r1'),
+              ),
+            ),
+          ),
+        ),
+      );
+      // Three pumps: (1) initial frame, (2) postFrameCallback fires + getReport
+      // resolves, (3) listQuestions resolves + rebuild with question list.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Verify SelectStep is visible and questions are listed before capturing.
+      expect(
+        find.byKey(const Key('select_step')),
+        findsOneWidget,
+        reason: 'W2: wizard must be on SelectStep for wizard_select.png',
+      );
+      expect(
+        find.byType(CheckboxListTile),
+        findsWidgets,
+        reason: 'W2: question checklist must be visible in SelectStep',
+      );
+
+      await _captureScreenshot(tester, selectKey, 'wizard_select.png');
+
+      // Unmount between screenshots to avoid ProviderScope override conflicts.
+      await tester.pumpWidget(const SizedBox.shrink());
+
+      // ── Part 2: Wizard Configure step (wizard_configure.png) ────────────
+
+      final configKey = GlobalKey();
+      final configFake = _ScreenshotFakeApi();
+
+      // Pre-seed the draft with 3 chart cards via the builder notifier override
+      // so we see ConfigureStep with real chart cards without driving the UI
+      // through SelectStep first.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nsightApiProvider.overrideWithValue(configFake),
+            activeMaterialProvider.overrideWith(_SeededMaterialNotifier.new),
+            builderProvider.overrideWith(_WizardSeededBuilderNotifier.new),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: RepaintBoundary(
+                key: configKey,
+                child: const _WizardOnConfigureStep(
+                  caseId: 'c1',
+                  reportId: 'r1',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      // Three pumps: (1) initial render, (2) questions async loads,
+      // (3) settle animations.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // Verify ConfigureStep chart cards are visible before capturing.
+      expect(
+        find.byKey(const Key('configure_step')),
+        findsOneWidget,
+        reason: 'W2: wizard must show ConfigureStep for wizard_configure.png',
+      );
+      expect(
+        find.byKey(const Key('chart_type_dropdown_0')),
+        findsOneWidget,
+        reason: 'W2: chart cards must be rendered in ConfigureStep',
+      );
+
+      await _captureScreenshot(tester, configKey, 'wizard_configure.png');
     },
   );
 }
