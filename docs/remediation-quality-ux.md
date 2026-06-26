@@ -42,6 +42,12 @@ A7. **Visual-verification gate.** A gallery render of EVERY chart type + a full 
     reviewed (human + Claude-judge against the Attendo deck) before any demo handoff. Institutionalize
     "look at the charts" — the step that was skipped.
 
+A8. **Per-question statistic option (percentage / count / mean).** Each question/chart has a
+    statistic selector (already in `ChartSpec.statistic` + the builder dropdown). Ensure it is clear
+    per question, **defaults to percentage**, and that switching a percentage question to **count**
+    renders correct whole-number counts (count number-format) and to **mean** the mean value. Pair it
+    with the A3 per-question number-format control. (REQ-C-15, REQ-M-04, REQ-N)
+
 ## Track B — Workflow / cleaner UX
 
 B1. **Make single/multi actually work** (settable + persisted + applied) and **explain it**: single =
