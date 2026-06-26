@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values,
+    new_figure, render_png, place_picture, series_values, fmt_value, style_legend,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
@@ -133,7 +133,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
-                    f"{v:.0f}",
+                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
                     ha="center", va="bottom",
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
@@ -185,7 +185,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
             if v is not None:
                 ax.text(
                     v + off, yi,
-                    f"{v:.0f}",
+                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
                     va="center", ha="left",
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
@@ -226,7 +226,7 @@ def build_image_column_stacked(ctx) -> None:
             if v > 1:   # skip label if segment is too thin
                 ax.text(
                     bar.get_x() + bar.get_width() / 2, mid,
-                    f"{v:.0f}",
+                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )
@@ -268,7 +268,7 @@ def build_image_bar_stacked(ctx) -> None:
             if v > 1:
                 ax.text(
                     mid, yi,
-                    f"{v:.0f}",
+                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )
@@ -287,14 +287,9 @@ def build_image_bar_stacked(ctx) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Shared legend styler
+# Shared legend styler (thin wrapper around the shared helper in _mpl)
 # ---------------------------------------------------------------------------
 
 def _style_legend(ax, loc: str = "best") -> None:
     """Apply house-style formatting to an axes legend."""
-    leg = ax.legend(fontsize=9.5, loc=loc, frameon=True)
-    leg.get_frame().set_facecolor("#FFFFFF")
-    leg.get_frame().set_edgecolor(GRIDC)
-    leg.get_frame().set_linewidth(0.8)
-    for t in leg.get_texts():
-        t.set_color(INK)
+    style_legend(ax, loc)

@@ -1,13 +1,20 @@
 """House-style slide chrome for image-mode slides (REQ-C-24/25/27a, REQ-D-04).
 
 `add_image_slide_chrome` adds the slide-level decorations — cream background,
-teal accent bar, bold title, and N annotation — to the slide *before* the chart
-picture is placed by the image builder.  Because shapes are z-ordered by
-insertion order, the chart picture (added last) lands on top of the chrome.
+teal accent bar, bold title, N annotation, and methodology footer — to the
+slide *before* the chart picture is placed by the image builder.  Because
+shapes are z-ordered by insertion order, the chart picture (added last) lands
+on top of the chrome.
 
-The function is intentionally generic: it reads title and base-N from the
-RenderContext (driven by ChartSpec + SeriesResult) and never hard-codes any
-Attendo-specific content.
+The function is intentionally generic: it reads title, statistic, and base-N
+from the RenderContext (driven by ChartSpec + SeriesResult) and never
+hard-codes any Attendo-specific content.
+
+Slide-text polish (R2):
+- Title = full question text (ctx.title), word-wrapped to 2 lines if long.
+  (REQ-D-04)
+- Methodology footer bottom-left: statistic label + "· n = N"  (REQ-C-24h)
+  e.g. "Osuus vastaajista (%) · n = 1001"
 """
 from __future__ import annotations
 
@@ -19,6 +26,15 @@ from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
 
 _FONT = "Liberation Sans"
 _IN = Inches(1)
+
+# Statistic → Finnish methodology label (generic; no question-specific text)
+_STAT_FOOTER: dict[str, str] = {
+    "pct": "Osuus vastaajista (%)",
+    "count": "Lukumäärä",
+    "mean": "Keskiarvo",
+    "median": "Mediaani",
+    "sum": "Summa",
+}
 
 
 def _slide_dims(slide) -> tuple[int, int]:
@@ -61,8 +77,9 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     Adds (in z-order, bottom → top):
     1. Cream background rectangle (full slide)
     2. Teal vertical accent bar (top-left)
-    3. Title textbox (ctx.title, bold INK)  — REQ-C-24a, REQ-D-04
-    4. N annotation textbox (base_n["Total"]) — REQ-C-24h
+    3. Title textbox (ctx.title, bold INK, word-wrapped) — REQ-C-24a, REQ-D-04
+    4. Methodology footer bottom-left (stat label + "· n = N") — REQ-C-24h
+    5. N annotation textbox bottom-right (compact) — REQ-C-24h
 
     Call this *before* the image builder so the chart picture lands on top.
     """
@@ -97,8 +114,23 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             [(title, 21, PX_INK, True)],
         )
 
-    # 4 — N annotation (bottom-right)  (REQ-C-24h)
+    # 4 — Methodology footer bottom-left (REQ-C-24h)
+    #     Format: "<stat label> · n = <base_n>"
     base_n = ctx.series.base_n.get("Total")
+    stat_label = _STAT_FOOTER.get(ctx.series.statistic, ctx.series.statistic)
+    if base_n is not None:
+        footer_text = f"{stat_label} · n = {base_n}"
+    else:
+        footer_text = stat_label
+    _textbox(
+        slide,
+        Inches(0.62), sh - Inches(0.50),
+        sw - Inches(4.0), Inches(0.40),
+        [(footer_text, 9.5, PX_MUTED, False)],
+        align=PP_ALIGN.LEFT,
+    )
+
+    # 5 — N annotation compact (bottom-right) — kept for legacy compat
     if base_n is not None:
         _textbox(
             slide,

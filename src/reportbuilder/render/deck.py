@@ -16,9 +16,8 @@ from pptx.util import Inches
 from reportbuilder.model.report import Report
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
-from reportbuilder.render.image import IMAGE_BUILDERS
 from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
-from reportbuilder.render.native import NATIVE_BUILDERS
+import reportbuilder.render.plugins as _plugins  # registers all plugins as side-effect
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +130,10 @@ def render_report(
             title=title,
         )
 
-        # --- Dispatch ---
+        # --- Dispatch via ChartPlugin registry (REQ-C-13) ---
+        p = _plugins.plugin(spec.chart_type)
         if report.render_mode == "native":
-            gf = NATIVE_BUILDERS[spec.chart_type](ctx)
+            gf = p.native_build(ctx)
             apply_elements(gf.chart, ctx, title)
             add_n_annotation(ctx)
             add_filter_annotation(ctx)
@@ -141,7 +141,7 @@ def render_report(
             # Add house-style slide chrome first so chart image lands on top
             # (REQ-C-24a/h, REQ-C-25, REQ-C-27a, REQ-D-04)
             add_image_slide_chrome(ctx)
-            IMAGE_BUILDERS[spec.chart_type](ctx)
+            p.image_build(ctx)
 
     assert_complete(prs, report)
     assert_no_pictures_in_chart_slots(prs, report, style)
