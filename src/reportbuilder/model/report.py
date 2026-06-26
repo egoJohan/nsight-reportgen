@@ -41,6 +41,7 @@ class ChartSpec:
     template_slot: str
     elements: ElementToggles
     scatter_xy: tuple[str, str] | None = None   # scatter only (design §9a)
+    show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ def report_from_json(data: dict | str) -> Report:
             template_slot=c["template_slot"],
             elements=ElementToggles(**el),
             scatter_xy=tuple(sx) if sx is not None else None,
+            show_not_answered=c.get("show_not_answered", False),
         )
 
     return Report(

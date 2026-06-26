@@ -39,3 +39,17 @@ class QuestionModel:
 
     def variable(self, name: str) -> Variable:
         return self.variables[name]
+
+    def missing_value_labels(self, qid: str) -> list[tuple[float, str]]:
+        """Return (code, label) pairs for user-missing values of the primary variable.
+
+        Sorted by code ascending. Falls back to the bare code as a string when the
+        variable has no label entry for that missing code. (REQ-D-06)
+        """
+        q = self.question(qid)
+        var = self.variables[q.variables[0]]
+        label_map = {vl.value: vl.label for vl in var.value_labels}
+        return [
+            (code, label_map.get(code, str(int(code) if code == int(code) else code)))
+            for code in sorted(var.missing_values)
+        ]

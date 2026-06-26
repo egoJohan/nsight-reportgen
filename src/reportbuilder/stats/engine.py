@@ -5,7 +5,7 @@ SeriesResult — the spine output (R1). REQ-C-14/15/16, M-03.
 """
 from __future__ import annotations
 import pandas as pd
-from reportbuilder.model.question import Question, QuestionModel
+from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
@@ -15,6 +15,10 @@ from reportbuilder.stats.sorting import sort_categories
 from reportbuilder.stats.statistics import pct, count_value, summary_value
 # Import statistics module to trigger built-in registrations
 import reportbuilder.stats.statistics  # noqa: F401
+
+# Label used for the aggregated missing-values bucket (REQ-D-06, MV).
+# Module constant so it can be imported by tests and localised in future.
+NOT_ANSWERED_LABEL: str = "Not answered"
 
 
 def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
@@ -58,6 +62,26 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         base_n=base_n, statistic=stat.name)
 
 
+def _missing_counts(data: pd.DataFrame, var: Variable,
+                    classifying_var: str | None = None) -> dict[str, int]:
+    """Count sysmis + user-missing rows per segment.
+
+    Returns a dict of {segment_label: count}. Always includes "Total".
+    For segmented data the per-segment count only considers rows whose
+    classifying variable has a valid (non-NaN) code — consistent with the
+    segment_bases convention. (REQ-D-06, REQ-MV-01, REQ-MV-02)
+    """
+    s = pd.to_numeric(data[var.name], errors="coerce")
+    missing_mask = s.isna() | s.isin(var.missing_values)
+    result: dict[str, int] = {"Total": int(missing_mask.sum())}
+    if classifying_var is not None:
+        seg = pd.to_numeric(data[classifying_var], errors="coerce")
+        for code in sorted(seg.dropna().unique()):
+            seg_label = str(int(code)) if float(code).is_integer() else str(code)
+            result[seg_label] = int((missing_mask & (seg == code)).sum())
+    return result
+
+
 def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     var = model.variable(question.variables[0])
@@ -71,12 +95,20 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     segments = tuple(s for s in bases if s != "Total")
     segments = (*segments, "Total") if segments else ("Total",)
 
+    # When show_not_answered is True, recompute over total (valid + missing). (REQ-D-06, MV)
+    show_na: bool = getattr(spec, "show_not_answered", False)
+    if show_na:
+        missing_n = _missing_counts(data, var, spec.classifying_var)
+        denom = {seg: bases.get(seg, 0) + missing_n.get(seg, 0) for seg in segments}
+    else:
+        denom = {seg: bases.get(seg, 0) for seg in segments}
+
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     for idx, (code, label) in enumerate(labels.items()):
         for seg in segments:
             c = counts.get((code, seg), 0)
-            base = bases.get(seg, 0)
+            base = denom.get(seg, 0)
             cells[(label, seg)] = Cell(pct=pct(c, base, spec.number_format),
                                        count=count_value(c, spec.number_format),
                                        mean=None)
@@ -84,9 +116,22 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         rows.append((label, code, {"pct": total_cell.pct, "count": total_cell.count,
                                    "mean": 0.0, "data_index": idx,
                                    "topbox": total_cell.pct}))
-    categories = tuple(sort_categories(rows, spec.sort))
-    return SeriesResult(categories=categories, segments=segments, cells=cells,
-                        base_n={s: bases.get(s, 0) for s in segments},
+    categories: list[str] = list(sort_categories(rows, spec.sort))
+
+    if show_na:
+        # Append "Not answered" last — after all real sorted categories.
+        for seg in segments:
+            mc = missing_n.get(seg, 0)
+            base = denom.get(seg, 0)
+            cells[(NOT_ANSWERED_LABEL, seg)] = Cell(
+                pct=pct(mc, base, spec.number_format),
+                count=count_value(mc, spec.number_format),
+                mean=None,
+            )
+        categories.append(NOT_ANSWERED_LABEL)
+
+    return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
+                        base_n={s: denom.get(s, 0) for s in segments},
                         statistic=spec.statistic)
 
 
