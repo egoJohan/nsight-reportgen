@@ -18,6 +18,14 @@ The original Attendo deck (`input/Attendo Bränditutkimus Marraskuu 2025.pptx`) 
 headline insight + question text + branded, correctly-typed charts (often small-multiples) + logo/
 footer. Generated slides must approach this.
 
+## SCOPE CHANGE (2026-06-26, user): NATIVE PPT rendering DROPPED for now
+The deck output is the **house-styled IMAGE slides** (matplotlib charts placed on cream-canvas
+slides). Native OOXML / template-fill rendering (A1 "render into the template" via `replace_data`,
+and editable `c:chart` output) is **deferred** — do NOT invest there now. Consequences: image mode is
+the default (and effectively only) render mode; the UI drops the native/image toggle; `ChartPlugin`s
+need only `image_build`; combo/native-fidelity/slot-binding concerns are moot. The PoC-quality bar is
+met by the IMAGE house style (R1, approved) generalized to all types (R2).
+
 ## Track A — Rendering quality (the core value)
 
 A1. **Render INTO the template.** `orchestrate_render` currently calls `build_pptx(...)` with no
