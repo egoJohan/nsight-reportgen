@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
-    fmt_value, style_legend,
+    format_value, style_legend,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC, CREAM,
@@ -47,7 +47,7 @@ def build_image_line(ctx) -> None:
         for xi, v in zip(x, vals):
             if v is not None:
                 ax.annotate(
-                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     xy=(xi, v),
                     xytext=(0, 7),
                     textcoords="offset points",

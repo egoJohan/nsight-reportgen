@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values, fmt_value, style_legend,
+    new_figure, render_png, place_picture, series_values, format_value, style_legend,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
@@ -133,7 +133,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
-                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     ha="center", va="bottom",
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
@@ -185,7 +185,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
             if v is not None:
                 ax.text(
                     v + off, yi,
-                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     va="center", ha="left",
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
@@ -216,6 +216,7 @@ def build_image_column_stacked(ctx) -> None:
     bottoms = np.zeros(len(cats))
     all_vals = [sum(data[s][i] or 0 for s in segs) for i in range(len(cats))]
     max_val = max(all_vals, default=0.0)
+    flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
     for i, seg in enumerate(segs):
         vals = np.array([v or 0.0 for v in data[seg]])
@@ -226,7 +227,7 @@ def build_image_column_stacked(ctx) -> None:
             if v > 1:   # skip label if segment is too thin
                 ax.text(
                     bar.get_x() + bar.get_width() / 2, mid,
-                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )
@@ -258,6 +259,7 @@ def build_image_bar_stacked(ctx) -> None:
     lefts = np.zeros(n_cats)
     all_totals = [sum(data[s][i] or 0 for s in segs) for i in range(n_cats)]
     max_val = max(all_totals, default=0.0)
+    flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
     for i, seg in enumerate(segs):
         vals = np.array([v or 0.0 for v in data[seg]])
@@ -268,7 +270,7 @@ def build_image_bar_stacked(ctx) -> None:
             if v > 1:
                 ax.text(
                     mid, yi,
-                    fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )

@@ -15,7 +15,7 @@ Returns None.
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values, fmt_value,
+    new_figure, render_png, place_picture, series_values, format_value,
 )
 from reportbuilder.render.house_style import TEAL, INK, MUTED, CREAM
 
@@ -32,6 +32,7 @@ def build_image_funnel(ctx) -> None:
 
     max_val = max(vals) if vals else 1.0
     bar_h = 0.60
+    all_vals = [v for v in vals if v is not None]
 
     for i, (cat, v) in enumerate(zip(cats, vals)):
         # Centre the bar on the x-axis (symmetric funnel silhouette)
@@ -40,7 +41,7 @@ def build_image_funnel(ctx) -> None:
                 linewidth=0.8, zorder=3)
 
         # Data label centred in bar
-        lbl = fmt_value(v, ctx.series.statistic, ctx.spec.number_format)
+        lbl = format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
         ax.text(
             left + v / 2, i, lbl,
             ha="center", va="center",

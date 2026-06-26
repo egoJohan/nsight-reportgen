@@ -377,11 +377,16 @@ def test_fmt_value_count_no_percent_sign():
 
 
 def test_fmt_value_mean_respects_decimals():
-    """fmt_value returns '4.2' when statistic='mean' with default mean_decimals=1."""
+    """fmt_value returns '4.2' for mean=4.2 (auto mode, Likert-style → 1 decimal).
+
+    In auto mode mean_decimals is ignored; use mode='manual' to enforce 0 decimals.
+    REQ-N-02.
+    """
     from reportbuilder.render.image._mpl import fmt_value
     from reportbuilder.model.report import NumberFormat
     assert fmt_value(4.2, "mean", NumberFormat()) == "4.2"
-    assert fmt_value(4.0, "mean", NumberFormat(mean_decimals=0)) == "4"
+    # manual mode: explicit mean_decimals=0 → integer display
+    assert fmt_value(4.0, "mean", NumberFormat(mode="manual", mean_decimals=0)) == "4"
 
 
 # ---------------------------------------------------------------------------

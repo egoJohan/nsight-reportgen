@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
-    render_png, place_picture, series_values, style_legend,
+    render_png, place_picture_square, series_values, style_legend,
 )
 from reportbuilder.render.house_style import (
     register_fonts, series_colors, CREAM, INK, MUTED, GRIDC,
@@ -42,9 +42,11 @@ def build_image_radar(ctx) -> None:
     cats, segs, data = series_values(ctx.series)
     clrs = series_colors(len(segs))
 
+    # Square figure: min slot dimension → circular polar axes, not oval
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
-    fig = plt.figure(figsize=(w_in, h_in), dpi=200)
+    sq = min(w_in, h_in)
+    fig = plt.figure(figsize=(sq, sq), dpi=200)
     fig.patch.set_facecolor(CREAM)
     ax = fig.add_subplot(111, polar=True)
     ax.set_facecolor(CREAM)
@@ -86,4 +88,4 @@ def build_image_radar(ctx) -> None:
         style_legend(ax, loc="upper right")
 
     png = render_png(fig)
-    place_picture(ctx, png)
+    place_picture_square(ctx, png)

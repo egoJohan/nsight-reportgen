@@ -78,20 +78,107 @@ def colors(ctx, n: int) -> list[str]:
     return ["#" + ctx.style.color_for(i) for i in range(n)]
 
 
-def fmt_value(v: float, statistic: str, number_format=None) -> str:
-    """Format a data label value with statistic-appropriate suffix.
+def auto_decimals(values: list[float], statistic: str) -> int:
+    """Choose decimal places automatically from value range and statistic (REQ-N-01/02/03).
 
-    pct  → "86 %"  (REQ-C-24f, show_pct_sign)
-    mean → "4.2"   (respects number_format.mean_decimals)
-    count / other → "86"
+    pct:   0 when all values are ≥ 10 or fractional parts are negligible;
+           1 when any value is < 10 with a non-trivial fraction or the spread
+           between adjacent sorted values is < 1.
+    mean:  0 if values span a wide, integer-ish range (spread ≥ 5 and fracs trivial);
+           1 otherwise (Likert-style or close values).
+    count: always 0.
     """
+    if statistic == "count":
+        return 0
+    clean = [float(v) for v in values if v is not None]
+    if not clean:
+        return 1 if statistic == "mean" else 0
     if statistic == "pct":
-        show_sign = getattr(number_format, "show_pct_sign", True) if number_format else True
-        return f"{v:.0f} %" if show_sign else f"{v:.0f}"
+        all_large = all(v >= 10.0 for v in clean)
+        frac_trivial = all(abs(v % 1) < 0.05 for v in clean)
+        if all_large or frac_trivial:
+            return 0
+        sorted_vals = sorted(clean)
+        if len(sorted_vals) > 1:
+            min_spread = min(b - a for a, b in zip(sorted_vals, sorted_vals[1:]))
+        else:
+            min_spread = 1.0
+        if any(v < 10.0 for v in clean) or min_spread < 1.0:
+            return 1
+        return 0
     if statistic == "mean":
-        dec = getattr(number_format, "mean_decimals", 1) if number_format else 1
+        spread = max(clean) - min(clean)
+        int_ish = all(abs(v % 1) < 0.1 for v in clean)
+        if spread >= 5.0 and int_ish:
+            return 0  # wide integer-ish range
+        return 1  # Likert-style or close values
+    return 0
+
+
+def format_value(v: float, statistic: str, fmt, all_values: list[float] | None = None) -> str:
+    """Format a single data-label value, honouring NumberFormat.mode (REQ-N-01/02/03).
+
+    mode='auto'   → choose decimals from all_values (or [v] if not supplied).
+    mode='manual' → use fmt.pct_decimals / fmt.mean_decimals.
+
+    Appends ' %' for pct when show_pct_sign is True.
+    """
+    show_sign = getattr(fmt, "show_pct_sign", True) if fmt else True
+    mode = getattr(fmt, "mode", "auto") if fmt else "auto"
+
+    if mode == "auto":
+        vals = list(all_values) if all_values is not None else [float(v)]
+        dec = auto_decimals(vals, statistic)
+    else:
+        if statistic == "pct":
+            dec = getattr(fmt, "pct_decimals", 0) if fmt else 0
+        elif statistic == "mean":
+            dec = getattr(fmt, "mean_decimals", 1) if fmt else 1
+        else:
+            dec = 0
+
+    if statistic == "pct":
+        return f"{v:.{dec}f} %" if show_sign else f"{v:.{dec}f}"
+    if statistic == "mean":
         return f"{v:.{dec}f}"
     return f"{v:.0f}"
+
+
+def fmt_value(v: float, statistic: str, number_format=None) -> str:
+    """Legacy label formatter — delegates to format_value (auto mode; single-value context).
+
+    Prefer format_value(v, statistic, fmt, all_values) for correct auto-decimals.
+    """
+    return format_value(v, statistic, number_format, all_values=[v])
+
+
+def new_square_figure(ctx):
+    """Create a square matplotlib Figure sized to min(slot width, slot height).
+
+    Used by pie, doughnut, and radar builders so the circle is not stretched
+    when placed in a landscape slide slot.  Returns (fig, ax) with a cartesian
+    Axes (caller replaces ax with a polar Axes if needed).
+    """
+    register_fonts()
+    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    sq = min(w_in, h_in)
+    fig, ax = plt.subplots(figsize=(sq, sq), dpi=200)
+    fig.patch.set_facecolor(CREAM)
+    ax.set_facecolor(CREAM)
+    return fig, ax
+
+
+def place_picture_square(ctx, png_path: str) -> None:
+    """Place a square PNG centred in ctx.slot, maintaining a 1:1 aspect ratio.
+
+    Fits the image to the smaller slot dimension and centres it within the slot
+    so a circular pie/radar chart is not stretched to oval by the 16:9 slot.
+    """
+    display_size = min(ctx.slot.width, ctx.slot.height)
+    left = ctx.slot.left + (ctx.slot.width - display_size) // 2
+    top = ctx.slot.top + (ctx.slot.height - display_size) // 2
+    ctx.slide.shapes.add_picture(png_path, left, top, display_size, display_size)
 
 
 def style_legend(ax, loc: str = "best") -> None:

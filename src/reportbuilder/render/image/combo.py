@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
-    fmt_value, style_legend,
+    format_value, style_legend,
 )
 from reportbuilder.render.house_style import TEAL, TEAL_LT, INK, MUTED, GRIDC, CREAM
 
@@ -30,6 +30,7 @@ def build_image_combo(ctx) -> None:
     fig, ax = new_figure(ctx)
 
     x = list(range(len(cats)))
+    all_vals = [v for seg in segs for v in data[seg] if v is not None]
 
     # Primary bars (segment 0 → TEAL)
     bars = ax.bar(x, data[segs[0]], color=TEAL, edgecolor=CREAM,
@@ -40,7 +41,7 @@ def build_image_combo(ctx) -> None:
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + max(0.5, bar.get_height() * 0.01),
-            fmt_value(v, ctx.series.statistic, ctx.spec.number_format),
+            format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
             ha="center", va="bottom",
             fontsize=9.5, fontweight="bold", color=INK, zorder=5,
         )

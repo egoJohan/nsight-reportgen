@@ -13,8 +13,9 @@ class SortSpec:
 
 @dataclass(frozen=True)
 class NumberFormat:
-    pct_decimals: int = 0                       # REQ-N-01
-    mean_decimals: int = 1                      # REQ-N-02
+    mode: str = "auto"                          # "auto" (range-based) | "manual" (explicit decimals)
+    pct_decimals: int = 0                       # REQ-N-01 — manual mode only
+    mean_decimals: int = 1                      # REQ-N-02 — manual mode only
     count_round_up: bool = False                # REQ-N-03
     show_pct_sign: bool = True
 
@@ -69,7 +70,13 @@ def report_from_json(data: dict | str) -> Report:
             chart_type=c["chart_type"],
             statistic=c["statistic"],
             classifying_var=c.get("classifying_var"),
-            number_format=NumberFormat(**nf),
+            number_format=NumberFormat(
+                mode=nf.get("mode", "auto"),
+                pct_decimals=nf.get("pct_decimals", 0),
+                mean_decimals=nf.get("mean_decimals", 1),
+                count_round_up=nf.get("count_round_up", False),
+                show_pct_sign=nf.get("show_pct_sign", True),
+            ),
             sort=SortSpec(
                 basis=so["basis"],
                 topbox_codes=tuple(so.get("topbox_codes", ())),

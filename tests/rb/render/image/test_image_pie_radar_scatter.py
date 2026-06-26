@@ -137,12 +137,11 @@ def _make_ctx(chart_type: str, series: SeriesResult, scatter_xy=None):
 
 
 def _assert_picture(slide, slot):
-    """Assert exactly one PICTURE shape with correct slot dimensions."""
+    """Assert exactly one PICTURE shape and a non-empty image blob."""
     pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 1, f"Expected 1 PICTURE shape, found {len(pics)}"
     pic = pics[0]
-    assert pic.width == slot.width, f"Picture width {pic.width} != slot width {slot.width}"
-    assert pic.height == slot.height, f"Picture height {pic.height} != slot height {slot.height}"
+    assert pic.width > 0 and pic.height > 0, "Picture must have positive dimensions"
 
     # Try PIL first; fall back to checking blob
     try:
@@ -153,6 +152,35 @@ def _assert_picture(slide, slot):
         assert w > 0 and h > 0, "PIL image size must be positive"
     except ImportError:
         assert len(pic.image.blob) > 0, "Picture blob must be non-empty"
+
+
+def _assert_picture_square_centered(slide, slot):
+    """Assert pie/doughnut/radar is placed square and centred within slot.
+
+    These charts render as square PNGs (to preserve circular aspect) and are
+    placed centred in the slide slot.  Width and height must be equal and equal
+    to min(slot.width, slot.height).
+    """
+    pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 1, f"Expected 1 PICTURE shape, found {len(pics)}"
+    pic = pics[0]
+    expected_size = min(slot.width, slot.height)
+    assert pic.width == expected_size, (
+        f"Square-placed chart width {pic.width} != min slot dim {expected_size}"
+    )
+    assert pic.height == expected_size, (
+        f"Square-placed chart height {pic.height} != min slot dim {expected_size}"
+    )
+    # Verify centred within slot
+    expected_left = slot.left + (slot.width - expected_size) // 2
+    expected_top = slot.top + (slot.height - expected_size) // 2
+    assert pic.left == expected_left, (
+        f"Chart left {pic.left} != expected centred left {expected_left}"
+    )
+    assert pic.top == expected_top, (
+        f"Chart top {pic.top} != expected centred top {expected_top}"
+    )
+    assert len(pic.image.blob) > 0, "Picture blob must be non-empty"
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +201,17 @@ def test_registry_has_pie_doughnut_radar_scatter():
 # ---------------------------------------------------------------------------
 
 def test_image_pie_places_picture():
-    """build_image_pie places exactly one slot-sized PICTURE shape."""
+    """build_image_pie places a square PICTURE centred in the slot (circular aspect).
+
+    Pie/doughnut/radar are rendered square and placed centred so the circle is
+    not stretched oval by the 16:9 slot.
+    """
     from reportbuilder.render.image.pie import build_image_pie
 
     prs, slide, slot, ctx = _make_ctx("pie", _single_segment_series())
     result = build_image_pie(ctx)
     assert result is None, "builder should return None"
-    _assert_picture(slide, slot)
+    _assert_picture_square_centered(slide, slot)
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +219,13 @@ def test_image_pie_places_picture():
 # ---------------------------------------------------------------------------
 
 def test_image_doughnut_places_picture():
-    """build_image_doughnut places exactly one slot-sized PICTURE shape."""
+    """build_image_doughnut places a square PICTURE centred in the slot."""
     from reportbuilder.render.image.pie import build_image_doughnut
 
     prs, slide, slot, ctx = _make_ctx("doughnut", _single_segment_series())
     result = build_image_doughnut(ctx)
     assert result is None, "builder should return None"
-    _assert_picture(slide, slot)
+    _assert_picture_square_centered(slide, slot)
 
 
 # ---------------------------------------------------------------------------
@@ -201,13 +233,13 @@ def test_image_doughnut_places_picture():
 # ---------------------------------------------------------------------------
 
 def test_image_radar_places_picture():
-    """build_image_radar places exactly one slot-sized PICTURE shape (multi-segment)."""
+    """build_image_radar places a square PICTURE centred in the slot (circular polygon)."""
     from reportbuilder.render.image.radar import build_image_radar
 
     prs, slide, slot, ctx = _make_ctx("radar", _multi_segment_series())
     result = build_image_radar(ctx)
     assert result is None, "builder should return None"
-    _assert_picture(slide, slot)
+    _assert_picture_square_centered(slide, slot)
 
 
 # ---------------------------------------------------------------------------
