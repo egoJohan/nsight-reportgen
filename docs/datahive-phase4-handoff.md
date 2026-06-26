@@ -251,3 +251,32 @@ Add a generic listing endpoint:
 
 This is the third and last read surface nSight needs; with the doc-read (addendum 1), blob
 read/write (addendum 2), and this listing, the full Case/Material/Report loop works over REST.
+
+---
+
+## CONSOLIDATED GAP LIST (2026-06-26) — for the egoHive/datahive session
+
+### A. BLOCKING — three REST read surfaces (service methods already exist; expose over REST)
+1. `GET /api/v1/projects/{project_id}/docs/{reference_id}` → `{label,name,reference_id,text}` —
+   delegates to `service.read_raw_doc`. Unblocks `load_report` (REQ-C-08). [addendum 1]
+2. `POST /api/v1/projects/{project_id}/blobs` (multipart `{file,label,name,reference_id}`) →
+   `{reference_id,doc_id,size}` (`attach_raw_blob`); `GET /api/v1/projects/blobs/{reference_id}` →
+   raw bytes (`read_raw_blob`; declare BEFORE `GET /{project_id}`). Unblocks materials. [addendum 2]
+3. `GET /api/v1/projects/{project_id}/docs?label=report` → `{docs:[{reference_id,name,label}]}` —
+   new thin service method enumerating `doc:<label>` records. Unblocks report listing. [addendum 3]
+
+### B. SETUP / DATA (datahive instance)
+4. Valid service token + tenant — running :7901/:7902 reject testhive/admin_token (401). Mint via
+   `datahive auth grant <name>`; document the path + the tenant it implies.
+5. Confirm/create the generic template `wftemplate:dataset-report-study` on the running hive
+   (create_case creates from it).
+
+### C. OPTIONAL / DECISIONS
+6. Routing: nSight calls datahive directly at :7901 (works). If routing via egoHive `/api/v1/dh/`
+   gateway instead, confirm it forwards /docs/{ref} + /blobs and how egoHive issues nSight a token.
+   (Only egoHive-side item; otherwise no egoHive change needed.)
+7. No `DELETE /api/v1/projects/{id}` (only DELETE /docs/{ref}); UI delete-case unsupported — add if wanted.
+8. `aggregate` is counts-only (no median/std/percentile). For cold-render of summary stats, add a
+   generic row-export / sum-capable aggregate. Not needed while nSight computes in-process from cache.
+
+After A (1–3) + B (4–5), the full Case→Material→Report loop works persistently over REST.
