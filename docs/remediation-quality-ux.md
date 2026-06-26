@@ -48,7 +48,30 @@ A8. **Per-question statistic option (percentage / count / mean).** Each question
     renders correct whole-number counts (count number-format) and to **mean** the mean value. Pair it
     with the A3 per-question number-format control. (REQ-C-15, REQ-M-04, REQ-N)
 
-## Track B — Workflow / cleaner UX
+## Track B0 — Wizard workflow (the UX redesign blueprint, user-approved direction)
+
+Replace the feature-by-feature tabs with a guided **wizard**. Question-level config lives on the
+**material**; chart/slide config lives on the **report**.
+
+**Material area (pre-wizard):** view the curated questions (A0); per question set **single/multi**
+grouping and the **missing-value → "Not answered"** mapping (data properties, shared by all reports).
+
+**Report wizard (launched by "New report"):**
+1. **Select questions** — from the material's curated list (search, multi-select).
+2. **Configure** — per selected question: statistic (% default), number format (Automatic default),
+   sort (pct default), classifying variable, and **graph type pre-filled with the smartest
+   suggestion** by question shape (multi tickbox→horizontal bar; Likert single→stacked bar;
+   scale→mean bar; parts-of-whole single→pie/doughnut). Show a **live thumbnail** per question.
+3. **Review charts** — full per-chart preview; fine-tune type/options. (No end-of-line surprises.)
+4. **Assemble slides** — per slide: headline/insight + question text + description; reorder; choose
+   template/branding; optionally **multiple charts per slide** (small-multiples like the Attendo deck).
+5. **Generate & download** — full-deck preview, then **PPTX or PDF**.
+
+**Cross-cutting:** progress is saved (report persists; resumable); free back/forward; real chart
+visuals visible from step 2 onward. Stepper UI with clear step names; good defaults so a user can
+click through quickly and tweak only what they want.
+
+## Track B — Workflow / cleaner UX (components feeding B0)
 
 B1. **Make single/multi actually work** (settable + persisted + applied) and **explain it**: single =
     one-answer question (one variable); multi = a tickbox set (several 0/1 variables) reported as one
