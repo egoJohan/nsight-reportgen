@@ -81,7 +81,12 @@ def orchestrate_render(
 
     # 3. Build the PPTX deck
     out_dir = out_dir or tempfile.mkdtemp()
-    pptx = build_pptx(report, model, df, os.path.join(str(out_dir), "deck.pptx"))
+    try:
+        pptx = build_pptx(report, model, df, os.path.join(str(out_dir), "deck.pptx"))
+    except ValueError as exc:
+        # Surface chart-level errors (e.g. scatter with null scatter_xy) as a
+        # clean 422 instead of an unhandled 500. (FIX-3)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # 4. Convert to PDF (requires LibreOffice soffice)
     pdf = pptx_to_pdf(pptx, str(out_dir))

@@ -167,3 +167,45 @@ def test_orchestrate_render_wiring() -> None:
     mock_build_pptx.assert_called_once()
     mock_pptx_to_pdf.assert_called_once()
     mock_slide_view.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — ValueError from build_pptx (e.g. scatter with null scatter_xy)
+# becomes 422, not 500. (FIX-3)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrate_render_value_error_becomes_422() -> None:
+    """A ValueError raised by build_pptx is surfaced as HTTP 422, not 500.
+    This guards against scatter charts with a null scatter_xy crashing the
+    render endpoint with an unhandled exception. (FIX-3)"""
+    mock_client = _make_mock_client()
+    app = create_app(client=mock_client)
+    http = TestClient(app)
+
+    small_report = _make_small_report()
+    small_model = _make_small_model()
+    fake_df = pd.DataFrame({"q1_var": [1.0, 0.0, 1.0]})
+
+    mock_client.load_report.return_value = report_to_json(small_report)
+    mock_client.get_material.return_value = b"x"
+
+    with (
+        patch("reportbuilder.api.routes_render.read_sav") as mock_read_sav,
+        patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
+    ):
+        mock_read_sav.return_value = (fake_df, small_model)
+        # Simulate scatter chart with null scatter_xy raising ValueError.
+        mock_build_pptx.side_effect = ValueError("scatter chart requires scatter_xy")
+
+        resp = http.post(
+            "/cases/case-x/reports/rep-x/render",
+            json={"material_id": "mat-x"},
+        )
+
+    assert resp.status_code == 422, (
+        f"ValueError from build_pptx must map to 422, not {resp.status_code} (FIX-3)"
+    )
+    assert "scatter chart requires scatter_xy" in resp.json().get("detail", ""), (
+        "422 detail must include the original ValueError message (FIX-3)"
+    )

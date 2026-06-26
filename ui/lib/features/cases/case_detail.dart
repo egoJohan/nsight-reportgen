@@ -7,9 +7,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/models.dart';
 import '../data/data_area.dart';
+import '../data/providers/material_provider.dart';
 import '../reports/report_builder.dart';
 import '../reports/reports_list.dart';
+import '../reports/providers/builder_provider.dart';
 import '../reports/providers/reports_provider.dart';
 import 'providers/selected_case_provider.dart';
 
@@ -29,6 +32,18 @@ class CaseDetail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Safe: AppShell only renders CaseDetail when selectedCaseProvider != null.
     final caseRecord = ref.watch(selectedCaseProvider)!;
+
+    // FIX-1: when the active case changes, reset all case-scoped providers so
+    // a stale material / open report / builder draft from the previous case
+    // never leaks into the new case.
+    ref.listen<CaseRecord?>(selectedCaseProvider, (prev, next) {
+      if (prev?.id != next?.id) {
+        ref.invalidate(activeMaterialProvider);
+        ref.invalidate(builderProvider);
+        ref.invalidate(reportsProvider);
+        ref.read(selectedReportProvider.notifier).select(null);
+      }
+    });
 
     return DefaultTabController(
       length: 2, // fixed tabs: Data + Reports
@@ -60,7 +75,10 @@ class CaseDetail extends ConsumerWidget {
                   builder: (context, ref, _) {
                     final selectedId = ref.watch(selectedReportProvider);
                     if (selectedId != null) {
+                      // ValueKey ensures a fresh widget state when the report
+                      // changes, resetting _nameInitialized. (FIX-2)
                       return ReportBuilder(
+                        key: ValueKey(selectedId),
                         caseId: caseRecord.id,
                         reportId: selectedId,
                       );

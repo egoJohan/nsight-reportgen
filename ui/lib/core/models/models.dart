@@ -45,8 +45,41 @@ class QuestionItem {
       };
 }
 
+// ---------------------------------------------------------------------------
+// Canonical JSON defaults for ChartSpecDef required keys (FIX-4).
+// These match the backend's NumberFormat(), SortSpec(), ElementToggles()
+// zero-argument constructors so report_from_json never hits a KeyError.
+// ---------------------------------------------------------------------------
+
+const _kDefaultStatistic = 'pct';
+
+const _kDefaultNumberFormatJson = <String, dynamic>{
+  'pct_decimals': 0,
+  'mean_decimals': 1,
+  'count_round_up': false,
+  'show_pct_sign': true,
+};
+
+const _kDefaultSortJson = <String, dynamic>{
+  'basis': 'data_order',
+  'topbox_codes': <dynamic>[],
+  'descending': true,
+};
+
+const _kDefaultElementsJson = <String, dynamic>{
+  'title': true,
+  'legend': true,
+  'n': true,
+  'axis_names': true,
+  'filter_var': true,
+  'data_labels': true,
+};
+
 /// A chart specification within a report definition.
 /// Mirrors the backend ChartSpec keys in snake_case.
+///
+/// [scatterXy] is a two-element list [xVar, yVar] used only when
+/// [chartType] is 'scatter'.
 class ChartSpecDef {
   const ChartSpecDef({
     required this.questionRef,
@@ -64,12 +97,12 @@ class ChartSpecDef {
   final String chartType;
   final String? statistic;
   final String? classifyingVar;
-  // Kept loose for now; task 8.7 fills these in.
   final Map<String, dynamic>? numberFormat;
   final Map<String, dynamic>? sort;
   final String? templateSlot;
   final Map<String, dynamic>? elements;
-  final Map<String, dynamic>? scatterXy;
+  /// Two-element [xVar, yVar] for scatter charts; null for all others.
+  final List<String>? scatterXy;
 
   factory ChartSpecDef.fromJson(Map<String, dynamic> json) => ChartSpecDef(
         questionRef: json['question_ref'] as String,
@@ -80,10 +113,15 @@ class ChartSpecDef {
         sort: json['sort'] as Map<String, dynamic>?,
         templateSlot: json['template_slot'] as String?,
         elements: json['elements'] as Map<String, dynamic>?,
-        scatterXy: json['scatter_xy'] as Map<String, dynamic>?,
+        scatterXy:
+            (json['scatter_xy'] as List<dynamic>?)?.cast<String>(),
       );
 
   /// Produces the exact snake_case keys the backend's report_from_json expects.
+  ///
+  /// Required keys (`statistic`, `number_format`, `sort`, `elements`) are
+  /// ALWAYS present — null fields fall back to their canonical backend defaults
+  /// so report_from_json never hits a KeyError. (FIX-4)
   ///
   /// `classifying_var` and `scatter_xy` are always emitted (may be null).
   /// `template_slot` is emitted when set (auto-assigned in [ReportDef.toJson]).
@@ -91,14 +129,16 @@ class ChartSpecDef {
     final m = <String, dynamic>{
       'question_ref': questionRef,
       'chart_type': chartType,
+      // Always emit — backend raises KeyError if absent. (FIX-4)
+      'statistic': statistic ?? _kDefaultStatistic,
+      // Always emit classifying_var — null means no segmentation.
+      'classifying_var': classifyingVar,
+      // Always emit with canonical defaults when null. (FIX-4)
+      'number_format': numberFormat ?? _kDefaultNumberFormatJson,
+      'sort': sort ?? _kDefaultSortJson,
+      'elements': elements ?? _kDefaultElementsJson,
     };
-    if (statistic != null) m['statistic'] = statistic;
-    // Always emit classifying_var — null means no segmentation.
-    m['classifying_var'] = classifyingVar;
-    if (numberFormat != null) m['number_format'] = numberFormat;
-    if (sort != null) m['sort'] = sort;
     if (templateSlot != null) m['template_slot'] = templateSlot;
-    if (elements != null) m['elements'] = elements;
     // Always emit scatter_xy — null for non-scatter charts.
     m['scatter_xy'] = scatterXy;
     return m;
@@ -136,7 +176,7 @@ class ChartSpecDef {
             : elements as Map<String, dynamic>?,
         scatterXy: scatterXy == _sentinel
             ? this.scatterXy
-            : scatterXy as Map<String, dynamic>?,
+            : scatterXy as List<String>?,
       );
 }
 

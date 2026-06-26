@@ -144,7 +144,20 @@ class ChartSpecEditor extends ConsumerWidget {
               initialValue: currentChartType,
               items: chartTypeItems,
               onChanged: (v) {
-                if (v != null) update(spec.copyWith(chartType: v));
+                if (v == null) return;
+                var updated = spec.copyWith(chartType: v);
+                if (v == 'scatter' && spec.scatterXy == null) {
+                  // Auto-init scatter_xy to first two available variables. (FIX-3)
+                  final x = singleVars.isNotEmpty ? singleVars[0] : null;
+                  final y = singleVars.length >= 2 ? singleVars[1] : x;
+                  if (x != null && y != null) {
+                    updated = updated.copyWith(scatterXy: [x, y]);
+                  }
+                } else if (v != 'scatter') {
+                  // Clear scatter_xy when switching away from scatter.
+                  updated = updated.copyWith(scatterXy: null);
+                }
+                update(updated);
               },
             ),
             const SizedBox(height: 8),
@@ -191,6 +204,56 @@ class ChartSpecEditor extends ConsumerWidget {
               onChanged: (v) => update(spec.copyWith(classifyingVar: v)),
             ),
             const SizedBox(height: 8),
+
+            // Scatter X / Y variables — shown only for scatter charts. (FIX-3)
+            if (currentChartType == 'scatter') ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                key: const Key('scatter_x_dropdown'),
+                decoration: const InputDecoration(labelText: 'Scatter X'),
+                initialValue:
+                    singleVars.contains(spec.scatterXy?.elementAtOrNull(0))
+                        ? spec.scatterXy![0]
+                        : (singleVars.isNotEmpty ? singleVars[0] : null),
+                items: singleVars
+                    .map(
+                      (v) => DropdownMenuItem<String>(
+                        value: v,
+                        child: Text(v),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  final y = spec.scatterXy?.elementAtOrNull(1) ?? v;
+                  update(spec.copyWith(scatterXy: [v, y]));
+                },
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                key: const Key('scatter_y_dropdown'),
+                decoration: const InputDecoration(labelText: 'Scatter Y'),
+                initialValue:
+                    singleVars.contains(spec.scatterXy?.elementAtOrNull(1))
+                        ? spec.scatterXy![1]
+                        : (singleVars.length >= 2
+                            ? singleVars[1]
+                            : (singleVars.isNotEmpty ? singleVars[0] : null)),
+                items: singleVars
+                    .map(
+                      (v) => DropdownMenuItem<String>(
+                        value: v,
+                        child: Text(v),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  final x = spec.scatterXy?.elementAtOrNull(0) ?? v;
+                  update(spec.copyWith(scatterXy: [x, v]));
+                },
+              ),
+            ],
 
             // Sort basis
             DropdownButtonFormField<String>(

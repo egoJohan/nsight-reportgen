@@ -111,13 +111,17 @@ class _ReportBuilderState extends ConsumerState<ReportBuilder> {
         spacing: 8,
         runSpacing: 8,
         children: [
-          // Back button
+          // Back button — clears the builder draft before returning to the
+          // reports list so opening another report starts with a fresh state.
+          // (FIX-2)
           IconButton(
             key: const Key('back_button'),
             icon: const Icon(Icons.arrow_back),
             tooltip: 'Back to reports list',
-            onPressed: () =>
-                ref.read(selectedReportProvider.notifier).select(null),
+            onPressed: () {
+              ref.read(builderProvider.notifier).reset();
+              ref.read(selectedReportProvider.notifier).select(null);
+            },
           ),
 
           // Editable name

@@ -74,6 +74,9 @@ class ReportBuilderNotifier extends Notifier<ReportDraft?> {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  /// Clears the draft back to null (called on builder close or case switch). (FIX-2)
+  void reset() => state = null;
+
   /// Fetches the report and initialises the draft. (REQ-C-10)
   Future<void> load(String caseId, String reportId) async {
     final api = ref.read(nsightApiProvider);

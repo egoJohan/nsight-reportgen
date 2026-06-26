@@ -33,7 +33,7 @@ class ElementToggles:
 class ChartSpec:
     question_ref: str                           # qid (REQ-C-11)
     chart_type: str                             # canonical id (REQ-C-13)
-    statistic: str                              # "pct"|"count"|"mean" (REQ-C-15)
+    statistic: str                              # "pct"|"count"|"mean"|"median"|"sum" (REQ-C-15)
     classifying_var: str | None                 # segmentation -> segments + Total (REQ-C-14)
     number_format: NumberFormat
     sort: SortSpec
