@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../config/theme.dart';
+import '../features/cases/cases_list.dart';
 import 'bottom_nav.dart';
 import 'icon_rail.dart';
 
@@ -52,7 +53,7 @@ class _AppShellState extends State<AppShell> {
         color: NSightColors.surface,
         border: Border(right: BorderSide(color: NSightColors.border)),
       ),
-      child: Center(child: Text('Cases', style: _labelStyle())),
+      child: const CasesList(),
     );
   }
 
@@ -77,7 +78,7 @@ class _AppShellState extends State<AppShell> {
     return Scaffold(
       body: Container(
         color: NSightColors.background,
-        child: Center(child: Text('Cases', style: _labelStyle())),
+        child: const CasesList(),
       ),
       bottomNavigationBar: BottomNav(
         selected: _section,

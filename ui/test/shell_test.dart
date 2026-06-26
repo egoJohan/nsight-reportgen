@@ -1,16 +1,32 @@
 // REQ-U-04 — Responsive shell: 3-pane desktop / bottom-nav mobile.
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:nsight_ui/core/models/models.dart';
+import 'package:nsight_ui/core/providers/api_provider.dart';
+import 'package:nsight_ui/core/services/nsight_api.dart';
 import 'package:nsight_ui/shell/app_shell.dart';
 import 'package:nsight_ui/shell/bottom_nav.dart';
 import 'package:nsight_ui/shell/icon_rail.dart';
 
-/// Wraps [AppShell] with the providers and material app required for testing.
+/// Minimal fake that returns an empty cases list — keeps shell tests fast and
+/// network-free. The shell tests exercise layout only, not case content.
+class _FakeNsightApi extends NsightApi {
+  _FakeNsightApi() : super(dio: Dio(), baseUrl: 'http://fake');
+
+  @override
+  Future<List<CaseRecord>> listCases() async => [];
+}
+
+/// Wraps [AppShell] with a faked [nsightApiProvider] and material app.
 Widget _harness() {
-  return const ProviderScope(
-    child: MaterialApp(
+  return ProviderScope(
+    overrides: [
+      nsightApiProvider.overrideWithValue(_FakeNsightApi()),
+    ],
+    child: const MaterialApp(
       home: AppShell(),
     ),
   );
