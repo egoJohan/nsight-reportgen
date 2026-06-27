@@ -44,6 +44,13 @@ class ChartSpec:
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
     slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
+    show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
+    not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
+    category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
+
+    def label_override_map(self) -> dict[str, str]:
+        """Return the category-label overrides as a {full_label: short_label} lookup dict."""
+        return {full: short for full, short in self.category_label_overrides}
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,20 @@ def report_to_json(report: Report) -> str:
 def report_from_json(data: dict | str) -> Report:
     """Rebuild a Report from JSON (str or already-parsed dict), restoring tuples."""
     d = json.loads(data) if isinstance(data, str) else data
+
+    def _not_answered_codes(c: dict) -> tuple[float, ...] | None:
+        """Parse not_answered_codes keeping None (absent/null) distinct from () (empty)."""
+        raw = c.get("not_answered_codes")
+        if raw is None:
+            return None
+        return tuple(float(x) for x in raw)
+
+    def _label_overrides(c: dict) -> tuple[tuple[str, str], ...]:
+        """Normalize category_label_overrides from a list of [full, short] pairs or a dict."""
+        raw = c.get("category_label_overrides") or ()
+        if isinstance(raw, dict):
+            return tuple((str(k), str(v)) for k, v in raw.items())
+        return tuple((str(pair[0]), str(pair[1])) for pair in raw)
 
     def _chart(c: dict) -> ChartSpec:
         nf = c["number_format"]
@@ -91,6 +112,9 @@ def report_from_json(data: dict | str) -> Report:
             show_not_answered=c.get("show_not_answered", False),
             slide_title=c.get("slide_title"),
             slide_description=c.get("slide_description"),
+            show_empty_categories=c.get("show_empty_categories", True),
+            not_answered_codes=_not_answered_codes(c),
+            category_label_overrides=_label_overrides(c),
         )
 
     return Report(

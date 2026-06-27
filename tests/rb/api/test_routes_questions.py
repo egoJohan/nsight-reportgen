@@ -124,6 +124,85 @@ def test_get_questions_field_values(tmp_path) -> None:
     assert q["text"] == "Satisfaction"
 
 
+def test_get_questions_includes_values_and_category_labels(tmp_path) -> None:
+    """questions response includes `values` (all value labels incl. missing) and
+    `category_labels` (non-missing labels in render order). (Task B)"""
+    model = QuestionModel(
+        variables={
+            "v1": Variable(
+                name="v1",
+                label="Satisfaction",
+                measurement="categorical",
+                value_labels=(
+                    ValueLabel(1.0, "Low"),
+                    ValueLabel(2.0, "High"),
+                    ValueLabel(99.0, "EOS"),
+                ),
+                missing_values=frozenset({99.0}),
+            )
+        },
+        questions=[Question(qid="v1", kind="single", variables=("v1",), text="Satisfaction")],
+    )
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    client = TestClient(app)
+    with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
+        mock_load.return_value = model
+        response = client.get("/materials/mat-3/questions")
+    assert response.status_code == 200
+    q = response.json()["questions"][0]
+    # values includes the missing code so the picker can show/uncheck it
+    assert q["values"] == [
+        {"code": 1.0, "label": "Low"},
+        {"code": 2.0, "label": "High"},
+        {"code": 99.0, "label": "EOS"},
+    ]
+    # category_labels excludes the missing code
+    assert q["category_labels"] == ["Low", "High"]
+    # missing_values still present (SAV-detected default)
+    assert q["missing_values"] == [{"code": 99.0, "label": "EOS"}]
+
+
+def test_get_questions_multi_values_empty(tmp_path) -> None:
+    """Multi questions return `values` == [] and member labels as category_labels. (Task B)"""
+    model = _make_grouped_model()
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    client = TestClient(app)
+    with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
+        mock_load.return_value = model
+        response = client.get("/materials/mat-4/questions")
+    assert response.status_code == 200
+    multi = [q for q in response.json()["questions"] if q["kind"] == "multi"]
+    assert multi, "expected an auto-grouped multi question"
+    assert multi[0]["values"] == []
+    assert multi[0]["category_labels"] == ["Brand A awareness", "Brand B awareness"]
+
+
+def test_chart_spec_body_maps_new_option_fields() -> None:
+    """preview-chart body fields map onto the ChartSpec (incl. None-vs-tuple). (Task B)"""
+    from reportbuilder.api.routes_questions import ChartSpecBody, _chart_spec_from_body
+
+    body = ChartSpecBody(
+        question_ref="q1",
+        chart_type="horizontal_bar",
+        show_empty_categories=False,
+        not_answered_codes=[99.0],
+        category_label_overrides=[["Poor", "P"], ["Good", "G"]],
+    )
+    spec = _chart_spec_from_body(body)
+    assert spec.show_empty_categories is False
+    assert spec.not_answered_codes == (99.0,)
+    assert spec.category_label_overrides == (("Poor", "P"), ("Good", "G"))
+
+    # None stays None (distinct from empty tuple); defaults stay backward-compatible.
+    default_spec = _chart_spec_from_body(
+        ChartSpecBody(question_ref="q1", chart_type="horizontal_bar"))
+    assert default_spec.not_answered_codes is None
+    assert default_spec.show_empty_categories is True
+    assert default_spec.category_label_overrides == ()
+
+
 # ---------------------------------------------------------------------------
 # PUT /materials/{material_id}/grouping — multi  (REQ-C-06, M-02)
 # ---------------------------------------------------------------------------

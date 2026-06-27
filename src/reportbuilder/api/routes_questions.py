@@ -89,6 +89,30 @@ def _missing_value_list(model: QuestionModel, qid: str) -> list[dict]:
     return [{"code": code, "label": label} for code, label in pairs]
 
 
+def _value_list(model: QuestionModel, q) -> list[dict]:
+    """All defined value labels (incl. missing) of the question's representative variable.
+
+    Single questions: every value label of the primary variable as {code, label} so the
+    not-answered picker can show and uncheck them. Multi questions: empty list (the member
+    dichotomies are 0/1 tick boxes — no meaningful value codes to fold). (REQ-D-06)
+    """
+    if q.kind == "multi":
+        return []
+    var = model.variables[q.variables[0]]
+    return [{"code": vl.value, "label": vl.label} for vl in var.value_labels]
+
+
+def _category_labels(model: QuestionModel, q) -> list[str]:
+    """Base category label strings in render order (the label-override editor's list).
+
+    Single: non-missing value labels of the primary variable. Multi: member-variable labels.
+    """
+    if q.kind == "multi":
+        return [model.variables[v].label for v in q.variables]
+    var = model.variables[q.variables[0]]
+    return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
+
+
 def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
     """Fetch the material's raw bytes from the store and return the QuestionModel as produced
     directly by read_sav (all single questions, no auto-grouping). Used by the stateless grouping
@@ -138,6 +162,8 @@ def list_questions(
                 "text": q.text,
                 "suggested_chart_type": suggest_chart_type(q, _quick_series(q, model)),
                 "missing_values": _missing_value_list(model, q.qid),
+                "values": _value_list(model, q),
+                "category_labels": _category_labels(model, q),
             }
             for q in model.questions
         ]
@@ -288,6 +314,9 @@ class ChartSpecBody(BaseModel):
     elements: _ElementTogglesBody = _ElementTogglesBody()
     scatter_xy: list[str] | None = None
     show_not_answered: bool = False
+    show_empty_categories: bool = True
+    not_answered_codes: list[float] | None = None
+    category_label_overrides: list[tuple[str, str]] = []
 
 
 def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
@@ -320,6 +349,15 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         scatter_xy=tuple(body.scatter_xy) if body.scatter_xy is not None else None,
         show_not_answered=body.show_not_answered,
+        show_empty_categories=body.show_empty_categories,
+        not_answered_codes=(
+            tuple(float(c) for c in body.not_answered_codes)
+            if body.not_answered_codes is not None
+            else None
+        ),
+        category_label_overrides=tuple(
+            (str(full), str(short)) for full, short in body.category_label_overrides
+        ),
     )
 
 
