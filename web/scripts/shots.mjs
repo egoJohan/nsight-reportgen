@@ -108,9 +108,16 @@ function makeChart(questionRef, chartType, slot) {
 }
 
 async function seedReport(caseId, materialId) {
-  // Pick a few questions to pre-populate the report's charts.
+  // Pick a few questions to pre-populate the report's charts. Avoid chart
+  // types that need extra config to render (stacked → classifying var; scatter).
+  const STACKED = new Set(["stacked_vertical_bar", "stacked_horizontal_bar"]);
   const { questions } = await apiFetch(`/materials/${materialId}/questions`);
-  const picks = questions.slice(0, 3);
+  const safe = questions.filter(
+    (q) =>
+      !STACKED.has(q.suggested_chart_type) &&
+      q.suggested_chart_type !== "scatter"
+  );
+  const picks = (safe.length >= 3 ? safe : questions).slice(0, 3);
   const charts = picks.map((q, i) =>
     makeChart(q.qid, q.suggested_chart_type, `s${i + 1}`)
   );
@@ -141,7 +148,9 @@ async function main() {
   const { reportId, name: reportName } = await seedReport(caseId, materialId);
 
   console.log(`\nLaunching browser → ${APP_URL}`);
-  const browser = await chromium.launch({ headless: true });
+  // Use the full Chrome channel (new headless) — the bundled headless shell
+  // lacks the PDF viewer, so the Download step's embedded PDF would be blank.
+  const browser = await chromium.launch({ headless: true, channel: "chrome" });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
@@ -253,12 +262,85 @@ async function main() {
       const img = document.querySelector('img[alt="Chart preview"]');
       return img && img.complete && img.naturalWidth > 0;
     },
+    null,
     { timeout: 30_000 }
   );
   await page.waitForTimeout(400);
   const configurePath = resolve(SHOTS_DIR, "wizard-configure.png");
   await page.screenshot({ path: configurePath });
   console.log(`  Saved: ${configurePath}`);
+
+  // ── Screenshot 6: Wizard → Review (grid of live thumbnails) ──────────────
+  console.log("\nShot 6: Wizard Review step…");
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.waitForSelector("text=/Review —/", { timeout: 15_000 });
+  // Wait for all chart thumbnails to actually finish loading.
+  await page.waitForFunction(
+    () => {
+      const imgs = Array.from(
+        document.querySelectorAll('img[alt="Chart preview"]')
+      );
+      return (
+        imgs.length >= 3 &&
+        imgs.every((img) => img.complete && img.naturalWidth > 0)
+      );
+    },
+    null,
+    { timeout: 60_000 }
+  );
+  await page.waitForTimeout(400);
+  const reviewPath = resolve(SHOTS_DIR, "wizard-review.png");
+  await page.screenshot({ path: reviewPath });
+  console.log(`  Saved: ${reviewPath}`);
+
+  // ── Screenshot 7: Wizard → Slides (title/description + reorder) ──────────
+  console.log("\nShot 7: Wizard Slides step…");
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.waitForSelector('textarea[data-slot="textarea"]', {
+    timeout: 15_000,
+  });
+  // Type a sample title/description into the first slide for a richer shot.
+  const firstTitle = page.locator('input[data-slot="input"]').first();
+  await firstTitle.fill("Brand awareness keeps climbing");
+  const firstDesc = page.locator('textarea[data-slot="textarea"]').first();
+  await firstDesc.fill(
+    "Prompted awareness rose again this quarter, led by the 25–44 segment."
+  );
+  // Wait for slide thumbnails to load.
+  await page.waitForFunction(
+    () => {
+      const imgs = Array.from(
+        document.querySelectorAll('img[alt="Chart preview"]')
+      );
+      return (
+        imgs.length >= 3 &&
+        imgs.every((img) => img.complete && img.naturalWidth > 0)
+      );
+    },
+    null,
+    { timeout: 60_000 }
+  );
+  await page.waitForTimeout(400);
+  const slidesPath = resolve(SHOTS_DIR, "wizard-slides.png");
+  await page.screenshot({ path: slidesPath });
+  console.log(`  Saved: ${slidesPath}`);
+
+  // ── Screenshot 8: Wizard → Download (after a successful Generate) ────────
+  console.log("\nShot 8: Wizard Download step (rendering, can take ~30s)…");
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.waitForSelector('button:has-text("Generate deck")', {
+    timeout: 15_000,
+  });
+  await page.getByRole("button", { name: "Generate deck" }).click();
+  // The render chain (PPTX → PDF → raster) is slow — wait generously.
+  await page.waitForSelector('iframe[title="Report PDF preview"]', {
+    timeout: 90_000,
+  });
+  // Give the embedded PDF (PDFium) a moment to paint inside the iframe.
+  await page.waitForTimeout(6000);
+  const downloadPath = resolve(SHOTS_DIR, "wizard-download.png");
+  await page.screenshot({ path: downloadPath });
+  console.log(`  Saved: ${downloadPath}`);
 
   // Cleanup
   await context.close();
@@ -271,6 +353,9 @@ Done!
   shots/reports.png          → ${reportsPath}
   shots/wizard-select.png    → ${selectPath}
   shots/wizard-configure.png → ${configurePath}
+  shots/wizard-review.png    → ${reviewPath}
+  shots/wizard-slides.png    → ${slidesPath}
+  shots/wizard-download.png  → ${downloadPath}
 `);
 
   // Log paths for the controller
@@ -279,6 +364,9 @@ Done!
   console.log(`SCREENSHOT_REPORTS=${reportsPath}`);
   console.log(`SCREENSHOT_WIZARD_SELECT=${selectPath}`);
   console.log(`SCREENSHOT_WIZARD_CONFIGURE=${configurePath}`);
+  console.log(`SCREENSHOT_WIZARD_REVIEW=${reviewPath}`);
+  console.log(`SCREENSHOT_WIZARD_SLIDES=${slidesPath}`);
+  console.log(`SCREENSHOT_WIZARD_DOWNLOAD=${downloadPath}`);
 }
 
 main().catch((err) => {

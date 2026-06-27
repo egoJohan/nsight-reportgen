@@ -4,7 +4,6 @@ import {
   ArrowRightIcon,
   CheckIcon,
   ChevronLeftIcon,
-  ClockIcon,
   Loader2Icon,
   SaveIcon,
 } from "lucide-react";
@@ -17,6 +16,18 @@ import { useReport, useUpdateReport } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
+import StepReview from "./StepReview";
+import StepSlides from "./StepSlides";
+import StepDownload from "./StepDownload";
+
+/** Move an item within an array, returning a new array. */
+function move<T>(arr: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= arr.length || from === to) return arr;
+  const next = arr.slice();
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
 
 const STEPS = [
   { id: "select", label: "Select" },
@@ -29,9 +40,11 @@ const STEPS = [
 function Stepper({
   current,
   onJump,
+  chartCount,
 }: {
   current: number;
   onJump: (i: number) => void;
+  chartCount: number;
 }) {
   return (
     <div className="flex items-center">
@@ -39,7 +52,8 @@ function Stepper({
         const done = i < current;
         const active = i === current;
         const future = i > current;
-        const reachable = i <= 1; // RX2 implements Select + Configure
+        // All steps reachable; Download requires at least one chart.
+        const reachable = i < 4 || chartCount > 0;
         return (
           <div key={s.id} className="flex items-center">
             <button
@@ -77,21 +91,6 @@ function Stepper({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function ComingNext({ label }: { label: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
-      <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-muted">
-        <ClockIcon className="size-6 text-muted-foreground" />
-      </div>
-      <h3 className="text-base font-semibold">{label} — coming next</h3>
-      <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-        This step is built in the next task (RX3). The Select and Configure
-        steps are ready now.
-      </p>
     </div>
   );
 }
@@ -176,6 +175,16 @@ export default function ReportWizard({
     [mutate]
   );
 
+  const reorderCharts = useCallback(
+    (from: number, to: number) => {
+      mutate((d) => ({
+        ...d,
+        charts: normalizeSlots(move(d.charts, from, to)),
+      }));
+    },
+    [mutate]
+  );
+
   // Keep a ref to the latest draft for save() without stale closures.
   const draftRef = useRef<ReportDoc | null>(null);
   draftRef.current = draft;
@@ -198,7 +207,7 @@ export default function ReportWizard({
   }, [updateReport, reportId]);
 
   async function goNext() {
-    if (step === 1) await save(); // auto-save leaving Configure
+    if (step === 1 || step === 3) await save(); // auto-save leaving Configure / Slides
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
   }
 
@@ -255,7 +264,11 @@ export default function ReportWizard({
 
       {/* Stepper */}
       <div className="mb-6 flex justify-center rounded-xl border bg-card px-3 py-2">
-        <Stepper current={step} onJump={setStep} />
+        <Stepper
+          current={step}
+          onJump={setStep}
+          chartCount={draft.charts.length}
+        />
       </div>
 
       {/* Step body */}
@@ -278,9 +291,30 @@ export default function ReportWizard({
             onRemoveChart={removeChart}
           />
         )}
-        {step === 2 && <ComingNext label="Review" />}
-        {step === 3 && <ComingNext label="Slides" />}
-        {step === 4 && <ComingNext label="Download" />}
+        {step === 2 && (
+          <StepReview
+            materialId={materialId}
+            charts={draft.charts}
+            onBack={() => setStep(1)}
+          />
+        )}
+        {step === 3 && (
+          <StepSlides
+            materialId={materialId}
+            charts={draft.charts}
+            onUpdateChart={updateChart}
+            onReorder={reorderCharts}
+          />
+        )}
+        {step === 4 && (
+          <StepDownload
+            caseId={caseId}
+            reportId={reportId}
+            materialId={materialId}
+            draft={draft}
+            save={save}
+          />
+        )}
       </div>
 
       {/* Footer nav */}

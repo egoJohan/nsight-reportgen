@@ -86,6 +86,20 @@ export function useDeleteReport(caseId: string) {
   });
 }
 
+export function useRenderReport(caseId: string) {
+  return useMutation({
+    mutationFn: ({
+      reportId,
+      materialId,
+      view = "slides",
+    }: {
+      reportId: string;
+      materialId: string;
+      view?: "slides";
+    }) => api.reports.render(caseId, reportId, materialId, view),
+  });
+}
+
 export function usePreviewChart(materialId: string | null) {
   return useMutation({
     mutationFn: (chart: ChartSpec) => {

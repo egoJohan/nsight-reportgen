@@ -89,6 +89,20 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// The backend renders chart previews through LibreOffice (soffice), which is a
+// single-instance process — firing several preview requests at once (e.g. a
+// grid of thumbnails) makes soffice fail. Serialise preview rendering so only
+// one request is in flight at a time.
+let previewChain: Promise<unknown> = Promise.resolve();
+function serializePreview<T>(task: () => Promise<T>): Promise<T> {
+  const run = previewChain.then(task, task);
+  previewChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 export const api = {
   cases: {
     list: (): Promise<Case[]> =>
@@ -122,31 +136,29 @@ export const api = {
         json<{ variables: Variable[] }>(r)
       ),
 
-    previewChart: async (
-      materialId: string,
-      chart: ChartSpec
-    ): Promise<Blob> => {
-      const res = await fetch(
-        `${API_BASE}/materials/${materialId}/preview-chart`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(chart),
+    previewChart: (materialId: string, chart: ChartSpec): Promise<Blob> =>
+      serializePreview(async () => {
+        const res = await fetch(
+          `${API_BASE}/materials/${materialId}/preview-chart`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(chart),
+          }
+        );
+        if (!res.ok) {
+          // Backend returns {detail: "<reason>"} for 422 (and 503 etc.)
+          let detail = `${res.status} ${res.statusText}`;
+          try {
+            const body = await res.json();
+            if (body && typeof body.detail === "string") detail = body.detail;
+          } catch {
+            // not JSON — keep status text
+          }
+          throw new Error(detail);
         }
-      );
-      if (!res.ok) {
-        // Backend returns {detail: "<reason>"} for 422 (and 503 etc.)
-        let detail = `${res.status} ${res.statusText}`;
-        try {
-          const body = await res.json();
-          if (body && typeof body.detail === "string") detail = body.detail;
-        } catch {
-          // not JSON — keep status text
-        }
-        throw new Error(detail);
-      }
-      return res.blob();
-    },
+        return res.blob();
+      }),
   },
 
   reports: {
@@ -183,5 +195,54 @@ export const api = {
       fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}`, {
         method: "DELETE",
       }).then((r) => json<{ deleted: boolean }>(r)),
+
+    // Run the full PPTX → PDF → raster render chain (slow). Surfaces the
+    // backend's {detail} message (422 / 503) so the UI can show the reason.
+    render: async (
+      caseId: string,
+      reportId: string,
+      materialId: string,
+      view: "slides" = "slides"
+    ): Promise<{ pdf_url: string }> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/render`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ material_id: materialId, view }),
+        }
+      );
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (body && typeof body.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<{ pdf_url: string }>;
+    },
+
+    previewPdf: async (caseId: string, reportId: string): Promise<Blob> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pdf`
+      );
+      if (!res.ok) {
+        throw new Error(`${res.status} ${res.statusText}`);
+      }
+      return res.blob();
+    },
+
+    previewPptx: async (caseId: string, reportId: string): Promise<Blob> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pptx`
+      );
+      if (!res.ok) {
+        throw new Error(`${res.status} ${res.statusText}`);
+      }
+      return res.blob();
+    },
   },
 };
