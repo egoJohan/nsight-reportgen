@@ -173,14 +173,24 @@ export const api = {
         json<{ variables: Variable[] }>(r)
       ),
 
-    previewChart: (materialId: string, chart: ChartSpec): Promise<Blob> =>
+    previewChart: (
+      materialId: string,
+      chart: ChartSpec,
+      opts?: { renderTitle?: boolean }
+    ): Promise<Blob> =>
       serializePreview(async () => {
+        // When renderTitle is false the PNG omits the baked title block, so the
+        // frontend owns the title region (progressive preview overlay).
+        const body =
+          opts?.renderTitle === undefined
+            ? chart
+            : { ...chart, render_title: opts.renderTitle };
         const res = await fetch(
           `${API_BASE}/materials/${materialId}/preview-chart`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(chart),
+            body: JSON.stringify(body),
           }
         );
         if (!res.ok) {

@@ -124,6 +124,13 @@ export default function ReportWizard({
     done: number;
     total: number;
   } | null>(null);
+  // Per-chart pending flags (keyed by question_ref) so the Configure preview
+  // can show "Generating title…" / "Shortening labels…" placeholders over the
+  // regions that are still being produced. Set true when a chart's AI call
+  // starts, false when it resolves/fails.
+  const [aiPending, setAiPending] = useState<
+    Record<string, { titlePending: boolean; labelsPending: boolean }>
+  >({});
 
   // Initialise the working draft once the report loads.
   useEffect(() => {
@@ -270,6 +277,24 @@ export default function ReportWizard({
 
     aiRunning.current = true;
     setAiProgress({ done: 0, total: tasks.length });
+    // Mark each chart's regions pending up front so the preview shows the
+    // placeholders immediately (before any AI call resolves).
+    setAiPending((prev) => {
+      const next = { ...prev };
+      for (const t of tasks) {
+        next[t.ref] = {
+          titlePending: t.needTitle || (next[t.ref]?.titlePending ?? false),
+          labelsPending: t.needLabels || (next[t.ref]?.labelsPending ?? false),
+        };
+      }
+      return next;
+    });
+
+    const clearPending = (ref: string, field: "titlePending" | "labelsPending") =>
+      setAiPending((prev) => ({
+        ...prev,
+        [ref]: { ...prev[ref], [field]: false },
+      }));
 
     // Per-chart worker: labels + title run concurrently for one chart.
     const worker = async (task: Task) => {
@@ -291,6 +316,7 @@ export default function ReportWizard({
             .catch(() => {
               /* graceful: keep original labels */
             })
+            .finally(() => clearPending(task.ref, "labelsPending"))
         );
       }
       if (task.needTitle) {
@@ -313,6 +339,7 @@ export default function ReportWizard({
             .catch(() => {
               /* graceful: fall back to the question text */
             })
+            .finally(() => clearPending(task.ref, "titlePending"))
         );
       }
       await Promise.allSettled(jobs);
@@ -490,6 +517,7 @@ export default function ReportWizard({
           <StepConfigure
             materialId={materialId}
             charts={draft.charts}
+            aiPending={aiPending}
             onUpdateChart={updateChart}
             onRemoveChart={removeChart}
           />
