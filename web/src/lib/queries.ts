@@ -5,6 +5,7 @@ import type { ReportDoc } from "./api";
 // ---- Query keys ----
 export const qk = {
   cases: () => ["cases"] as const,
+  chartTypes: () => ["chart-types"] as const,
   questions: (materialId: string) => ["questions", materialId] as const,
   variables: (materialId: string) => ["variables", materialId] as const,
   report: (caseId: string, reportId: string) =>
@@ -22,6 +23,15 @@ export function useCreateCase() {
   return useMutation({
     mutationFn: (name: string) => api.cases.create(name),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.cases() }),
+  });
+}
+
+export function useChartTypes() {
+  return useQuery({
+    queryKey: qk.chartTypes(),
+    queryFn: api.chartTypes,
+    staleTime: Infinity, // the catalog is static for the app's lifetime
+    select: (d) => d.chart_types,
   });
 }
 

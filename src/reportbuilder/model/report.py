@@ -1,7 +1,8 @@
 """Report definition model (design §8)."""
 from __future__ import annotations
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class ChartSpec:
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
+    options: dict[str, Any] = field(default_factory=dict)  # free-form per-chart-type options (plugin-declared config keys)
 
     def label_override_map(self) -> dict[str, str]:
         """Return the category-label overrides as a {full_label: short_label} lookup dict."""
@@ -115,6 +117,7 @@ def report_from_json(data: dict | str) -> Report:
             show_empty_categories=c.get("show_empty_categories", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
+            options=dict(c.get("options") or {}),
         )
 
     return Report(

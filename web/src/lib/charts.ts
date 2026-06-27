@@ -91,6 +91,16 @@ export const SORT_ITEMS: Record<string, string> = Object.fromEntries(
   SORT_OPTIONS.map((s) => [s.id, s.label])
 );
 
+// ---- Sort direction (separate from the sort basis; descending is the default) ----
+export const SORT_DIRECTIONS: { id: "desc" | "asc"; label: string }[] = [
+  { id: "desc", label: "Descending" },
+  { id: "asc", label: "Ascending" },
+];
+
+export const SORT_DIRECTION_ITEMS: Record<string, string> = Object.fromEntries(
+  SORT_DIRECTIONS.map((s) => [s.id, s.label])
+);
+
 // ---- Defaults ----
 export const DEFAULT_NUMBER_FORMAT: NumberFormat = {
   mode: "auto",

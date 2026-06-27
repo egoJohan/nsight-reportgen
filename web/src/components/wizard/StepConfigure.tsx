@@ -22,18 +22,14 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { ChartSpec, Question } from "@/lib/api";
-import { useQuestions, useVariables } from "@/lib/queries";
+import type { ChartSpec, ConfigField, Question, Variable } from "@/lib/api";
+import { useChartTypes, useQuestions, useVariables } from "@/lib/queries";
 import {
   CHART_TYPES,
   CHART_TYPE_ITEMS,
   NUMBER_FORMAT_ITEMS,
-  SORT_OPTIONS,
-  SORT_ITEMS,
-  STATISTICS,
-  STATISTIC_ITEMS,
+  SORT_DIRECTIONS,
   chartTypeLabel,
-  isStacked,
   isWordcloud,
 } from "@/lib/charts";
 
@@ -264,126 +260,135 @@ function Field({
   );
 }
 
-// ── Controls for the active chart ───────────────────────────────────────────
-function ChartControls({
-  chart,
-  materialId,
-  question,
-  onChange,
-}: {
+// ── Schema-driven config form ───────────────────────────────────────────────
+// The per-chart config form is rendered entirely from the active chart type's
+// plugin-declared schema (GET /chart-types). Adding a chart type — or a new
+// option of an EXISTING widget type — needs no change here; only a brand-new
+// widget type does.
+
+interface WidgetProps {
+  field: ConfigField;
   chart: ChartSpec;
   materialId: string;
   question: Question | undefined;
+  variables: Variable[] | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
-}) {
-  const { data: variables } = useVariables(materialId);
-  const stacked = isStacked(chart.chart_type);
-  const isSingle = question?.kind === "single";
-  const stackedMissing = stacked && !chart.classifying_var;
-  const manual = chart.number_format.mode === "manual";
-  const varItems: Record<string, string> = {
+}
+
+// Read/patch a config key: a first-class ChartSpec field when one exists, else
+// the free-form `options` bag — so a new chart type's new option needs no
+// ChartSpec change to round-trip.
+function readField(chart: ChartSpec, key: string): unknown {
+  if (key in chart) return (chart as unknown as Record<string, unknown>)[key];
+  return chart.options?.[key];
+}
+function patchField(
+  chart: ChartSpec,
+  key: string,
+  value: unknown
+): Partial<ChartSpec> {
+  if (key in chart && key !== "options") {
+    return { [key]: value } as Partial<ChartSpec>;
+  }
+  return { options: { ...(chart.options ?? {}), [key]: value } };
+}
+
+function SelectWidget({ field, chart, onChange }: WidgetProps) {
+  const opts = field.options ?? [];
+  const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
+  const value = String(
+    readField(chart, field.key) ?? field.default ?? opts[0]?.value ?? ""
+  );
+  return (
+    <Field label={field.label} hint={field.help}>
+      <Select
+        items={items}
+        value={value}
+        onValueChange={(v) => onChange(patchField(chart, field.key, v))}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {opts.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function SwitchWidget({ field, chart, onChange }: WidgetProps) {
+  const checked = Boolean(readField(chart, field.key) ?? field.default ?? false);
+  return (
+    <Field label={field.label}>
+      <div className="flex h-8 items-center">
+        <Switch
+          checked={checked}
+          onCheckedChange={(c: boolean) =>
+            onChange(patchField(chart, field.key, c))
+          }
+        />
+      </div>
+    </Field>
+  );
+}
+
+function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps) {
+  const required = !!field.required;
+  const missing = required && !chart.classifying_var;
+  const items: Record<string, string> = {
     __none__: "None",
     ...Object.fromEntries((variables ?? []).map((v) => [v.name, v.label])),
   };
-
-  if (chart.chart_type === "scatter") {
-    return (
-      <div className="space-y-4">
-        <ChartTypeField chart={chart} question={question} onChange={onChange} />
-        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          Scatter configuration coming soon.
-        </div>
-      </div>
-    );
-  }
-
-  // A word cloud renders straight from computed word frequencies — none of the
-  // statistic/sort/classifying/number-format/not-answered/label controls apply.
-  if (isWordcloud(chart.chart_type)) {
-    return (
-      <div className="space-y-4">
-        <ChartTypeField chart={chart} question={question} onChange={onChange} />
-        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          Word cloud — shows the most frequently mentioned answer words; larger
-          words were mentioned more often.
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-      <ChartTypeField chart={chart} question={question} onChange={onChange} />
-
-      <Field label="Statistic">
-        <Select
-          items={STATISTIC_ITEMS}
-          value={chart.statistic}
-          onValueChange={(v) =>
-            onChange({ statistic: v as ChartSpec["statistic"] })
-          }
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATISTICS.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {s.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-
-      <Field
-        label="Classifying variable"
-        required={stacked}
-        hint={
-          stackedMissing
-            ? "Stacked charts need a dimension to split by"
-            : undefined
+    <Field
+      label={field.label}
+      required={required}
+      hint={missing ? "This chart needs a dimension to split by" : undefined}
+    >
+      <Select
+        items={items}
+        value={chart.classifying_var ?? "__none__"}
+        onValueChange={(v) =>
+          onChange({ classifying_var: v === "__none__" ? null : v })
         }
       >
-        <Select
-          items={varItems}
-          value={chart.classifying_var ?? "__none__"}
-          onValueChange={(v) =>
-            onChange({ classifying_var: v === "__none__" ? null : v })
-          }
-        >
-          <SelectTrigger
-            className={cn("w-full", stackedMissing && "border-destructive")}
-          >
-            <SelectValue placeholder="None" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">None</SelectItem>
-            {(variables ?? []).map((v) => (
-              <SelectItem key={v.name} value={v.name}>
-                {v.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs leading-snug text-muted-foreground">
-          Optional — break the chart down by another variable (e.g. by gender or
-          age) to get a series per group plus a Total. Required for stacked
-          charts. Leave as None for one overall result.
-        </p>
-      </Field>
+        <SelectTrigger className={cn("w-full", missing && "border-destructive")}>
+          <SelectValue placeholder="None" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">None</SelectItem>
+          {(variables ?? []).map((v) => (
+            <SelectItem key={v.name} value={v.name}>
+              {v.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {field.help && (
+        <p className="text-xs leading-snug text-muted-foreground">{field.help}</p>
+      )}
+    </Field>
+  );
+}
 
-      <Field label="Sort">
+function SortWidget({ field, chart, onChange }: WidgetProps) {
+  const opts = field.options ?? [];
+  const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
+  const dirDisabled = chart.sort.basis === "data_order";
+  return (
+    <>
+      <Field label={field.label}>
         <Select
-          items={SORT_ITEMS}
+          items={items}
           value={chart.sort.basis}
           onValueChange={(v) =>
             onChange({
-              sort: {
-                ...chart.sort,
-                basis: v as ChartSpec["sort"]["basis"],
-                descending: true,
-              },
+              sort: { ...chart.sort, basis: v as ChartSpec["sort"]["basis"] },
             })
           }
         >
@@ -391,7 +396,31 @@ function ChartControls({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {SORT_OPTIONS.map((s) => (
+            {opts.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {/* Sort direction — separate control; descending is the default. Not
+          applicable to "Data order" (keeps the source order as-is). */}
+      <Field label="Sort direction">
+        <Select
+          items={Object.fromEntries(SORT_DIRECTIONS.map((s) => [s.id, s.label]))}
+          value={chart.sort.descending ? "desc" : "asc"}
+          onValueChange={(v) =>
+            onChange({ sort: { ...chart.sort, descending: v === "desc" } })
+          }
+          disabled={dirDisabled}
+        >
+          <SelectTrigger className="w-full" disabled={dirDisabled}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_DIRECTIONS.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.label}
               </SelectItem>
@@ -399,9 +428,15 @@ function ChartControls({
           </SelectContent>
         </Select>
       </Field>
+    </>
+  );
+}
 
-      {/* Number format */}
-      <Field label="Number format">
+function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
+  const manual = chart.number_format.mode === "manual";
+  return (
+    <>
+      <Field label={field.label}>
         <Select
           items={NUMBER_FORMAT_ITEMS}
           value={chart.number_format.mode}
@@ -423,53 +458,6 @@ function ChartControls({
           </SelectContent>
         </Select>
       </Field>
-
-      {/* Show "Not answered" */}
-      <Field label='Show "Not answered"'>
-        <div className="flex h-8 items-center">
-          <Switch
-            checked={chart.show_not_answered}
-            onCheckedChange={(checked: boolean) =>
-              onChange({ show_not_answered: checked })
-            }
-          />
-        </div>
-      </Field>
-
-      {/* Show empty (0%) categories */}
-      <Field label="Show empty (0%) categories">
-        <div className="flex h-8 items-center">
-          <Switch
-            checked={chart.show_empty_categories}
-            onCheckedChange={(checked: boolean) =>
-              onChange({ show_empty_categories: checked })
-            }
-          />
-        </div>
-      </Field>
-
-      {/* "Not answered" value picker — single categorical only */}
-      {isSingle && question && (question.values?.length ?? 0) > 0 && (
-        <div className="col-span-2">
-          <NotAnsweredPicker
-            chart={chart}
-            question={question}
-            onChange={onChange}
-          />
-        </div>
-      )}
-
-      {/* Category-label editor + Shorten with AI */}
-      {question && (question.category_labels?.length ?? 0) > 0 && (
-        <div className="col-span-2">
-          <CategoryLabelEditor
-            chart={chart}
-            question={question}
-            materialId={materialId}
-            onChange={onChange}
-          />
-        </div>
-      )}
 
       {manual && (
         <div className="col-span-2 grid grid-cols-3 items-end gap-4 rounded-lg border bg-muted/30 p-3">
@@ -509,12 +497,9 @@ function ChartControls({
             <div className="flex h-8 items-center">
               <Switch
                 checked={chart.number_format.show_pct_sign}
-                onCheckedChange={(checked: boolean) =>
+                onCheckedChange={(c: boolean) =>
                   onChange({
-                    number_format: {
-                      ...chart.number_format,
-                      show_pct_sign: checked,
-                    },
+                    number_format: { ...chart.number_format, show_pct_sign: c },
                   })
                 }
               />
@@ -522,6 +507,141 @@ function ChartControls({
           </Field>
         </div>
       )}
+    </>
+  );
+}
+
+function NoteWidget({ field }: WidgetProps) {
+  return (
+    <div className="col-span-2 rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+      {field.help}
+    </div>
+  );
+}
+
+// Dispatch a schema field to its widget. Unknown widget types are skipped so an
+// older UI degrades gracefully against a newer schema.
+function FieldWidget(props: WidgetProps) {
+  const { field, question, chart, materialId, onChange } = props;
+  switch (field.widget) {
+    case "select":
+      return <SelectWidget {...props} />;
+    case "switch":
+      return <SwitchWidget {...props} />;
+    case "variable":
+      return <ClassifyingVarWidget {...props} />;
+    case "sort":
+      return <SortWidget {...props} />;
+    case "number_format":
+      return <NumberFormatWidget {...props} />;
+    case "note":
+      return <NoteWidget {...props} />;
+    case "not_answered":
+      // Single categorical only — self-hides otherwise.
+      if (!(question && (question.values?.length ?? 0) > 0)) return null;
+      return (
+        <div className="col-span-2">
+          <NotAnsweredPicker chart={chart} question={question} onChange={onChange} />
+        </div>
+      );
+    case "category_labels":
+      if (!(question && (question.category_labels?.length ?? 0) > 0)) return null;
+      return (
+        <div className="col-span-2">
+          <CategoryLabelEditor
+            chart={chart}
+            question={question}
+            materialId={materialId}
+            onChange={onChange}
+          />
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function ConfigForm({
+  schema,
+  chart,
+  materialId,
+  question,
+  variables,
+  onChange,
+}: {
+  schema: ConfigField[];
+  chart: ChartSpec;
+  materialId: string;
+  question: Question | undefined;
+  variables: Variable[] | undefined;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+      {schema.map((field, i) => (
+        <FieldWidget
+          key={`${field.key}-${i}`}
+          field={field}
+          chart={chart}
+          materialId={materialId}
+          question={question}
+          variables={variables}
+          onChange={onChange}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Controls for the active chart (schema-driven) ───────────────────────────
+function ChartControls({
+  chart,
+  materialId,
+  question,
+  onChange,
+}: {
+  chart: ChartSpec;
+  materialId: string;
+  question: Question | undefined;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const { data: variables } = useVariables(materialId);
+  const { data: chartTypes } = useChartTypes();
+
+  const catalog = useMemo(
+    () => new Map((chartTypes ?? []).map((c) => [c.id, c])),
+    [chartTypes]
+  );
+  const schema = catalog.get(chart.chart_type)?.config ?? [];
+  const supportsClassifying = (typeId: string) =>
+    (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var");
+
+  // Switching to a chart type with no classifying variable (e.g. a single-series
+  // pie) drops any stale classifying_var, so it can't silently split the data
+  // into series the chart can't show.
+  const handleTypeChange = (patch: Partial<ChartSpec>) => {
+    if (
+      patch.chart_type &&
+      !supportsClassifying(patch.chart_type) &&
+      chart.classifying_var
+    ) {
+      onChange({ ...patch, classifying_var: null });
+    } else {
+      onChange(patch);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <ChartTypeField chart={chart} question={question} onChange={handleTypeChange} />
+      <ConfigForm
+        schema={schema}
+        chart={chart}
+        materialId={materialId}
+        question={question}
+        variables={variables}
+        onChange={onChange}
+      />
     </div>
   );
 }

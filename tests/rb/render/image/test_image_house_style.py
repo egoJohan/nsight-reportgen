@@ -272,6 +272,27 @@ def test_add_image_slide_chrome_adds_title_and_n():
     assert titles_found, "Title text 'Autettu tunnettuus' not found in any textbox"
 
 
+def test_slide_chrome_uses_ai_title_not_question_text():
+    """When the AI-generated headline (spec.slide_title) is set, the slide shows
+    it and NOT the raw question text. Originals are not shown once AI lands.
+    (Pairs with the engine's label-override test that drops the original category
+    labels — together they guarantee title + legend labels are the AI versions.)"""
+    import dataclasses
+    from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
+
+    prs, slide, slot, ctx = _make_ctx(title="Mikä on kokemuksesi hoivapalveluista?")
+    ai_title = "Enemmistöllä on myönteinen kokemus hoivapalveluista"
+    ctx = dataclasses.replace(ctx, spec=dataclasses.replace(ctx.spec, slide_title=ai_title))
+
+    add_image_slide_chrome(ctx)
+
+    alltext = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+    assert ai_title in alltext, "AI slide_title not rendered"
+    assert "Mikä on kokemuksesi" not in alltext, (
+        "raw question text was shown even though an AI title was set"
+    )
+
+
 def test_add_image_slide_chrome_n_annotation():
     """add_image_slide_chrome includes N=<Total> annotation (REQ-C-24h)."""
     from reportbuilder.render.image.slide_chrome import add_image_slide_chrome

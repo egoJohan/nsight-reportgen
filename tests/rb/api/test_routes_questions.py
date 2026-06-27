@@ -262,16 +262,20 @@ def test_text_question_is_chartable_as_wordcloud():
     assert qs["sat"]["suggested_chart_type"] != "wordcloud"
 
 
-def test_compatible_chart_types_multi_excludes_pie():
-    """G.2: a multi-response question excludes pie/doughnut and includes
-    horizontal_bar in compatible_chart_types."""
+def test_compatible_chart_types_multi_offers_pie_but_suggests_bar():
+    """A multi-response question is a single series, so pie/doughnut ARE offered
+    (the user may legitimately want a pie when the option shares read as parts of
+    a whole, e.g. a "pick one if you have several" question summing to ~100%).
+    The smart DEFAULT for multi stays horizontal_bar — pie is available, not
+    auto-suggested."""
     qs = _get_questions(_make_grouped_model())
     multi = [q for q in qs if q["kind"] == "multi"]
     assert multi, "expected an auto-grouped multi question"
     compatible = multi[0]["compatible_chart_types"]
-    assert "pie" not in compatible
-    assert "doughnut" not in compatible
+    assert "pie" in compatible
+    assert "doughnut" in compatible
     assert "horizontal_bar" in compatible
+    assert multi[0]["suggested_chart_type"] == "horizontal_bar"
 
 
 # ---------------------------------------------------------------------------

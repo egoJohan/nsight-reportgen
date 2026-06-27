@@ -91,6 +91,32 @@ export interface ChartSpec {
   category_label_overrides: [string, string][];
   slide_title: string | null;
   slide_description: string | null;
+  // Free-form per-chart-type options (plugin-declared config keys without a
+  // first-class ChartSpec field). Optional for backward compatibility.
+  options?: Record<string, unknown>;
+}
+
+// ---- Chart-type catalog (plugin-declared config schema) ----
+export interface ConfigFieldOption {
+  value: string;
+  label: string;
+}
+
+export interface ConfigField {
+  key: string;
+  widget: string; // select | switch | number | variable | sort | number_format | not_answered | category_labels | scatter_xy | note
+  label: string;
+  help?: string;
+  options?: ConfigFieldOption[];
+  default?: unknown;
+  required?: boolean;
+}
+
+export interface ChartTypeInfo {
+  id: string;
+  label: string;
+  requires: string[];
+  config: ConfigField[];
 }
 
 // ---- AI text generation ----
@@ -152,6 +178,12 @@ export const api = {
         body: JSON.stringify({ name }),
       }).then((r) => json<{ case_id: string }>(r)),
   },
+
+  // Plugin-declared chart-type catalog + config schema (material-independent).
+  chartTypes: (): Promise<{ chart_types: ChartTypeInfo[] }> =>
+    fetch(`${API_BASE}/chart-types`).then((r) =>
+      json<{ chart_types: ChartTypeInfo[] }>(r)
+    ),
 
   materials: {
     upload: (caseId: string, file: File): Promise<UploadResult> => {

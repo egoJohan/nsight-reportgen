@@ -39,6 +39,28 @@ from reportbuilder.store.datahive_client import DataHiveClient
 questions_router = APIRouter()
 
 
+@questions_router.get("/chart-types")
+def list_chart_types() -> dict:
+    """Chart-type catalog with each type's declarative config schema.
+
+    The frontend renders the per-chart configuration form purely from this
+    schema (via a widget registry), so a new chart type — even one with a new
+    config option — adds its plugin + schema field and needs no frontend change.
+    Material-independent; safe to fetch once. (REQ-C-13, REQ-C-30)
+    """
+    return {
+        "chart_types": [
+            {
+                "id": p.id,
+                "label": p.label,
+                "requires": list(p.requires),
+                "config": [f.to_dict() for f in p.config_schema],
+            }
+            for p in CHART_PLUGINS.values()
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

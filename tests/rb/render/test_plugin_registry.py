@@ -262,9 +262,11 @@ def test_suggest_wave_cats_returns_line():
 
 
 def test_suggest_multi_response_not_pie():
-    """Multi-response question → suggest_chart_type must NOT return pie or doughnut.
+    """Multi-response question → suggest_chart_type must NOT default to pie/doughnut.
 
-    REQ-C-13: pie/doughnut suitability returns None for multi-response.
+    Pie may be OFFERED for a multi-response set when its shares partition the base
+    (see tests/rb/render/charts/test_pie.py), but the smart DEFAULT for multi is a
+    bar — never a pie.
     """
     result = suggest_chart_type(_MultiQ(), _many_cat_series())
     assert result not in ("pie", "doughnut"), (
