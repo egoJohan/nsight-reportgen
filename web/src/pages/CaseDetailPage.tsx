@@ -1,35 +1,23 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DatabaseIcon, FileTextIcon, ArrowLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import DataTab from "@/components/DataTab";
+import ReportsTab from "@/components/ReportsTab";
 import { useCases } from "@/lib/queries";
-
-function ReportsPlaceholder() {
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted">
-        <FileTextIcon className="size-7 text-muted-foreground" />
-      </div>
-      <h3 className="text-lg font-semibold tracking-tight">Reports coming soon</h3>
-      <p className="mt-2 max-w-xs text-sm text-muted-foreground leading-relaxed">
-        The report wizard will be built in the next task (RX2). Upload your data
-        in the Data tab to get started.
-      </p>
-    </div>
-  );
-}
 
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: cases } = useCases();
   const currentCase = cases?.find((c) => c.id === id);
+  const [tab, setTab] = useState("data");
 
   if (!id) return null;
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-8">
+    <div className="mx-auto w-full max-w-6xl px-6 py-8">
       {/* Back + heading */}
       <div className="mb-6">
         <Button
@@ -48,7 +36,7 @@ export default function CaseDetailPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="data" className="w-full">
+      <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="data" className="gap-2">
             <DatabaseIcon className="size-4" />
@@ -65,7 +53,7 @@ export default function CaseDetailPage() {
         </TabsContent>
 
         <TabsContent value="reports">
-          <ReportsPlaceholder />
+          <ReportsTab caseId={id} onGoToData={() => setTab("data")} />
         </TabsContent>
       </Tabs>
     </div>

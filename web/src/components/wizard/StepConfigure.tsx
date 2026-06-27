@@ -1,0 +1,505 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertCircleIcon,
+  BarChart3Icon,
+  ImageIcon,
+  Trash2Icon,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import type { ChartSpec, Question } from "@/lib/api";
+import { useQuestions, useVariables } from "@/lib/queries";
+import {
+  CHART_TYPES,
+  SORT_OPTIONS,
+  STATISTICS,
+  chartTypeLabel,
+  isStacked,
+} from "@/lib/charts";
+
+// ── Live preview ──────────────────────────────────────────────────────────
+function ChartPreview({
+  materialId,
+  chart,
+}: {
+  materialId: string;
+  chart: ChartSpec;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const urlRef = useRef<string | null>(null);
+
+  // Serialise the fields that affect the rendered image (ignore slot/slide_*).
+  const key = useMemo(
+    () =>
+      JSON.stringify({
+        question_ref: chart.question_ref,
+        chart_type: chart.chart_type,
+        statistic: chart.statistic,
+        classifying_var: chart.classifying_var,
+        number_format: chart.number_format,
+        sort: chart.sort,
+        elements: chart.elements,
+        scatter_xy: chart.scatter_xy,
+        show_not_answered: chart.show_not_answered,
+      }),
+    [chart]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const handle = setTimeout(async () => {
+      try {
+        const blob = await api.materials.previewChart(materialId, chart);
+        if (cancelled) return;
+        const next = URL.createObjectURL(blob);
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = next;
+        setUrl(next);
+        setError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Preview failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, materialId]);
+
+  // Revoke on unmount
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    []
+  );
+
+  return (
+    <div className="relative flex h-[560px] w-full items-center justify-center overflow-hidden rounded-xl border bg-muted/30 p-4">
+      {url ? (
+        <img
+          src={url}
+          alt="Chart preview"
+          className="max-h-full max-w-full rounded-md object-contain shadow-sm"
+        />
+      ) : (
+        !error && (
+          <div className="flex flex-col items-center gap-3 text-muted-foreground">
+            <ImageIcon className="size-8 opacity-40" />
+            <span className="text-sm">Rendering preview…</span>
+          </div>
+        )
+      )}
+
+      {loading && (
+        <div className="absolute top-3 right-3 flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm ring-1 ring-border">
+          <div className="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          Updating…
+        </div>
+      )}
+
+      {error && (
+        <div className="absolute inset-x-4 bottom-4 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive shadow-sm">
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+          <span className="leading-snug">{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── A labelled control row ──────────────────────────────────────────────────
+function Field({
+  label,
+  required,
+  children,
+  hint,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-medium text-muted-foreground">
+        {label}
+        {required && <span className="ml-1 text-destructive">*</span>}
+      </Label>
+      {children}
+      {hint && <p className="text-xs text-amber-600">{hint}</p>}
+    </div>
+  );
+}
+
+// ── Controls for the active chart ───────────────────────────────────────────
+function ChartControls({
+  chart,
+  materialId,
+  onChange,
+}: {
+  chart: ChartSpec;
+  materialId: string;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const { data: variables } = useVariables(materialId);
+  const stacked = isStacked(chart.chart_type);
+  const stackedMissing = stacked && !chart.classifying_var;
+  const manual = chart.number_format.mode === "manual";
+
+  if (chart.chart_type === "scatter") {
+    return (
+      <div className="space-y-4">
+        <ChartTypeField chart={chart} onChange={onChange} />
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          Scatter configuration coming soon.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+      <ChartTypeField chart={chart} onChange={onChange} />
+
+      <Field label="Statistic">
+        <Select
+          value={chart.statistic}
+          onValueChange={(v) =>
+            onChange({ statistic: v as ChartSpec["statistic"] })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATISTICS.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field
+        label="Classifying variable"
+        required={stacked}
+        hint={
+          stackedMissing
+            ? "Stacked charts need a dimension to split by"
+            : undefined
+        }
+      >
+        <Select
+          value={chart.classifying_var ?? "__none__"}
+          onValueChange={(v) =>
+            onChange({ classifying_var: v === "__none__" ? null : v })
+          }
+        >
+          <SelectTrigger
+            className={cn("w-full", stackedMissing && "border-destructive")}
+          >
+            <SelectValue placeholder="None" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None</SelectItem>
+            {(variables ?? []).map((v) => (
+              <SelectItem key={v.name} value={v.name}>
+                {v.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      <Field label="Sort">
+        <Select
+          value={chart.sort.basis}
+          onValueChange={(v) =>
+            onChange({
+              sort: {
+                ...chart.sort,
+                basis: v as ChartSpec["sort"]["basis"],
+                descending: true,
+              },
+            })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {/* Number format */}
+      <Field label="Number format">
+        <Select
+          value={chart.number_format.mode}
+          onValueChange={(v) =>
+            onChange({
+              number_format: {
+                ...chart.number_format,
+                mode: v as "auto" | "manual",
+              },
+            })
+          }
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto</SelectItem>
+            <SelectItem value="manual">Manual</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+
+      {/* Show "Not answered" */}
+      <Field label='Show "Not answered"'>
+        <div className="flex h-8 items-center">
+          <Switch
+            checked={chart.show_not_answered}
+            onCheckedChange={(checked: boolean) =>
+              onChange({ show_not_answered: checked })
+            }
+          />
+        </div>
+      </Field>
+
+      {manual && (
+        <div className="col-span-2 grid grid-cols-3 items-end gap-4 rounded-lg border bg-muted/30 p-3">
+          <Field label="% decimals">
+            <Input
+              type="number"
+              min={0}
+              max={4}
+              value={chart.number_format.pct_decimals}
+              onChange={(e) =>
+                onChange({
+                  number_format: {
+                    ...chart.number_format,
+                    pct_decimals: Number(e.target.value) || 0,
+                  },
+                })
+              }
+            />
+          </Field>
+          <Field label="Mean decimals">
+            <Input
+              type="number"
+              min={0}
+              max={4}
+              value={chart.number_format.mean_decimals}
+              onChange={(e) =>
+                onChange({
+                  number_format: {
+                    ...chart.number_format,
+                    mean_decimals: Number(e.target.value) || 0,
+                  },
+                })
+              }
+            />
+          </Field>
+          <Field label="% sign">
+            <div className="flex h-8 items-center">
+              <Switch
+                checked={chart.number_format.show_pct_sign}
+                onCheckedChange={(checked: boolean) =>
+                  onChange({
+                    number_format: {
+                      ...chart.number_format,
+                      show_pct_sign: checked,
+                    },
+                  })
+                }
+              />
+            </div>
+          </Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChartTypeField({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <Field label="Chart type">
+      <Select
+        value={chart.chart_type}
+        onValueChange={(v) => onChange({ chart_type: (v as string) ?? "" })}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {CHART_TYPES.map((t) => (
+            <SelectItem key={t.id} value={t.id}>
+              {t.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+// ── Main Configure step ─────────────────────────────────────────────────────
+export default function StepConfigure({
+  materialId,
+  charts,
+  onUpdateChart,
+  onRemoveChart,
+}: {
+  materialId: string;
+  charts: ChartSpec[];
+  onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
+  onRemoveChart: (index: number) => void;
+}) {
+  const { data: questions } = useQuestions(materialId);
+  const [active, setActive] = useState(0);
+
+  const questionMap = useMemo(() => {
+    const m = new Map<string, Question>();
+    (questions ?? []).forEach((q) => m.set(q.qid, q));
+    return m;
+  }, [questions]);
+
+  // Keep active index valid as charts change.
+  useEffect(() => {
+    if (active > charts.length - 1) setActive(Math.max(0, charts.length - 1));
+  }, [charts.length, active]);
+
+  if (charts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
+        <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
+        <p className="text-sm font-medium">No charts yet</p>
+        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+          Go back to <span className="font-medium">Select</span> and add
+          questions to configure their charts here.
+        </p>
+      </div>
+    );
+  }
+
+  const activeChart = charts[active];
+
+  return (
+    <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-6">
+      {/* Left: chart list */}
+      <div className="space-y-2">
+        <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Charts ({charts.length})
+        </p>
+        <div className="space-y-1.5">
+          {charts.map((c, i) => {
+            const q = questionMap.get(c.question_ref);
+            return (
+              <button
+                key={`${c.question_ref}-${i}`}
+                onClick={() => setActive(i)}
+                className={cn(
+                  "group flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  i === active
+                    ? "border-primary/40 bg-primary/5"
+                    : "border-transparent hover:bg-muted/60"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-medium tabular-nums",
+                    i === active
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-sm leading-snug">
+                    {q?.text ?? c.question_ref}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {chartTypeLabel(c.chart_type)}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right: large preview + compact controls */}
+      {activeChart && (
+        <div className="flex flex-col gap-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-semibold">
+                {questionMap.get(activeChart.question_ref)?.text ??
+                  activeChart.question_ref}
+              </h3>
+              <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                {activeChart.question_ref}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={() => onRemoveChart(active)}
+            >
+              <Trash2Icon className="size-4" />
+              Remove
+            </Button>
+          </div>
+
+          <ChartPreview
+            key={activeChart.question_ref + active}
+            materialId={materialId}
+            chart={activeChart}
+          />
+
+          <div className="rounded-xl border bg-card p-4">
+            <ChartControls
+              chart={activeChart}
+              materialId={materialId}
+              onChange={(patch) => onUpdateChart(active, patch)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

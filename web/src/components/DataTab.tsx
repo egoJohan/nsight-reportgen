@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   UploadCloudIcon,
@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useQuestions, useUploadMaterial } from "@/lib/queries";
+import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
 
 // ---- Sort options ----
@@ -58,12 +59,19 @@ function KindBadge({ q }: { q: Question }) {
 // ---- Question table ----
 function QuestionTable({
   materialId,
+  onInvalid,
 }: {
   materialId: string;
+  onInvalid: () => void;
 }) {
   const { data: questions, isLoading, isError } = useQuestions(materialId);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("default");
+
+  // Stored materialId may 404 after a demo-backend restart — drop it.
+  useEffect(() => {
+    if (isError) onInvalid();
+  }, [isError, onInvalid]);
 
   if (isLoading) {
     return (
@@ -251,7 +259,8 @@ function UploadArea({
 
 // ---- Main DataTab ----
 export default function DataTab({ caseId }: { caseId: string }) {
-  const [materialId, setMaterialId] = useState<string | null>(null);
+  const { workspace, setMaterial } = useWorkspace(caseId);
+  const materialId = workspace.materialId;
 
   return (
     <div>
@@ -265,7 +274,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
           </div>
           <UploadArea
             caseId={caseId}
-            onUploaded={(id) => setMaterialId(id)}
+            onUploaded={(id) => setMaterial(id)}
           />
         </>
       ) : (
@@ -281,13 +290,16 @@ export default function DataTab({ caseId }: { caseId: string }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setMaterialId(null)}
+              onClick={() => setMaterial(null)}
               className="text-muted-foreground"
             >
               Replace file
             </Button>
           </div>
-          <QuestionTable materialId={materialId} />
+          <QuestionTable
+            materialId={materialId}
+            onInvalid={() => setMaterial(null)}
+          />
         </>
       )}
     </div>

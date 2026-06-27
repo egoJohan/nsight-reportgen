@@ -77,6 +77,59 @@ async function uploadMaterial(caseId) {
   return result.material_id;
 }
 
+function makeChart(questionRef, chartType, slot) {
+  return {
+    question_ref: questionRef,
+    chart_type: chartType || "vertical_bar",
+    statistic: "pct",
+    classifying_var: null,
+    number_format: {
+      mode: "auto",
+      pct_decimals: 0,
+      mean_decimals: 1,
+      count_round_up: false,
+      show_pct_sign: true,
+    },
+    sort: { basis: "pct", topbox_codes: [], descending: true },
+    template_slot: slot,
+    elements: {
+      title: true,
+      legend: true,
+      n: true,
+      axis_names: true,
+      filter_var: true,
+      data_labels: true,
+    },
+    scatter_xy: null,
+    show_not_answered: false,
+    slide_title: null,
+    slide_description: null,
+  };
+}
+
+async function seedReport(caseId, materialId) {
+  // Pick a few questions to pre-populate the report's charts.
+  const { questions } = await apiFetch(`/materials/${materialId}/questions`);
+  const picks = questions.slice(0, 3);
+  const charts = picks.map((q, i) =>
+    makeChart(q.qid, q.suggested_chart_type, `s${i + 1}`)
+  );
+
+  const name = "Brand Tracker — Q4 2025";
+  const { report_id } = await apiFetch(`/cases/${caseId}/reports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      render_mode: "image",
+      template_ref: "",
+      charts,
+    }),
+  });
+  console.log(`  Created report: ${report_id} (${charts.length} charts)`);
+  return { reportId: report_id, name };
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -85,6 +138,7 @@ async function main() {
   console.log("Seeding backend data…");
   const caseId = await seedCase();
   const materialId = await uploadMaterial(caseId);
+  const { reportId, name: reportName } = await seedReport(caseId, materialId);
 
   console.log(`\nLaunching browser → ${APP_URL}`);
   const browser = await chromium.launch({ headless: true });
@@ -100,6 +154,21 @@ async function main() {
       "*, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }";
     document.head.appendChild(style);
   });
+
+  // Seed the per-case workspace (localStorage) so the Reports tab and the
+  // DataTab question browser are populated on load (no UI upload needed).
+  await page.addInitScript(
+    ({ caseId, materialId, reportId, reportName }) => {
+      localStorage.setItem(
+        `nsight.ws.${caseId}`,
+        JSON.stringify({
+          materialId,
+          reports: [{ id: reportId, name: reportName }],
+        })
+      );
+    },
+    { caseId, materialId, reportId, reportName }
+  );
 
   // ── Screenshot 1: Cases page ─────────────────────────────────────────────
   console.log("\nShot 1: Cases page…");
@@ -150,19 +219,66 @@ async function main() {
   await page.screenshot({ path: dataPath });
   console.log(`  Saved: ${dataPath}`);
 
+  // ── Screenshot 3: Reports tab ────────────────────────────────────────────
+  console.log("\nShot 3: Reports tab…");
+  await page.goto(`${APP_URL}/cases/${caseId}`, {
+    waitUntil: "networkidle",
+    timeout: 30_000,
+  });
+  await page.waitForSelector('[role="tablist"]', { timeout: 15_000 });
+  await page.getByRole("tab", { name: "Reports" }).click();
+  await page.waitForTimeout(400);
+  const reportsPath = resolve(SHOTS_DIR, "reports.png");
+  await page.screenshot({ path: reportsPath });
+  console.log(`  Saved: ${reportsPath}`);
+
+  // ── Screenshot 4: Wizard → Select ────────────────────────────────────────
+  console.log("\nShot 4: Wizard Select step…");
+  // Open the seeded report by clicking its card.
+  await page.getByText(reportName).first().click();
+  // Select step shows the searchable checklist of questions.
+  await page.waitForSelector("text=Add selected", { timeout: 15_000 });
+  await page.waitForTimeout(500);
+  const selectPath = resolve(SHOTS_DIR, "wizard-select.png");
+  await page.screenshot({ path: selectPath });
+  console.log(`  Saved: ${selectPath}`);
+
+  // ── Screenshot 5: Wizard → Configure (large live preview) ────────────────
+  console.log("\nShot 5: Wizard Configure step…");
+  await page.getByRole("button", { name: "Configure" }).first().click();
+  // Wait for the live preview <img> to actually finish loading the PNG.
+  await page.waitForSelector('img[alt="Chart preview"]', { timeout: 30_000 });
+  await page.waitForFunction(
+    () => {
+      const img = document.querySelector('img[alt="Chart preview"]');
+      return img && img.complete && img.naturalWidth > 0;
+    },
+    { timeout: 30_000 }
+  );
+  await page.waitForTimeout(400);
+  const configurePath = resolve(SHOTS_DIR, "wizard-configure.png");
+  await page.screenshot({ path: configurePath });
+  console.log(`  Saved: ${configurePath}`);
+
   // Cleanup
   await context.close();
   await browser.close();
 
   console.log(`
 Done!
-  shots/cases.png → ${casesPath}
-  shots/data.png  → ${dataPath}
+  shots/cases.png            → ${casesPath}
+  shots/data.png             → ${dataPath}
+  shots/reports.png          → ${reportsPath}
+  shots/wizard-select.png    → ${selectPath}
+  shots/wizard-configure.png → ${configurePath}
 `);
 
   // Log paths for the controller
   console.log(`SCREENSHOT_CASES=${casesPath}`);
   console.log(`SCREENSHOT_DATA=${dataPath}`);
+  console.log(`SCREENSHOT_REPORTS=${reportsPath}`);
+  console.log(`SCREENSHOT_WIZARD_SELECT=${selectPath}`);
+  console.log(`SCREENSHOT_WIZARD_CONFIGURE=${configurePath}`);
 }
 
 main().catch((err) => {
