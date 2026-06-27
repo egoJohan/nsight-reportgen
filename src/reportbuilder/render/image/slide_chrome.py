@@ -93,35 +93,42 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     bg.line.fill.background()
     bg.shadow.inherit = False
 
-    # 2 — Teal accent bar (thin vertical stripe, top-left)
-    acc = slide.shapes.add_shape(
-        1,
-        Inches(0.55), Inches(0.42),
-        Inches(0.10), Inches(0.92),
-    )
-    acc.fill.solid()
-    acc.fill.fore_color.rgb = PX_TEAL
-    acc.line.fill.background()
-    acc.shadow.inherit = False
+    # The title block (accent bar + title + description) is gated on the
+    # elements.title toggle. The live preview sets it False to render a
+    # title-less PNG so the frontend can own the title region (progressive
+    # "Generating title…" placeholder). The deck keeps it True (default).
+    show_title = getattr(getattr(ctx.spec, "elements", None), "title", True)
 
-    # 3 — Title / question-text textbox  (REQ-C-24a, REQ-D-04)
-    #     Use slide_title when set; fall back to ctx.title (question text).
-    title = getattr(ctx.spec, "slide_title", None) or ctx.title or ""
-    slide_description = getattr(ctx.spec, "slide_description", None) or ""
-    if title:
-        _textbox(
-            slide,
-            Inches(0.80), Inches(0.38),
-            sw - Inches(1.0), Inches(0.60),
-            [(title, 21, PX_INK, True)],
+    if show_title:
+        # 2 — Teal accent bar (thin vertical stripe, top-left)
+        acc = slide.shapes.add_shape(
+            1,
+            Inches(0.55), Inches(0.42),
+            Inches(0.10), Inches(0.92),
         )
-    if slide_description:
-        _textbox(
-            slide,
-            Inches(0.80), Inches(1.02),
-            sw - Inches(1.0), Inches(0.40),
-            [(slide_description, 13, PX_MUTED, False)],
-        )
+        acc.fill.solid()
+        acc.fill.fore_color.rgb = PX_TEAL
+        acc.line.fill.background()
+        acc.shadow.inherit = False
+
+        # 3 — Title / question-text textbox  (REQ-C-24a, REQ-D-04)
+        #     Use slide_title when set; fall back to ctx.title (question text).
+        title = getattr(ctx.spec, "slide_title", None) or ctx.title or ""
+        slide_description = getattr(ctx.spec, "slide_description", None) or ""
+        if title:
+            _textbox(
+                slide,
+                Inches(0.80), Inches(0.38),
+                sw - Inches(1.0), Inches(0.60),
+                [(title, 21, PX_INK, True)],
+            )
+        if slide_description:
+            _textbox(
+                slide,
+                Inches(0.80), Inches(1.02),
+                sw - Inches(1.0), Inches(0.40),
+                [(slide_description, 13, PX_MUTED, False)],
+            )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)
     #     Format: "<stat label> · n = <base_n>"

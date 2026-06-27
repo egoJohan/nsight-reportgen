@@ -363,6 +363,10 @@ class ChartSpecBody(BaseModel):
     # AI/edited slide title is set, the preview uses it instead of the question text.
     slide_title: str | None = None
     slide_description: str | None = None
+    # Preview-only: when False the rendered PNG omits the title block (accent bar +
+    # title + description) so the frontend can own that region with a progressive
+    # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
+    render_title: bool = True
 
 
 def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
@@ -386,7 +390,8 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         template_slot="preview",
         elements=ElementToggles(
-            title=body.elements.title,
+            # render_title=False omits the baked title block for the live preview.
+            title=body.elements.title and body.render_title,
             legend=body.elements.legend,
             n=body.elements.n,
             axis_names=body.elements.axis_names,
