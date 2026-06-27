@@ -387,7 +387,7 @@ export default function StepConfigure({
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   onRemoveChart: (index: number) => void;
 }) {
-  const { data: questions } = useQuestions(materialId);
+  const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
 
   const questionMap = useMemo(() => {
@@ -400,6 +400,18 @@ export default function StepConfigure({
   useEffect(() => {
     if (active > charts.length - 1) setActive(Math.max(0, charts.length - 1));
   }, [charts.length, active]);
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
+        <AlertCircleIcon className="mb-3 size-8 text-muted-foreground/50" />
+        <p className="text-sm font-medium">Couldn't load this material's questions</p>
+        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+          It may have been removed. Re-upload the data in the Data tab.
+        </p>
+      </div>
+    );
+  }
 
   if (charts.length === 0) {
     return (
@@ -486,7 +498,7 @@ export default function StepConfigure({
           </div>
 
           <ChartPreview
-            key={activeChart.question_ref + active}
+            key={`${activeChart.question_ref}-${active}`}
             materialId={materialId}
             chart={activeChart}
           />

@@ -121,10 +121,16 @@ export default function ReportsTab({
   if (openReportId) {
     return (
       <ReportWizard
+        key={openReportId}
         caseId={caseId}
         reportId={openReportId}
         materialId={materialId}
         onClose={() => setOpenReportId(null)}
+        onMissing={() => {
+          removeReport(openReportId);
+          setOpenReportId(null);
+          toast.error("That report no longer exists.");
+        }}
       />
     );
   }
@@ -139,7 +145,7 @@ export default function ReportsTab({
       },
       {
         onSuccess: ({ report_id }) => {
-          addReport({ id: report_id, name });
+          addReport({ id: report_id, name, materialId: materialId ?? undefined });
           setDialogOpen(false);
           setOpenReportId(report_id);
         },
@@ -156,15 +162,20 @@ export default function ReportsTab({
         toast.success("Report deleted");
       },
       onError: (e) => {
-        // Remove from workspace anyway if it's gone server-side.
-        removeReport(id);
+        // Only self-heal the workspace list on a genuine 404 (gone server-side).
+        // A transient/network failure keeps the still-existing report listed.
+        if (e instanceof Error && e.message.startsWith("404")) removeReport(id);
         setConfirmDelete(null);
         toast.error(`Delete failed: ${e.message}`);
       },
     });
   }
 
-  const reports = workspace.reports;
+  // Scope to reports built on the current material. Legacy entries without a
+  // materialId (persisted before scoping) are also shown — harmless.
+  const reports = workspace.reports.filter(
+    (r) => r.materialId === undefined || r.materialId === materialId
+  );
 
   return (
     <div>

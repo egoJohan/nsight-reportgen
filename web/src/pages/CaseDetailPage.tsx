@@ -48,11 +48,11 @@ export default function CaseDetailPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="data">
+        <TabsContent value="data" keepMounted>
           <DataTab caseId={id} />
         </TabsContent>
 
-        <TabsContent value="reports">
+        <TabsContent value="reports" keepMounted>
           <ReportsTab caseId={id} onGoToData={() => setTab("data")} />
         </TabsContent>
       </Tabs>

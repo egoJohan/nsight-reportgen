@@ -300,9 +300,13 @@ async function main() {
     timeout: 15_000,
   });
   // Type a sample title/description into the first slide for a richer shot.
-  const firstTitle = page.locator('input[data-slot="input"]').first();
+  // Scope to :visible — the inactive (keepMounted, hidden) Data tab panel also
+  // carries a "Search questions…" input[data-slot="input"] in the DOM.
+  const firstTitle = page.locator('input[data-slot="input"]:visible').first();
   await firstTitle.fill("Brand awareness keeps climbing");
-  const firstDesc = page.locator('textarea[data-slot="textarea"]').first();
+  const firstDesc = page
+    .locator('textarea[data-slot="textarea"]:visible')
+    .first();
   await firstDesc.fill(
     "Prompted awareness rose again this quarter, led by the 25–44 segment."
   );

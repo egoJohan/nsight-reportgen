@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckIcon, SearchIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, SearchIcon, PlusIcon, AlertCircleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +32,7 @@ export default function StepSelect({
   addedRefs: Set<string>;
   onAdd: (questions: Question[]) => void;
 }) {
-  const { data: questions, isLoading } = useQuestions(materialId);
+  const { data: questions, isLoading, isError } = useQuestions(materialId);
   const [search, setSearch] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
@@ -69,6 +69,18 @@ export default function StepSelect({
         {Array.from({ length: 8 }).map((_, i) => (
           <Skeleton key={i} className="h-12 w-full rounded-lg" />
         ))}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
+        <AlertCircleIcon className="mb-3 size-8 text-muted-foreground/50" />
+        <p className="text-sm font-medium">Couldn't load this material's questions</p>
+        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+          It may have been removed. Re-upload the data in the Data tab.
+        </p>
       </div>
     );
   }

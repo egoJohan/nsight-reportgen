@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
-import type { ChartSpec, ReportDoc } from "./api";
+import type { ReportDoc } from "./api";
 
 // ---- Query keys ----
 export const qk = {
@@ -97,14 +97,5 @@ export function useRenderReport(caseId: string) {
       materialId: string;
       view?: "slides";
     }) => api.reports.render(caseId, reportId, materialId, view),
-  });
-}
-
-export function usePreviewChart(materialId: string | null) {
-  return useMutation({
-    mutationFn: (chart: ChartSpec) => {
-      if (!materialId) throw new Error("No material selected");
-      return api.materials.previewChart(materialId, chart);
-    },
   });
 }

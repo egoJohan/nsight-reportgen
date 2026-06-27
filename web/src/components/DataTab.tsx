@@ -62,16 +62,17 @@ function QuestionTable({
   onInvalid,
 }: {
   materialId: string;
-  onInvalid: () => void;
+  onInvalid: (error: unknown) => void;
 }) {
-  const { data: questions, isLoading, isError } = useQuestions(materialId);
+  const { data: questions, isLoading, isError, error } = useQuestions(materialId);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("default");
 
-  // Stored materialId may 404 after a demo-backend restart — drop it.
+  // Stored materialId may 404 after a demo-backend restart — let the parent
+  // decide whether to drop it (only on a genuine 404, not a transient blip).
   useEffect(() => {
-    if (isError) onInvalid();
-  }, [isError, onInvalid]);
+    if (isError) onInvalid(error);
+  }, [isError, error, onInvalid]);
 
   if (isLoading) {
     return (
@@ -298,7 +299,13 @@ export default function DataTab({ caseId }: { caseId: string }) {
           </div>
           <QuestionTable
             materialId={materialId}
-            onInvalid={() => setMaterial(null)}
+            onInvalid={(error) => {
+              // Only drop the stored material on a genuine 404 (it's gone). A
+              // transient 500/network blip keeps it so we don't force a re-upload.
+              if (error instanceof Error && error.message.startsWith("404")) {
+                setMaterial(null);
+              }
+            }}
           />
         </>
       )}

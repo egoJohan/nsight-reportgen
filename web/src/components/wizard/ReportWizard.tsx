@@ -4,6 +4,7 @@ import {
   ArrowRightIcon,
   CheckIcon,
   ChevronLeftIcon,
+  FileXIcon,
   Loader2Icon,
   SaveIcon,
 } from "lucide-react";
@@ -100,13 +101,15 @@ export default function ReportWizard({
   reportId,
   materialId,
   onClose,
+  onMissing,
 }: {
   caseId: string;
   reportId: string;
   materialId: string;
   onClose: () => void;
+  onMissing?: () => void;
 }) {
-  const { data: loaded, isLoading } = useReport(caseId, reportId);
+  const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
   const updateReport = useUpdateReport(caseId);
 
   const [draft, setDraft] = useState<ReportDoc | null>(null);
@@ -206,9 +209,53 @@ export default function ReportWizard({
     }
   }, [updateReport, reportId]);
 
-  async function goNext() {
-    if (step === 1 || step === 3) await save(); // auto-save leaving Configure / Slides
-    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  // Persist any unsaved edits before navigating; abort if the save fails
+  // (save() already toasts on failure). Used by every exit/transition so
+  // in-memory changes are never silently dropped.
+  const commitThen = useCallback(
+    async (action: () => void) => {
+      if (dirty) {
+        const ok = await save();
+        if (!ok) return;
+      }
+      action();
+    },
+    [dirty, save]
+  );
+
+  function goNext() {
+    commitThen(() => setStep((s) => Math.min(s + 1, STEPS.length - 1)));
+  }
+
+  // Self-heal a stale/deleted report id out of the workspace, once.
+  const missingFired = useRef(false);
+  useEffect(() => {
+    if (isError && !missingFired.current) {
+      missingFired.current = true;
+      onMissing?.();
+    }
+  }, [isError, onMissing]);
+
+  // Stale report id (404 after a backend restart / deletion elsewhere): show
+  // an escapable error panel instead of trapping the user on a spinner.
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted">
+          <FileXIcon className="size-7 text-muted-foreground" />
+        </div>
+        <h3 className="text-lg font-semibold tracking-tight">
+          Report unavailable
+        </h3>
+        <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
+          This report couldn't be loaded. It may have been removed.
+        </p>
+        <Button className="mt-5" onClick={onClose}>
+          <ChevronLeftIcon className="size-4" />
+          Back to reports
+        </Button>
+      </div>
+    );
   }
 
   if (isLoading || !draft) {
@@ -228,7 +275,7 @@ export default function ReportWizard({
             variant="ghost"
             size="sm"
             className="-ml-2 shrink-0 text-muted-foreground"
-            onClick={onClose}
+            onClick={() => commitThen(onClose)}
           >
             <ChevronLeftIcon className="size-4" />
             Back to reports
@@ -266,7 +313,7 @@ export default function ReportWizard({
       <div className="mb-6 flex justify-center rounded-xl border bg-card px-3 py-2">
         <Stepper
           current={step}
-          onJump={setStep}
+          onJump={(i) => commitThen(() => setStep(i))}
           chartCount={draft.charts.length}
         />
       </div>
@@ -321,7 +368,7 @@ export default function ReportWizard({
       <div className="mt-6 flex items-center justify-between border-t pt-4">
         <Button
           variant="ghost"
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          onClick={() => commitThen(() => setStep((s) => Math.max(0, s - 1)))}
           disabled={step === 0}
         >
           <ArrowLeftIcon className="size-4" />

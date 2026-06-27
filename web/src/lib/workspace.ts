@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 export interface WorkspaceReport {
   id: string;
   name: string;
+  // Material the report's charts were built against. Optional so legacy
+  // entries persisted before this field tolerate parsing (left undefined).
+  materialId?: string;
 }
 
 export interface WorkspaceState {
