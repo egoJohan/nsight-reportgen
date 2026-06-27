@@ -262,3 +262,126 @@ class TestLabelOverrides:
                      category_label_overrides=(("Poor", "P"),))
         result = compute(_model().question("q1"), spec, _data(), _model())
         assert NOT_ANSWERED_LABEL in result.categories
+
+
+# ---------------------------------------------------------------------------
+# Regression: not_answered_codes must drive the percentage BASE (eff-aware)
+#
+# Defect: not_answered_codes was applied when counting the "Not answered"
+# bucket but NOT when computing the percentage base/denominator. When the
+# chosen codes diverge from var.missing_values the percentages were silently
+# wrong (denominator could even exceed N). The base (single_base /
+# segment_bases) must honour the effective not-answered set.
+# ---------------------------------------------------------------------------
+
+
+class TestNotAnsweredCodesDriveBase:
+    """Divergent not_answered_codes=(3.0,) vs var.missing_values={99.0}.
+
+    Data N=14: code1 x2, code2 x3, code3 x4, code99 x3, NaN x2.
+    With eff={3.0}: valid (non-NaN, not in eff) = 2+3+3 = 8 (99 counts valid),
+    not-answered bucket = code3(4)+NaN(2) = 6. denom(show_na) = 8+6 = 14 == N.
+    """
+
+    def test_show_na_denom_equals_n_no_double_count(self):
+        spec = _spec(show_not_answered=True, not_answered_codes=(3.0,),
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(_model().question("q1"), spec, _data(), _model())
+        # denom == N (14): valid(8) + missing(6), no double-count, no drop.
+        assert result.base_n["Total"] == 14
+        # "Not answered" = 6/14 = 42.9% (NOT 6/15 and NOT 43% from a wrong base).
+        assert result.cell(NOT_ANSWERED_LABEL, "Total").count == 6.0
+        assert result.cell(NOT_ANSWERED_LABEL, "Total").pct == 42.9
+
+    def test_show_na_category_percentages_use_eff_base(self):
+        spec = _spec(show_not_answered=True, not_answered_codes=(3.0,),
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(_model().question("q1"), spec, _data(), _model())
+        # All shown-category percentages computed over base==14.
+        assert result.cell("Poor", "Total").pct == round(2 / 14 * 100, 1)   # 14.3
+        assert result.cell("Fair", "Total").pct == round(3 / 14 * 100, 1)   # 21.4
+        # 99 is NOT in eff now -> a normal category, pct over base 14.
+        assert result.cell("En halua vastata", "Total").pct == round(3 / 14 * 100, 1)
+        # Folded code 3 is gone from normal categories.
+        assert "Good" not in result.categories
+        # Percentages (incl. Not answered) sum to 100 over the eff-aware base.
+        shown = result.categories
+        total_pct = sum(result.cell(c, "Total").pct for c in shown)
+        assert total_pct == 100.0
+
+    def test_show_na_false_uses_eff_base_for_shown_categories(self):
+        # show_not_answered=False: eff codes excluded from categories AND the
+        # base for the SHOWN categories' percentages must be the eff-aware
+        # valid count (8), not the var.missing_values count (10).
+        spec = _spec(show_not_answered=False, not_answered_codes=(3.0,),
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(_model().question("q1"), spec, _data(), _model())
+        assert "Good" not in result.categories            # eff code excluded
+        assert NOT_ANSWERED_LABEL not in result.categories
+        assert result.base_n["Total"] == 8                # eff-aware base
+        assert result.cell("Poor", "Total").pct == round(2 / 8 * 100, 1)   # 25.0
+        assert result.cell("En halua vastata", "Total").pct == round(3 / 8 * 100, 1)  # 37.5
+
+    def test_default_path_base_unchanged(self):
+        # not_answered_codes=None -> eff == var.missing_values ({99}); base
+        # behaviour must be byte-identical to the legacy default.
+        spec = _spec(show_not_answered=True, not_answered_codes=None,
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(_model().question("q1"), spec, _data(), _model())
+        # valid (non-NaN, not 99) = 2+3+4 = 9; missing = 99(3)+NaN(2) = 5; denom 14.
+        assert result.base_n["Total"] == 14
+        assert result.cell(NOT_ANSWERED_LABEL, "Total").count == 5.0
+        assert result.cell("Good", "Total").pct == round(4 / 14 * 100, 1)   # 28.6
+
+
+class TestNotAnsweredCodesDriveSegmentBase:
+    """Segmented (classifying_var) case: segment_bases must honour the override."""
+
+    def _seg_model(self) -> QuestionModel:
+        var = _var()
+        q = Question(qid="q1", kind="single", variables=("q1",), text="Satisfaction")
+        return QuestionModel(variables={"q1": var}, questions=[q])
+
+    def _seg_data(self) -> pd.DataFrame:
+        # q1 matches _data(); seg in {1,2}. With eff={3.0}:
+        #   valid (non-NaN, q1!=3): rows with q1 in {1,2,99}
+        #   seg1 valid -> 5, seg2 valid -> 3, Total -> 8
+        # The OLD (buggy) var.missing_values={99} base would give seg1=5,
+        # seg2=4, Total=9 -> the assertions below distinguish the two.
+        return pd.DataFrame({
+            "q1":  [1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0,
+                    99.0, 99.0, 99.0, np.nan, np.nan],
+            "seg": [1.0, 2.0, 1.0, 2.0, 1.0, 1.0, 2.0, 1.0, 2.0,
+                    1.0, 2.0, 1.0, 1.0, 2.0],
+        })
+
+    def test_segment_bases_are_eff_aware(self):
+        spec = _spec(classifying_var="seg", show_not_answered=False,
+                     not_answered_codes=(3.0,),
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(self._seg_model().question("q1"), spec,
+                         self._seg_data(), self._seg_model())
+        # eff-aware per-segment bases (NOT the buggy 9/5/4).
+        assert result.base_n["Total"] == 8
+        assert result.base_n["1"] == 5
+        assert result.base_n["2"] == 3
+        # Percentages computed over the eff-aware per-segment base.
+        # Poor(code1): seg1 has 1 -> 1/5; Fair(code2): seg2 has 1 -> 1/3.
+        assert result.cell("Poor", "1").count == 1.0
+        assert result.cell("Poor", "1").pct == round(1 / 5 * 100, 1)   # 20.0
+        assert result.cell("Fair", "2").pct == round(1 / 3 * 100, 1)   # 33.3
+
+    def test_segment_show_na_denom_equals_segment_n(self):
+        # With show_not_answered the per-segment denom = valid + missing in seg.
+        # seg1: valid 5 + missing(code3 idx5,7 + NaN idx12)=3 -> 8
+        # seg2: valid 3 + missing(code3 idx6,8 + NaN idx13)=3 -> 6
+        spec = _spec(classifying_var="seg", show_not_answered=True,
+                     not_answered_codes=(3.0,),
+                     number_format=NumberFormat(pct_decimals=1))
+        result = compute(self._seg_model().question("q1"), spec,
+                         self._seg_data(), self._seg_model())
+        assert result.base_n["1"] == 8
+        assert result.base_n["2"] == 6
+        assert result.base_n["Total"] == 14
+        assert result.cell(NOT_ANSWERED_LABEL, "1").pct == round(3 / 8 * 100, 1)  # 37.5
+        assert result.cell(NOT_ANSWERED_LABEL, "2").pct == round(3 / 6 * 100, 1)  # 50.0

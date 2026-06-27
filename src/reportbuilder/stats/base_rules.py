@@ -10,14 +10,22 @@ import pandas as pd
 from reportbuilder.model.question import Variable
 
 
-def _valid_mask(data: pd.DataFrame, var: Variable) -> pd.Series:
+def _valid_mask(data: pd.DataFrame, var: Variable,
+                missing_override: set[float] | None = None) -> pd.Series:
     s = pd.to_numeric(data[var.name], errors="coerce")
-    return s.notna() & ~s.isin(var.missing_values)
+    missing = var.missing_values if missing_override is None else missing_override
+    return s.notna() & ~s.isin(missing)
 
 
-def single_base(data: pd.DataFrame, var: Variable, segment_filter=None) -> int:
-    """Valid responses excluding the variable's user-missing set and NaN (Sysmis). (REQ-C-16, MV-01/02)"""
-    mask = _valid_mask(data, var)
+def single_base(data: pd.DataFrame, var: Variable, segment_filter=None,
+                missing_override: set[float] | None = None) -> int:
+    """Valid responses excluding the variable's user-missing set and NaN (Sysmis). (REQ-C-16, MV-01/02)
+
+    When `missing_override` is provided it replaces `var.missing_values` for the
+    "is this code missing" test — keeping the base consistent with an
+    effective "Not answered" set (e.g. ChartSpec.not_answered_codes).
+    """
+    mask = _valid_mask(data, var, missing_override)
     if segment_filter is not None:
         mask = mask & segment_filter
     return int(mask.sum())
@@ -33,10 +41,15 @@ def multi_base(data: pd.DataFrame, vars_: list[Variable]) -> int:
     return int(answered.sum())
 
 
-def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str) -> dict[str, int]:
+def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str,
+                  missing_override: set[float] | None = None) -> dict[str, int]:
     """Per-segment base + a "Total", each excluding missing in the reported var and
-    the classifier. (REQ-C-14)"""
-    valid = _valid_mask(data, var)
+    the classifier. (REQ-C-14)
+
+    When `missing_override` is provided it replaces `var.missing_values` for the
+    "is this code missing" test (eff-aware base for ChartSpec.not_answered_codes).
+    """
+    valid = _valid_mask(data, var, missing_override)
     seg = pd.to_numeric(data[classifying_var], errors="coerce")
     bases: dict[str, int] = {"Total": int((valid & seg.notna()).sum())}
     for code in sorted(seg.dropna().unique()):

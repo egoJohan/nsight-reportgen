@@ -115,9 +115,9 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
     if spec.classifying_var:
-        bases = segment_bases(data, var, spec.classifying_var)
+        bases = segment_bases(data, var, spec.classifying_var, missing_override=eff)
     else:
-        bases = {"Total": single_base(data, var)}
+        bases = {"Total": single_base(data, var, missing_override=eff)}
     counts = aggregate_counts(data, var.name, spec.classifying_var)
     segments = tuple(s for s in bases if s != "Total")
     segments = (*segments, "Total") if segments else ("Total",)
