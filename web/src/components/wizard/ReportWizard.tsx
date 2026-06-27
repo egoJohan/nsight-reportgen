@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useQuestions, useReport, useUpdateReport } from "@/lib/queries";
-import { makeChart, normalizeSlots } from "@/lib/charts";
+import { isWordcloud, makeChart, normalizeSlots } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepReview from "./StepReview";
@@ -265,6 +265,9 @@ export default function ReportWizard({
     for (const c of draft.charts) {
       const q = qMap.get(c.question_ref);
       const needLabels =
+        // A word cloud has no category labels to shorten — skip the AI call
+        // entirely so labelsPending never goes true for it.
+        !isWordcloud(c.chart_type) &&
         !labelsAttempted.current.has(c.question_ref) &&
         c.category_label_overrides.length === 0 &&
         (q?.category_labels?.length ?? 0) > 0;

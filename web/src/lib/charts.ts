@@ -23,6 +23,7 @@ export const CHART_TYPES: ChartTypeOption[] = [
   { id: "scatter", label: "Scatter Plot" },
   { id: "funnel", label: "Funnel Chart" },
   { id: "combo", label: "Combo Chart" },
+  { id: "wordcloud", label: "Word Cloud" },
 ];
 
 export const STACKED = new Set<string>([
@@ -34,6 +35,12 @@ export const SCATTER = "scatter";
 
 export function isStacked(chartType: string): boolean {
   return STACKED.has(chartType);
+}
+
+/** A word cloud renders from computed word frequencies; the usual statistic/
+ * sort/classifying/label controls don't apply and no AI label-shortening runs. */
+export function isWordcloud(chartType: string): boolean {
+  return chartType === "wordcloud";
 }
 
 export function chartTypeLabel(id: string): string {

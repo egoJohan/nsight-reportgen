@@ -34,6 +34,7 @@ import {
   STATISTIC_ITEMS,
   chartTypeLabel,
   isStacked,
+  isWordcloud,
 } from "@/lib/charts";
 
 // Per-chart pending flags (keyed by question_ref) from the auto-AI orchestrator.
@@ -207,8 +208,9 @@ function ChartPreview({
             </div>
           ))}
 
-        {/* Label region — placed per chart type; clears when labels land. */}
-        {url && labelsPending && (
+        {/* Label region — placed per chart type; clears when labels land. A
+            word cloud has no category labels, so it never shows this overlay. */}
+        {url && labelsPending && !isWordcloud(chart.chart_type) && (
           <PendingRegion
             style={{
               left: region.left,
@@ -290,6 +292,20 @@ function ChartControls({
         <ChartTypeField chart={chart} question={question} onChange={onChange} />
         <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           Scatter configuration coming soon.
+        </div>
+      </div>
+    );
+  }
+
+  // A word cloud renders straight from computed word frequencies — none of the
+  // statistic/sort/classifying/number-format/not-answered/label controls apply.
+  if (isWordcloud(chart.chart_type)) {
+    return (
+      <div className="space-y-4">
+        <ChartTypeField chart={chart} question={question} onChange={onChange} />
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          Word cloud — shows the most frequently mentioned answer words; larger
+          words were mentioned more often.
         </div>
       </div>
     );

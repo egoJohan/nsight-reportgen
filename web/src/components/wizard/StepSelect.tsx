@@ -8,6 +8,15 @@ import { cn } from "@/lib/utils";
 import type { Question } from "@/lib/api";
 import { useQuestions } from "@/lib/queries";
 
+// A question whose only compatible chart type is the word cloud (an open-ended
+// free-text question). It's chartable — just rendered as a cloud, not a bar.
+function isWordcloudOnly(q: Question): boolean {
+  return (
+    q.compatible_chart_types?.length === 1 &&
+    q.compatible_chart_types[0] === "wordcloud"
+  );
+}
+
 function KindBadge({ q }: { q: Question }) {
   if (q.kind === "multi") {
     return (
@@ -166,6 +175,14 @@ export default function StepSelect({
                 </span>
               </span>
               <KindBadge q={q} />
+              {isChartable && isWordcloudOnly(q) && (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 whitespace-nowrap border-teal-300 bg-teal-50 font-normal text-teal-700"
+                >
+                  Word cloud
+                </Badge>
+              )}
               {!isChartable && (
                 <Badge
                   variant="outline"

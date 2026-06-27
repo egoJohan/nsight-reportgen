@@ -40,6 +40,15 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
   return q;
 }
 
+// A question whose only compatible chart type is the word cloud (an open-ended
+// free-text question) — chartable, rendered as a cloud.
+function isWordcloudOnly(q: Question): boolean {
+  return (
+    q.compatible_chart_types?.length === 1 &&
+    q.compatible_chart_types[0] === "wordcloud"
+  );
+}
+
 // ---- Kind badge ----
 function KindBadge({ q }: { q: Question }) {
   if (q.kind === "multi") {
@@ -172,6 +181,13 @@ function QuestionTable({
                         title={q.non_chartable_reason ?? undefined}
                       >
                         Text / not chartable
+                      </Badge>
+                    ) : isWordcloudOnly(q) ? (
+                      <Badge
+                        variant="outline"
+                        className="border-teal-300 bg-teal-50 text-teal-700 whitespace-nowrap font-normal"
+                      >
+                        Word cloud
                       </Badge>
                     ) : q.missing_values && q.missing_values.length > 0 ? (
                       <Badge
