@@ -20,6 +20,13 @@ import reportbuilder.stats.statistics  # noqa: F401
 # Module constant so it can be imported by tests and localised in future.
 NOT_ANSWERED_LABEL: str = "Not answered"
 
+# Task G.3: actionable message raised when a non-chartable (open-ended text)
+# question reaches the engine, instead of a cryptic "could not convert string
+# to float" further down the render chain.
+TEXT_NOT_CHARTABLE_MSG: str = (
+    "This question has open-ended text answers and can't be charted"
+)
+
 
 def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
              model: QuestionModel, stat) -> SeriesResult:
@@ -62,14 +69,79 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         base_n=base_n, statistic=stat.name)
 
 
-def _cell_is_zero(cell: Cell | None) -> bool:
-    """True when a category cell carries no value (0 pct AND 0 count). Used to
-    detect empty (0%) categories for show_empty_categories=False. (REQ-options)"""
+def _auto_pct_decimals(values: list[float | None]) -> int:
+    """Decimals auto mode would DISPLAY for these pct values (Task G.4).
+
+    Mirrors the pct branch of render.image._mpl.auto_decimals (kept in sync) so
+    the engine can decide whether a category's *displayed* value rounds to zero
+    without importing the (matplotlib-heavy) image layer.
+    """
+    clean = [float(v) for v in values if v is not None]
+    if not clean:
+        return 0
+    all_large = all(v >= 10.0 for v in clean)
+    frac_trivial = all(abs(v % 1) < 0.05 for v in clean)
+    if all_large or frac_trivial:
+        return 0
+    sorted_vals = sorted(clean)
+    if len(sorted_vals) > 1:
+        min_spread = min(b - a for a, b in zip(sorted_vals, sorted_vals[1:]))
+    else:
+        min_spread = 1.0
+    if any(v < 10.0 for v in clean) or min_spread < 1.0:
+        return 1
+    return 0
+
+
+def _effective_pct_decimals(values: list[float | None], fmt) -> int:
+    """Decimals actually shown for pct given the NumberFormat (auto or manual)."""
+    if getattr(fmt, "mode", "auto") == "manual":
+        return getattr(fmt, "pct_decimals", 0)
+    return _auto_pct_decimals(values)
+
+
+def _displayed_zero(cell: Cell | None, statistic: str, decimals: int) -> bool:
+    """True when the cell's DISPLAYED value rounds to zero (Task G.4).
+
+    For ``count`` the displayed integer rounds to 0; for ``pct`` (and other
+    distribution stats) the value rounds to 0 at the effective decimals shown.
+    A missing cell is treated as zero. This is what drives the
+    show_empty_categories=False hide-empty filter — a tiny-but-nonzero category
+    such as 4/1001 → "0 %" is now dropped, while a "0.4 %" (1-decimal) is kept.
+    """
     if cell is None:
         return True
-    pct_zero = cell.pct in (0, 0.0) or cell.pct is None
-    count_zero = cell.count in (0, 0.0) or cell.count is None
-    return pct_zero and count_zero
+    if statistic == "count":
+        return cell.count is None or round(float(cell.count)) == 0
+    return cell.pct is None or round(float(cell.pct), decimals) == 0
+
+
+def _drop_displayed_zero_rows(rows, cells, segments, statistic, fmt):
+    """Drop rows whose displayed value rounds to 0 across ALL segments (Task G.4).
+
+    Computes the effective per-segment pct decimals from the surviving category
+    values (matching how the renderer formats the series), removes the dropped
+    cells from ``cells`` in place, and returns the kept rows.
+    """
+    displays = [r[0] for r in rows]
+    seg_dec = {
+        seg: _effective_pct_decimals(
+            [cells[(d, seg)].pct for d in displays if (d, seg) in cells], fmt
+        )
+        for seg in segments
+    }
+    kept = []
+    for r in rows:
+        disp = r[0]
+        if all(
+            _displayed_zero(cells.get((disp, seg)), statistic, seg_dec[seg])
+            for seg in segments
+        ):
+            for seg in segments:
+                cells.pop((disp, seg), None)
+        else:
+            kept.append(r)
+    return kept
 
 
 def _effective_missing(spec: ChartSpec, var: Variable) -> set[float]:
@@ -145,18 +217,11 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                                      "mean": 0.0, "data_index": idx,
                                      "topbox": total_cell.pct}))
 
-    # Hide empty (0%) categories: drop any row that is 0 across ALL segments. (show_empty_categories)
+    # Hide categories whose DISPLAYED value rounds to 0 across ALL segments. (Task G.4)
     if not show_empty:
-        kept = []
-        for r in rows:
-            disp = r[0]
-            all_zero = all(_cell_is_zero(cells.get((disp, seg))) for seg in segments)
-            if all_zero:
-                for seg in segments:
-                    cells.pop((disp, seg), None)
-            else:
-                kept.append(r)
-        rows = kept
+        rows = _drop_displayed_zero_rows(
+            rows, cells, segments, spec.statistic, spec.number_format
+        )
 
     categories: list[str] = list(sort_categories(rows, spec.sort))
 
@@ -199,16 +264,11 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
         rows.append((display, float(idx), {"pct": cell.pct, "count": cell.count,
                                            "mean": 0.0, "data_index": idx, "topbox": cell.pct}))
 
-    # Hide empty (0%) members when show_empty_categories is False.
+    # Hide members whose DISPLAYED value rounds to 0 when show_empty is False. (Task G.4)
     if not show_empty:
-        kept = []
-        for r in rows:
-            disp = r[0]
-            if _cell_is_zero(cells.get((disp, "Total"))):
-                cells.pop((disp, "Total"), None)
-            else:
-                kept.append(r)
-        rows = kept
+        rows = _drop_displayed_zero_rows(
+            rows, cells, ("Total",), spec.statistic, spec.number_format
+        )
 
     categories = tuple(sort_categories(rows, spec.sort))
     return SeriesResult(categories=categories, segments=("Total",), cells=cells,
@@ -218,6 +278,11 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
+    # Task G.3: open-ended text questions have no numeric basis — fail early with
+    # an actionable message instead of a cryptic float-conversion error downstream.
+    qvars = [model.variable(n) for n in question.variables]
+    if qvars and all(v.measurement == "text" for v in qvars):
+        raise ValueError(TEXT_NOT_CHARTABLE_MSG)
     stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
     if stat.family == "summary":
         return _summary(question, spec, data, model, stat)

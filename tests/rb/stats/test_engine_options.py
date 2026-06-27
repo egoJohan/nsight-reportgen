@@ -17,7 +17,13 @@ from reportbuilder.model.report import (
     report_from_json,
     report_to_json,
 )
-from reportbuilder.stats.engine import NOT_ANSWERED_LABEL, compute
+import pytest
+
+from reportbuilder.stats.engine import (
+    NOT_ANSWERED_LABEL,
+    TEXT_NOT_CHARTABLE_MSG,
+    compute,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +186,102 @@ class TestHideEmpty:
                          _spec(show_not_answered=True, show_empty_categories=True),
                          df, _model())
         assert NOT_ANSWERED_LABEL in result.categories
+
+
+# ---------------------------------------------------------------------------
+# Task G.4: hide categories whose DISPLAYED value rounds to 0
+# ---------------------------------------------------------------------------
+
+
+def _ident_model() -> QuestionModel:
+    """var9-like identity question: Mieheksi/Naiseksi dominate; Muuksi/En halua
+    sanoa are tiny-but-nonzero (display as 0 %)."""
+    var = Variable(
+        name="ident",
+        label="Miten identifioit itsesi?",
+        measurement="categorical",
+        value_labels=(
+            ValueLabel(1.0, "Mieheksi"),
+            ValueLabel(2.0, "Naiseksi"),
+            ValueLabel(3.0, "Muuksi"),
+            ValueLabel(4.0, "En halua sanoa"),
+        ),
+        missing_values=frozenset(),
+    )
+    q = Question(qid="ident", kind="single", variables=("ident",), text="Identity")
+    return QuestionModel(variables={"ident": var}, questions=[q])
+
+
+def _ident_data() -> pd.DataFrame:
+    # n = 1001: Mieheksi 500, Naiseksi 496, Muuksi 4 (0.40%), En halua sanoa 1 (0.10%)
+    codes = [1.0] * 500 + [2.0] * 496 + [3.0] * 4 + [4.0] * 1
+    return pd.DataFrame({"ident": codes})
+
+
+def _ident_spec(**kw) -> ChartSpec:
+    return ChartSpec(
+        question_ref="ident",
+        chart_type="pie",
+        statistic=kw.get("statistic", "pct"),
+        classifying_var=None,
+        number_format=kw.get("number_format", NumberFormat()),
+        sort=SortSpec(basis="data_order"),
+        template_slot="s1",
+        elements=ElementToggles(),
+        show_empty_categories=kw.get("show_empty_categories", True),
+    )
+
+
+class TestHideDisplayZero:
+    def test_display_zero_categories_dropped_when_false(self):
+        """Muuksi (4/1001 -> "0 %") and En halua sanoa (1/1001 -> "0 %") are
+        dropped though their counts are non-zero; Mieheksi/Naiseksi remain."""
+        result = compute(_ident_model().question("ident"),
+                         _ident_spec(show_empty_categories=False),
+                         _ident_data(), _ident_model())
+        assert set(result.categories) == {"Mieheksi", "Naiseksi"}
+        assert "Muuksi" not in result.categories
+        assert "En halua sanoa" not in result.categories
+
+    def test_display_zero_categories_kept_when_true(self):
+        result = compute(_ident_model().question("ident"),
+                         _ident_spec(show_empty_categories=True),
+                         _ident_data(), _ident_model())
+        assert "Muuksi" in result.categories
+        assert "En halua sanoa" in result.categories
+
+    def test_one_decimal_nonzero_pct_is_kept(self):
+        """With a manual 1-decimal format, Muuksi shows "0.4 %" (NOT zero as
+        displayed) and must be kept; En halua sanoa shows "0.1 %" and kept too."""
+        result = compute(_ident_model().question("ident"),
+                         _ident_spec(show_empty_categories=False,
+                                     number_format=NumberFormat(mode="manual", pct_decimals=1)),
+                         _ident_data(), _ident_model())
+        assert "Muuksi" in result.categories            # 0.4 % is not displayed-zero
+        assert result.cell("Muuksi", "Total").pct == 0.4
+        assert "En halua sanoa" in result.categories    # 0.1 %
+
+
+# ---------------------------------------------------------------------------
+# Task G.3: open-ended text questions raise a clean, actionable error
+# ---------------------------------------------------------------------------
+
+
+class TestTextQuestionGuard:
+    def _text_model(self) -> QuestionModel:
+        var = Variable(name="other", label="Muut, mitkä?", measurement="text",
+                       value_labels=(), missing_values=frozenset())
+        q = Question(qid="other", kind="single", variables=("other",), text="Muut, mitkä?")
+        return QuestionModel(variables={"other": var}, questions=[q])
+
+    def test_compute_on_text_question_raises_clear_value_error(self):
+        model = self._text_model()
+        df = pd.DataFrame({"other": ["Alzheimer potilas", "kotihoito", "x"]})
+        with pytest.raises(ValueError) as exc:
+            compute(model.question("other"), _spec(), df, model)
+        msg = str(exc.value)
+        assert msg == TEXT_NOT_CHARTABLE_MSG
+        assert "could not convert string to float" not in msg
 
 
 # ---------------------------------------------------------------------------

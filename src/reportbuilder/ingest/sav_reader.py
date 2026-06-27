@@ -23,6 +23,23 @@ def _measurement(spss_measure: str) -> str:
     return "scale" if (spss_measure or "").lower() == "scale" else "categorical"
 
 
+def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
+    """Detect open-ended free-text variables (Task G.1).
+
+    A variable is open-ended text when it has NO usable numeric value labels AND
+    the bulk of its non-null values are not coercible to numbers (e.g. free-text
+    answers like "Alzheimer potilas"). Such variables have no chartable numeric
+    basis and must be flagged non-chartable rather than crashing the renderer.
+    """
+    if value_labels:
+        return False  # coded categorical — has a numeric basis
+    nn = series.dropna()
+    if len(nn) == 0:
+        return False
+    coerced = pd.to_numeric(nn, errors="coerce")
+    return float(coerced.isna().mean()) > 0.5
+
+
 def _user_missing(ranges: list | None) -> frozenset[float]:
     codes: set[float] = set()
     for r in ranges or []:
@@ -129,10 +146,15 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             ValueLabel(float(code), str(lbl))
             for code, lbl in sorted(value_labels.get(name, {}).items())
         )
+        measurement = _measurement(measures.get(name, ""))
+        # Task G.1: classify open-ended free-text variables as measurement "text"
+        # so questions built from them can be flagged non-chartable downstream.
+        if _is_text_variable(df[name], vls):
+            measurement = "text"
         variables[name] = Variable(
             name=name,
             label=labels.get(name) or name,
-            measurement=_measurement(measures.get(name, "")),
+            measurement=measurement,
             value_labels=vls,
             missing_values=_user_missing(missing_ranges.get(name)),
         )

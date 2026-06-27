@@ -31,7 +31,7 @@ from reportbuilder.model.report import (
     Report,
     SortSpec,
 )
-from reportbuilder.render.plugins import suggest_chart_type
+from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -75,6 +75,37 @@ def _quick_series(question, model: QuestionModel) -> SeriesResult:
         base_n={"Total": len(cats) * 10},
         statistic="pct",
     )
+
+
+def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
+    """Whether a question can be charted, plus a reason when it cannot (Task G.1).
+
+    A question is non-chartable when it has no numeric basis — i.e. all of its
+    variables are open-ended free text (measurement "text"). Such questions are
+    kept in the list (the UI shows them disabled) but flagged.
+    """
+    qvars = [model.variables[v] for v in q.variables]
+    if qvars and all(v.measurement == "text" for v in qvars):
+        return False, "Open-ended text answers"
+    return True, None
+
+
+def _compatible_chart_types(question, series: SeriesResult) -> list[str]:
+    """Chart-type ids whose plugin suitability is not None for this shape (Task G.2).
+
+    Reuses the same plugin suitability scorers that drive suggested_chart_type, so
+    the UI can gray out incompatible types (e.g. pie/doughnut for multi-response,
+    scatter which is opt-in). Order follows plugin registration order.
+    """
+    out: list[str] = []
+    for cid, p in CHART_PLUGINS.items():
+        try:
+            if p.suitability(question, series) is not None:
+                out.append(cid)
+        except Exception:
+            # A scorer that errors on this shape is simply not offered.
+            continue
+    return out
 
 
 def _missing_value_list(model: QuestionModel, qid: str) -> list[dict]:
@@ -154,21 +185,31 @@ def list_questions(
     render-resolvable. Each question includes a suggested chart type (REQ-C-13) and the
     missing-value mapping (REQ-D-06). (REQ-C-05)"""
     model = load_model_for_material(material_id, client)
-    return {
-        "questions": [
-            {
-                "qid": q.qid,
-                "kind": q.kind,
-                "variables": list(q.variables),
-                "text": q.text,
-                "suggested_chart_type": suggest_chart_type(q, _quick_series(q, model)),
-                "missing_values": _missing_value_list(model, q.qid),
-                "values": _value_list(model, q),
-                "category_labels": _category_labels(model, q),
-            }
-            for q in model.questions
-        ]
-    }
+    questions = []
+    for q in model.questions:
+        chartable, reason = _question_chartable(model, q)
+        if chartable:
+            series = _quick_series(q, model)
+            suggested = suggest_chart_type(q, series)
+            compatible = _compatible_chart_types(q, series)
+        else:
+            # Non-chartable (open-ended text): no suggestion, no compatible types.
+            suggested = None
+            compatible = []
+        questions.append({
+            "qid": q.qid,
+            "kind": q.kind,
+            "variables": list(q.variables),
+            "text": q.text,
+            "chartable": chartable,
+            "non_chartable_reason": reason,
+            "suggested_chart_type": suggested,
+            "compatible_chart_types": compatible,
+            "missing_values": _missing_value_list(model, q.qid),
+            "values": _value_list(model, q),
+            "category_labels": _category_labels(model, q),
+        })
+    return {"questions": questions}
 
 
 @questions_router.get("/materials/{material_id}/variables")

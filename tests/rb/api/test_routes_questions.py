@@ -204,6 +204,73 @@ def test_chart_spec_body_maps_new_option_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Task G.1 / G.2: chartable flag + compatible_chart_types
+# ---------------------------------------------------------------------------
+
+
+def _text_question_model() -> QuestionModel:
+    """A single open-ended text question plus a normal categorical one."""
+    variables = {
+        "other": Variable(
+            name="other",
+            label="Muut hoivapalvelut, mitkä?",
+            measurement="text",
+            value_labels=(),
+            missing_values=frozenset(),
+        ),
+        "sat": Variable(
+            name="sat",
+            label="Satisfaction",
+            measurement="categorical",
+            value_labels=(ValueLabel(1.0, "Low"), ValueLabel(2.0, "High")),
+            missing_values=frozenset(),
+        ),
+    }
+    questions = [
+        Question(qid="other", kind="single", variables=("other",), text="Muut hoivapalvelut, mitkä?"),
+        Question(qid="sat", kind="single", variables=("sat",), text="Satisfaction"),
+    ]
+    return QuestionModel(variables=variables, questions=questions)
+
+
+def _get_questions(model):
+    mock_client = Mock()
+    app = create_app(client=mock_client)
+    client = TestClient(app)
+    with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
+        mock_load.return_value = model
+        response = client.get("/materials/mat-G/questions")
+    assert response.status_code == 200
+    return response.json()["questions"]
+
+
+def test_text_question_is_non_chartable():
+    """G.1: an open-ended text question is flagged chartable=false with a reason;
+    a normal categorical question is chartable=true."""
+    qs = {q["qid"]: q for q in _get_questions(_text_question_model())}
+    assert qs["other"]["chartable"] is False
+    assert qs["other"]["non_chartable_reason"]  # a non-empty reason string
+    assert qs["other"]["compatible_chart_types"] == []
+    assert qs["other"]["suggested_chart_type"] is None
+
+    assert qs["sat"]["chartable"] is True
+    assert qs["sat"]["non_chartable_reason"] is None
+    assert qs["sat"]["compatible_chart_types"]  # non-empty
+
+
+def test_compatible_chart_types_multi_excludes_pie():
+    """G.2: a multi-response question excludes pie/doughnut and includes
+    horizontal_bar in compatible_chart_types."""
+    qs = _get_questions(_make_grouped_model())
+    multi = [q for q in qs if q["kind"] == "multi"]
+    assert multi, "expected an auto-grouped multi question"
+    compatible = multi[0]["compatible_chart_types"]
+    assert "pie" not in compatible
+    assert "doughnut" not in compatible
+    assert "horizontal_bar" in compatible
+
+
+# ---------------------------------------------------------------------------
 # PUT /materials/{material_id}/grouping — multi  (REQ-C-06, M-02)
 # ---------------------------------------------------------------------------
 
