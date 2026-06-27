@@ -249,6 +249,11 @@ function ChartControls({
             ))}
           </SelectContent>
         </Select>
+        <p className="text-xs leading-snug text-muted-foreground">
+          Optional — break the chart down by another variable (e.g. by gender or
+          age) to get a series per group plus a Total. Required for stacked
+          charts. Leave as None for one overall result.
+        </p>
       </Field>
 
       <Field label="Sort">

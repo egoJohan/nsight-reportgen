@@ -7,13 +7,15 @@ import {
   FileXIcon,
   Loader2Icon,
   SaveIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
-import { useReport, useUpdateReport } from "@/lib/queries";
+import { useQuestions, useReport, useUpdateReport } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
@@ -110,12 +112,18 @@ export default function ReportWizard({
   onMissing?: () => void;
 }) {
   const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
+  const { data: questions } = useQuestions(materialId);
   const updateReport = useUpdateReport(caseId);
 
   const [draft, setDraft] = useState<ReportDoc | null>(null);
   const [step, setStep] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // Auto AI-formatting progress overlay ({done, total}); null when idle.
+  const [aiProgress, setAiProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   // Initialise the working draft once the report loads.
   useEffect(() => {
@@ -168,6 +176,20 @@ export default function ReportWizard({
     [mutate]
   );
 
+  // Update a chart found by its question_ref (indices can shift while async
+  // AI work is in flight, so the auto-formatter addresses charts by ref).
+  const updateChartByRef = useCallback(
+    (ref: string, patch: Partial<ChartSpec>) => {
+      mutate((d) => ({
+        ...d,
+        charts: d.charts.map((c) =>
+          c.question_ref === ref ? { ...c, ...patch } : c
+        ),
+      }));
+    },
+    [mutate]
+  );
+
   const removeChart = useCallback(
     (index: number) => {
       mutate((d) => ({
@@ -208,6 +230,126 @@ export default function ReportWizard({
       return false;
     }
   }, [updateReport, reportId]);
+
+  // ── Auto AI-formatting (the default, not a manual click) ──────────────────
+  // When charts are added (or a report loads without them), automatically
+  // short-label every chart's categories and generate a descriptive slide
+  // title, then store the results onto the specs so Configure shows SHORT
+  // labels and Slides shows the AI title by default. Per-chart graceful
+  // fallback to the originals on failure; never retried within a session.
+  const aiRunning = useRef(false);
+  const labelsAttempted = useRef<Set<string>>(new Set());
+  const titlesAttempted = useRef<Set<string>>(new Set());
+  // Bumped when an auto-format pass finishes; a separate effect then persists
+  // the result. Saving from a post-commit effect (instead of inline) ensures
+  // every generated patch has flushed into the draft before we read it.
+  const [aiSaveTick, setAiSaveTick] = useState(0);
+
+  useEffect(() => {
+    // Wait for questions so we only request labels for charts that have
+    // category labels (and compute label + title work in one pass).
+    if (!draft || !questions || aiRunning.current) return;
+
+    const qMap = new Map<string, Question>();
+    questions.forEach((q) => qMap.set(q.qid, q));
+
+    type Task = { ref: string; needLabels: boolean; needTitle: boolean };
+    const tasks: Task[] = [];
+    for (const c of draft.charts) {
+      const q = qMap.get(c.question_ref);
+      const needLabels =
+        !labelsAttempted.current.has(c.question_ref) &&
+        c.category_label_overrides.length === 0 &&
+        (q?.category_labels?.length ?? 0) > 0;
+      const needTitle =
+        !titlesAttempted.current.has(c.question_ref) && !c.slide_title;
+      if (needLabels || needTitle)
+        tasks.push({ ref: c.question_ref, needLabels, needTitle });
+    }
+    if (tasks.length === 0) return;
+
+    aiRunning.current = true;
+    setAiProgress({ done: 0, total: tasks.length });
+
+    // Per-chart worker: labels + title run concurrently for one chart.
+    const worker = async (task: Task) => {
+      const jobs: Promise<unknown>[] = [];
+      if (task.needLabels) {
+        labelsAttempted.current.add(task.ref);
+        jobs.push(
+          api.materials
+            .aiShortLabels(materialId, { question_ref: task.ref })
+            .then(({ overrides }) => {
+              const useful = overrides.filter(
+                ([full, short]) => short.trim() && short.trim() !== full
+              );
+              if (useful.length > 0)
+                updateChartByRef(task.ref, {
+                  category_label_overrides: useful,
+                });
+            })
+            .catch(() => {
+              /* graceful: keep original labels */
+            })
+        );
+      }
+      if (task.needTitle) {
+        titlesAttempted.current.add(task.ref);
+        const chart = draftRef.current?.charts.find(
+          (c) => c.question_ref === task.ref
+        );
+        jobs.push(
+          api.materials
+            .aiSlideTitle(materialId, {
+              question_ref: task.ref,
+              statistic: chart?.statistic,
+              classifying_var: chart?.classifying_var,
+              show_not_answered: chart?.show_not_answered,
+              not_answered_codes: chart?.not_answered_codes,
+            })
+            .then(({ title }) => {
+              if (title) updateChartByRef(task.ref, { slide_title: title });
+            })
+            .catch(() => {
+              /* graceful: fall back to the question text */
+            })
+        );
+      }
+      await Promise.allSettled(jobs);
+      setAiProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+    };
+
+    // Limited concurrency (≈3 charts in flight); egoHive is slow.
+    const run = async () => {
+      let idx = 0;
+      const lanes = Array.from(
+        { length: Math.min(3, tasks.length) },
+        async () => {
+          while (idx < tasks.length) {
+            const t = tasks[idx++];
+            await worker(t);
+          }
+        }
+      );
+      await Promise.all(lanes);
+    };
+
+    run().finally(() => {
+      aiRunning.current = false;
+      setAiProgress(null);
+      // Persist via the effect below, after the patches have committed.
+      setAiSaveTick((t) => t + 1);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, questions, materialId, updateChartByRef]);
+
+  // Persist generated overrides/titles once an auto-format pass settles. Runs
+  // post-commit so draftRef already reflects every generated patch.
+  useEffect(() => {
+    if (aiSaveTick === 0) return;
+    void save();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiSaveTick]);
 
   // Persist any unsaved edits before navigating; abort if the save fails
   // (save() already toasts on failure). Used by every exit/transition so
@@ -308,6 +450,20 @@ export default function ReportWizard({
           </Button>
         </div>
       </div>
+
+      {/* Auto AI-formatting progress */}
+      {aiProgress && (
+        <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+          <SparklesIcon className="size-4 shrink-0 animate-pulse text-primary" />
+          <span className="font-medium text-foreground">
+            Preparing your report
+          </span>
+          <span className="text-muted-foreground">
+            formatting titles &amp; labels… {aiProgress.done}/{aiProgress.total}
+          </span>
+          <Loader2Icon className="ml-auto size-4 shrink-0 animate-spin text-muted-foreground" />
+        </div>
+      )}
 
       {/* Stepper */}
       <div className="mb-6 flex justify-center rounded-xl border bg-card px-3 py-2">
