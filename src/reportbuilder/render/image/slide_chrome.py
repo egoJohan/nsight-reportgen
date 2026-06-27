@@ -138,13 +138,6 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         [(footer_text, 9.5, PX_MUTED, False)],
         align=PP_ALIGN.LEFT,
     )
-
-    # 5 — N annotation compact (bottom-right) — kept for legacy compat
-    if base_n is not None:
-        _textbox(
-            slide,
-            sw - Inches(3.2), sh - Inches(0.50),
-            Inches(3.0), Inches(0.40),
-            [(f"n = {base_n}", 9.5, PX_MUTED, True)],
-            align=PP_ALIGN.RIGHT,
-        )
+    # n is shown once, in the methodology footer above (it already reads
+    # "<stat label> · n = N"). The previous separate bottom-right "n = N"
+    # annotation was redundant and has been removed.

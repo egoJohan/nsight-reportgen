@@ -35,11 +35,12 @@ def test_slide_title_prompt_is_finnish_with_findings_and_constraints() -> None:
         chat=chat,
     )
     assert title == "Attendo johtaa tunnettuudessa"
-    # Finnish prompt mentioning the findings + key constraints.
-    assert "suomenkielinen otsikko" in chat.prompt
+    # Finnish analytical key-message ("avainviesti") prompt mentioning the
+    # question, the findings, and the don't-just-restate constraint.
+    assert "avainviesti" in chat.prompt
     assert "Mitä brändejä tunnet?" in chat.prompt
     assert "Attendo" in chat.prompt and "86" in chat.prompt
-    assert "ÄLÄ toista kysymystä" in chat.prompt
+    assert "toistaa kysymystä" in chat.prompt
 
 
 def test_slide_title_strips_quotes_and_markdown() -> None:

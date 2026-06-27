@@ -24,8 +24,18 @@ from reportbuilder.ai.reference import ReferenceLabels
 # Max length for an AI-shortened category label (C.2).
 MAX_LABEL_LEN = 24
 
-# Soft cap on a slide title length, mentioned in the prompt (C.2).
-MAX_TITLE_LEN = 70
+# Soft cap on a slide title length. A title is an analytical key message
+# ("avainviesti"), so it needs room for a short conclusion — not a 3-word slogan.
+MAX_TITLE_LEN = 110
+
+# Style exemplars: real analytical key-message headlines from nSight decks.
+# They state the SUBJECT of the question and the KEY CONCLUSION from the data —
+# not a restatement of the question, not a bare slogan.
+_TITLE_EXAMPLES = (
+    "Yleinen käsitys yksityisistä palveluntarjoajista on kohentunut ja on nyt yhtä myönteinen kuin julkisista",
+    "Attendo tunnetaan selvästi parhaiten yksityisistä hoivapalveluiden tarjoajista",
+    "Suurin osa vastaajista valitsisi mieluummin yksityisen kuin julkisen hoivapalvelun",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -39,16 +49,22 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         v = f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
         lines.append(f"- {label}: {v}")
     findings_block = "\n".join(lines) if lines else "- (ei kärkituloksia)"
+    examples_block = "\n".join(f"- {e}" for e in _TITLE_EXAMPLES)
     return (
-        "Olet markkinatutkimusraporttien otsikoija. "
-        f"Kaavion taustakysymys: \"{question_text}\".\n"
-        "Kaavion kärkitulokset (kategoria: arvo):\n"
+        "Olet markkinatutkimuksen analyytikko. Kirjoitat kaaviolle avainviestin "
+        "(otsikon), joka kertoo lukijalle, mitä kysyttiin ja mikä on vastausten "
+        "keskeinen johtopäätös.\n\n"
+        f"Kysymys (mitä kysyttiin): \"{question_text}\".\n"
+        "Vastausten kärkitulokset (kategoria: arvo):\n"
         f"{findings_block}\n\n"
-        "Kirjoita YKSI lyhyt, kuvaileva suomenkielinen otsikko, joka kertoo mitä "
-        "kaavio näyttää ja nostaa esiin johtavan tuloksen. "
-        f"Pidä otsikko lyhyenä (enintään noin {MAX_TITLE_LEN} merkkiä). "
-        "ÄLÄ toista kysymystä sellaisenaan, äläkä kirjoita kokonaista virkettä tai "
-        "listaa. Palauta vain otsikko ilman lainausmerkkejä."
+        "Esimerkkejä hyvän avainviestin tyylistä:\n"
+        f"{examples_block}\n\n"
+        "Kirjoita YKSI suomenkielinen avainviesti, joka tiivistää kysymyksen aiheen "
+        "ja vastausten keskeisen johtopäätöksen yhdeksi analyyttiseksi havainnoksi. "
+        "Otsikon tulee TULKITA tuloksia (mitä data kertoo), ei vain todeta yksittäistä "
+        "lukua tai toistaa kysymystä. Vältä iskulausetta; kirjoita kuten esimerkeissä. "
+        f"Enintään noin {MAX_TITLE_LEN} merkkiä, yksi rivi, ei lainausmerkkejä, ei "
+        "loppupistettä."
     )
 
 
