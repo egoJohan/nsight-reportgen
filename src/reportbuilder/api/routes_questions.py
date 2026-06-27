@@ -10,6 +10,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -361,9 +362,18 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
     )
 
 
+# Per-process cache salt: the in-memory store resets material ids (mat-1, mat-2…)
+# on restart, so a cache keyed only on (material_id, spec) would serve images
+# rendered by a PREVIOUS process — i.e. stale, pre-code-change renders. Salting
+# the key per process makes every server start use a fresh preview namespace.
+_PREVIEW_CACHE_SALT = uuid.uuid4().hex[:8]
+
+
 def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
-    """Return a deterministic per-(material, spec) temp directory for preview artifacts."""
-    key = hashlib.md5(f"{material_id}:{spec_json}".encode()).hexdigest()[:16]
+    """Return a per-(process, material, spec) temp directory for preview artifacts."""
+    key = hashlib.md5(
+        f"{_PREVIEW_CACHE_SALT}:{material_id}:{spec_json}".encode()
+    ).hexdigest()[:16]
     d = pathlib.Path(tempfile.gettempdir()) / "nsight-preview" / key
     d.mkdir(parents=True, exist_ok=True)
     return d
