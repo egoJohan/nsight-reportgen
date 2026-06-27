@@ -206,7 +206,13 @@ def ai_short_labels(
             raise HTTPException(
                 status_code=404, detail=f"Question '{body.question_ref}' not found"
             ) from exc
-        labels = _category_labels(model, question)
+        try:
+            labels = _category_labels(model, question)
+        except Exception as exc:
+            # Never 500: a malformed model surfaces as a clean 503.
+            raise HTTPException(
+                status_code=503, detail=f"Could not resolve category labels: {exc}"
+            ) from exc
     else:
         raise HTTPException(
             status_code=422,
