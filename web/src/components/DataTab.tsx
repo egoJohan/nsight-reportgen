@@ -111,7 +111,16 @@ function QuestionTable({
             className="pl-9"
           />
         </div>
-        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+        <Select
+          items={{
+            default: "Default order",
+            text_asc: "A → Z",
+            text_desc: "Z → A",
+            kind: "By type",
+          }}
+          value={sort}
+          onValueChange={(v) => setSort(v as SortKey)}
+        >
           <SelectTrigger className="w-40">
             <SelectValue placeholder="Sort by…" />
           </SelectTrigger>

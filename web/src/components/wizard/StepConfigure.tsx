@@ -22,8 +22,12 @@ import type { ChartSpec, Question } from "@/lib/api";
 import { useQuestions, useVariables } from "@/lib/queries";
 import {
   CHART_TYPES,
+  CHART_TYPE_ITEMS,
+  NUMBER_FORMAT_ITEMS,
   SORT_OPTIONS,
+  SORT_ITEMS,
   STATISTICS,
+  STATISTIC_ITEMS,
   chartTypeLabel,
   isStacked,
 } from "@/lib/charts";
@@ -164,6 +168,10 @@ function ChartControls({
   const stacked = isStacked(chart.chart_type);
   const stackedMissing = stacked && !chart.classifying_var;
   const manual = chart.number_format.mode === "manual";
+  const varItems: Record<string, string> = {
+    __none__: "None",
+    ...Object.fromEntries((variables ?? []).map((v) => [v.name, v.label])),
+  };
 
   if (chart.chart_type === "scatter") {
     return (
@@ -182,6 +190,7 @@ function ChartControls({
 
       <Field label="Statistic">
         <Select
+          items={STATISTIC_ITEMS}
           value={chart.statistic}
           onValueChange={(v) =>
             onChange({ statistic: v as ChartSpec["statistic"] })
@@ -210,6 +219,7 @@ function ChartControls({
         }
       >
         <Select
+          items={varItems}
           value={chart.classifying_var ?? "__none__"}
           onValueChange={(v) =>
             onChange({ classifying_var: v === "__none__" ? null : v })
@@ -233,6 +243,7 @@ function ChartControls({
 
       <Field label="Sort">
         <Select
+          items={SORT_ITEMS}
           value={chart.sort.basis}
           onValueChange={(v) =>
             onChange({
@@ -260,6 +271,7 @@ function ChartControls({
       {/* Number format */}
       <Field label="Number format">
         <Select
+          items={NUMBER_FORMAT_ITEMS}
           value={chart.number_format.mode}
           onValueChange={(v) =>
             onChange({
@@ -357,6 +369,7 @@ function ChartTypeField({
   return (
     <Field label="Chart type">
       <Select
+        items={CHART_TYPE_ITEMS}
         value={chart.chart_type}
         onValueChange={(v) => onChange({ chart_type: (v as string) ?? "" })}
       >

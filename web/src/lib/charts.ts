@@ -40,6 +40,15 @@ export function chartTypeLabel(id: string): string {
   return CHART_TYPES.find((c) => c.id === id)?.label ?? id;
 }
 
+/** base-ui Select renders the raw value unless given an items map; these resolve labels. */
+export const CHART_TYPE_ITEMS: Record<string, string> = Object.fromEntries(
+  CHART_TYPES.map((t) => [t.id, t.label])
+);
+export const NUMBER_FORMAT_ITEMS: Record<string, string> = {
+  auto: "Auto",
+  manual: "Manual",
+};
+
 // ---- Statistic options ----
 export interface StatisticOption {
   id: ChartSpec["statistic"];
@@ -54,6 +63,10 @@ export const STATISTICS: StatisticOption[] = [
   { id: "sum", label: "Sum" },
 ];
 
+export const STATISTIC_ITEMS: Record<string, string> = Object.fromEntries(
+  STATISTICS.map((s) => [s.id, s.label])
+);
+
 // ---- Sort options (compact subset mapped to sort.basis) ----
 export interface SortOption {
   id: SortSpec["basis"];
@@ -66,6 +79,10 @@ export const SORT_OPTIONS: SortOption[] = [
   { id: "mean", label: "Mean" },
   { id: "count", label: "Count" },
 ];
+
+export const SORT_ITEMS: Record<string, string> = Object.fromEntries(
+  SORT_OPTIONS.map((s) => [s.id, s.label])
+);
 
 // ---- Defaults ----
 export const DEFAULT_NUMBER_FORMAT: NumberFormat = {
