@@ -3,8 +3,12 @@ import {
   AlertCircleIcon,
   BarChart3Icon,
   ImageIcon,
+  Loader2Icon,
+  RotateCcwIcon,
+  SparklesIcon,
   Trash2Icon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,6 +62,9 @@ function ChartPreview({
         elements: chart.elements,
         scatter_xy: chart.scatter_xy,
         show_not_answered: chart.show_not_answered,
+        show_empty_categories: chart.show_empty_categories,
+        not_answered_codes: chart.not_answered_codes,
+        category_label_overrides: chart.category_label_overrides,
       }),
     [chart]
   );
@@ -158,14 +165,17 @@ function Field({
 function ChartControls({
   chart,
   materialId,
+  question,
   onChange,
 }: {
   chart: ChartSpec;
   materialId: string;
+  question: Question | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
   const { data: variables } = useVariables(materialId);
   const stacked = isStacked(chart.chart_type);
+  const isSingle = question?.kind === "single";
   const stackedMissing = stacked && !chart.classifying_var;
   const manual = chart.number_format.mode === "manual";
   const varItems: Record<string, string> = {
@@ -304,6 +314,41 @@ function ChartControls({
         </div>
       </Field>
 
+      {/* Show empty (0%) categories */}
+      <Field label="Show empty (0%) categories">
+        <div className="flex h-8 items-center">
+          <Switch
+            checked={chart.show_empty_categories}
+            onCheckedChange={(checked: boolean) =>
+              onChange({ show_empty_categories: checked })
+            }
+          />
+        </div>
+      </Field>
+
+      {/* "Not answered" value picker — single categorical only */}
+      {isSingle && question && (question.values?.length ?? 0) > 0 && (
+        <div className="col-span-2">
+          <NotAnsweredPicker
+            chart={chart}
+            question={question}
+            onChange={onChange}
+          />
+        </div>
+      )}
+
+      {/* Category-label editor + Shorten with AI */}
+      {question && (question.category_labels?.length ?? 0) > 0 && (
+        <div className="col-span-2">
+          <CategoryLabelEditor
+            chart={chart}
+            question={question}
+            materialId={materialId}
+            onChange={onChange}
+          />
+        </div>
+      )}
+
       {manual && (
         <div className="col-span-2 grid grid-cols-3 items-end gap-4 rounded-lg border bg-muted/30 p-3">
           <Field label="% decimals">
@@ -355,6 +400,183 @@ function ChartControls({
           </Field>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── "Not answered" value picker ─────────────────────────────────────────────
+function NotAnsweredPicker({
+  chart,
+  question,
+  onChange,
+}: {
+  chart: ChartSpec;
+  question: Question;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const detected = useMemo(
+    () => (question.missing_values ?? []).map((m) => m.code),
+    [question.missing_values]
+  );
+  // null = "use detected": fall back to the SAV-detected missing set for display.
+  const usingDetected = chart.not_answered_codes === null;
+  const checked = useMemo(
+    () => new Set(chart.not_answered_codes ?? detected),
+    [chart.not_answered_codes, detected]
+  );
+  const values = question.values ?? [];
+
+  const toggle = (code: number) => {
+    const next = new Set(checked);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    // Once the user edits, write the explicit list (even if it equals detected).
+    onChange({ not_answered_codes: Array.from(next) });
+  };
+
+  if (values.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs font-medium text-muted-foreground">
+          "Not answered" values
+        </Label>
+        {!usingDetected && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-muted-foreground"
+            onClick={() => onChange({ not_answered_codes: null })}
+          >
+            <RotateCcwIcon className="size-3" />
+            Reset to detected
+          </Button>
+        )}
+      </div>
+      <div className="max-h-36 space-y-0.5 overflow-y-auto">
+        {values.map((v) => (
+          <label
+            key={v.code}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/60"
+          >
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={checked.has(v.code)}
+              onChange={() => toggle(v.code)}
+            />
+            <span className="tabular-nums text-muted-foreground">
+              {v.code}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{v.label}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Choose which answers count as "Not answered". Defaults to the values
+        flagged missing in the data.
+      </p>
+    </div>
+  );
+}
+
+// ── Category-label editor (editable short labels + Shorten with AI) ──────────
+function CategoryLabelEditor({
+  chart,
+  question,
+  materialId,
+  onChange,
+}: {
+  chart: ChartSpec;
+  question: Question;
+  materialId: string;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const [shortening, setShortening] = useState(false);
+
+  const overrideMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [full, short] of chart.category_label_overrides) m.set(full, short);
+    return m;
+  }, [chart.category_label_overrides]);
+
+  // Write/update a single [full, short] override; empty or == full removes it.
+  const setOverride = (full: string, short: string) => {
+    const trimmed = short.trim();
+    const pairs = chart.category_label_overrides.filter(([f]) => f !== full);
+    if (trimmed && trimmed !== full) pairs.push([full, short]);
+    onChange({ category_label_overrides: pairs });
+  };
+
+  const shortenWithAI = async () => {
+    setShortening(true);
+    try {
+      const { overrides } = await api.materials.aiShortLabels(materialId, {
+        question_ref: chart.question_ref,
+      });
+      // Keep only meaningful shortenings (non-empty, actually shorter/different).
+      const useful = overrides.filter(
+        ([full, short]) => short.trim() && short.trim() !== full
+      );
+      if (useful.length === 0) {
+        toast.warning("AI couldn't shorten the labels (service may be unavailable)");
+        return;
+      }
+      onChange({ category_label_overrides: useful });
+      toast.success(`Shortened ${useful.length} label(s) with AI`);
+    } catch (e) {
+      toast.error(
+        `Shorten with AI failed: ${e instanceof Error ? e.message : "unknown error"}`
+      );
+    } finally {
+      setShortening(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs font-medium text-muted-foreground">
+          Category labels
+        </Label>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          disabled={shortening}
+          onClick={shortenWithAI}
+        >
+          {shortening ? (
+            <Loader2Icon className="size-3.5 animate-spin" />
+          ) : (
+            <SparklesIcon className="size-3.5" />
+          )}
+          {shortening ? "Shortening…" : "Shorten with AI"}
+        </Button>
+      </div>
+      <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+        {(question.category_labels ?? []).map((full, i) => (
+          <div
+            key={`${full}-${i}`}
+            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
+          >
+            <span className="text-sm leading-snug text-muted-foreground break-words">
+              {full}
+            </span>
+            <Input
+              value={overrideMap.get(full) ?? ""}
+              placeholder={full}
+              className="h-8"
+              onChange={(e) => setOverride(full, e.target.value)}
+            />
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Edit the short label shown in the chart, or let AI shorten them all.
+        Leave blank to use the full label.
+      </p>
     </div>
   );
 }
@@ -520,6 +742,7 @@ export default function StepConfigure({
             <ChartControls
               chart={activeChart}
               materialId={materialId}
+              question={questionMap.get(activeChart.question_ref)}
               onChange={(patch) => onUpdateChart(active, patch)}
             />
           </div>

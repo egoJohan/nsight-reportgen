@@ -117,7 +117,19 @@ async function seedReport(caseId, materialId) {
       !STACKED.has(q.suggested_chart_type) &&
       q.suggested_chart_type !== "scatter"
   );
-  const picks = (safe.length >= 3 ? safe : questions).slice(0, 3);
+  // Lead with a single categorical question (with values + ideally a missing
+  // set) so the Configure shot shows the "Not answered" value picker, then fill
+  // to 3 with the remaining safe questions.
+  const pool = safe.length >= 3 ? safe : questions;
+  const lead =
+    pool.find(
+      (q) =>
+        q.kind === "single" &&
+        (q.values?.length ?? 0) > 0 &&
+        (q.missing_values?.length ?? 0) > 0
+    ) ?? pool.find((q) => q.kind === "single" && (q.values?.length ?? 0) > 0);
+  const rest = pool.filter((q) => q !== lead);
+  const picks = (lead ? [lead, ...rest] : pool).slice(0, 3);
   const charts = picks.map((q, i) =>
     makeChart(q.qid, q.suggested_chart_type, `s${i + 1}`)
   );
@@ -270,6 +282,37 @@ async function main() {
   await page.screenshot({ path: configurePath });
   console.log(`  Saved: ${configurePath}`);
 
+  // ── Screenshot 5b: Configure options (empty-cat switch, not-answered picker,
+  //    category-label editor after a real "Shorten with AI" run) ─────────────
+  console.log(
+    "\nShot 5b: Configure options + Shorten with AI (egoHive, can take ~20s)…"
+  );
+  const shortenBtn = page.getByRole("button", { name: /Shorten with AI/ });
+  await shortenBtn.scrollIntoViewIfNeeded();
+  await shortenBtn.click();
+  // egoHive is slow — wait for the success/failure toast before screenshotting.
+  await page.waitForSelector("text=/Shortened|couldn't shorten/i", {
+    timeout: 90_000,
+  });
+  await page.waitForTimeout(600);
+  // Frame the new controls together: align the category-label editor to the
+  // bottom of the viewport so the show-empty switch, the not-answered picker,
+  // and the freshly shortened labels are all visible at once.
+  await page.evaluate(() => {
+    const lbl = Array.from(document.querySelectorAll("label, p, span")).find(
+      (el) => el.textContent?.trim() === "Category labels"
+    );
+    const card = lbl?.closest("div.rounded-lg");
+    (card ?? lbl)?.scrollIntoView({ block: "end", behavior: "instant" });
+  });
+  await page.waitForTimeout(400);
+  const optionsPath = resolve(SHOTS_DIR, "configure-options.png");
+  await page.screenshot({ path: optionsPath });
+  console.log(`  Saved: ${optionsPath}`);
+  // Reset scroll so the forward-nav buttons remain reachable.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(200);
+
   // ── Screenshot 6: Wizard → Review (grid of live thumbnails) ──────────────
   console.log("\nShot 6: Wizard Review step…");
   await page.getByRole("button", { name: "Next" }).click();
@@ -329,6 +372,32 @@ async function main() {
   await page.screenshot({ path: slidesPath });
   console.log(`  Saved: ${slidesPath}`);
 
+  // ── Screenshot 7b: Slides with a real AI-generated title ─────────────────
+  console.log(
+    "\nShot 7b: Generate AI slide title (egoHive, can take ~20s)…"
+  );
+  const titleBefore = await firstTitle.inputValue();
+  // The first slide already has a (manual) title, so the button reads "Regenerate".
+  await page
+    .getByRole("button", { name: /Generate title|Regenerate/ })
+    .first()
+    .click();
+  // Wait for the first visible title input to be replaced by the AI text.
+  await page.waitForFunction(
+    (prev) => {
+      const inputs = Array.from(
+        document.querySelectorAll('input[data-slot="input"]')
+      ).filter((el) => el.offsetParent !== null);
+      return !!inputs[0] && !!inputs[0].value && inputs[0].value !== prev;
+    },
+    titleBefore,
+    { timeout: 90_000 }
+  );
+  await page.waitForTimeout(500);
+  const aiTitlePath = resolve(SHOTS_DIR, "slides-ai-title.png");
+  await page.screenshot({ path: aiTitlePath });
+  console.log(`  Saved: ${aiTitlePath}`);
+
   // ── Screenshot 8: Wizard → Download (after a successful Generate) ────────
   console.log("\nShot 8: Wizard Download step (rendering, can take ~30s)…");
   await page.getByRole("button", { name: "Next" }).click();
@@ -357,8 +426,10 @@ Done!
   shots/reports.png          → ${reportsPath}
   shots/wizard-select.png    → ${selectPath}
   shots/wizard-configure.png → ${configurePath}
+  shots/configure-options.png→ ${optionsPath}
   shots/wizard-review.png    → ${reviewPath}
   shots/wizard-slides.png    → ${slidesPath}
+  shots/slides-ai-title.png  → ${aiTitlePath}
   shots/wizard-download.png  → ${downloadPath}
 `);
 
@@ -368,8 +439,10 @@ Done!
   console.log(`SCREENSHOT_REPORTS=${reportsPath}`);
   console.log(`SCREENSHOT_WIZARD_SELECT=${selectPath}`);
   console.log(`SCREENSHOT_WIZARD_CONFIGURE=${configurePath}`);
+  console.log(`SCREENSHOT_CONFIGURE_OPTIONS=${optionsPath}`);
   console.log(`SCREENSHOT_WIZARD_REVIEW=${reviewPath}`);
   console.log(`SCREENSHOT_WIZARD_SLIDES=${slidesPath}`);
+  console.log(`SCREENSHOT_SLIDES_AI_TITLE=${aiTitlePath}`);
   console.log(`SCREENSHOT_WIZARD_DOWNLOAD=${downloadPath}`);
 }
 

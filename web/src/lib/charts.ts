@@ -127,6 +127,11 @@ export function makeChart(
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,
     show_not_answered: false,
+    // Hide 0% rows by default — the user's expectation.
+    show_empty_categories: false,
+    // null = use SAV-detected missing set until the user edits the picker.
+    not_answered_codes: null,
+    category_label_overrides: [],
     slide_title: null,
     slide_description: null,
   };

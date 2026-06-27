@@ -12,6 +12,11 @@ export interface MissingValue {
   label: string;
 }
 
+export interface ValueLabel {
+  code: number;
+  label: string;
+}
+
 export interface Question {
   qid: string;
   kind: "single" | "multi";
@@ -19,6 +24,10 @@ export interface Question {
   text: string;
   suggested_chart_type: string;
   missing_values: MissingValue[];
+  // All value labels incl. missing (single questions); [] for multi.
+  values: ValueLabel[];
+  // Base category label strings, in render order — the label-editor's list.
+  category_labels: string[];
 }
 
 export interface Variable {
@@ -68,8 +77,30 @@ export interface ChartSpec {
   elements: ChartElements;
   scatter_xy: [string, string] | null;
   show_not_answered: boolean;
+  // When false, categories that are 0% across all segments are dropped.
+  show_empty_categories: boolean;
+  // null = use SAV-detected missing set; an explicit list overrides it.
+  not_answered_codes: number[] | null;
+  // Ordered [full_label, short_label] display overrides.
+  category_label_overrides: [string, string][];
   slide_title: string | null;
   slide_description: string | null;
+}
+
+// ---- AI text generation ----
+
+export interface AiSlideTitleBody {
+  question_ref: string;
+  statistic?: string;
+  classifying_var?: string | null;
+  number_format?: NumberFormat;
+  show_not_answered?: boolean;
+  not_answered_codes?: number[] | null;
+}
+
+export interface AiShortLabelsBody {
+  question_ref?: string;
+  categories?: string[];
 }
 
 export interface ReportDoc {
@@ -159,6 +190,60 @@ export const api = {
         }
         return res.blob();
       }),
+
+    // AI: generate a descriptive slide title. May 503 if egoHive is down —
+    // surfaces the backend {detail} message.
+    aiSlideTitle: async (
+      materialId: string,
+      body: AiSlideTitleBody
+    ): Promise<{ title: string }> => {
+      const res = await fetch(
+        `${API_BASE}/materials/${materialId}/ai/slide-title`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const b = await res.json();
+          if (b && typeof b.detail === "string") detail = b.detail;
+        } catch {
+          // not JSON
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<{ title: string }>;
+    },
+
+    // AI: shorten category labels into [full, short] pairs. May return pairs
+    // equal to the originals when egoHive is unavailable (graceful), or 503.
+    aiShortLabels: async (
+      materialId: string,
+      body: AiShortLabelsBody
+    ): Promise<{ overrides: [string, string][] }> => {
+      const res = await fetch(
+        `${API_BASE}/materials/${materialId}/ai/short-labels`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const b = await res.json();
+          if (b && typeof b.detail === "string") detail = b.detail;
+        } catch {
+          // not JSON
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<{ overrides: [string, string][] }>;
+    },
   },
 
   reports: {
