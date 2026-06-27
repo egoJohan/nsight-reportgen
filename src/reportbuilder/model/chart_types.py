@@ -16,6 +16,7 @@ class ChartType(str, Enum):
     SCATTER = "scatter"
     FUNNEL = "funnel"
     COMBO = "combo"
+    WORDCLOUD = "wordcloud"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ CAPABILITIES: dict[ChartType, Capability] = {
     ChartType.SCATTER: _OWN,
     ChartType.FUNNEL: Capability(native=True, native_kind="stacked_bar_approx", image=True),
     ChartType.COMBO: Capability(native=False, native_kind="none", image=True),
+    # Word cloud is image-only (no native OOXML equivalent), like combo (Task J).
+    ChartType.WORDCLOUD: Capability(native=False, native_kind="none", image=True),
 }
 
 

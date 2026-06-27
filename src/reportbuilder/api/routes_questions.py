@@ -77,16 +77,21 @@ def _quick_series(question, model: QuestionModel) -> SeriesResult:
     )
 
 
-def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
-    """Whether a question can be charted, plus a reason when it cannot (Task G.1).
-
-    A question is non-chartable when it has no numeric basis — i.e. all of its
-    variables are open-ended free text (measurement "text"). Such questions are
-    kept in the list (the UI shows them disabled) but flagged.
-    """
+def _is_text_question(model: QuestionModel, q) -> bool:
+    """True when all of the question's variables are open-ended free text (Task J.3)."""
     qvars = [model.variables[v] for v in q.variables]
-    if qvars and all(v.measurement == "text" for v in qvars):
-        return False, "Open-ended text answers"
+    return bool(qvars) and all(v.measurement == "text" for v in qvars)
+
+
+def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
+    """Whether a question can be charted, plus a reason when it cannot (Task J.3).
+
+    Open-ended free-text questions are now chartable — as a *word cloud only*
+    (see the questions route, which wires their suggested/compatible types). A
+    question is only non-chartable when it has no variables at all.
+    """
+    if not q.variables:
+        return False, "No variables"
     return True, None
 
 
@@ -188,14 +193,18 @@ def list_questions(
     questions = []
     for q in model.questions:
         chartable, reason = _question_chartable(model, q)
-        if chartable:
-            series = _quick_series(q, model)
-            suggested = suggest_chart_type(q, series)
-            compatible = _compatible_chart_types(q, series)
-        else:
-            # Non-chartable (open-ended text): no suggestion, no compatible types.
+        if not chartable:
             suggested = None
             compatible = []
+        elif _is_text_question(model, q):
+            # Open-ended text → chartable as a word cloud ONLY (Task J.3).
+            suggested = "wordcloud"
+            compatible = ["wordcloud"]
+        else:
+            series = _quick_series(q, model)
+            suggested = suggest_chart_type(q, series)
+            # Non-text questions never offer wordcloud (its suitability is None).
+            compatible = _compatible_chart_types(q, series)
         questions.append({
             "qid": q.qid,
             "kind": q.kind,

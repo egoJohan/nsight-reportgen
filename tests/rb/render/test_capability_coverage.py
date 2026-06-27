@@ -31,8 +31,9 @@ def test_native_combo_raises_others_build():
     with pytest.raises(NativeUnsupportedError):
         NATIVE_BUILDERS["combo"](None)  # raises before touching ctx
 
-    # every other key must be callable and not the raiser
-    other_keys = _ALL_VALUES - {"combo"}
+    # every native-capable key must be callable and not the raiser
+    raiser_values = {t.value for t in ChartType if not CAPABILITIES[t].native}
+    other_keys = _ALL_VALUES - raiser_values
     for key in other_keys:
         fn = NATIVE_BUILDERS[key]
         assert callable(fn), f"NATIVE_BUILDERS[{key!r}] is not callable"

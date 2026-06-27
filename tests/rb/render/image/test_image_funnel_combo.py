@@ -166,7 +166,9 @@ def test_image_combo():
 # ---------------------------------------------------------------------------
 
 def test_image_builders_all_eleven():
-    """IMAGE_BUILDERS must contain exactly the 11 canonical chart_type ids (REQ-C-13)."""
+    """IMAGE_BUILDERS must contain exactly the canonical chart_type ids (REQ-C-13).
+
+    Now includes the image-only ``wordcloud`` type (Task J)."""
     from reportbuilder.render.image import IMAGE_BUILDERS
 
     expected = {
@@ -181,6 +183,7 @@ def test_image_builders_all_eleven():
         "scatter",
         "funnel",
         "combo",
+        "wordcloud",
     }
     assert set(IMAGE_BUILDERS) == expected, (
         f"Missing: {expected - set(IMAGE_BUILDERS)}; "

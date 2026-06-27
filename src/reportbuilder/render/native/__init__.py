@@ -36,4 +36,6 @@ NATIVE_BUILDERS: dict[str, object] = {
     "scatter": build_scatter,
     "funnel": build_funnel,
     "combo": build_combo_native,
+    # Word cloud has no native OOXML form — image-only; reuse the unsupported raiser.
+    "wordcloud": build_combo_native,
 }

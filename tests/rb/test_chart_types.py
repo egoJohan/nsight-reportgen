@@ -8,9 +8,9 @@ class TestChartTypeEnum:
     """Test ChartType enum members and count."""
 
     def test_exactly_11_chart_types(self):
-        """Verify exactly 11 ChartType members exist."""
+        """Verify the ChartType members (image-only ``wordcloud`` added in Task J)."""
         chart_types = list(ChartType)
-        assert len(chart_types) == 11
+        assert len(chart_types) == 12
         assert set(chart_types) == {
             ChartType.LINE,
             ChartType.PIE,
@@ -23,6 +23,7 @@ class TestChartTypeEnum:
             ChartType.SCATTER,
             ChartType.FUNNEL,
             ChartType.COMBO,
+            ChartType.WORDCLOUD,
         }
 
 
@@ -47,8 +48,8 @@ class TestCapabilitiesTable:
     """Test the CAPABILITIES dictionary."""
 
     def test_all_11_types_in_capabilities(self):
-        """Verify CAPABILITIES has entries for all 11 ChartType members."""
-        assert len(CAPABILITIES) == 11
+        """Verify CAPABILITIES has entries for every ChartType member."""
+        assert len(CAPABILITIES) == len(list(ChartType))
         for chart_type in ChartType:
             assert chart_type in CAPABILITIES
             assert isinstance(CAPABILITIES[chart_type], Capability)

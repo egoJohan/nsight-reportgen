@@ -244,18 +244,22 @@ def _get_questions(model):
     return response.json()["questions"]
 
 
-def test_text_question_is_non_chartable():
-    """G.1: an open-ended text question is flagged chartable=false with a reason;
-    a normal categorical question is chartable=true."""
+def test_text_question_is_chartable_as_wordcloud():
+    """Task J.3: an open-ended text question is now chartable — as a word cloud ONLY
+    (suggested=wordcloud, compatible==["wordcloud"], no non_chartable_reason); a normal
+    categorical question stays chartable and never offers wordcloud."""
     qs = {q["qid"]: q for q in _get_questions(_text_question_model())}
-    assert qs["other"]["chartable"] is False
-    assert qs["other"]["non_chartable_reason"]  # a non-empty reason string
-    assert qs["other"]["compatible_chart_types"] == []
-    assert qs["other"]["suggested_chart_type"] is None
+    assert qs["other"]["chartable"] is True
+    assert qs["other"]["non_chartable_reason"] is None
+    assert qs["other"]["compatible_chart_types"] == ["wordcloud"]
+    assert qs["other"]["suggested_chart_type"] == "wordcloud"
 
     assert qs["sat"]["chartable"] is True
     assert qs["sat"]["non_chartable_reason"] is None
     assert qs["sat"]["compatible_chart_types"]  # non-empty
+    # A non-text question must NOT offer the word cloud.
+    assert "wordcloud" not in qs["sat"]["compatible_chart_types"]
+    assert qs["sat"]["suggested_chart_type"] != "wordcloud"
 
 
 def test_compatible_chart_types_multi_excludes_pie():

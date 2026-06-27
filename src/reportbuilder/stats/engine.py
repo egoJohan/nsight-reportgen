@@ -4,6 +4,8 @@ Ties together aggregate_counts, base rules, statistics helpers, and sort into th
 SeriesResult — the spine output (R1). REQ-C-14/15/16, M-03.
 """
 from __future__ import annotations
+import collections
+import re
 import pandas as pd
 from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec
@@ -26,6 +28,90 @@ NOT_ANSWERED_LABEL: str = "Not answered"
 TEXT_NOT_CHARTABLE_MSG: str = (
     "This question has open-ended text answers and can't be charted"
 )
+
+
+# Task J.1: word-cloud frequency path. A modest inline Finnish (+ a few English)
+# stop-word set so connective/filler words don't dominate the cloud. Kept small
+# and deterministic — extend deliberately rather than pulling a heavy NLP dep.
+_WORDCLOUD_STOPWORDS: frozenset[str] = frozenset({
+    "ja", "tai", "on", "ei", "en", "ole", "se", "ne", "että", "kuin", "mutta",
+    "niin", "kun", "jos", "vai", "joka", "tämä", "tää", "nyt", "vielä", "myös",
+    "sekä", "mikä", "kaikki", "ihan", "sitä", "tuo", "tämän", "olla", "ovat",
+    "hyvin", "the", "of", "and", "for", "with", "not", "you", "are",
+})
+# Tokens shorter than this are dropped (e.g. "ok", "ei" handled by stopwords).
+_WORDCLOUD_MIN_LEN: int = 3
+# Maximum number of distinct words carried into the SeriesResult / cloud.
+_WORDCLOUD_TOP_N: int = 60
+
+
+def _wordcloud(question: Question, spec: ChartSpec, data: pd.DataFrame,
+               model: QuestionModel) -> SeriesResult:
+    """Word-frequency SeriesResult for a free-text question (Task J.1).
+
+    Gathers the response strings across ALL of the question's member variables
+    (multi text questions like var37 have several columns — combined), tokenises
+    each (lowercase, unicode word tokens), drops short tokens, pure numbers, and a
+    small Finnish stop-word set, then counts frequencies and keeps the top N words.
+
+    The result reuses the standard SeriesResult/Cell contract so it flows through
+    build_pptx → the wordcloud render plugin → slide_chrome unchanged:
+    ``categories`` are the words, ``segments`` is ``("Total",)``, each cell carries
+    ``count`` = the word frequency (statistic = "count"), and ``base_n["Total"]`` is
+    the number of respondents who gave any text answer.
+
+    Raises ``ValueError`` when there are no usable words (preview/render map this to a
+    clean 422) — e.g. a wordcloud requested on a non-text question.
+    """
+    var_names = list(question.variables)
+    counts: collections.Counter[str] = collections.Counter()
+    answered_mask = pd.Series(False, index=data.index)
+    for name in var_names:
+        if name not in data.columns:
+            continue
+        col = data[name]
+        is_str = col.map(lambda x: isinstance(x, str) and x.strip() != "")
+        answered_mask = answered_mask | is_str
+        for text in col[is_str]:
+            for tok in re.findall(r"\w+", text.lower(), re.UNICODE):
+                if len(tok) < _WORDCLOUD_MIN_LEN:
+                    continue
+                if tok.isdigit():
+                    continue
+                if tok in _WORDCLOUD_STOPWORDS:
+                    continue
+                counts[tok] += 1
+
+    if not counts:
+        raise ValueError("No text answers to build a word cloud")
+
+    respondents = int(answered_mask.sum())
+    # Deterministic ordering: count desc, then word asc to break ties stably.
+    top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_WORDCLOUD_TOP_N]
+    total = sum(counts.values())
+
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    categories: list[str] = []
+    cells: dict[tuple[str, str], Cell] = {}
+    for word, freq in top:
+        display = overrides.get(word, word)
+        # Defensive: skip a collision if an override maps two words to one label.
+        if (display, "Total") in cells:
+            continue
+        categories.append(display)
+        cells[(display, "Total")] = Cell(
+            pct=(freq / total * 100.0) if total else None,
+            count=float(freq),
+            mean=None,
+        )
+
+    return SeriesResult(
+        categories=tuple(categories),
+        segments=("Total",),
+        cells=cells,
+        base_n={"Total": respondents},
+        statistic="count",
+    )
 
 
 def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
@@ -278,6 +364,11 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
+    # Task J.1: word-cloud chart type — route to the word-frequency path regardless
+    # of question kind. Free-text questions become chartable this way; a wordcloud
+    # requested on a non-text question yields no words → clean ValueError/422.
+    if spec.chart_type == "wordcloud":
+        return _wordcloud(question, spec, data, model)
     # Task G.3: open-ended text questions have no numeric basis — fail early with
     # an actionable message instead of a cryptic float-conversion error downstream.
     qvars = [model.variable(n) for n in question.variables]

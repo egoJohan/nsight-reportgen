@@ -236,6 +236,15 @@ def _suit_combo(question, series: SeriesResult) -> float:
     return 0.30
 
 
+def _suit_wordcloud(question, series: SeriesResult) -> None:
+    """Always None — word cloud is never auto-suggested for normal questions.
+
+    Free-text questions get the wordcloud type explicitly via the questions route
+    (Task J.3), not through generic suitability; returning None keeps it out of the
+    compatible-types list for non-text questions (Task J.2)."""
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Registration — wrap the existing NATIVE_BUILDERS / IMAGE_BUILDERS
 # ---------------------------------------------------------------------------
@@ -257,6 +266,7 @@ _PLUGINS_SPEC: list[tuple[str, str, Callable, tuple[str, ...]]] = [
     ("scatter",                "Scatter Plot",               _suit_scatter,           ("scatter_xy",)),
     ("funnel",                 "Funnel Chart",               _suit_funnel,            ()),
     ("combo",                  "Combo Chart",                _suit_combo,             ()),
+    ("wordcloud",              "Word Cloud",                 _suit_wordcloud,         ()),
 ]
 
 for _id, _label, _suit, _req in _PLUGINS_SPEC:
