@@ -1,7 +1,8 @@
 """Questions routes: GET /materials/{material_id}/questions (browse),
+GET /materials/{material_id}/variables (variable labels for classifying-var pickers),
 PUT /materials/{material_id}/grouping (stateless preview),
 POST /materials/{material_id}/preview-chart (single-chart PNG thumbnail).
-(REQ-C-05, REQ-C-06, REQ-C-13, REQ-C-19, REQ-D-06, M-02)"""
+(REQ-C-05, REQ-C-06, REQ-C-13, REQ-C-19, REQ-D-06, M-02, RX-be.1, RX-be.2, RX-be.3)"""
 from __future__ import annotations
 
 import hashlib
@@ -139,6 +140,35 @@ def list_questions(
                 "missing_values": _missing_value_list(model, q.qid),
             }
             for q in model.questions
+        ]
+    }
+
+
+@questions_router.get("/materials/{material_id}/variables")
+def list_variables(
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """List all variables for a material with display labels and measurement.
+
+    Returns name, a display label (the variable's SPSS label if set, else the raw name),
+    and measurement (categorical/scale). Sorted categorical-first so the classifying-variable
+    picker groups them sensibly. (RX-be.1)
+    """
+    model = load_model_for_material(material_id, client)
+    all_vars = list(model.variables.values())
+    # Stable sort: categorical before scale; original file order within each tier.
+    all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
+    return {
+        "variables": [
+            {
+                "name": var.name,
+                # label is already the human-readable label (falls back to name in read_sav
+                # when no SPSS label is set), so we expose it directly.
+                "label": var.label,
+                "measurement": var.measurement,
+            }
+            for var in all_vars
         ]
     }
 
@@ -312,13 +342,33 @@ def preview_chart(
     Implementation: loads the material, builds a 1-ChartSpec image-mode Report,
     calls build_pptx → pptx_to_pdf → rasterize page 1 → returns PNG bytes.
     Requires LibreOffice (soffice) on PATH; returns 503 if absent.
-    Chart ValueErrors (e.g. scatter without scatter_xy) become 422. (REQ-C-05, REQ-C-13, REQ-C-19, REQ-D-06)
+    The entire render chain is wrapped so ANY failure returns a clean 422 with a
+    short reason — never a 500 or a dropped connection.
+    (REQ-C-05, REQ-C-13, REQ-C-19, REQ-D-06, RX-be.2, RX-be.3)
     """
     # Guard: LibreOffice required for PDF conversion
     if shutil.which("soffice") is None and shutil.which("libreoffice") is None:
         raise HTTPException(
             status_code=503,
             detail="LibreOffice (soffice) is not available; chart preview requires it.",
+        )
+
+    # Guard (RX-be.3): stacked charts require a classifying variable for their segments
+    _STACKED = {"stacked_vertical_bar", "stacked_horizontal_bar"}
+    if body.chart_type in _STACKED and not body.classifying_var:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{body.chart_type}: Stacked charts need a classifying variable "
+                "to define the segments"
+            ),
+        )
+
+    # Guard (RX-be.2): scatter requires explicit X and Y variables
+    if body.chart_type == "scatter" and not body.scatter_xy:
+        raise HTTPException(
+            status_code=422,
+            detail="scatter: Scatter needs an X and Y variable (scatter_xy)",
         )
 
     # 1. Load material data
@@ -347,18 +397,27 @@ def preview_chart(
     )
 
     # 4. Render PPTX → PDF → PNG page 1
+    #    The entire chain is wrapped so any unexpected failure surfaces as 422,
+    #    not a 500 or a silent dropped connection. (RX-be.2)
     out_dir = _preview_out_dir(material_id, body.model_dump_json())
     pptx_path = str(out_dir / "preview.pptx")
     try:
         build_pptx(report, model, df, pptx_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    pdf_path = pptx_to_pdf(pptx_path, str(out_dir))
-    pngs = rasterize_pages(pdf_path, str(out_dir / "pages"))
+        pdf_path = pptx_to_pdf(pptx_path, str(out_dir))
+        pngs = rasterize_pages(pdf_path, str(out_dir / "pages"))
+    except HTTPException:
+        raise  # already a well-formed HTTP error — pass through unchanged
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{body.chart_type}: {exc}",
+        ) from exc
 
     if not pngs:
-        raise HTTPException(status_code=500, detail="Rasterization produced no pages.")
+        raise HTTPException(
+            status_code=422,
+            detail=f"{body.chart_type}: Rasterization produced no pages.",
+        )
 
     png_bytes = pathlib.Path(pngs[0]).read_bytes()
     return Response(content=png_bytes, media_type="image/png")
