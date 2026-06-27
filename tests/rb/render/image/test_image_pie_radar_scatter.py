@@ -155,31 +155,41 @@ def _assert_picture(slide, slot):
 
 
 def _assert_picture_square_centered(slide, slot):
-    """Assert pie/doughnut/radar is placed square and centred within slot.
+    """Assert pie/doughnut/radar is placed aspect-preserved, contained, and centred.
 
-    These charts render as square PNGs (to preserve circular aspect) and are
-    placed centred in the slide slot.  Width and height must be equal and equal
-    to min(slot.width, slot.height).
+    These charts render as (near-)square PNGs to keep the circle circular.  The
+    placement (``place_picture_square``) now preserves the PNG's TRUE aspect ratio
+    — it scales the image to fit inside the slot and centres it — instead of
+    forcing it into a min(w,h) square box (which would squish a non-square PNG into
+    an oval).  We assert: the picture is fully contained, centred, and its on-slide
+    aspect ratio matches the PNG's real pixel aspect ratio (no distortion).
     """
+    import io
+    from PIL import Image
+
     pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 1, f"Expected 1 PICTURE shape, found {len(pics)}"
     pic = pics[0]
-    expected_size = min(slot.width, slot.height)
-    assert pic.width == expected_size, (
-        f"Square-placed chart width {pic.width} != min slot dim {expected_size}"
+
+    # Fully contained within the slot (never clipped/overflowing).
+    assert 0 < pic.width <= slot.width, f"width {pic.width} not contained in {slot.width}"
+    assert 0 < pic.height <= slot.height, f"height {pic.height} not contained in {slot.height}"
+
+    # Aspect ratio on the slide must match the PNG's real pixel aspect (no squish).
+    px_w, px_h = Image.open(io.BytesIO(pic.image.blob)).size
+    png_aspect = px_w / px_h
+    placed_aspect = pic.width / pic.height
+    assert abs(placed_aspect - png_aspect) < 0.01, (
+        f"Placed aspect {placed_aspect:.4f} != PNG aspect {png_aspect:.4f} (image distorted)"
     )
-    assert pic.height == expected_size, (
-        f"Square-placed chart height {pic.height} != min slot dim {expected_size}"
-    )
-    # Verify centred within slot
-    expected_left = slot.left + (slot.width - expected_size) // 2
-    expected_top = slot.top + (slot.height - expected_size) // 2
-    assert pic.left == expected_left, (
-        f"Chart left {pic.left} != expected centred left {expected_left}"
-    )
-    assert pic.top == expected_top, (
-        f"Chart top {pic.top} != expected centred top {expected_top}"
-    )
+
+    # Fit-to-slot: at least one dimension reaches its slot bound (largest contained fit).
+    touches = (abs(pic.width - slot.width) <= 2) or (abs(pic.height - slot.height) <= 2)
+    assert touches, "Picture should be scaled to the largest fit inside the slot"
+
+    # Centred within the slot.
+    assert abs(pic.left - (slot.left + (slot.width - pic.width) // 2)) <= 2, "not centred horizontally"
+    assert abs(pic.top - (slot.top + (slot.height - pic.height) // 2)) <= 2, "not centred vertically"
     assert len(pic.image.blob) > 0, "Picture blob must be non-empty"
 
 

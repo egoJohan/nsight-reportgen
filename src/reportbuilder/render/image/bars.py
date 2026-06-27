@@ -14,9 +14,10 @@ House style applied:
 - Auto-orientation: build_image_column switches to horizontal bars when there
   are > 6 categories or any label exceeds 14 characters to avoid x-label
   overlap. Explicit horizontal_bar / vertical_bar requests are always honoured.
-- Long-label handling (R4.1): horizontal-bar y-axis labels are wrapped to at
-  most 2 lines of ~22 chars; vertical-bar x-axis labels are truncated at 42
-  chars.  Both use '…' to indicate clipped text.
+- Long-label handling: labels are NEVER ellipsis-cut and NEVER allowed to
+  overlap.  Horizontal-bar y-axis labels are wrapped at word boundaries onto as
+  many lines as needed (full text).  Vertical-bar x-axis labels are wrapped AND
+  rotated 30° (ha="right") so neighbouring labels never collide.
 - "Not answered" coloring (R4.2): bars whose category matches NOT_ANSWERED_LABEL
   are rendered in MUTED grey so non-response reads as distinct from real data.
 """
@@ -34,33 +35,32 @@ from reportbuilder.render.house_style import (
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 
 # ---------------------------------------------------------------------------
-# Label-length constants (R4.1)
+# Label-wrap constants — labels are wrapped, never truncated/ellipsis-cut.
 # ---------------------------------------------------------------------------
-_LABEL_WRAP_WIDTH: int = 22   # max chars per line for horizontal-bar y-axis labels
-_LABEL_MAX_CHARS: int = 42    # truncation threshold for vertical-bar x-axis labels
+_LABEL_WRAP_WIDTH: int = 22   # chars per line for horizontal-bar y-axis labels
+_XLABEL_WRAP_WIDTH: int = 16  # chars per line for (rotated) vertical-bar x-axis labels
+_XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
 
 
 # ---------------------------------------------------------------------------
-# Label helpers (R4.1 — long-label fix)
+# Label helpers — wrap to full text, NEVER ellipsis-cut (no '…' anywhere).
 # ---------------------------------------------------------------------------
 
-def _wrap_label(text: str) -> str:
-    """Wrap a y-axis label for horizontal bars to at most 2 lines of _LABEL_WRAP_WIDTH chars.
+def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
+    """Wrap a category label at word boundaries onto as many lines as needed.
 
-    Labels that already fit on one line (≤ _LABEL_WRAP_WIDTH chars) are returned
-    unchanged.  Longer text is broken at word boundaries; text that still cannot
-    fit in 2 lines is terminated with '…' on the second line.
+    The full label text is always preserved — labels are never truncated and an
+    ellipsis ('…') is never appended.  Words longer than *width* are broken so a
+    single long token can never overflow the column either.
     """
-    if len(text) <= _LABEL_WRAP_WIDTH:
+    if len(text) <= width:
         return text
-    return textwrap.fill(text, width=_LABEL_WRAP_WIDTH, max_lines=2, placeholder="…")
+    return textwrap.fill(text, width=width, break_long_words=True)
 
 
-def _truncate_label(text: str, max_chars: int = _LABEL_MAX_CHARS) -> str:
-    """Truncate an x-axis label for vertical bars to *max_chars*, appending '…' if clipped."""
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 1] + "…"
+def _wrap_xtick_label(text: str) -> str:
+    """Wrap a vertical-bar x-axis label (narrower wrap; rotation handles the rest)."""
+    return _wrap_label(text, width=_XLABEL_WRAP_WIDTH)
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +177,13 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
 
-    # R4.1: truncate long x-axis labels so they don't crowd the plot.
-    display_cats = [_truncate_label(c) for c in cats]
+    # Wrap + rotate x-axis labels so they are shown in full and never overlap.
+    display_cats = [_wrap_xtick_label(c) for c in cats]
     ax.set_xticks(x)
-    ax.set_xticklabels(display_cats, fontsize=11.5, color=INK)
+    ax.set_xticklabels(
+        display_cats, fontsize=10.5, color=INK,
+        rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
+    )
     _apply_column_style(ax, max_val)
 
     if ctx.spec.elements.legend and n_segs > 1:
@@ -233,7 +236,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
 
-    # R4.1: wrap long y-axis labels to ≤ 2 lines so bars always have room.
+    # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
     display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
@@ -280,10 +283,13 @@ def build_image_column_stacked(ctx) -> None:
                 )
         bottoms = bottoms + vals
 
-    # R4.1: truncate long x-axis labels.
-    display_cats = [_truncate_label(c) for c in cats]
+    # Wrap + rotate x-axis labels so they are shown in full and never overlap.
+    display_cats = [_wrap_xtick_label(c) for c in cats]
     ax.set_xticks(x)
-    ax.set_xticklabels(display_cats, fontsize=11.5, color=INK)
+    ax.set_xticklabels(
+        display_cats, fontsize=10.5, color=INK,
+        rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
+    )
     _apply_column_style(ax, max_val)
 
     if ctx.spec.elements.legend and len(segs) > 1:
@@ -327,7 +333,7 @@ def build_image_bar_stacked(ctx) -> None:
                 )
         lefts = lefts + vals
 
-    # R4.1: wrap long y-axis labels.
+    # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
     display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)

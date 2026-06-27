@@ -170,15 +170,28 @@ def new_square_figure(ctx):
 
 
 def place_picture_square(ctx, png_path: str) -> None:
-    """Place a square PNG centred in ctx.slot, maintaining a 1:1 aspect ratio.
+    """Place a PNG centred in ctx.slot preserving the PNG's true aspect ratio.
 
-    Fits the image to the smaller slot dimension and centres it within the slot
-    so a circular pie/radar chart is not stretched to oval by the 16:9 slot.
+    Reads the PNG's real pixel dimensions and scales it to fit *inside* the slot
+    (letterbox: scale to the limiting dimension, centred).  This keeps a circular
+    pie/radar chart circular — even when ``bbox_inches="tight"`` trimmed the saved
+    PNG asymmetrically and it is no longer perfectly square — instead of forcing it
+    into a min(w,h) square box that would squish a non-square PNG into an oval.
     """
-    display_size = min(ctx.slot.width, ctx.slot.height)
-    left = ctx.slot.left + (ctx.slot.width - display_size) // 2
-    top = ctx.slot.top + (ctx.slot.height - display_size) // 2
-    ctx.slide.shapes.add_picture(png_path, left, top, display_size, display_size)
+    from PIL import Image
+
+    with Image.open(png_path) as im:
+        px_w, px_h = im.size
+
+    slot_w = ctx.slot.width
+    slot_h = ctx.slot.height
+    # Scale to fit within the slot, preserving aspect ratio (never upscale-distort).
+    scale = min(slot_w / px_w, slot_h / px_h)
+    disp_w = int(round(px_w * scale))
+    disp_h = int(round(px_h * scale))
+    left = ctx.slot.left + (slot_w - disp_w) // 2
+    top = ctx.slot.top + (slot_h - disp_h) // 2
+    ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h)
 
 
 def style_legend(ax, loc: str = "best") -> None:

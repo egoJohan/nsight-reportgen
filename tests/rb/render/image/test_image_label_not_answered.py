@@ -1,10 +1,11 @@
-"""Tests for R4 polish: long-label wrapping/truncation + 'Not answered' grey bar.
+"""Tests for label handling (never overlap / never ellipsis-cut) + 'Not answered' grey bar.
 
-R4.1 — Long-label handling:
-  - _wrap_label wraps labels > 22 chars to ≤ 2 lines with '…' on overflow
-  - _truncate_label clips labels > 42 chars with '…'
-  - Horizontal-bar renderer applies wrapped display labels without error
-  - Short labels (≤ 22 chars) pass through unchanged
+Label policy (Task A — render quality):
+  - _wrap_label wraps long labels at word boundaries onto as many lines as needed;
+    the full text is always preserved and '…' is NEVER appended.
+  - _wrap_xtick_label wraps vertical-bar x-axis labels (rotation handles overlap).
+  - Short labels (≤ wrap width) pass through unchanged.
+  - Horizontal-bar renderer applies wrapped display labels without error.
 
 R4.2 — "Not answered" bar coloring:
   - The "Not answered" bar is rendered in MUTED grey, not TEAL
@@ -74,18 +75,23 @@ def _get_png_blob(slide) -> bytes:
 # R4.1 — Label helper unit tests
 # ---------------------------------------------------------------------------
 
+def _strip_wrap(text: str) -> str:
+    """Collapse wrapped lines back to a single space-joined string for comparison."""
+    return " ".join(text.split())
+
+
 class TestWrapLabel:
-    """Unit tests for _wrap_label helper (R4.1)."""
+    """Unit tests for _wrap_label helper — wrap, never ellipsis-cut."""
 
     def test_short_label_unchanged(self):
-        """Labels ≤ 22 chars pass through _wrap_label unchanged."""
+        """Labels ≤ wrap width pass through _wrap_label unchanged."""
         from reportbuilder.render.image.bars import _wrap_label
         assert _wrap_label("Yes") == "Yes"
         assert _wrap_label("Kyllä, joskus") == "Kyllä, joskus"
         assert _wrap_label("A" * 22) == "A" * 22
 
-    def test_long_label_wrapped_to_two_lines(self):
-        """Labels > 22 chars are wrapped; result contains a newline."""
+    def test_long_label_wrapped_to_multiple_lines(self):
+        """Labels > wrap width are wrapped; result contains a newline, lines fit."""
         from reportbuilder.render.image.bars import _wrap_label
         long = "Hoitajat kuuntelevat toiveitani"   # 31 chars
         result = _wrap_label(long)
@@ -93,38 +99,43 @@ class TestWrapLabel:
         for line in result.split("\n"):
             assert len(line) <= 22, f"Line too long: {line!r}"
 
-    def test_very_long_label_ellipsized(self):
-        """Labels that cannot fit in 2 lines end with '…'."""
+    def test_very_long_label_never_ellipsized(self):
+        """Very long labels are wrapped onto as many lines as needed — never '…'."""
         from reportbuilder.render.image.bars import _wrap_label
         very_long = "Hoitajat kuuntelevat toiveitani ja tarpeitani erittäin hyvin kaikissa tilanteissa"
         result = _wrap_label(very_long)
-        assert result.endswith("…"), f"Expected trailing ellipsis; got {result!r}"
-        lines = result.split("\n")
-        assert len(lines) <= 2, f"Should be at most 2 lines; got {lines!r}"
+        assert "…" not in result, f"Ellipsis must never appear; got {result!r}"
+        # Full text is preserved (every word survives, only whitespace changes).
+        assert _strip_wrap(result) == _strip_wrap(very_long)
+        for line in result.split("\n"):
+            assert len(line) <= 22, f"Line too long: {line!r}"
 
 
-class TestTruncateLabel:
-    """Unit tests for _truncate_label helper (R4.1)."""
+class TestWrapXtickLabel:
+    """Unit tests for _wrap_xtick_label helper (vertical-bar x-axis labels)."""
 
     def test_short_label_unchanged(self):
-        """Labels ≤ 42 chars pass through _truncate_label unchanged."""
-        from reportbuilder.render.image.bars import _truncate_label
-        assert _truncate_label("Short") == "Short"
-        assert _truncate_label("A" * 42) == "A" * 42
+        """Labels ≤ x-tick wrap width pass through unchanged."""
+        from reportbuilder.render.image.bars import _wrap_xtick_label
+        assert _wrap_xtick_label("Short") == "Short"
+        assert _wrap_xtick_label("A" * 16) == "A" * 16
 
-    def test_long_label_truncated_with_ellipsis(self):
-        """Labels > 42 chars are truncated to 42 chars ending with '…'."""
-        from reportbuilder.render.image.bars import _truncate_label
-        long = "A" * 60
-        result = _truncate_label(long)
-        assert result.endswith("…"), f"Expected trailing ellipsis; got {result!r}"
-        assert len(result) == 42, f"Expected length 42; got {len(result)}"
+    def test_long_label_wrapped_never_ellipsized(self):
+        """Long x-axis labels wrap (full text preserved), never '…'."""
+        from reportbuilder.render.image.bars import _wrap_xtick_label
+        long = "Erittäin tyytyväinen palveluun"
+        result = _wrap_xtick_label(long)
+        assert "…" not in result, f"Ellipsis must never appear; got {result!r}"
+        assert "\n" in result, f"Expected wrap; got {result!r}"
+        assert _strip_wrap(result) == _strip_wrap(long)
 
-    def test_custom_max_chars(self):
-        """_truncate_label respects an explicit max_chars argument."""
-        from reportbuilder.render.image.bars import _truncate_label
-        result = _truncate_label("ABCDEFGHIJ", max_chars=5)
-        assert result == "ABCD…", f"Got {result!r}"
+    def test_long_unbroken_token_does_not_overflow(self):
+        """A single token longer than the wrap width is broken, not ellipsized."""
+        from reportbuilder.render.image.bars import _wrap_xtick_label
+        result = _wrap_xtick_label("A" * 40)
+        assert "…" not in result
+        for line in result.split("\n"):
+            assert len(line) <= 16, f"Line too long: {line!r}"
 
 
 # ---------------------------------------------------------------------------
