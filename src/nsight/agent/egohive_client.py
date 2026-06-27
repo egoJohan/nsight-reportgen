@@ -249,6 +249,52 @@ def egohive_narrate(
     return _clean(_send_message(base, session_id, prompt, timeout=timeout))
 
 
+def egohive_chat(
+    prompt: str,
+    *,
+    base_url: Optional[str] = None,
+    endpoint_id: Optional[str] = None,
+    creds_path: str | Path | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> str:
+    """Generic one-shot chat turn against the egoHive Gemini agent.
+
+    Mints a fresh session, sends ``prompt``, and returns the assistant's text
+    reply with markdown emphasis and surrounding quotes stripped. Unlike
+    :func:`_clean`, this PRESERVES line breaks so callers that batch several
+    items into a single prompt (e.g. a numbered list) can parse the multi-line
+    reply; callers that want a single headline line should apply :func:`_clean`.
+
+    Args:
+        prompt: The full prompt text to send.
+        base_url / endpoint_id / creds_path: Optional overrides; default to the
+            values in ``work/egohive_creds.json``.
+        timeout: Per-request network timeout in seconds.
+
+    Returns:
+        The assistant's cleaned reply text (line breaks preserved).
+
+    Raises:
+        EgoHiveError: if the prompt is empty, config/creds are invalid, or the
+            egoHive call fails (unreachable / non-2xx / malformed response).
+    """
+    if not prompt or not str(prompt).strip():
+        raise EgoHiveError("egohive_chat requires a non-empty prompt.")
+
+    creds = load_creds(creds_path)
+    base = (base_url or creds["base_url"]).rstrip("/")
+    ep = endpoint_id or creds["endpoint_id"]
+
+    session_id = _create_session(base, ep, timeout=timeout)
+    reply = _send_message(base, session_id, prompt, timeout=timeout)
+
+    # Light cleanup that keeps newlines (single-line callers apply _clean).
+    cleaned = (reply or "").replace("**", "").replace("__", "").strip()
+    if len(cleaned) >= 2 and cleaned[0] in "\"'" and cleaned[-1] in "\"'":
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
 def _clean(text: str) -> str:
     """Strip markdown emphasis and surrounding quotes the model may add, keep one line."""
     t = (text or "").strip()
@@ -258,4 +304,4 @@ def _clean(text: str) -> str:
     return t.split("\n")[0].strip()
 
 
-__all__ = ["egohive_narrate", "login", "load_creds", "EgoHiveError"]
+__all__ = ["egohive_narrate", "egohive_chat", "login", "load_creds", "EgoHiveError"]
