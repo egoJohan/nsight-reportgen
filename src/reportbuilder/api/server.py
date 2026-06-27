@@ -2,6 +2,11 @@
 
 Builds the app with a real DataHiveClient from env, and enables CORS so the Flutter
 dev app (localhost) can call it.
+
+Demo mode (NSIGHT_DEMO=1) uses a self-contained store that now persists to disk so
+created cases, uploaded materials, and reports survive server restarts. The on-disk
+location is `NSIGHT_DEMO_DIR` (env var) when set, otherwise `<repo>/work/demo-store`
+(work/ is gitignored). The directory is created if missing.
 """
 from __future__ import annotations
 
@@ -18,7 +23,12 @@ def _select_client():
     flow runs with no datahive/token; otherwise build a real DataHiveClient from env."""
     if os.environ.get("NSIGHT_DEMO") == "1":
         from reportbuilder.store.memory_client import InMemoryDataHiveClient
-        return InMemoryDataHiveClient()
+        # repo root = .../proto (api -> reportbuilder -> src -> proto)
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        default_dir = os.path.join(repo_root, "work", "demo-store")
+        storage_dir = os.environ.get("NSIGHT_DEMO_DIR", default_dir)
+        os.makedirs(storage_dir, exist_ok=True)
+        return InMemoryDataHiveClient(storage_dir=storage_dir)
     return datahive_client_from_env()  # None -> default real client (will fail until configured)
 
 
