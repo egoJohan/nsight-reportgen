@@ -49,7 +49,9 @@ function ChartPreview({
   const [loading, setLoading] = useState(false);
   const urlRef = useRef<string | null>(null);
 
-  // Serialise the fields that affect the rendered image (ignore slot/slide_*).
+  // Serialise the fields that affect the rendered image. The backend now renders
+  // the slide title/description as the chart headline, so include them here —
+  // otherwise the preview won't refresh when the AI sets/edits the title.
   const key = useMemo(
     () =>
       JSON.stringify({
@@ -65,6 +67,8 @@ function ChartPreview({
         show_empty_categories: chart.show_empty_categories,
         not_answered_codes: chart.not_answered_codes,
         category_label_overrides: chart.category_label_overrides,
+        slide_title: chart.slide_title,
+        slide_description: chart.slide_description,
       }),
     [chart]
   );
@@ -186,7 +190,7 @@ function ChartControls({
   if (chart.chart_type === "scatter") {
     return (
       <div className="space-y-4">
-        <ChartTypeField chart={chart} onChange={onChange} />
+        <ChartTypeField chart={chart} question={question} onChange={onChange} />
         <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
           Scatter configuration coming soon.
         </div>
@@ -196,7 +200,7 @@ function ChartControls({
 
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-      <ChartTypeField chart={chart} onChange={onChange} />
+      <ChartTypeField chart={chart} question={question} onChange={onChange} />
 
       <Field label="Statistic">
         <Select
@@ -588,11 +592,21 @@ function CategoryLabelEditor({
 
 function ChartTypeField({
   chart,
+  question,
   onChange,
 }: {
   chart: ChartSpec;
+  question: Question | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
+  // The backend tells us which chart types are compatible with this question
+  // (e.g. excludes pie/doughnut for multi-response). Gray out the rest. When we
+  // have no list (question still loading), keep everything selectable.
+  const compatible = useMemo(() => {
+    const list = question?.compatible_chart_types;
+    return list && list.length > 0 ? new Set(list) : null;
+  }, [question?.compatible_chart_types]);
+
   return (
     <Field label="Chart type">
       <Select
@@ -604,11 +618,19 @@ function ChartTypeField({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {CHART_TYPES.map((t) => (
-            <SelectItem key={t.id} value={t.id}>
-              {t.label}
-            </SelectItem>
-          ))}
+          {CHART_TYPES.map((t) => {
+            // Always keep the currently-selected type selectable, even if an old
+            // report picked an incompatible one — don't trap the user.
+            const incompatible =
+              compatible !== null &&
+              !compatible.has(t.id) &&
+              t.id !== chart.chart_type;
+            return (
+              <SelectItem key={t.id} value={t.id} disabled={incompatible}>
+                {t.label}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </Field>

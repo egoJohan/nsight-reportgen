@@ -22,7 +22,13 @@ export interface Question {
   kind: "single" | "multi";
   variables: string[];
   text: string;
+  // Whether the question can be charted at all (false for open-ended text).
+  chartable: boolean;
+  // Human-readable reason when chartable === false (e.g. "Open-ended text answers").
+  non_chartable_reason: string | null;
   suggested_chart_type: string;
+  // Chart-type ids whose plugin suitability applies to this question.
+  compatible_chart_types: string[];
   missing_values: MissingValue[];
   // All value labels incl. missing (single questions); [] for multi.
   values: ValueLabel[];

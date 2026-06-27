@@ -165,7 +165,15 @@ function QuestionTable({
                     <KindBadge q={q} />
                   </TableCell>
                   <TableCell className="py-3 align-top">
-                    {q.missing_values && q.missing_values.length > 0 ? (
+                    {q.chartable === false ? (
+                      <Badge
+                        variant="outline"
+                        className="border-muted-foreground/30 bg-muted text-muted-foreground whitespace-nowrap font-normal"
+                        title={q.non_chartable_reason ?? undefined}
+                      >
+                        Text / not chartable
+                      </Badge>
+                    ) : q.missing_values && q.missing_values.length > 0 ? (
                       <Badge
                         variant="outline"
                         className="text-amber-600 border-amber-300 bg-amber-50 whitespace-nowrap font-normal"
