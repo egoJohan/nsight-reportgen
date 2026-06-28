@@ -502,6 +502,16 @@ def preview_chart(
             detail="scatter: Scatter needs an X and Y variable (scatter_xy)",
         )
 
+    # 0. Cache hit: the deterministic per-(process, material, spec) dir already
+    #    holds this exact render → return it without regenerating. The image is
+    #    formed ONCE and reused; the per-process salt invalidates it on restart
+    #    (so code changes never serve a stale render). Only a changed spec (or a
+    #    new process) does the full build_pptx → PDF → rasterize chain below.
+    out_dir = _preview_out_dir(material_id, body.model_dump_json())
+    cached_png = out_dir / "preview.png"
+    if cached_png.exists():
+        return Response(content=cached_png.read_bytes(), media_type="image/png")
+
     # 1. Load material data
     raw = client.get_material(material_id)
     with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
@@ -530,7 +540,6 @@ def preview_chart(
     # 4. Render PPTX → PDF → PNG page 1
     #    The entire chain is wrapped so any unexpected failure surfaces as 422,
     #    not a 500 or a silent dropped connection. (RX-be.2)
-    out_dir = _preview_out_dir(material_id, body.model_dump_json())
     pptx_path = str(out_dir / "preview.pptx")
     try:
         build_pptx(report, model, df, pptx_path)
@@ -551,4 +560,5 @@ def preview_chart(
         )
 
     png_bytes = pathlib.Path(pngs[0]).read_bytes()
+    cached_png.write_bytes(png_bytes)  # cache for reuse by later identical requests
     return Response(content=png_bytes, media_type="image/png")

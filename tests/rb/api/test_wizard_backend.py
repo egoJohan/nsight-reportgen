@@ -214,7 +214,10 @@ def test_preview_chart_value_error_returns_422() -> None:
     with patch("reportbuilder.api.routes_questions.build_pptx") as mock_build:
         mock_build.side_effect = ValueError("chart configuration error: scatter requires scatter_xy")
 
-        response = client.post("/materials/mat-w1/preview-chart", json=_VALID_SPEC)
+        # Unique material id so the preview cache (keyed by material+spec) never
+        # short-circuits this render — a failed build is never cached, so the
+        # 422 path must run.
+        response = client.post("/materials/mat-w1-422/preview-chart", json=_VALID_SPEC)
 
     assert response.status_code == 422, (
         f"Expected 422 for chart ValueError, got {response.status_code}"
