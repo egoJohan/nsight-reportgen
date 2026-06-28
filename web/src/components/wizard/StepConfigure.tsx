@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable } from "@/lib/api";
-import { useChartTypes, useQuestions, useVariables } from "@/lib/queries";
+import { useChartPreview, useChartTypes, useQuestions, useVariables } from "@/lib/queries";
 import {
   CHART_TYPES,
   CHART_TYPE_ITEMS,
@@ -98,70 +98,26 @@ function ChartPreview({
   labelsPending: boolean;
   questionText: string;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const urlRef = useRef<string | null>(null);
-
-  // Serialise the fields that affect the rendered image. The frontend owns the
-  // title region (render_title:false), so slide_title/description are NOT
-  // included — they don't change the PNG and shouldn't trigger a re-render.
-  const key = useMemo(
-    () =>
-      JSON.stringify({
-        question_ref: chart.question_ref,
-        chart_type: chart.chart_type,
-        statistic: chart.statistic,
-        classifying_var: chart.classifying_var,
-        number_format: chart.number_format,
-        sort: chart.sort,
-        elements: chart.elements,
-        scatter_xy: chart.scatter_xy,
-        show_not_answered: chart.show_not_answered,
-        show_empty_categories: chart.show_empty_categories,
-        not_answered_codes: chart.not_answered_codes,
-        category_label_overrides: chart.category_label_overrides,
-      }),
-    [chart]
-  );
-
+  // Debounce live edits so typing/toggling doesn't fire a render per keystroke.
+  // Unchanged charts resolve INSTANTLY from the shared cache (formed once).
+  const editKey = useMemo(() => JSON.stringify(chart), [chart]);
+  const chartRef = useRef(chart);
+  chartRef.current = chart;
+  const [debounced, setDebounced] = useState(chart);
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    const handle = setTimeout(async () => {
-      try {
-        // render_title:false — the PNG omits the title block; we render it as
-        // the overlay headline so it can stream in independently.
-        const blob = await api.materials.previewChart(materialId, chart, {
-          renderTitle: false,
-        });
-        if (cancelled) return;
-        const next = URL.createObjectURL(blob);
-        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-        urlRef.current = next;
-        setUrl(next);
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Preview failed");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 400);
-    return () => {
-      cancelled = true;
-      clearTimeout(handle);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, materialId]);
+    const h = setTimeout(() => setDebounced(chartRef.current), 350);
+    return () => clearTimeout(h);
+  }, [editKey]);
 
-  // Revoke on unmount
-  useEffect(
-    () => () => {
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    },
-    []
+  // render_title:false — the PNG omits the title block; the frontend owns the
+  // title region (progressive overlay). Cached by content via useChartPreview.
+  const { data: url, error: qError, isFetching: loading } = useChartPreview(
+    materialId,
+    debounced,
+    { renderTitle: false }
   );
+  const error =
+    qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
 
   const title = chart.slide_title?.trim() || questionText;
   const region = labelRegion(chart.chart_type);
