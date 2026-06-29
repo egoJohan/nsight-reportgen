@@ -453,7 +453,22 @@ def ai_demographics(
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Could not generate demographics: {exc}") from exc
-    return {"bullets": bullets, "question_refs": picked}
+
+    # A suggested chart type per picked demographic question (for the grid cells).
+    from reportbuilder.render.plugins import suggest_chart_type
+
+    charts = []
+    for ref in picked:
+        try:
+            q = model.question(ref)
+            series = compute(q, _kind_spec(q, model), df, model)
+            ct = suggest_chart_type(q, series)
+            if ct == "wordcloud":  # demographics aren't text, but guard
+                ct = "vertical_bar"
+            charts.append({"question_ref": ref, "chart_type": ct})
+        except Exception:
+            charts.append({"question_ref": ref, "chart_type": "vertical_bar"})
+    return {"bullets": bullets, "question_refs": picked, "charts": charts}
 
 
 __all__ = ["ai_router"]

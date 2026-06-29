@@ -19,6 +19,7 @@ import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useReport, useUpdateReport } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import {
+  buildDemographicsGrids,
   buildSpecialPages,
   isSpecialSlide,
   isThemes,
@@ -473,6 +474,30 @@ export default function ReportWizard({
     [mutate]
   );
 
+  // Demographics: a (possibly multi-page) facts slide followed by demographics
+  // grid slides (several compact charts per page). Replaces the whole group.
+  const applyDemographics = useCallback(
+    (
+      group: string,
+      heading: string,
+      bullets: string[],
+      cells: { question_ref: string; chart_type: string }[]
+    ) => {
+      mutate((d) => {
+        const factPages = buildSpecialPages(
+          "special_demographics",
+          heading,
+          bullets,
+          group
+        ).map((p, i) => (i === 0 ? { ...p, question_ref: group } : p));
+        const gridPages = buildDemographicsGrids(cells ?? [], group);
+        const next = replaceSpecialGroup(d.charts, group, [...factPages, ...gridPages]);
+        return next ? { ...d, charts: normalizeSlots(next) } : d;
+      });
+    },
+    [mutate]
+  );
+
   // Add a special slide (synchronously, returning its anchor ref so the caller
   // can select it) and generate its bullets in the background — spanning pages
   // when the content overflows one slide.
@@ -491,17 +516,11 @@ export default function ReportWizard({
       void (async () => {
         try {
           if (type === "special_demographics") {
-            const { bullets, question_refs } = await api.materials.aiDemographics(
+            const { bullets, charts } = await api.materials.aiDemographics(
               materialId,
               { question_refs: reportQuestionRefs() }
             );
-            const existing = new Set(
-              (draftRef.current?.charts ?? []).map((c) => c.question_ref)
-            );
-            const newCharts = question_refs
-              .filter((r) => r && !existing.has(r))
-              .map((r) => makeChart(r, "vertical_bar"));
-            applySpecialPages(group, type, heading, bullets, newCharts);
+            applyDemographics(group, heading, bullets, charts);
           } else {
             const bullets = await fetchBullets(type, reportQuestionRefs());
             applySpecialPages(group, type, heading, bullets);
@@ -548,11 +567,16 @@ export default function ReportWizard({
       );
       setBulletsPending(group, true);
       try {
-        const bullets =
-          type === "special_demographics"
-            ? (await api.materials.aiDemographics(materialId, { question_refs: reportQuestionRefs() })).bullets
-            : await fetchBullets(type, reportQuestionRefs());
-        applySpecialPages(group, type, heading, bullets);
+        if (type === "special_demographics") {
+          const { bullets, charts } = await api.materials.aiDemographics(
+            materialId,
+            { question_refs: reportQuestionRefs() }
+          );
+          applyDemographics(group, heading, bullets, charts);
+        } else {
+          const bullets = await fetchBullets(type, reportQuestionRefs());
+          applySpecialPages(group, type, heading, bullets);
+        }
       } catch (e) {
         toast.error(`Could not regenerate slide: ${errMsg(e)}`);
       } finally {

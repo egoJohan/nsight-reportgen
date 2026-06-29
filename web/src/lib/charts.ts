@@ -69,6 +69,17 @@ export function rendersAsBullets(chart: { chart_type: string }): boolean {
   return isSpecialSlide(chart) || isThemes(chart);
 }
 
+/** A multi-chart demographics grid slide (options.charts = [{question_ref,chart_type}]). */
+export function isDemographicsGrid(chart: { chart_type: string }): boolean {
+  return chart.chart_type === "demographics_grid";
+}
+
+/** True when the whole slide is rendered server-side (bullets or a chart grid),
+ *  so the preview shows the full PNG with no frontend title overlay. */
+export function rendersFullSlide(chart: { chart_type: string }): boolean {
+  return rendersAsBullets(chart) || isDemographicsGrid(chart);
+}
+
 export function chartTypeLabel(id: string): string {
   return (
     CHART_TYPES.find((c) => c.id === id)?.label ??
@@ -274,6 +285,50 @@ export function buildSpecialPages(
       group,
     })
   );
+}
+
+/** Build a demographics-grid slide spec from per-question cell charts. */
+export function makeDemographicsGrid(
+  cells: { question_ref: string; chart_type: string }[],
+  opts?: { slide_title?: string; group?: string }
+): ChartSpec {
+  return {
+    question_ref: specialRef("demographics_grid"),
+    chart_type: "demographics_grid",
+    statistic: "pct",
+    classifying_var: null,
+    number_format: { ...DEFAULT_NUMBER_FORMAT },
+    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    template_slot: "s1",
+    elements: { ...DEFAULT_ELEMENTS },
+    scatter_xy: null,
+    show_not_answered: false,
+    show_empty_categories: false,
+    not_answered_codes: null,
+    category_label_overrides: [],
+    slide_title: opts?.slide_title ?? "Vastaajat",
+    slide_description: null,
+    options: { charts: cells, ...(opts?.group ? { group: opts.group } : {}) },
+  };
+}
+
+/** Group demographic cell charts into grid slides of up to `per` charts each. */
+export function buildDemographicsGrids(
+  cells: { question_ref: string; chart_type: string }[],
+  group: string,
+  per = 4
+): ChartSpec[] {
+  const pages = Math.ceil(cells.length / per);
+  const out: ChartSpec[] = [];
+  for (let p = 0; p < pages; p++) {
+    out.push(
+      makeDemographicsGrid(cells.slice(p * per, (p + 1) * per), {
+        slide_title: pages > 1 ? `Vastaajat (${p + 1}/${pages})` : "Vastaajat",
+        group,
+      })
+    );
+  }
+  return out;
 }
 
 /** Assign template_slot by position: s1..sN. */

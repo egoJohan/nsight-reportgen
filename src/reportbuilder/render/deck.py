@@ -13,11 +13,12 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.exc import PackageNotFoundError
 from pptx.util import Inches
 
-from reportbuilder.model.report import Report, renders_as_bullets
+from reportbuilder.model.report import Report, is_demographics_grid, renders_as_bullets
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
 from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
 from reportbuilder.render.image.special_slide import render_special_slide
+from reportbuilder.render.image.demographics_grid import render_demographics_grid
 import reportbuilder.render.plugins as _plugins  # registers all plugins as side-effect
 
 
@@ -45,17 +46,25 @@ def _count_chart_shapes(prs: Presentation) -> tuple[int, int]:
     return charts, pics
 
 
-def assert_complete(prs: Presentation, report: Report) -> None:
+def assert_complete(prs: Presentation, report: Report,
+                    expected_pics: int | None = None) -> None:
     """The deck contains exactly one rendered chart object per ChartSpec, nothing extra.
 
     Native mode: counts c:chart shapes.  Image mode: counts PICTURE shapes.
-    Raises CompletenessError if the tally doesn't match len(report.charts). (REQ-C-18)
+    Raises CompletenessError if the tally doesn't match. Bullet slides add no
+    chart object; a demographics grid adds several pictures, so the caller passes
+    ``expected_pics`` (computed where the series are known). (REQ-C-18)
     """
     charts, pics = _count_chart_shapes(prs)
     rendered = charts if report.render_mode == "native" else pics
-    # Special (non-chart) slides render as text, not a chart/picture object, so
-    # they don't count toward the expected tally.
-    expected = len([c for c in report.charts if not renders_as_bullets(c)])
+    if expected_pics is not None and report.render_mode != "native":
+        expected = expected_pics
+    else:
+        # Bullet/grid slides don't add exactly one picture; exclude them.
+        expected = len([
+            c for c in report.charts
+            if not renders_as_bullets(c) and not is_demographics_grid(c)
+        ])
     if rendered != expected:
         raise CompletenessError(
             f"expected {expected} {report.render_mode} chart objects, found {rendered}"
@@ -120,6 +129,11 @@ def render_report(
         # slide_index may reference an existing slide or was just appended
         slide = prs.slides[slot.slide_index]
 
+        # --- Demographics grid: several compact charts on one slide ---
+        if is_demographics_grid(spec):
+            render_demographics_grid(slide, slot, style, spec, series_by_ref, _titles)
+            continue
+
         # --- Bullet slides (special slides + themes): render text, no series ---
         if renders_as_bullets(spec):
             render_special_slide(
@@ -153,7 +167,21 @@ def render_report(
             add_image_slide_chrome(ctx)
             p.image_build(ctx)
 
-    assert_complete(prs, report)
+    # Expected pictures: 1 per normal chart, 0 per bullet slide, and one per grid
+    # cell that actually has a series (computed above).
+    expected_pics = 0
+    for spec in report.charts:
+        if renders_as_bullets(spec):
+            continue
+        if is_demographics_grid(spec):
+            expected_pics += sum(
+                1
+                for c in (spec.options.get("charts") or [])
+                if series_by_ref.get(c.get("question_ref")) is not None
+            )
+        else:
+            expected_pics += 1
+    assert_complete(prs, report, expected_pics=expected_pics)
     assert_no_pictures_in_chart_slots(prs, report, style)
     return prs
 

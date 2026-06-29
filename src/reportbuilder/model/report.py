@@ -82,6 +82,12 @@ def renders_as_bullets(spec: "ChartSpec") -> bool:
     return spec.chart_type in _BULLET_TYPES
 
 
+def is_demographics_grid(spec: "ChartSpec") -> bool:
+    """A multi-chart grid slide. options["charts"] = [{"question_ref","chart_type"}, …];
+    each cell renders a compact chart for one question."""
+    return spec.chart_type == "demographics_grid"
+
+
 @dataclass(frozen=True)
 class Report:
     name: str

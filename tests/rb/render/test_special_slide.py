@@ -168,3 +168,31 @@ def test_bullet_markdown_renders_bold(tmp_path):
     ]
     bold = [r.text for r in runs if r.font.bold]
     assert "tärkeä" in bold
+
+
+def test_demographics_grid_renders_a_chart_per_cell(tmp_path):
+    """A demographics_grid renders one picture per cell chart and passes
+    assert_complete (its pictures are counted, not treated as one)."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    model, df = tiny_model_and_data()
+    grid = _spec(
+        chart_type="demographics_grid",
+        slide_title="Vastaajat",
+        options={"charts": [
+            {"question_ref": "q1", "chart_type": "vertical_bar"},
+            {"question_ref": "q1", "chart_type": "pie"},
+        ]},
+    )
+    rep = Report(name="r", render_mode="image", template_ref="", charts=(grid,))
+    out = str(tmp_path / "grid.pptx")
+    build_pptx(rep, model, df, out)  # must not raise CompletenessError
+    prs = Presentation(out)
+    pics = sum(
+        1 for s in prs.slides for sh in s.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+    )
+    assert pics == 2  # one chart per cell
+    alltext = " ".join(
+        s.text_frame.text for s in prs.slides[0].shapes if s.has_text_frame
+    )
+    assert "Vastaajat" in alltext

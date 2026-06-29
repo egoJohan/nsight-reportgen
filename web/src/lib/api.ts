@@ -388,8 +388,11 @@ export const api = {
     aiDemographics: (
       materialId: string,
       body: { question_refs?: string[] }
-    ): Promise<{ bullets: string[]; question_refs: string[] }> =>
-      postAi(materialId, "demographics", body),
+    ): Promise<{
+      bullets: string[];
+      question_refs: string[];
+      charts: { question_ref: string; chart_type: string }[];
+    }> => postAi(materialId, "demographics", body),
 
     // AI: summarise an open-ended question's answers into key themes (bullets).
     aiThemes: (

@@ -1,9 +1,26 @@
 from __future__ import annotations
-from reportbuilder.model.report import Report, renders_as_bullets
+from reportbuilder.model.report import (
+    ChartSpec,
+    ElementToggles,
+    NumberFormat,
+    Report,
+    SortSpec,
+    is_demographics_grid,
+    renders_as_bullets,
+)
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
 from reportbuilder.render.deck import render_to_file
 from reportbuilder.stats.engine import compute
+
+
+def _cell_spec(ref: str, chart_type: str) -> ChartSpec:
+    """A minimal spec for one demographics-grid cell chart."""
+    return ChartSpec(
+        question_ref=ref, chart_type=chart_type, statistic="pct",
+        classifying_var=None, number_format=NumberFormat(),
+        sort=SortSpec(basis="pct"), template_slot="cell", elements=ElementToggles(),
+    )
 
 
 def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
@@ -14,6 +31,18 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
     series_by_ref: dict = {}
     titles: dict = {}
     for spec in report.charts:
+        # Demographics grid: compute a series per cell chart (by question_ref).
+        if is_demographics_grid(spec):
+            for c in (spec.options.get("charts") or []):
+                ref = c.get("question_ref")
+                ctype = c.get("chart_type") or "vertical_bar"
+                try:
+                    q = model.question(ref)
+                    series_by_ref[ref] = compute(q, _cell_spec(ref, ctype), data, model)
+                    titles[ref] = q.text
+                except Exception:
+                    pass
+            continue
         # Bullet slides (special slides + themes) carry no series — they render
         # as text in render_report. Skip stats, but record the question text so a
         # themes slide can use it as its heading.

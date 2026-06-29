@@ -36,9 +36,11 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   chartTypeLabel,
+  isDemographicsGrid,
   isSpecialSlide,
   isWordcloud,
   rendersAsBullets,
+  rendersFullSlide,
 } from "@/lib/charts";
 import {
   Dialog,
@@ -1312,7 +1314,9 @@ export default function StepConfigure({
   const activeIndex = activeChart
     ? charts.findIndex((c) => c.question_ref === activeChart.question_ref)
     : -1;
-  const activeSpecial = activeChart ? rendersAsBullets(activeChart) : false;
+  const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
+  const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
+  const activeGrid = activeChart ? isDemographicsGrid(activeChart) : false;
   const activeBulletsPending =
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 
@@ -1426,14 +1430,22 @@ export default function StepConfigure({
                 chart={activeChart}
                 bulletsPending={activeBulletsPending}
               />
-              <div className="rounded-xl border bg-card p-4">
-                <SpecialSlideControls
-                  chart={activeChart}
-                  pending={activeBulletsPending}
-                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
-                  onRegenerate={() => onRegenerateSpecial?.(activeChart)}
-                />
-              </div>
+              {activeGrid ? (
+                <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
+                  A demographics overview — the charts are chosen automatically
+                  from the respondent (age, gender, geography…) questions. Use
+                  Remove to delete this slide, or drag to reorder it.
+                </div>
+              ) : activeBullets ? (
+                <div className="rounded-xl border bg-card p-4">
+                  <SpecialSlideControls
+                    chart={activeChart}
+                    pending={activeBulletsPending}
+                    onChange={(patch) => onUpdateChart(activeIndex, patch)}
+                    onRegenerate={() => onRegenerateSpecial?.(activeChart)}
+                  />
+                </div>
+              ) : null}
             </>
           ) : (
             <>
