@@ -12,6 +12,7 @@ from __future__ import annotations
 import pathlib
 import tempfile
 import os
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -90,24 +91,38 @@ def orchestrate_render(
     # Enrich model with multi-response + battery grouping
     model = enrich_model(model)
 
-    # 3. Build the PPTX deck
+    # 3. Build the PPTX deck into UNIQUE work files, then atomically publish to
+    #    the canonical deck.pptx/deck.pdf names. Two concurrent renders of the
+    #    SAME report never tear each other's output, and a GET preview.pdf in
+    #    flight always reads a complete file (os.replace is atomic). (concurrency)
     out_dir = out_dir or tempfile.mkdtemp()
+    uid = uuid.uuid4().hex[:8]
+    work_pptx = os.path.join(str(out_dir), f"deck.{uid}.pptx")
     try:
-        pptx = build_pptx(report, model, df, os.path.join(str(out_dir), "deck.pptx"))
+        build_pptx(report, model, df, work_pptx)
     except ValueError as exc:
         # Surface chart-level errors (e.g. scatter with null scatter_xy) as a
         # clean 422 instead of an unhandled 500. (FIX-3)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    # 4. Convert to PDF (requires LibreOffice soffice)
-    pdf = pptx_to_pdf(pptx, str(out_dir))
+    # 4. Convert to PDF (requires LibreOffice soffice) — yields deck.<uid>.pdf
+    work_pdf = pptx_to_pdf(work_pptx, str(out_dir))
 
-    # 5. Rasterize preview (slides view or pages view)
+    # 5. Atomically publish to the canonical names that the GET routes serve.
+    final_pptx = os.path.join(str(out_dir), "deck.pptx")
+    final_pdf = os.path.join(str(out_dir), "deck.pdf")
+    os.replace(work_pptx, final_pptx)
+    os.replace(work_pdf, final_pdf)
+
+    # 6. Rasterize preview into a per-render subdir so concurrent renders don't
+    #    mix each other's page*.png via the sorted glob.
+    page_dir = os.path.join(str(out_dir), f"pages-{uid}")
+    os.makedirs(page_dir, exist_ok=True)
     rasterize = slide_view if view != "pages" else page_view
-    preview = rasterize(pdf, str(out_dir))
+    preview = rasterize(final_pdf, page_dir)
 
-    # 6. Return artifact paths
-    return {"pptx": pptx, "pdf": pdf, "preview": preview}
+    # 7. Return artifact paths
+    return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
 
 
 # ---------------------------------------------------------------------------

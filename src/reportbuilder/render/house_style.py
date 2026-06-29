@@ -6,6 +6,8 @@ individual builders.
 """
 from __future__ import annotations
 
+import threading as _threading
+
 import matplotlib as _mpl
 from matplotlib import font_manager as _fm
 from pptx.dml.color import RGBColor
@@ -54,26 +56,33 @@ _LIBERATION_PATHS = [
 ]
 
 
+_FONTS_LOCK = _threading.Lock()
+
+
 def register_fonts() -> None:
     """Register Liberation Sans with matplotlib; fall back to DejaVu Sans if absent.
 
-    Idempotent — safe to call multiple times; registers once per process.
-    REQ-C-25 (consistent typography across charts).
+    Idempotent and thread-safe — chart rendering runs on a threadpool, so the
+    check-then-set and the shared fontManager / rcParams mutation are guarded by a
+    lock to register exactly once per process. REQ-C-25 (consistent typography).
     """
     global _FONTS_REGISTERED
     if _FONTS_REGISTERED:
         return
-    for fp in _LIBERATION_PATHS:
-        try:
-            _fm.fontManager.addfont(fp)
-        except Exception:
-            pass
-    avail = {f.name for f in _fm.fontManager.ttflist}
-    if "Liberation Sans" in avail:
-        _mpl.rcParams["font.family"] = "Liberation Sans"
-    else:
-        _mpl.rcParams["font.family"] = "DejaVu Sans"  # graceful fallback
-    _FONTS_REGISTERED = True
+    with _FONTS_LOCK:
+        if _FONTS_REGISTERED:
+            return
+        for fp in _LIBERATION_PATHS:
+            try:
+                _fm.fontManager.addfont(fp)
+            except Exception:
+                pass
+        avail = {f.name for f in _fm.fontManager.ttflist}
+        if "Liberation Sans" in avail:
+            _mpl.rcParams["font.family"] = "Liberation Sans"
+        else:
+            _mpl.rcParams["font.family"] = "DejaVu Sans"  # graceful fallback
+        _FONTS_REGISTERED = True
 
 
 # ---------------------------------------------------------------------------

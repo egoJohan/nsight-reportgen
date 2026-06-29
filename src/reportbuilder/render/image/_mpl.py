@@ -9,9 +9,22 @@ import tempfile
 import textwrap
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.house_style import register_fonts, CREAM, INK, GRIDC, MUTED
+
+
+def _new_agg_figure(w_in: float, h_in: float, dpi: int = 200) -> Figure:
+    """Create a standalone Agg Figure (OO API — NOT pyplot).
+
+    Chart rendering runs on FastAPI's threadpool, so figures are created and
+    destroyed concurrently across threads. The pyplot interface (the global Gcf
+    figure manager) is not thread-safe; using Figure()+FigureCanvasAgg keeps each
+    figure entirely local to its thread, eliminating that race."""
+    fig = Figure(figsize=(w_in, h_in), dpi=dpi)
+    FigureCanvasAgg(fig)
+    return fig
 
 _EMU_PER_IN = 914400.0
 
@@ -103,18 +116,22 @@ def new_figure(ctx):
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
-    fig, ax = plt.subplots(figsize=(w_in, h_in), dpi=200)
+    fig = _new_agg_figure(w_in, h_in)
+    ax = fig.subplots()
     fig.patch.set_facecolor(CREAM)
     ax.set_facecolor(CREAM)
     return fig, ax
 
 
 def render_png(fig) -> str:
-    """Save figure to a temp PNG file at high quality and close it. Returns the file path."""
+    """Save figure to a temp PNG file at high quality and free it. Returns the path.
+
+    The figure is an OO Agg Figure (not pyplot-managed), so there is no global
+    registry entry to close — clearing it just releases its artists/memory."""
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04)
-    plt.close(fig)
+    fig.clear()
     return path
 
 
@@ -241,7 +258,8 @@ def new_square_figure(ctx):
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
-    fig, ax = plt.subplots(figsize=(sq, sq), dpi=200)
+    fig = _new_agg_figure(sq, sq)
+    ax = fig.subplots()
     fig.patch.set_facecolor(CREAM)
     ax.set_facecolor(CREAM)
     return fig, ax

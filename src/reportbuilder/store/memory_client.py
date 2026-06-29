@@ -16,12 +16,16 @@ Layout under ``storage_dir``:
   - ``state.json``         — scalars (the id counter ``_n``)
   - ``materials/<id>.sav`` — raw material bytes (kept out of JSON)
 
-Not for production — even with disk persistence this is a single-process demo store.
+Thread-safe within one process (a single re-entrant lock guards all state), but
+still SINGLE-PROCESS: running multiple workers would give each its own in-memory
+copy and clobber the shared files. Not for production — back the API with a real
+transactional store / DB for multi-worker, multi-tenant use.
 """
 from __future__ import annotations
 
 import json
 import os
+import threading
 
 
 class InMemoryDataHiveClient:
@@ -35,6 +39,11 @@ class InMemoryDataHiveClient:
         self._material_meta: dict[str, dict] = {}
         self._reports: dict[str, str] = {}
         self._n = 0
+        # FastAPI runs sync routes on a threadpool → these methods are called from
+        # multiple threads in parallel. A single re-entrant lock makes every
+        # read-modify-write (and the multi-file _save) atomic: no torn IDs, no
+        # "dict changed size during iteration", no interleaved persistence.
+        self._lock = threading.RLock()
         if self.storage_dir is not None:
             self._load()
 
@@ -101,75 +110,84 @@ class InMemoryDataHiveClient:
 
     # --- cases ---
     def create_case(self, name: str) -> str:
-        cid = self._id("case-")
-        self._cases[cid] = {"id": cid, "name": name}
-        self._save()
-        return cid
+        with self._lock:
+            cid = self._id("case-")
+            self._cases[cid] = {"id": cid, "name": name}
+            self._save()
+            return cid
 
     def list_cases(self) -> list[dict]:
-        return list(self._cases.values())
+        with self._lock:
+            return [dict(c) for c in self._cases.values()]
 
     def rename_case(self, case_id: str, name: str) -> None:
-        c = self._cases.get(case_id)
-        if c is None:
-            raise KeyError(case_id)
-        c["name"] = name
-        self._save()
+        with self._lock:
+            c = self._cases.get(case_id)
+            if c is None:
+                raise KeyError(case_id)
+            c["name"] = name
+            self._save()
 
     def delete_case(self, case_id: str) -> None:
-        if case_id not in self._cases:
-            raise KeyError(case_id)
-        del self._cases[case_id]
-        # Cascade: drop this case's materials (reports are tracked client-side).
-        mids = [m for m, meta in self._material_meta.items()
-                if meta.get("case_id") == case_id]
-        for mid in mids:
-            self._materials.pop(mid, None)
-            self._material_meta.pop(mid, None)
-            if self.storage_dir is not None:
-                try:
-                    os.remove(os.path.join(self._materials_dir(), f"{mid}.sav"))
-                except OSError:
-                    pass
-        self._save()
+        with self._lock:
+            if case_id not in self._cases:
+                raise KeyError(case_id)
+            del self._cases[case_id]
+            # Cascade: drop this case's materials (reports are tracked client-side).
+            mids = [m for m, meta in self._material_meta.items()
+                    if meta.get("case_id") == case_id]
+            for mid in mids:
+                self._materials.pop(mid, None)
+                self._material_meta.pop(mid, None)
+                if self.storage_dir is not None:
+                    try:
+                        os.remove(os.path.join(self._materials_dir(), f"{mid}.sav"))
+                    except OSError:
+                        pass
+            self._save()
 
     # --- materials (byte-exact) ---
     def attach_material(self, case_id: str, name: str, sav_bytes: bytes,
                         codebook_summary: str) -> str:
-        mid = self._id("mat-")
-        data = bytes(sav_bytes)
-        self._materials[mid] = data
-        self._material_meta[mid] = {"case_id": case_id, "name": name}
-        if self.storage_dir is not None:
-            self._atomic_write(os.path.join(self._materials_dir(), f"{mid}.sav"), data)
-        self._save()
-        return mid
+        with self._lock:
+            mid = self._id("mat-")
+            data = bytes(sav_bytes)
+            self._materials[mid] = data
+            self._material_meta[mid] = {"case_id": case_id, "name": name}
+            if self.storage_dir is not None:
+                self._atomic_write(os.path.join(self._materials_dir(), f"{mid}.sav"), data)
+            self._save()
+            return mid
 
     def get_material(self, material_id: str) -> bytes:
-        if material_id in self._materials:
-            return self._materials[material_id]
-        if self.storage_dir is not None:
-            path = os.path.join(self._materials_dir(), f"{material_id}.sav")
-            with open(path, "rb") as f:
-                data = f.read()
-            self._materials[material_id] = data
-            return data
-        raise KeyError(material_id)
+        with self._lock:
+            if material_id in self._materials:
+                return self._materials[material_id]
+            if self.storage_dir is not None:
+                path = os.path.join(self._materials_dir(), f"{material_id}.sav")
+                with open(path, "rb") as f:
+                    data = f.read()
+                self._materials[material_id] = data
+                return data
+            raise KeyError(material_id)
 
     # --- reports (verbatim JSON round-trip) ---
     def save_report(self, case_id: str, report_id: str | None, report_json: str,
                     readable: str) -> str:
-        rid = report_id or self._id("rep-")
-        self._reports[rid] = report_json
-        self._save()
-        return rid
+        with self._lock:
+            rid = report_id or self._id("rep-")
+            self._reports[rid] = report_json
+            self._save()
+            return rid
 
     def load_report(self, case_id: str, report_doc_id: str) -> str:
-        return self._reports[report_doc_id]
+        with self._lock:
+            return self._reports[report_doc_id]
 
     def delete_report(self, case_id: str, report_doc_id: str) -> None:
-        self._reports.pop(report_doc_id, None)
-        self._save()
+        with self._lock:
+            self._reports.pop(report_doc_id, None)
+            self._save()
 
     # --- aggregation (demo stub) ---
     def aggregate(self, material_id: str, group_by: list[str], filters: dict,

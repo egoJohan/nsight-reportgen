@@ -698,17 +698,20 @@ def preview_chart(
         charts=(spec,),
     )
 
-    # 4. Render PPTX → PDF → PNG page 1
-    #    The entire chain is wrapped so any unexpected failure surfaces as 422,
-    #    not a 500 or a silent dropped connection. (RX-be.2)
-    pptx_path = str(out_dir / "preview.pptx")
+    # 4. Render PPTX → PDF → PNG page 1, using UNIQUE work files + a per-render
+    #    pages subdir so two concurrent identical requests can't tear each other's
+    #    artifacts. The cached preview.png is published ATOMICALLY (os.replace),
+    #    so the cache-hit branch above never reads a half-written file. (RX-be.2,
+    #    concurrency)
+    uid = uuid.uuid4().hex[:8]
+    pptx_path = str(out_dir / f"preview.{uid}.pptx")
     try:
         build_pptx(report, model, df, pptx_path)
         pdf_path = pptx_to_pdf(pptx_path, str(out_dir))
         # Previews are shown at ~640px (big pane) / smaller (thumbs), so 110 DPI
         # is ample and ~40% lighter than deck DPI — smaller PNGs decode faster
         # and use less memory across 100+ cached previews.
-        pngs = rasterize_pages(pdf_path, str(out_dir / "pages"), dpi=110)
+        pngs = rasterize_pages(pdf_path, str(out_dir / f"pages-{uid}"), dpi=110)
     except HTTPException:
         raise  # already a well-formed HTTP error — pass through unchanged
     except Exception as exc:
@@ -724,5 +727,9 @@ def preview_chart(
         )
 
     png_bytes = pathlib.Path(pngs[0]).read_bytes()
-    cached_png.write_bytes(png_bytes)  # cache for reuse by later identical requests
+    # Atomically publish the cached PNG: write to a temp file in the same dir,
+    # then os.replace so concurrent readers see a complete file.
+    tmp_png = out_dir / f"preview.{uid}.png"
+    tmp_png.write_bytes(png_bytes)
+    os.replace(tmp_png, cached_png)
     return Response(content=png_bytes, media_type="image/png")

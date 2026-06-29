@@ -18,7 +18,8 @@ from __future__ import annotations
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
     render_png, place_picture_square, series_values, style_legend, wrap_label,
@@ -46,7 +47,8 @@ def build_image_radar(ctx) -> None:
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
-    fig = plt.figure(figsize=(sq, sq), dpi=200)
+    fig = Figure(figsize=(sq, sq), dpi=200)
+    FigureCanvasAgg(fig)
     fig.patch.set_facecolor(CREAM)
     ax = fig.add_subplot(111, polar=True)
     ax.set_facecolor(CREAM)

@@ -27,7 +27,8 @@ import textwrap
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
     render_png, place_picture_square, series_values, format_value,
@@ -65,7 +66,8 @@ def _make_square_fig_ax(ctx):
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
-    fig = plt.figure(figsize=(w_in, h_in), dpi=200)
+    fig = Figure(figsize=(w_in, h_in), dpi=200)
+    FigureCanvasAgg(fig)
     fig.patch.set_facecolor(CREAM)
     # Pie axes: left ~62% of the width, full height — the circle fills the height.
     ax = fig.add_axes([0.0, 0.0, 0.62, 1.0])

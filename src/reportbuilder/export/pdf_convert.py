@@ -31,7 +31,11 @@ def pdf_page_count(pdf_path: str) -> int:
 # Bound concurrent soffice processes — each is heavy (startup + memory). Sized to
 # the box; conversions beyond this queue for a free profile slot.
 _MAX_CONCURRENT = max(1, min(4, (os.cpu_count() or 2)))
-_PROFILE_ROOT = Path(tempfile.gettempdir()) / "nsight-lo-profiles"
+# Namespace the profile root by PID so multiple worker PROCESSES (gunicorn/uvicorn
+# --workers N) never hand out the same UserInstallation dir to two concurrent
+# soffice invocations — which would re-introduce the single-instance-per-profile
+# lock contention/corruption the slot pool exists to prevent.
+_PROFILE_ROOT = Path(tempfile.gettempdir()) / "nsight-lo-profiles" / f"pid-{os.getpid()}"
 
 # A queue of profile dirs acts as both the concurrency gate (get() blocks until a
 # slot is free) and the per-conversion isolation (each slot has its own profile).

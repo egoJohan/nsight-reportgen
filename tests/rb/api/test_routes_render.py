@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -144,6 +145,20 @@ def test_orchestrate_render_wiring() -> None:
     mock_client.load_report.return_value = report_to_json(small_report)
     mock_client.get_material.return_value = b"x"
 
+    # build_pptx / pptx_to_pdf now write UNIQUE work files that the orchestrator
+    # atomically publishes (os.replace) to canonical deck.pptx/deck.pdf, so the
+    # mocks must actually create the files they stand in for.
+    def _fake_build(report, model, df, path):
+        with open(path, "w") as f:
+            f.write("pptx")
+        return path
+
+    def _fake_pdf(pptx_path, out_dir):
+        pdf = os.path.join(out_dir, "work.pdf")
+        with open(pdf, "w") as f:
+            f.write("pdf")
+        return pdf
+
     with (
         patch("reportbuilder.api.routes_render.read_sav") as mock_read_sav,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
@@ -151,15 +166,19 @@ def test_orchestrate_render_wiring() -> None:
         patch("reportbuilder.api.routes_render.slide_view") as mock_slide_view,
     ):
         mock_read_sav.return_value = (fake_df, small_model)
-        mock_build_pptx.return_value = "/t/deck.pptx"
-        mock_pptx_to_pdf.return_value = "/t/deck.pdf"
+        mock_build_pptx.side_effect = _fake_build
+        mock_pptx_to_pdf.side_effect = _fake_pdf
         mock_slide_view.return_value = ["/t/p1.png"]
 
         result = orchestrate_render(
             "case-3", "rep-3", "mat-3", mock_client, view="slides"
         )
 
-    assert result == {"pptx": "/t/deck.pptx", "pdf": "/t/deck.pdf", "preview": ["/t/p1.png"]}
+    # Atomic publish: canonical names, real files on disk, preview from slide_view.
+    assert os.path.basename(result["pptx"]) == "deck.pptx"
+    assert os.path.basename(result["pdf"]) == "deck.pdf"
+    assert os.path.exists(result["pptx"]) and os.path.exists(result["pdf"])
+    assert result["preview"] == ["/t/p1.png"]
 
     mock_client.load_report.assert_called_once_with("case-3", "rep-3")
     mock_client.get_material.assert_called_once_with("mat-3")
