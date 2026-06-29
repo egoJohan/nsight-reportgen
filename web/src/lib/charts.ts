@@ -22,6 +22,7 @@ export const CHART_TYPES: ChartTypeOption[] = [
   { id: "radar", label: "Radar Chart" },
   { id: "scatter", label: "Scatter Plot" },
   { id: "funnel", label: "Funnel Chart" },
+  { id: "combo", label: "Combo Chart" },
   { id: "wordcloud", label: "Word Cloud" },
 ];
 
