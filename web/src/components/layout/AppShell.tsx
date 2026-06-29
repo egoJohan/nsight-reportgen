@@ -16,12 +16,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useCases } from "@/lib/queries";
 import NewCaseDialog from "@/components/NewCaseDialog";
-import {
-  PlusIcon,
-  FolderOpenIcon,
-  SettingsIcon,
-  BarChart3Icon,
-} from "lucide-react";
+import { PlusIcon, FolderOpenIcon, SettingsIcon } from "lucide-react";
 
 function CasesNav() {
   const { data: cases } = useCases();
@@ -81,16 +76,14 @@ export default function AppShell() {
   return (
     <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon">
-        {/* Wordmark */}
-        <SidebarHeader className="px-4 py-5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground shrink-0">
-              <BarChart3Icon className="size-4" />
-            </div>
-            <span className="font-semibold text-base tracking-tight group-data-[collapsible=icon]:hidden">
-              nSight
-            </span>
-          </div>
+        {/* Logo — the mark is white, so sit it on a dark brand band. */}
+        <SidebarHeader className="px-3 py-4">
+          <NavLink
+            to="/"
+            className="flex items-center justify-center rounded-xl bg-primary px-5 py-4 group-data-[collapsible=icon]:hidden"
+          >
+            <img src="/nsight-logo.svg" alt="nSight" className="h-12 w-auto" />
+          </NavLink>
         </SidebarHeader>
 
         <SidebarContent>
@@ -112,8 +105,9 @@ export default function AppShell() {
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Cases list */}
-          <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+          {/* Cases list — own scroll region (visible scrollbar) so a long list
+              is reachable while "New case" stays pinned above. */}
+          <SidebarGroup className="min-h-0 flex-1 overflow-y-auto group-data-[collapsible=icon]:hidden">
             <SidebarGroupContent>
               <CasesNav />
             </SidebarGroupContent>
