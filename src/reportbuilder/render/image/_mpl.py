@@ -123,6 +123,23 @@ def new_figure(ctx):
     return fig, ax
 
 
+def new_tall_figure(ctx, h_in: float):
+    """Like new_figure but with a caller-chosen height (>= the slot height).
+
+    Horizontal-bar charts grow taller as categories increase so every row keeps
+    room for a ~2-line wrapped label at a legible font (instead of shrinking the
+    font / truncating). The taller PNG is letterbox-placed top-aligned, filling
+    the slot's height and using the otherwise-empty space below the chart."""
+    register_fonts()
+    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    h_in = max(h_in, ctx.slot.height / _EMU_PER_IN)
+    fig = _new_agg_figure(w_in, h_in)
+    ax = fig.subplots()
+    fig.patch.set_facecolor(CREAM)
+    ax.set_facecolor(CREAM)
+    return fig, ax
+
+
 def render_png(fig) -> str:
     """Save figure to a temp PNG file at high quality and free it. Returns the path.
 

@@ -28,8 +28,9 @@ import textwrap
 
 import numpy as np
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, place_picture_square, series_values,
-    format_value, style_legend, force_break_token, wrap_label_capped,
+    new_figure, new_tall_figure, render_png, place_picture, place_picture_square,
+    series_values, format_value, style_legend, force_break_token, wrap_label,
+    wrap_label_capped,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
@@ -41,6 +42,7 @@ from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 # ---------------------------------------------------------------------------
 _LABEL_WRAP_WIDTH: int = 30   # chars per line for horizontal-bar y-axis labels (wider gutter)
 _HBAR_LABEL_WRAP_WIDTH: int = 42  # wider wrap for hbar y-labels → fewer lines, taller font
+_HBAR_ROW_IN: float = 0.52        # vertical inches reserved per category row (fits 2 label lines)
 _XLABEL_WRAP_WIDTH: int = 20  # chars per line for (rotated) vertical-bar x-axis labels
 _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
 
@@ -273,10 +275,19 @@ def build_image_bar(ctx) -> None:
 
 def _render_bar_h(ctx, cats, segs, data) -> None:
     """Internal horizontal-bar renderer shared by bar + auto-orient column."""
-    fig, ax = new_figure(ctx)
+    n_cats = len(cats)
+    # Reserve as many label lines as the LONGEST label actually needs (2..3), so
+    # normal long labels wrap in full and are never truncated. Only a pathological
+    # label still longer than 3 lines at the wide wrap width is ellipsised.
+    wrapped_full = [wrap_label(c, _HBAR_LABEL_WRAP_WIDTH) for c in cats]
+    label_lines = min(3, max(2, max((w.count("\n") + 1 for w in wrapped_full), default=1)))
+    # Grow the figure taller as categories (and reserved label lines) increase so
+    # every row has room — preferring more space (a bigger chart that fills the
+    # slide) over shrinking the font or truncating.
+    row_in = label_lines * 0.18 + 0.16
+    fig, ax = new_tall_figure(ctx, n_cats * row_in + 1.2)
     clrs = series_colors(len(segs))
 
-    n_cats = len(cats)
     n_segs = len(segs)
     y = np.arange(n_cats)[::-1]   # top category at top of plot
     height = 0.7 / n_segs if n_segs > 1 else 0.62
@@ -294,14 +305,14 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
             ys, vals, height=height,
             label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
-    # Category-label font is sized to the per-row band so that many long labels
-    # never overlap; it stays below the slide title size. The number of lines
-    # that fit at that font determines an ellipsis cap (last resort over overlap).
+    # The figure is sized so each row fits `label_lines` wrapped lines; size the
+    # font to that band (kept below the title size). Ellipsis is a true last
+    # resort — only a label STILL longer than `label_lines` (≤3) is truncated.
     fig_h_in = float(fig.get_size_inches()[1])
-    ylabel_fs = _hbar_label_fontsize(n_cats, fig_h_in)
     row_pt = _hbar_row_pt(n_cats, fig_h_in)
-    max_lines = max(1, int(row_pt // (ylabel_fs * 1.25)))
-    value_fs = max(7.5, min(9.5, ylabel_fs))
+    max_lines = label_lines
+    ylabel_fs = max(8.5, min(11.5, row_pt / (max_lines * 1.3)))
+    value_fs = max(8.0, min(9.5, ylabel_fs))
 
     off = _label_offset(max_val)
     for i, seg in enumerate(segs):
