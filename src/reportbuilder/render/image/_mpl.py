@@ -6,13 +6,71 @@ can safely import this module in headless/test environments without a display.
 from __future__ import annotations
 import os
 import tempfile
+import textwrap
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from reportbuilder.render.house_style import register_fonts, CREAM, INK, GRIDC
+from reportbuilder.render.house_style import register_fonts, CREAM, INK, GRIDC, MUTED
 
 _EMU_PER_IN = 914400.0
+
+
+def force_break_token(token: str, width: int) -> list[str]:
+    """Break a single word longer than *width* into width-sized chunks.
+
+    Last-resort splitting so a pathological unbroken long word (e.g. erroneous
+    survey data with no spaces) cannot overflow the chart bounds. Normal words
+    shorter than *width* are returned unchanged.
+    """
+    if len(token) <= width:
+        return [token]
+    return [token[i:i + width] for i in range(0, len(token), width)]
+
+
+def wrap_label(text: str, width: int) -> str:
+    """Wrap *text* at word boundaries onto lines of at most *width* chars.
+
+    Never truncates and never adds an ellipsis. Hyphenated compounds are kept
+    intact at word level; a single token longer than *width* is force-broken
+    mid-character (the only case a word is split) so erroneous long labels can't
+    run off the chart. Returns the text with embedded newlines.
+    """
+    text = (text or "").strip()
+    if len(text) <= width:
+        return text
+    out: list[str] = []
+    for ln in textwrap.wrap(
+        text, width=width, break_long_words=False, break_on_hyphens=True
+    ):
+        out.extend(force_break_token(ln, width))
+    return "\n".join(out) if out else text
+
+
+def render_empty_chart(ctx, message: str = "Ei tietoja näytettäväksi") -> None:
+    """Render a centred 'no data' placeholder as a picture, so a chart with no
+    categories (e.g. a scale variable with no value labels) degrades cleanly
+    instead of crashing the deck. Counts as the chart's one picture."""
+    fig, ax = new_figure(ctx)
+    ax.axis("off")
+    ax.text(0.5, 0.5, message, ha="center", va="center",
+            fontsize=13, color=MUTED, transform=ax.transAxes)
+    place_picture(ctx, render_png(fig))
+
+
+def series_is_empty(series) -> bool:
+    """True when a series has nothing to plot (no categories, or every value is
+    None/zero across all segments)."""
+    cats = getattr(series, "categories", ())
+    if not cats:
+        return True
+    stat = getattr(series, "statistic", "pct")
+    for cat in cats:
+        for seg in series.segments:
+            cell = series.cells.get((cat, seg))
+            if cell is not None and cell.value(stat) not in (None, 0, 0.0):
+                return False
+    return True
 
 
 def new_figure(ctx):

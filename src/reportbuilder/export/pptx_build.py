@@ -12,6 +12,12 @@ from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
 from reportbuilder.render.deck import render_to_file
 from reportbuilder.stats.engine import compute
+from reportbuilder.stats.series import SeriesResult
+
+
+def _empty_series(statistic: str) -> SeriesResult:
+    return SeriesResult(categories=(), segments=("Total",), cells={},
+                        base_n={"Total": 0}, statistic=statistic or "pct")
 
 
 def _cell_spec(ref: str, chart_type: str) -> ChartSpec:
@@ -53,6 +59,12 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
                 pass
             continue
         q = model.question(spec.question_ref)
-        series_by_ref[spec.question_ref] = compute(q, spec, data, model)
+        # A single chart that can't compute (e.g. a wordcloud with no words)
+        # must not crash the whole deck — fall back to an empty series, which
+        # render_report draws as a "no data" placeholder.
+        try:
+            series_by_ref[spec.question_ref] = compute(q, spec, data, model)
+        except Exception:
+            series_by_ref[spec.question_ref] = _empty_series(spec.statistic)
         titles[spec.question_ref] = q.text
     return render_to_file(report, series_by_ref, style, out_path, titles=titles)

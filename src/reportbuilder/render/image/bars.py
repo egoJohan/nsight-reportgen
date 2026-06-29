@@ -29,6 +29,7 @@ import textwrap
 import numpy as np
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values, format_value, style_legend,
+    force_break_token,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
@@ -75,7 +76,12 @@ def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
         if len(_wrap(w)) <= n_lines:
             target = w
             break
-    return "\n".join(_wrap(target))
+    # Last resort: a single token still wider than the gutter (a pathological
+    # unbroken long word) is force-broken so it can't run off the chart.
+    out: list[str] = []
+    for ln in _wrap(target):
+        out.extend(force_break_token(ln, width))
+    return "\n".join(out)
 
 
 def _wrap_xtick_label(text: str) -> str:

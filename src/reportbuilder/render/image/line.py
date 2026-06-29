@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
-    format_value, style_legend,
+    format_value, style_legend, wrap_label,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC, CREAM,
@@ -55,9 +55,18 @@ def build_image_line(ctx) -> None:
                     fontsize=9.5, fontweight="bold", color=INK, zorder=5,
                 )
 
-    # Category labels
+    # Category labels — wrapped (and pathological long words force-broken), and
+    # rotated when there are several long labels so they don't overlap/run off.
+    wrapped = [wrap_label(c, 16) for c in cats]
+    longest = max((len(c) for c in cats), default=0)
+    rotate = len(cats) > 4 or longest > 16
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, fontsize=11.5, color=INK)
+    ax.set_xticklabels(
+        wrapped, fontsize=10.5 if rotate else 11.5, color=INK,
+        rotation=25 if rotate else 0,
+        ha="right" if rotate else "center",
+        rotation_mode="anchor" if rotate else None,
+    )
     ax.tick_params(axis="both", length=0)
 
     # House-style spines: bottom spine only

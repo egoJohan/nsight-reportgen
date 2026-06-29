@@ -15,7 +15,7 @@ Returns None.
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values, format_value,
+    new_figure, render_png, place_picture, series_values, format_value, wrap_label,
 )
 from reportbuilder.render.house_style import TEAL, INK, MUTED, CREAM
 
@@ -49,17 +49,20 @@ def build_image_funnel(ctx) -> None:
             zorder=5,
         )
 
-    # Category labels on the right of each bar
+    # Category labels on the right of each bar — wrapped onto multiple lines
+    # (and pathological long words force-broken) so they stay in a fixed gutter
+    # instead of running off the slide.
     for i, cat in enumerate(cats):
         ax.text(
-            max_val + 0.5, i, f"  {cat}",
+            max_val * 1.04, i, wrap_label(cat, 28),
             va="center", ha="left",
             fontsize=11.0, color=INK, zorder=5,
         )
 
     # Invert y-axis so widest bar (index 0) appears at the top
     ax.invert_yaxis()
-    ax.set_xlim(0, max_val * 1.40)
+    # Reserve a wide right gutter for the wrapped category labels.
+    ax.set_xlim(0, max_val * 2.05)
     ax.axis("off")
 
     png = render_png(fig)

@@ -19,6 +19,7 @@ from reportbuilder.render.elements import apply_elements, add_n_annotation, add_
 from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
 from reportbuilder.render.image.special_slide import render_special_slide
 from reportbuilder.render.image.demographics_grid import render_demographics_grid
+from reportbuilder.render.image._mpl import render_empty_chart, series_is_empty
 import reportbuilder.render.plugins as _plugins  # registers all plugins as side-effect
 
 
@@ -165,7 +166,12 @@ def render_report(
             # Add house-style slide chrome first so chart image lands on top
             # (REQ-C-24a/h, REQ-C-25, REQ-C-27a, REQ-D-04)
             add_image_slide_chrome(ctx)
-            p.image_build(ctx)
+            # A chart with nothing to plot (e.g. a scale variable with no value
+            # labels) degrades to a placeholder instead of crashing the builder.
+            if series_is_empty(series):
+                render_empty_chart(ctx)
+            else:
+                p.image_build(ctx)
 
     # Expected pictures: 1 per normal chart, 0 per bullet slide, and one per grid
     # cell that actually has a series (computed above).

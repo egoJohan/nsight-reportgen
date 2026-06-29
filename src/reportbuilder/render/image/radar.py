@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
-    render_png, place_picture_square, series_values, style_legend,
+    render_png, place_picture_square, series_values, style_legend, wrap_label,
 )
 from reportbuilder.render.house_style import (
     register_fonts, series_colors, CREAM, INK, MUTED, GRIDC,
@@ -71,9 +71,13 @@ def build_image_radar(ctx) -> None:
         )
         ax.fill(closed_angles, closed_vals, alpha=0.15, color=clrs[i], zorder=3)
 
-    # Spoke labels
+    # Spoke labels — wrap long category labels onto multiple lines (and
+    # force-break pathological unbroken long words) so they don't overlap the
+    # polygon or run off the figure. Shrink the font a touch as categories grow.
+    fs = 10.0 if n_cats <= 8 else (9.0 if n_cats <= 12 else 8.0)
     ax.set_xticks(angles)
-    ax.set_xticklabels(cats, fontsize=10.0, color=INK)
+    ax.set_xticklabels([wrap_label(c, 16) for c in cats], fontsize=fs, color=INK)
+    ax.tick_params(axis="x", pad=10)
 
     # Radial grid
     ax.set_ylim(0, r_max)

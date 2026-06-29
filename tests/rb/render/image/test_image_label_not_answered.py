@@ -134,13 +134,18 @@ class TestWrapXtickLabel:
         assert "\n" in result, f"Expected wrap; got {result!r}"
         assert _strip_wrap(result) == _strip_wrap(long)
 
-    def test_long_unbroken_token_kept_whole(self):
-        """A single long token is NOT split mid-character — it stays whole (the
-        gutter widens to fit it). Never ellipsized; full text preserved."""
-        from reportbuilder.render.image.bars import _wrap_xtick_label
-        result = _wrap_xtick_label("A" * 40)
+    def test_pathological_long_token_force_broken(self):
+        """A single token far longer than the wrap width is force-broken into
+        width-sized chunks as a last resort so erroneous unbroken long words
+        can't run off the chart. Full text preserved; never ellipsized; no line
+        exceeds the wrap width."""
+        from reportbuilder.render.image.bars import _wrap_xtick_label, _XLABEL_WRAP_WIDTH
+        result = _wrap_xtick_label("A" * 80)
         assert "…" not in result
-        assert result == "A" * 40  # one unbroken token, not "AAA\nAAA…"
+        assert "\n" in result, f"Expected force-break; got {result!r}"
+        assert result.replace("\n", "") == "A" * 80  # full text preserved
+        for line in result.split("\n"):
+            assert len(line) <= _XLABEL_WRAP_WIDTH
 
     def test_wrap_breaks_at_hyphen_not_midword(self):
         """A long hyphenated phrase wraps at the hyphen/space, never mid-word."""
