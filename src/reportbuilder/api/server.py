@@ -51,11 +51,15 @@ app = build_server_app()
 def main():
     import uvicorn
 
+    # Dev hot-reload: NSIGHT_RELOAD=1 restarts the server when backend source
+    # changes (watches src/reportbuilder only, so frontend edits don't churn it).
+    reload = os.environ.get("NSIGHT_RELOAD") == "1"
     uvicorn.run(
         "reportbuilder.api.server:app",
         host=os.environ.get("NSIGHT_HOST", "127.0.0.1"),
         port=int(os.environ.get("NSIGHT_PORT", "8200")),
-        reload=False,
+        reload=reload,
+        reload_dirs=["src/reportbuilder"] if reload else None,
     )
 
 
