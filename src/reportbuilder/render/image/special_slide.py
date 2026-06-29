@@ -41,12 +41,11 @@ def render_special_slide(slide, slot, style, spec: ChartSpec) -> None:
     if heading:
         _heading_box(slide, sw, heading)
 
-    # 4 — Bullet list
-    bullets = [
-        str(b).strip()
-        for b in (spec.options.get("bullets") or [])
-        if str(b).strip()
-    ]
+    # 4 — Bullet list. Tolerate a bare string (don't iterate it into characters).
+    raw = spec.options.get("bullets") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    bullets = [str(b).strip() for b in raw if str(b).strip()]
     if bullets:
         _bullet_box(slide, sw, sh, bullets)
 

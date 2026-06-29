@@ -101,6 +101,26 @@ def test_build_pptx_all_special_deck(tmp_path):
     assert _count_pictures(out) == 0  # no charts → no pictures, still valid
 
 
+def test_special_slide_tolerates_string_bullets(tmp_path):
+    """A bare string in options['bullets'] renders as ONE bullet, not per-char."""
+    model, df = tiny_model_and_data()
+    spec = _spec(
+        chart_type="special_overview",
+        slide_title="H",
+        options={"bullets": "a single string"},
+    )
+    rep = Report(name="r", render_mode="image", template_ref="", charts=(spec,))
+    out = str(tmp_path / "deck.pptx")
+    build_pptx(rep, model, df, out)
+    prs = Presentation(out)
+    alltext = " ".join(
+        s.text_frame.text for s in prs.slides[0].shapes if s.has_text_frame
+    )
+    assert "a single string" in alltext
+    # Would-be per-char rendering produces standalone bullet glyphs; one bullet only.
+    assert alltext.count("•") == 1
+
+
 def test_special_slide_renders_heading_and_bullets(tmp_path):
     model, df = tiny_model_and_data()
     rep = Report(

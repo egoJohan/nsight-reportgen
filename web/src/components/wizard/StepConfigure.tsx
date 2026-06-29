@@ -1055,10 +1055,16 @@ function SpecialSlideControls({
 }) {
   const bullets = ((chart.options?.bullets as string[] | undefined) ?? []).join("\n");
   const [draft, setDraft] = useState(bullets);
-  // Resync when the generated bullets land (or when switching slides).
-  useEffect(() => setDraft(bullets), [bullets]);
+  const focused = useRef(false);
+  // Resync when the generated bullets land (or when switching slides) — but NOT
+  // while the user is actively editing, so an incoming (re)generation never
+  // clobbers unsaved edits mid-type.
+  useEffect(() => {
+    if (!focused.current) setDraft(bullets);
+  }, [bullets]);
 
   const commit = () => {
+    focused.current = false;
     const next = draft
       .split("\n")
       .map((l) => l.trim())
@@ -1126,10 +1132,12 @@ const SPECIAL_SLIDE_CHOICES: {
 function AddSpecialDialog({
   open,
   onOpenChange,
+  existingTypes,
   onPick,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  existingTypes: Set<string>;
   onPick: (type: string) => void;
 }) {
   return (
@@ -1142,25 +1150,36 @@ function AddSpecialDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          {SPECIAL_SLIDE_CHOICES.map(({ type, label, description, Icon }) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => {
-                onPick(type);
-                onOpenChange(false);
-              }}
-              className="flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50"
-            >
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Icon className="size-4" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{label}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-              </div>
-            </button>
-          ))}
+          {SPECIAL_SLIDE_CHOICES.map(({ type, label, description, Icon }) => {
+            const added = existingTypes.has(type);
+            return (
+              <button
+                key={type}
+                type="button"
+                disabled={added}
+                onClick={() => {
+                  onPick(type);
+                  onOpenChange(false);
+                }}
+                className="flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50"
+              >
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Icon className="size-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {label}
+                    {added && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        Added
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </DialogContent>
     </Dialog>
@@ -1188,12 +1207,15 @@ export default function StepConfigure({
   // Called with every chart's ref when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
   onEnsureTitles?: (refs: string[]) => void;
-  // Add / regenerate special (non-chart) slides.
-  onAddSpecial?: (type: string) => void;
+  // Add / regenerate special (non-chart) slides. onAddSpecial returns the new
+  // slide's question_ref so the caller can select it.
+  onAddSpecial?: (type: string) => string | void;
   onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
   const { data: questions, isError } = useQuestions(materialId);
-  const [active, setActive] = useState(0);
+  // The active slide is tracked by question_ref (not index) so inserting a slide
+  // at the front or reordering never silently changes which slide is shown.
+  const [active, setActive] = useState<string | null>(null);
   const [specialDialogOpen, setSpecialDialogOpen] = useState(false);
   const { dragIndex, overIndex, containerRef, itemProps } =
     useDragReorder(onReorder);
@@ -1204,10 +1226,13 @@ export default function StepConfigure({
     return m;
   }, [questions]);
 
-  // Keep active index valid as charts change.
+  // Keep the active ref valid as charts change (fall back to the first slide).
   useEffect(() => {
-    if (active > charts.length - 1) setActive(Math.max(0, charts.length - 1));
-  }, [charts.length, active]);
+    if (!charts.length) return;
+    if (!charts.some((c) => c.question_ref === active)) {
+      setActive(charts[0].question_ref);
+    }
+  }, [charts, active]);
 
   // Auto-generate AI slide titles for every chart once Design is open (batched
   // in the background, just like the thumbnails) — not on report load, and not
@@ -1230,8 +1255,14 @@ export default function StepConfigure({
     );
   }
 
+  // Special-slide types already in the report — disabled in the dialog so a
+  // double-click can't create duplicate Overview/Conclusion/Demographics slides.
+  const existingSpecialTypes = new Set(
+    charts.filter((c) => isSpecialSlide(c)).map((c) => c.chart_type)
+  );
+
   // "+ Add special slide" affordance + its dialog (shown in both the empty
-  // state and the normal layout).
+  // state and the normal layout). Picking a type adds the slide and selects it.
   const addSpecialBar = onAddSpecial ? (
     <>
       <button
@@ -1245,7 +1276,11 @@ export default function StepConfigure({
       <AddSpecialDialog
         open={specialDialogOpen}
         onOpenChange={setSpecialDialogOpen}
-        onPick={(type) => onAddSpecial(type)}
+        existingTypes={existingSpecialTypes}
+        onPick={(type) => {
+          const ref = onAddSpecial(type);
+          if (ref) setActive(ref);
+        }}
       />
     </>
   ) : null;
@@ -1266,7 +1301,11 @@ export default function StepConfigure({
     );
   }
 
-  const activeChart = charts[active];
+  const activeChart =
+    charts.find((c) => c.question_ref === active) ?? charts[0];
+  const activeIndex = activeChart
+    ? charts.findIndex((c) => c.question_ref === activeChart.question_ref)
+    : -1;
   const activeSpecial = activeChart ? isSpecialSlide(activeChart) : false;
   const activeBulletsPending =
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
@@ -1285,13 +1324,14 @@ export default function StepConfigure({
             const dragging = dragIndex === i;
             const dropTarget =
               dragIndex !== null && overIndex === i && dragIndex !== i;
+            const isActive = c.question_ref === active;
             return (
               <div
                 key={`${c.question_ref}-${i}`}
                 {...itemProps(i)}
                 className={cn(
                   "group overflow-hidden rounded-lg border transition-colors",
-                  i === active
+                  isActive
                     ? "border-primary/40 bg-primary/5"
                     : "border-border hover:bg-muted/40",
                   dragging && "opacity-50",
@@ -1312,13 +1352,13 @@ export default function StepConfigure({
                     </span>
                   )}
                   <button
-                    onClick={() => setActive(i)}
+                    onClick={() => setActive(c.question_ref)}
                     className="flex min-w-0 flex-1 items-start gap-2 text-left"
                   >
                     <span
                       className={cn(
                         "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-xs font-medium tabular-nums",
-                        i === active
+                        isActive
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-muted-foreground"
                       )}
@@ -1340,7 +1380,7 @@ export default function StepConfigure({
                 {/* auto-rendered thumbnail (batched on entry; shares the preview
                     cache via renderTitle:false) — no click needed to render */}
                 <button
-                  onClick={() => setActive(i)}
+                  onClick={() => setActive(c.question_ref)}
                   className="block w-full px-2 pt-1.5 pb-2"
                 >
                   <ChartThumb
@@ -1377,7 +1417,7 @@ export default function StepConfigure({
               variant="ghost"
               size="sm"
               className="shrink-0 text-muted-foreground hover:text-destructive"
-              onClick={() => onRemoveChart(active)}
+              onClick={() => onRemoveChart(activeIndex)}
             >
               <Trash2Icon className="size-4" />
               Remove
@@ -1387,7 +1427,7 @@ export default function StepConfigure({
           {activeSpecial ? (
             <>
               <SpecialPreview
-                key={`${activeChart.question_ref}-${active}`}
+                key={activeChart.question_ref}
                 materialId={materialId}
                 chart={activeChart}
                 bulletsPending={activeBulletsPending}
@@ -1396,7 +1436,7 @@ export default function StepConfigure({
                 <SpecialSlideControls
                   chart={activeChart}
                   pending={activeBulletsPending}
-                  onChange={(patch) => onUpdateChart(active, patch)}
+                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
                   onRegenerate={() => onRegenerateSpecial?.(activeChart)}
                 />
               </div>
@@ -1404,7 +1444,7 @@ export default function StepConfigure({
           ) : (
             <>
               <ChartPreview
-                key={`${activeChart.question_ref}-${active}`}
+                key={activeChart.question_ref}
                 materialId={materialId}
                 chart={activeChart}
                 titlePending={
@@ -1424,7 +1464,7 @@ export default function StepConfigure({
                   chart={activeChart}
                   materialId={materialId}
                   question={questionMap.get(activeChart.question_ref)}
-                  onChange={(patch) => onUpdateChart(active, patch)}
+                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
                 />
               </div>
             </>

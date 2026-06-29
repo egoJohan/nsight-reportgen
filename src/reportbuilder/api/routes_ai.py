@@ -396,8 +396,8 @@ def ai_demographics(
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
 
-    candidates = [(q.qid, q.text) for q in model.questions]
     try:
+        candidates = [(q.qid, q.text) for q in model.questions]
         picked = pick_demographic_questions(candidates, chat=egohive_chat)
         findings = _findings_for_refs(picked, df, model)
         bullets = generate_demographics_bullets(label, findings, chat=egohive_chat) if findings else []

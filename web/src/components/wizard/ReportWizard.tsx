@@ -370,9 +370,10 @@ export default function ReportWizard({
     [materialId]
   );
 
-  // Add a special slide and generate its bullets in the background.
+  // Add a special slide (synchronously, returning its ref so the caller can
+  // select it) and generate its bullets in the background.
   const addSpecialSlide = useCallback(
-    async (type: string) => {
+    (type: string): string => {
       const slide = makeSpecialSlide(type, { slide_title: SPECIAL_HEADINGS[type] });
       const ref = slide.question_ref;
       const atFront = type !== "special_conclusion"; // conclusion goes last
@@ -381,37 +382,44 @@ export default function ReportWizard({
         charts: normalizeSlots(atFront ? [slide, ...d.charts] : [...d.charts, slide]),
       }));
       setBulletsPending(ref, true);
-      try {
-        if (type === "special_demographics") {
-          const { bullets, question_refs } = await api.materials.aiDemographics(
-            materialId,
-            { question_refs: reportQuestionRefs() }
-          );
-          mutate((d) => {
-            const existing = new Set(d.charts.map((c) => c.question_ref));
-            const newCharts = question_refs
-              .filter((r) => r && !existing.has(r))
-              .map((r) => makeChart(r, "vertical_bar"));
-            const idx = d.charts.findIndex((c) => c.question_ref === ref);
-            const updated = d.charts.map((c) =>
-              c.question_ref === ref ? { ...c, options: { bullets } } : c
+      void (async () => {
+        try {
+          if (type === "special_demographics") {
+            const { bullets, question_refs } = await api.materials.aiDemographics(
+              materialId,
+              { question_refs: reportQuestionRefs() }
             );
-            const out =
-              idx >= 0
-                ? [...updated.slice(0, idx + 1), ...newCharts, ...updated.slice(idx + 1)]
-                : [...updated, ...newCharts];
-            return { ...d, charts: normalizeSlots(out) };
-          });
-        } else {
-          const bullets = await fetchBullets(type, reportQuestionRefs());
-          updateChartByRef(ref, { options: { bullets } });
+            mutate((d) => {
+              const idx = d.charts.findIndex((c) => c.question_ref === ref);
+              // The slide was removed while generating — drop the result rather
+              // than appending orphaned demographic charts at the end.
+              if (idx < 0) return d;
+              const existing = new Set(d.charts.map((c) => c.question_ref));
+              const newCharts = question_refs
+                .filter((r) => r && !existing.has(r))
+                .map((r) => makeChart(r, "vertical_bar"));
+              const updated = d.charts.map((c) =>
+                c.question_ref === ref ? { ...c, options: { bullets } } : c
+              );
+              const out = [
+                ...updated.slice(0, idx + 1),
+                ...newCharts,
+                ...updated.slice(idx + 1),
+              ];
+              return { ...d, charts: normalizeSlots(out) };
+            });
+          } else {
+            const bullets = await fetchBullets(type, reportQuestionRefs());
+            updateChartByRef(ref, { options: { bullets } });
+          }
+        } catch (e) {
+          toast.error(`Could not generate slide: ${errMsg(e)}`);
+        } finally {
+          setBulletsPending(ref, false);
+          setAiSaveTick((t) => t + 1);
         }
-      } catch (e) {
-        toast.error(`Could not generate slide: ${errMsg(e)}`);
-      } finally {
-        setBulletsPending(ref, false);
-        setAiSaveTick((t) => t + 1);
-      }
+      })();
+      return ref;
     },
     [materialId, mutate, updateChartByRef, reportQuestionRefs, fetchBullets, setBulletsPending]
   );

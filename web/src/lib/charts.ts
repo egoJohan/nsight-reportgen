@@ -177,12 +177,24 @@ export function makeChart(
  * bullet content in options.bullets. Carries all serde-required ChartSpec
  * fields so the backend report_from_json accepts it like any chart.
  */
+// A unique id per special slide. The backend identifies special slides by
+// chart_type (not question_ref), so a non-empty ref is safe — and it's required
+// so that per-slide state (preview cache, AI-pending flags, updateChartByRef)
+// never collides when a report holds more than one special slide.
+function specialRef(type: string): string {
+  const rand =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return `sp_${type}_${rand}`;
+}
+
 export function makeSpecialSlide(
   type: keyof typeof SPECIAL_SLIDE_LABELS | string,
   opts?: { slide_title?: string; bullets?: string[] }
 ): ChartSpec {
   return {
-    question_ref: "",
+    question_ref: specialRef(type),
     chart_type: type,
     statistic: "pct",
     classifying_var: null,
