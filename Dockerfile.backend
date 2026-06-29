@@ -1,0 +1,29 @@
+# nSight report-tool backend: FastAPI + the deterministic render engine.
+# Needs LibreOffice (pptx -> pdf) and poppler (pdf -> png) for chart rendering.
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
+
+# Rendering toolchain + fonts (deterministic label metrics).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libreoffice-impress \
+        poppler-utils \
+        fonts-dejavu \
+        fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install dependencies + the project (cached unless deps/source change).
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+RUN uv sync --frozen --no-dev
+
+# Demo mode: self-contained on-disk store (no datahive/token needed), persisted
+# to a mounted volume. Bind to all interfaces for the container network.
+ENV NSIGHT_DEMO=1 \
+    NSIGHT_HOST=0.0.0.0 \
+    NSIGHT_PORT=8200 \
+    NSIGHT_DEMO_DIR=/data/demo-store
+
+EXPOSE 8200
+CMD ["/app/.venv/bin/python", "-m", "reportbuilder.api.server"]

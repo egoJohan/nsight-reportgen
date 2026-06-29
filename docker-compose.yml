@@ -1,0 +1,31 @@
+# Local containerized run of the nSight report tool (production-style).
+#   docker compose up --build
+# UI on http://localhost:8090 ; the backend is internal (reached via the nginx
+# proxy). Demo mode = self-contained store persisted in the named volume.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      NSIGHT_DEMO: "1"
+      NSIGHT_HOST: "0.0.0.0"
+      NSIGHT_PORT: "8200"
+      NSIGHT_DEMO_DIR: /data/demo-store
+    volumes:
+      - nsight-demo:/data/demo-store
+    expose:
+      - "8200"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./web
+    ports:
+      - "8090:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  nsight-demo:
