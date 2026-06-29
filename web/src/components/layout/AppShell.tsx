@@ -30,9 +30,13 @@ function CasesNav() {
     el?.scrollIntoView({ block: "nearest" });
   }, [activeId, cases]);
 
+  // Newest case first (descending): the backend returns cases in creation
+  // order, so reverse to put the most recent at the top.
+  const ordered = (cases ?? []).slice().reverse();
+
   return (
     <SidebarMenu>
-      {(cases ?? []).map((c) => (
+      {ordered.map((c) => (
         <SidebarMenuItem key={c.id}>
           <SidebarMenuButton
             render={<NavLink to={`/cases/${c.id}`} />}
