@@ -183,28 +183,63 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// POST a special-slide AI request, surfacing the backend {detail} on error.
-async function postAi<T>(
-  materialId: string,
-  kind: string,
-  body: unknown
-): Promise<T> {
-  const res = await fetch(`${API_BASE}/materials/${materialId}/ai/${kind}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+// All egoHive-backed AI calls (titles, short-labels, special slides) share one
+// bounded concurrency gate so the title auto-batch + special-slide generation
+// never collectively overload egoHive (which returns 503 under load). Transient
+// 503s are retried with backoff. egoHive tolerates ~2 concurrent comfortably.
+const AI_CONCURRENCY = 2;
+let aiActive = 0;
+const aiQueue: Array<() => void> = [];
+
+function aiGate<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      aiActive++;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          aiActive--;
+          aiQueue.shift()?.();
+        });
+    };
+    if (aiActive < AI_CONCURRENCY) start();
+    else aiQueue.push(start);
   });
-  if (!res.ok) {
-    let detail = `${res.status} ${res.statusText}`;
-    try {
-      const b = await res.json();
-      if (b && typeof b.detail === "string") detail = b.detail;
-    } catch {
-      // not JSON
+}
+
+const _sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// POST an AI request through the gate, retrying transient 503s with backoff.
+// Non-503 errors are terminal. Surfaces the backend {detail} on failure.
+async function aiPost<T>(path: string, body: unknown): Promise<T> {
+  return aiGate(async () => {
+    const backoffs = [0, 700, 1800]; // attempt 1 immediate, then back off
+    let lastDetail = "AI request failed";
+    for (let attempt = 0; attempt < backoffs.length; attempt++) {
+      if (backoffs[attempt]) await _sleep(backoffs[attempt]);
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return res.json() as Promise<T>;
+      let detail = `${res.status} ${res.statusText}`;
+      try {
+        const b = await res.json();
+        if (b && typeof b.detail === "string") detail = b.detail;
+      } catch {
+        // not JSON
+      }
+      lastDetail = detail;
+      if (res.status !== 503) throw new Error(detail); // only 503 is retryable
     }
-    throw new Error(detail);
-  }
-  return res.json() as Promise<T>;
+    throw new Error(lastDetail);
+  });
+}
+
+// POST a special-slide AI request (overview/conclusion/demographics).
+function postAi<T>(materialId: string, kind: string, body: unknown): Promise<T> {
+  return aiPost<T>(`/materials/${materialId}/ai/${kind}`, body);
 }
 
 // The backend renders previews through LibreOffice, which is now concurrency-safe
@@ -321,59 +356,21 @@ export const api = {
         return res.blob();
       }),
 
-    // AI: generate a descriptive slide title. May 503 if egoHive is down —
-    // surfaces the backend {detail} message.
-    aiSlideTitle: async (
+    // AI: generate a descriptive slide title. Goes through the shared AI gate
+    // (bounded concurrency + 503 retry); surfaces the backend {detail} message.
+    aiSlideTitle: (
       materialId: string,
       body: AiSlideTitleBody
-    ): Promise<{ title: string }> => {
-      const res = await fetch(
-        `${API_BASE}/materials/${materialId}/ai/slide-title`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-      if (!res.ok) {
-        let detail = `${res.status} ${res.statusText}`;
-        try {
-          const b = await res.json();
-          if (b && typeof b.detail === "string") detail = b.detail;
-        } catch {
-          // not JSON
-        }
-        throw new Error(detail);
-      }
-      return res.json() as Promise<{ title: string }>;
-    },
+    ): Promise<{ title: string }> =>
+      aiPost(`/materials/${materialId}/ai/slide-title`, body),
 
-    // AI: shorten category labels into [full, short] pairs. May return pairs
-    // equal to the originals when egoHive is unavailable (graceful), or 503.
-    aiShortLabels: async (
+    // AI: shorten category labels into [full, short] pairs. Through the shared
+    // AI gate (bounded concurrency + 503 retry).
+    aiShortLabels: (
       materialId: string,
       body: AiShortLabelsBody
-    ): Promise<{ overrides: [string, string][] }> => {
-      const res = await fetch(
-        `${API_BASE}/materials/${materialId}/ai/short-labels`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
-      if (!res.ok) {
-        let detail = `${res.status} ${res.statusText}`;
-        try {
-          const b = await res.json();
-          if (b && typeof b.detail === "string") detail = b.detail;
-        } catch {
-          // not JSON
-        }
-        throw new Error(detail);
-      }
-      return res.json() as Promise<{ overrides: [string, string][] }>;
-    },
+    ): Promise<{ overrides: [string, string][] }> =>
+      aiPost(`/materials/${materialId}/ai/short-labels`, body),
 
     // AI: special-slide bullet generators. All may 503 if egoHive is down.
     aiOverview: (
