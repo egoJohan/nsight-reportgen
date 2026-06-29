@@ -47,6 +47,27 @@ def wrap_label(text: str, width: int) -> str:
     return "\n".join(out) if out else text
 
 
+def wrap_label_capped(text: str, width: int, max_lines: int) -> str:
+    """Like wrap_label but caps the result to *max_lines* lines, truncating the
+    last visible line with an ellipsis when the text doesn't fit.
+
+    Ellipsis truncation is a deliberate last resort (user-approved): when a label
+    has too many categories / too-long text to fit its row band, an ellipsis is
+    preferred over labels overlapping each other. Full text is preserved whenever
+    it fits in *max_lines*."""
+    max_lines = max(1, max_lines)
+    full = wrap_label(text, width)
+    lines = full.split("\n")
+    if len(lines) <= max_lines:
+        return full
+    kept = lines[:max_lines]
+    last = kept[-1]
+    if len(last) >= width:                 # make room for the ellipsis
+        last = last[: max(1, width - 1)]
+    kept[-1] = last.rstrip() + "…"
+    return "\n".join(kept)
+
+
 def render_empty_chart(ctx, message: str = "Ei tietoja näytettäväksi") -> None:
     """Render a centred 'no data' placeholder as a picture, so a chart with no
     categories (e.g. a scale variable with no value labels) degrades cleanly
@@ -98,14 +119,12 @@ def render_png(fig) -> str:
 
 
 def place_picture(ctx, png_path: str) -> None:
-    """Place png_path onto ctx.slide at ctx.slot geometry via add_picture."""
-    ctx.slide.shapes.add_picture(
-        png_path,
-        ctx.slot.left,
-        ctx.slot.top,
-        ctx.slot.width,
-        ctx.slot.height,
-    )
+    """Place png_path onto ctx.slide, scaled to FIT the slot preserving aspect.
+
+    No chart element may ever be stretched or squeezed: the PNG is scaled by the
+    limiting slot dimension and centred (letterbox), so the rendered chart keeps
+    its true aspect ratio. (Identical behaviour to place_picture_square.)"""
+    place_picture_square(ctx, png_path)
 
 
 def series_values(series):

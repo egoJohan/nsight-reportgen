@@ -28,8 +28,8 @@ import textwrap
 
 import numpy as np
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values, format_value, style_legend,
-    force_break_token,
+    new_figure, render_png, place_picture, place_picture_square, series_values,
+    format_value, style_legend, force_break_token, wrap_label_capped,
 )
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC,
@@ -40,8 +40,27 @@ from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 # Label-wrap constants — labels are wrapped, never truncated/ellipsis-cut.
 # ---------------------------------------------------------------------------
 _LABEL_WRAP_WIDTH: int = 30   # chars per line for horizontal-bar y-axis labels (wider gutter)
+_HBAR_LABEL_WRAP_WIDTH: int = 42  # wider wrap for hbar y-labels → fewer lines, taller font
 _XLABEL_WRAP_WIDTH: int = 20  # chars per line for (rotated) vertical-bar x-axis labels
 _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
+
+
+def _hbar_row_pt(n_cats: int, fig_h_in: float) -> float:
+    """Vertical space (in points) available to ONE category row."""
+    usable_pt = fig_h_in * 72.0 * 0.80   # ~80% of figure height is the plot area
+    return usable_pt / max(n_cats, 1)
+
+
+def _hbar_label_fontsize(n_cats: int, fig_h_in: float) -> float:
+    """Pick a y-axis label font size that fits *n_cats* rows in the chart's
+    vertical space, aiming for up to ~2 wrapped lines per row.
+
+    The slide slot height is a hard cap, so with many long-label categories the
+    font must shrink to the per-row band to avoid overlap. Clamped to a legible
+    range and always below the slide title size."""
+    row_pt = _hbar_row_pt(n_cats, fig_h_in)
+    fs = row_pt / (2.0 * 1.25)   # target 2 lines; 1.25 = line-height factor
+    return max(7.0, min(11.0, fs))
 
 
 # ---------------------------------------------------------------------------
@@ -251,20 +270,35 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
             ys, vals, height=height,
             label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
-        off = _label_offset(max_val)
+    # Category-label font is sized to the per-row band so that many long labels
+    # never overlap; it stays below the slide title size. The number of lines
+    # that fit at that font determines an ellipsis cap (last resort over overlap).
+    fig_h_in = float(fig.get_size_inches()[1])
+    ylabel_fs = _hbar_label_fontsize(n_cats, fig_h_in)
+    row_pt = _hbar_row_pt(n_cats, fig_h_in)
+    max_lines = max(1, int(row_pt // (ylabel_fs * 1.25)))
+    value_fs = max(7.5, min(9.5, ylabel_fs))
+
+    off = _label_offset(max_val)
+    for i, seg in enumerate(segs):
+        vals = data[seg]
+        offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
+        ys = y + offset
         for yi, v in zip(ys, vals):
             if v is not None:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     va="center", ha="left",
-                    fontsize=9.5, fontweight="bold", color=INK, zorder=5,
+                    fontsize=value_fs, fontweight="bold", color=INK, zorder=5,
                 )
 
-    # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
-    display_cats = [_wrap_label(c) for c in cats]
+    # Wrap y-axis labels; cap to the lines that fit the band (ellipsis last resort).
+    display_cats = [
+        wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines) for c in cats
+    ]
     ax.set_yticks(y)
-    ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
+    ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, max_val)
 
@@ -272,7 +306,8 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         _style_legend(ax, loc="lower right")
 
     png = render_png(fig)
-    place_picture(ctx, png)
+    # Aspect-preserving placement: never stretch/squeeze the chart into the slot.
+    place_picture_square(ctx, png)
 
 
 # ---------------------------------------------------------------------------

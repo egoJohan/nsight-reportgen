@@ -100,22 +100,28 @@ def _make_ctx(chart_type: str, series: SeriesResult) -> tuple:
 
 
 def _assert_picture(slide, slot):
-    """Assert exactly one PICTURE shape with correct slot dimensions."""
+    """Assert exactly one PICTURE shape placed aspect-preserved (no stretch).
+
+    No chart element may be stretched/squeezed, so the PNG is scaled to fit
+    INSIDE the slot preserving its true aspect ratio and centred (letterbox).
+    We assert: contained, undistorted (placed aspect == PNG pixel aspect),
+    fit-to-slot (one dimension reaches its slot bound), and centred.
+    """
+    import io
+    from PIL import Image
+
     pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 1, f"Expected 1 PICTURE shape, found {len(pics)}"
     pic = pics[0]
-    assert pic.width == slot.width, f"Picture width {pic.width} != slot width {slot.width}"
-    assert pic.height == slot.height, f"Picture height {pic.height} != slot height {slot.height}"
+    assert 0 < pic.width <= slot.width, f"width {pic.width} not contained in {slot.width}"
+    assert 0 < pic.height <= slot.height, f"height {pic.height} not contained in {slot.height}"
 
-    # Try PIL first; fall back to checking blob
-    try:
-        import io
-        from PIL import Image
-        img = Image.open(io.BytesIO(pic.image.blob))
-        w, h = img.size
-        assert w > 0 and h > 0, "PIL image size must be positive"
-    except ImportError:
-        assert len(pic.image.blob) > 0, "Picture blob must be non-empty"
+    px_w, px_h = Image.open(io.BytesIO(pic.image.blob)).size
+    assert abs(pic.width / pic.height - px_w / px_h) < 0.01, "image distorted (stretched/squeezed)"
+    touches = (abs(pic.width - slot.width) <= 2) or (abs(pic.height - slot.height) <= 2)
+    assert touches, "Picture should be scaled to the largest fit inside the slot"
+    assert abs(pic.left - (slot.left + (slot.width - pic.width) // 2)) <= 2, "not centred horizontally"
+    assert abs(pic.top - (slot.top + (slot.height - pic.height) // 2)) <= 2, "not centred vertically"
 
 
 # ---------------------------------------------------------------------------
