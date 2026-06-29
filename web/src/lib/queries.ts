@@ -96,14 +96,14 @@ function blobToDataURL(blob: Blob): Promise<string> {
 export function useChartPreview(
   materialId: string,
   chart: ChartSpec,
-  opts?: { renderTitle?: boolean; enabled?: boolean }
+  opts?: { renderTitle?: boolean; enabled?: boolean; priority?: boolean }
 ) {
   const renderTitle = opts?.renderTitle ?? true;
   return useQuery({
     queryKey: ["chart-preview", materialId, renderTitle, previewContentKey(chart, renderTitle)],
     queryFn: () =>
       api.materials
-        .previewChart(materialId, chart, { renderTitle })
+        .previewChart(materialId, chart, { renderTitle, priority: opts?.priority })
         .then(blobToDataURL),
     enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,

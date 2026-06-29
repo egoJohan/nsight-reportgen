@@ -246,26 +246,49 @@ function postAi<T>(materialId: string, kind: string, body: unknown): Promise<T> 
 }
 
 // The backend renders previews through LibreOffice, which is now concurrency-safe
-// (a small pool of isolated profiles). Run previews through a bounded pool so a
-// grid of thumbnails generates in PARALLEL — but capped, to match the backend's
-// soffice pool and avoid overwhelming it. Cached previews resolve instantly and
-// don't occupy a slot for long.
+// (a small pool of isolated profiles). Run previews through a bounded pool so the
+// deck warms in PARALLEL — but capped, to match the backend's soffice pool.
+//
+// PRIORITY: the slide the user is looking at (active) must NEVER wait behind the
+// background deck-prefetch queue. Background renders are capped at
+// PREVIEW_CONCURRENCY - PRIORITY_RESERVE, so at least one slot is always free for
+// an active render to start immediately; priority renders also jump the queue.
 const PREVIEW_CONCURRENCY = 4;
+const PRIORITY_RESERVE = 1; // slots kept free for active-slide (priority) renders
 let previewActive = 0;
-const previewQueue: Array<() => void> = [];
+const priorityQueue: Array<() => void> = [];
+const backgroundQueue: Array<() => void> = [];
 
-function serializePreview<T>(task: () => Promise<T>): Promise<T> {
+function pumpPreview() {
+  // Priority (active-slide) renders may use the full pool and run first.
+  while (priorityQueue.length && previewActive < PREVIEW_CONCURRENCY) {
+    previewActive++;
+    priorityQueue.shift()!();
+  }
+  // Background renders are capped below the pool size, leaving a reserved slot
+  // so a freshly-activated slide can always start without waiting.
+  while (
+    backgroundQueue.length &&
+    previewActive < PREVIEW_CONCURRENCY - PRIORITY_RESERVE
+  ) {
+    previewActive++;
+    backgroundQueue.shift()!();
+  }
+}
+
+function serializePreview<T>(
+  task: () => Promise<T>,
+  priority = false
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const start = () => {
-      previewActive++;
       task().then(resolve, reject).finally(() => {
         previewActive--;
-        const next = previewQueue.shift();
-        if (next) next();
+        pumpPreview();
       });
     };
-    if (previewActive < PREVIEW_CONCURRENCY) start();
-    else previewQueue.push(start);
+    (priority ? priorityQueue : backgroundQueue).push(start);
+    pumpPreview();
   });
 }
 
@@ -328,7 +351,7 @@ export const api = {
     previewChart: (
       materialId: string,
       chart: ChartSpec,
-      opts?: { renderTitle?: boolean }
+      opts?: { renderTitle?: boolean; priority?: boolean }
     ): Promise<Blob> =>
       serializePreview(async () => {
         // When renderTitle is false the PNG omits the baked title block, so the
@@ -357,7 +380,7 @@ export const api = {
           throw new Error(detail);
         }
         return res.blob();
-      }),
+      }, opts?.priority ?? false),
 
     // AI: generate a descriptive slide title. Goes through the shared AI gate
     // (bounded concurrency + 503 retry); surfaces the backend {detail} message.

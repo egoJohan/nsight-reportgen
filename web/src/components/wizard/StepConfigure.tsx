@@ -131,7 +131,7 @@ function ChartPreview({
   const { data: url, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: false }
+    { renderTitle: false, priority: true }
   );
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
@@ -1042,7 +1042,7 @@ function SpecialPreview({
   const { data: url, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     chart,
-    { renderTitle: true }
+    { renderTitle: true, priority: true }
   );
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
