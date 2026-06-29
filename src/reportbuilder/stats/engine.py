@@ -5,6 +5,7 @@ SeriesResult — the spine output (R1). REQ-C-14/15/16, M-03.
 """
 from __future__ import annotations
 import collections
+import dataclasses
 import re
 import pandas as pd
 from reportbuilder.model.question import Question, QuestionModel, Variable
@@ -361,6 +362,35 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         base_n={"Total": base}, statistic=spec.statistic)
 
 
+def _relabel_segments(result: SeriesResult, model: QuestionModel,
+                      classifying_var: str) -> SeriesResult:
+    """Map segment codes (e.g. "10002") to the classifying variable's value
+    labels (e.g. "25-34 vuotias") for display. "Total" is kept; codes without a
+    label pass through unchanged."""
+    try:
+        var = model.variable(classifying_var)
+    except Exception:
+        return result
+    code_to_label: dict[str, str] = {}
+    for vl in var.value_labels:
+        key = str(int(vl.value)) if float(vl.value).is_integer() else str(vl.value)
+        code_to_label[key] = vl.label
+    if not code_to_label:
+        return result
+
+    def rl(seg: str) -> str:
+        return seg if seg == "Total" else code_to_label.get(seg, seg)
+
+    new_segs = tuple(rl(s) for s in result.segments)
+    if new_segs == result.segments:
+        return result
+    new_cells = {(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()}
+    new_base = {rl(s): n for s, n in result.base_n.items()}
+    return dataclasses.replace(
+        result, segments=new_segs, cells=new_cells, base_n=new_base
+    )
+
+
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
@@ -375,13 +405,19 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
     if question.kind == "battery":
-        return _battery(question, spec, data, model)
-    stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
-    if stat.family == "summary":
-        return _summary(question, spec, data, model, stat)
-    if question.kind == "multi":
-        return _multi(question, spec, data, model)
-    return _single(question, spec, data, model)
+        result = _battery(question, spec, data, model)
+    else:
+        stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
+        if stat.family == "summary":
+            result = _summary(question, spec, data, model, stat)
+        elif question.kind == "multi":
+            result = _multi(question, spec, data, model)
+        else:
+            result = _single(question, spec, data, model)
+    # Display segment codes as the classifying variable's value labels.
+    if spec.classifying_var:
+        result = _relabel_segments(result, model, spec.classifying_var)
+    return result
 
 
 def _rating_scale(var: Variable) -> dict[float, float]:
