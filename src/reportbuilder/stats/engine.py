@@ -374,9 +374,51 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     qvars = [model.variable(n) for n in question.variables]
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
+    if question.kind == "battery":
+        return _battery(question, spec, data, model)
     stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
     if stat.family == "summary":
         return _summary(question, spec, data, model, stat)
     if question.kind == "multi":
         return _multi(question, spec, data, model)
     return _single(question, spec, data, model)
+
+
+def _rating_scale(var: Variable) -> dict[float, float]:
+    """Map a rating variable's value codes to their 1..N scale point, parsed from
+    the leading integer of each value label ("5 - Vastaa erittäin hyvin" -> 5,
+    "3" -> 3). Codes whose label has no leading integer (e.g. "En osaa sanoa")
+    are omitted -> treated as no-answer."""
+    scale: dict[float, float] = {}
+    for vl in var.value_labels:
+        m = re.match(r"\s*(\d+)", vl.label or "")
+        if m and vl.value not in var.missing_values:
+            scale[vl.value] = float(m.group(1))
+    return scale
+
+
+def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
+             model: QuestionModel) -> SeriesResult:
+    """A rating battery: one bar per member (category), value = the MEAN rating
+    on the members' shared 1..N scale (no-answer codes excluded). Members were
+    relabelled to their category by the battery grouper, so category == label."""
+    vars_ = [model.variable(n) for n in question.variables]
+    cells: dict[tuple[str, str], Cell] = {}
+    rows = []
+    answered_any = pd.Series(False, index=data.index)
+    for idx, v in enumerate(vars_):
+        scale = _rating_scale(v)
+        s = pd.to_numeric(data[v.name], errors="coerce")
+        mapped = s.map(scale)
+        answered_any = answered_any | mapped.notna()
+        n = int(mapped.notna().sum())
+        mean = float(mapped.mean()) if n > 0 else None
+        cells[(v.label, "Total")] = Cell(pct=None, count=float(n), mean=mean)
+        key = mean if mean is not None else 0.0
+        rows.append((v.label, float(idx),
+                     {"pct": key, "count": n, "mean": key, "data_index": idx, "topbox": key}))
+
+    base = int(answered_any.sum())
+    categories = tuple(sort_categories(rows, spec.sort))
+    return SeriesResult(categories=categories, segments=("Total",), cells=cells,
+                        base_n={"Total": base}, statistic="mean")

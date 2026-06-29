@@ -19,7 +19,7 @@ export interface ValueLabel {
 
 export interface Question {
   qid: string;
-  kind: "single" | "multi";
+  kind: "single" | "multi" | "battery";
   variables: string[];
   text: string;
   // Whether the question can be charted at all (false for open-ended text).
@@ -47,6 +47,7 @@ export interface QuestionDistRow {
   category: string;
   count: number | null;
   pct: number | null;
+  mean?: number | null;
 }
 
 export interface QuestionSummary {

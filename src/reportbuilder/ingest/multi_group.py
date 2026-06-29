@@ -74,6 +74,21 @@ def _group_qid(members: tuple[str, ...]) -> str:
     return _prefix(members[0]).lower() or members[0].lower()
 
 
+def enrich_model(model: QuestionModel) -> QuestionModel:
+    """Apply all curation grouping to a freshly-read model: auto multi-response
+    grouping, then battery (rating-grid) grouping. The single place every model
+    loader should call so grouping is consistent everywhere."""
+    from reportbuilder.ingest.battery_group import apply_batteries, suggest_batteries
+
+    groups = suggest_multi_groups(model)
+    if groups:
+        model = apply_groups(model, groups)
+    batteries = suggest_batteries(model)
+    if batteries:
+        model = apply_batteries(model, batteries)
+    return model
+
+
 def _option_labels(model: QuestionModel, members: tuple[str, ...]) -> dict[str, str] | None:
     """When member labels follow ``<Option>:<SharedQuestion>`` (the survey-export
     convention) return ``{member_name: option}`` — i.e. the labels with the shared

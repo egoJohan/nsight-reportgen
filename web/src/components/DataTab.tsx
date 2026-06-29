@@ -52,6 +52,13 @@ function isWordcloudOnly(q: Question): boolean {
 
 // ---- Kind badge ----
 function KindBadge({ q }: { q: Question }) {
+  if (q.kind === "battery") {
+    return (
+      <Badge variant="secondary" className="whitespace-nowrap border-violet-200 bg-violet-50 font-normal text-violet-700">
+        Battery · {q.variables.length}
+      </Badge>
+    );
+  }
   if (q.kind === "multi") {
     return (
       <Badge variant="secondary" className="whitespace-nowrap font-normal">

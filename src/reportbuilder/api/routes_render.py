@@ -21,7 +21,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.multi_group import apply_groups, suggest_multi_groups
+from reportbuilder.ingest.multi_group import enrich_model
 from reportbuilder.ingest.sav_reader import read_sav
 from reportbuilder.model.report import report_from_json
 from reportbuilder.store.datahive_client import DataHiveClient
@@ -87,10 +87,8 @@ def orchestrate_render(
     finally:
         os.unlink(tmp_path)
 
-    # Enrich model with multi-groups if any are detected
-    groups = suggest_multi_groups(model)
-    if groups:
-        model = apply_groups(model, groups)
+    # Enrich model with multi-response + battery grouping
+    model = enrich_model(model)
 
     # 3. Build the PPTX deck
     out_dir = out_dir or tempfile.mkdtemp()

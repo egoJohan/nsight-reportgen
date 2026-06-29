@@ -23,7 +23,7 @@ from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import generate_slide_title, shorten_labels
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_questions import _category_labels
-from reportbuilder.ingest.multi_group import apply_groups, suggest_multi_groups
+from reportbuilder.ingest.multi_group import enrich_model
 from reportbuilder.ingest.sav_reader import read_sav
 from reportbuilder.model.report import (
     ChartSpec,
@@ -66,10 +66,7 @@ def _load_df_model(material_id: str, client: DataHiveClient):
         df, model = read_sav(tmp_path)
     finally:
         os.unlink(tmp_path)
-    groups = suggest_multi_groups(model)
-    if groups:
-        model = apply_groups(model, groups)
-    return df, model
+    return df, enrich_model(model)
 
 
 def _findings_from_series(

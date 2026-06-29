@@ -22,10 +22,15 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 function Distribution({ s }: { s: QuestionSummary }) {
   const rows = s.distribution ?? [];
   if (rows.length === 0) return null;
-  const max = Math.max(...rows.map((r) => r.pct ?? 0), 1);
+  // Battery questions report a mean per category; everything else a percentage.
+  const isMean = s.statistic === "mean";
+  const val = (r: (typeof rows)[number]) => (isMean ? r.mean : r.pct) ?? 0;
+  const max = Math.max(...rows.map(val), isMean ? 5 : 1);
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Response distribution</p>
+      <p className="mb-2 text-sm font-medium">
+        {isMean ? "Mean rating per item" : "Response distribution"}
+      </p>
       <div className="space-y-1.5">
         {rows.map((r, i) => (
           <div key={`${r.category}-${i}`} className="flex items-center gap-3">
@@ -35,11 +40,17 @@ function Distribution({ s }: { s: QuestionSummary }) {
             <div className="relative h-5 flex-1 overflow-hidden rounded bg-muted">
               <div
                 className="absolute inset-y-0 left-0 rounded bg-primary/80"
-                style={{ width: `${((r.pct ?? 0) / max) * 100}%` }}
+                style={{ width: `${(val(r) / max) * 100}%` }}
               />
             </div>
             <div className="w-24 shrink-0 text-right text-sm tabular-nums">
-              {r.pct != null ? `${r.pct.toFixed(0)} %` : "—"}
+              {isMean
+                ? r.mean != null
+                  ? r.mean.toFixed(1)
+                  : "—"
+                : r.pct != null
+                  ? `${r.pct.toFixed(0)} %`
+                  : "—"}
               <span className="ml-1 text-xs text-muted-foreground">
                 ({r.count ?? "—"})
               </span>
@@ -88,9 +99,11 @@ export default function QuestionDetailsDialog({
             {/* Tags */}
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="font-normal">
-                {s.kind === "multi"
-                  ? `Multi-response · ${s.variables.length}`
-                  : "Single"}
+                {s.kind === "battery"
+                  ? `Rating battery · ${s.variables.length}`
+                  : s.kind === "multi"
+                    ? `Multi-response · ${s.variables.length}`
+                    : "Single"}
               </Badge>
               <Badge variant="outline" className="font-normal">
                 {s.measurement}

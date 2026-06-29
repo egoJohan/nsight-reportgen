@@ -21,7 +21,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.multi_group import apply_groups, suggest_multi_groups
+from reportbuilder.ingest.multi_group import apply_groups, enrich_model
 from reportbuilder.ingest.sav_reader import read_sav
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.model.report import (
@@ -75,7 +75,8 @@ def _quick_series(question, model: QuestionModel) -> SeriesResult:
     For multi questions: categories are the member-variable labels.
     (REQ-C-13)
     """
-    if question.kind == "multi":
+    # multi + battery: one category per member variable (its rewritten label).
+    if question.kind in ("multi", "battery"):
         cats = tuple(model.variables[v].label for v in question.variables)
     else:
         var = model.variables[question.variables[0]]
@@ -87,16 +88,22 @@ def _quick_series(question, model: QuestionModel) -> SeriesResult:
         if not cats:
             cats = ("A", "B", "C")  # fallback: no value labels defined
 
+    # A battery reports a mean per member (not a part-of-whole %), so its
+    # synthetic shape uses the mean statistic — keeps pie/doughnut out and
+    # picks a bar default.
+    is_battery = question.kind == "battery"
     segments = ("Total",)
     cells: dict[tuple[str, str], Cell] = {
-        (cat, "Total"): Cell(pct=50.0, count=10.0, mean=None) for cat in cats
+        (cat, "Total"): Cell(pct=None if is_battery else 50.0, count=10.0,
+                             mean=3.0 if is_battery else None)
+        for cat in cats
     }
     return SeriesResult(
         categories=cats,
         segments=segments,
         cells=cells,
         base_n={"Total": len(cats) * 10},
-        statistic="pct",
+        statistic="mean" if is_battery else "pct",
     )
 
 
@@ -156,7 +163,7 @@ def _value_list(model: QuestionModel, q) -> list[dict]:
     not-answered picker can show and uncheck them. Multi questions: empty list (the member
     dichotomies are 0/1 tick boxes — no meaningful value codes to fold). (REQ-D-06)
     """
-    if q.kind == "multi":
+    if q.kind in ("multi", "battery"):
         return []
     var = model.variables[q.variables[0]]
     return [{"code": vl.value, "label": vl.label} for vl in var.value_labels]
@@ -167,7 +174,7 @@ def _category_labels(model: QuestionModel, q) -> list[str]:
 
     Single: non-missing value labels of the primary variable. Multi: member-variable labels.
     """
-    if q.kind == "multi":
+    if q.kind in ("multi", "battery"):
         return [model.variables[v].label for v in q.variables]
     var = model.variables[q.variables[0]]
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
@@ -193,10 +200,7 @@ def load_model_for_material(material_id: str, client: DataHiveClient) -> Questio
     auto-detected multi groups applied (render-resolvable qids). Manual-grouping persistence is
     deferred to Phase 4. (REQ-C-05)"""
     model = _load_singles(material_id, client)
-    groups = suggest_multi_groups(model)
-    if groups:
-        return apply_groups(model, groups)
-    return model
+    return enrich_model(model)
 
 
 def _load_df_model(material_id: str, client: DataHiveClient):
@@ -209,10 +213,7 @@ def _load_df_model(material_id: str, client: DataHiveClient):
         df, model = read_sav(tmp_path)
     finally:
         os.unlink(tmp_path)
-    groups = suggest_multi_groups(model)
-    if groups:
-        model = apply_groups(model, groups)
-    return df, model
+    return df, enrich_model(model)
 
 
 def _question_measurement(model: QuestionModel, q) -> str:
@@ -220,6 +221,8 @@ def _question_measurement(model: QuestionModel, q) -> str:
     variable's measurement (categorical/scale)."""
     if q.kind == "multi":
         return "multi"
+    if q.kind == "battery":
+        return "rating battery"
     var = model.variables[q.variables[0]]
     return var.measurement or "categorical"
 
@@ -330,12 +333,18 @@ def question_summary(
         series = compute(q, _summary_spec(q.qid), df, model)
         seg = series.segments[0] if series.segments else "Total"
         out["base_n"] = series.base_n.get(seg)
+        out["statistic"] = series.statistic  # "pct" | "mean" (battery)
         dist = []
         for cat in series.categories:
             cell = series.cells.get((cat, seg))
             if cell is None:
                 continue
-            dist.append({"category": cat, "count": cell.count, "pct": cell.pct})
+            dist.append({
+                "category": cat,
+                "count": cell.count,
+                "pct": cell.pct,
+                "mean": cell.mean,
+            })
         out["distribution"] = dist
         out["suggested_chart_type"] = suggest_chart_type(q, series)
         out["compatible_chart_types"] = _compatible_chart_types(q, series)
@@ -637,9 +646,7 @@ def preview_chart(
     finally:
         os.unlink(tmp_path)
 
-    groups = suggest_multi_groups(model)
-    if groups:
-        model = apply_groups(model, groups)
+    model = enrich_model(model)
 
     # 2. Convert request body to ChartSpec
     spec = _chart_spec_from_body(body)
