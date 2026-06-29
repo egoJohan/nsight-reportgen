@@ -134,13 +134,23 @@ class TestWrapXtickLabel:
         assert "\n" in result, f"Expected wrap; got {result!r}"
         assert _strip_wrap(result) == _strip_wrap(long)
 
-    def test_long_unbroken_token_does_not_overflow(self):
-        """A single token longer than the wrap width is broken, not ellipsized."""
-        from reportbuilder.render.image.bars import _wrap_xtick_label, _XLABEL_WRAP_WIDTH
+    def test_long_unbroken_token_kept_whole(self):
+        """A single long token is NOT split mid-character — it stays whole (the
+        gutter widens to fit it). Never ellipsized; full text preserved."""
+        from reportbuilder.render.image.bars import _wrap_xtick_label
         result = _wrap_xtick_label("A" * 40)
         assert "…" not in result
+        assert result == "A" * 40  # one unbroken token, not "AAA\nAAA…"
+
+    def test_wrap_breaks_at_hyphen_not_midword(self):
+        """A long hyphenated phrase wraps at the hyphen/space, never mid-word."""
+        from reportbuilder.render.image.bars import _wrap_label
+        result = _wrap_label("Mielenterveys- tai päihdekuntoutuspalvelut")
+        # The long word stays intact on its own line — no "pä\nihde…".
+        assert "päihdekuntoutuspalvelut" in result.replace("\n", "\n") and \
+            "pä\nihde" not in result
         for line in result.split("\n"):
-            assert len(line) <= _XLABEL_WRAP_WIDTH, f"Line too long: {line!r}"
+            assert line.strip()  # no empty lines
 
 
 # ---------------------------------------------------------------------------

@@ -129,6 +129,25 @@ def _is_metadata(name: str, label: str) -> bool:
     return False
 
 
+def _is_constant_marker(name: str, var: "Variable", series) -> bool:
+    """Return True for a structural/total marker column that is NOT a real
+    question: it has no human label (label == variable name), no value labels,
+    is not free text, AND carries no information (<= 1 distinct value, i.e. a
+    constant or all-empty column — e.g. a "TOTAALI" section divider).
+
+    Deliberately strict so real derived variables (binary flags, aggregate
+    ratings, segments) — which have varying data — are never dropped.
+    """
+    if var.value_labels or var.measurement == "text":
+        return False
+    if (var.label or "").strip() != name:
+        return False
+    try:
+        return int(series.nunique(dropna=True)) <= 1
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Public reader
 # ---------------------------------------------------------------------------
@@ -180,6 +199,7 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
         Question(qid=_slug(name), kind="single", variables=(name,), text=variables[name].label)
         for name in df.columns
         if not _is_metadata(name, variables[name].label)
+        and not _is_constant_marker(name, variables[name], df[name])
     ]
     model = QuestionModel(variables=variables, questions=questions)
     return df, model

@@ -61,8 +61,11 @@ def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
         return text
 
     def _wrap(w: int) -> list[str]:
+        # Wrap at spaces and existing hyphens only — never split a word
+        # mid-character (break_long_words=False). A token longer than the width
+        # stays whole (the gutter widens to fit it) rather than "pä\nihde…".
         return textwrap.wrap(
-            text, width=w, break_long_words=True, break_on_hyphens=False
+            text, width=w, break_long_words=False, break_on_hyphens=True
         )
 
     n_lines = len(_wrap(width))
