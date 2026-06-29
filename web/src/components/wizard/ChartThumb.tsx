@@ -12,12 +12,18 @@ export default function ChartThumb({
   materialId,
   chart,
   className,
+  renderTitle,
 }: {
   materialId: string;
   chart: ChartSpec;
   className?: string;
+  // When false, shares the Design preview's cache entry (title-less PNG) so the
+  // thumbnail and the large preview render only ONCE per chart.
+  renderTitle?: boolean;
 }) {
-  const { data: url, error, isFetching } = useChartPreview(materialId, chart);
+  const { data: url, error, isFetching } = useChartPreview(materialId, chart, {
+    renderTitle,
+  });
   const message =
     error instanceof Error ? error.message : error ? "Preview failed" : null;
 

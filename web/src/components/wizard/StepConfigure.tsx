@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BarChart3Icon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   ImageIcon,
   Loader2Icon,
   RotateCcwIcon,
@@ -9,6 +11,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
+import ChartThumb from "@/components/wizard/ChartThumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -963,12 +966,14 @@ export default function StepConfigure({
   aiPending,
   onUpdateChart,
   onRemoveChart,
+  onReorder,
 }: {
   materialId: string;
   charts: ChartSpec[];
   aiPending?: AiPendingMap;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   onRemoveChart: (index: number) => void;
+  onReorder?: (from: number, to: number) => void;
 }) {
   const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
@@ -1022,35 +1027,75 @@ export default function StepConfigure({
           {charts.map((c, i) => {
             const q = questionMap.get(c.question_ref);
             return (
-              <button
+              <div
                 key={`${c.question_ref}-${i}`}
-                onClick={() => setActive(i)}
                 className={cn(
-                  "group flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
+                  "group overflow-hidden rounded-lg border transition-colors",
                   i === active
                     ? "border-primary/40 bg-primary/5"
-                    : "border-transparent hover:bg-muted/60"
+                    : "border-border hover:bg-muted/40"
                 )}
               >
-                <span
-                  className={cn(
-                    "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-medium tabular-nums",
-                    i === active
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
+                {/* header: number + text + reorder */}
+                <div className="flex items-start gap-2 px-2 pt-2">
+                  <button
+                    onClick={() => setActive(i)}
+                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-xs font-medium tabular-nums",
+                        i === active
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-2 text-sm leading-snug">
+                        {q?.text ?? c.question_ref}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {chartTypeLabel(c.chart_type)}
+                      </span>
+                    </span>
+                  </button>
+                  {onReorder && (
+                    <div className="flex shrink-0 flex-col -my-0.5">
+                      <button
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                        disabled={i === 0}
+                        title="Move up"
+                        onClick={() => onReorder(i, i - 1)}
+                      >
+                        <ChevronUpIcon className="size-4" />
+                      </button>
+                      <button
+                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+                        disabled={i === charts.length - 1}
+                        title="Move down"
+                        onClick={() => onReorder(i, i + 1)}
+                      >
+                        <ChevronDownIcon className="size-4" />
+                      </button>
+                    </div>
                   )}
+                </div>
+                {/* auto-rendered thumbnail (batched on entry; shares the preview
+                    cache via renderTitle:false) — no click needed to render */}
+                <button
+                  onClick={() => setActive(i)}
+                  className="block w-full px-2 pt-1.5 pb-2"
                 >
-                  {i + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-sm leading-snug">
-                    {q?.text ?? c.question_ref}
-                  </span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {chartTypeLabel(c.chart_type)}
-                  </span>
-                </span>
-              </button>
+                  <ChartThumb
+                    materialId={materialId}
+                    chart={c}
+                    renderTitle={false}
+                    className="h-20"
+                  />
+                </button>
+              </div>
             );
           })}
         </div>

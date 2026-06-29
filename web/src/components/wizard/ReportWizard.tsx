@@ -486,6 +486,7 @@ export default function ReportWizard({
             aiPending={aiPending}
             onUpdateChart={updateChart}
             onRemoveChart={removeChart}
+            onReorder={reorderCharts}
           />
         )}
         {step === 2 && (
