@@ -245,14 +245,14 @@ def _get_questions(model):
 
 
 def test_text_question_is_chartable_as_wordcloud():
-    """Task J.3: an open-ended text question is now chartable — as a word cloud ONLY
-    (suggested=wordcloud, compatible==["wordcloud"], no non_chartable_reason); a normal
-    categorical question stays chartable and never offers wordcloud."""
+    """An open-ended text question is chartable — defaulting to AI-summarised
+    "themes" with the word cloud still available; a normal categorical question
+    stays chartable and never offers themes/wordcloud."""
     qs = {q["qid"]: q for q in _get_questions(_text_question_model())}
     assert qs["other"]["chartable"] is True
     assert qs["other"]["non_chartable_reason"] is None
-    assert qs["other"]["compatible_chart_types"] == ["wordcloud"]
-    assert qs["other"]["suggested_chart_type"] == "wordcloud"
+    assert qs["other"]["compatible_chart_types"] == ["themes", "wordcloud"]
+    assert qs["other"]["suggested_chart_type"] == "themes"
 
     assert qs["sat"]["chartable"] is True
     assert qs["sat"]["non_chartable_reason"] is None

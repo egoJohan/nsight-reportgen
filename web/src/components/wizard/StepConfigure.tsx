@@ -38,6 +38,7 @@ import {
   chartTypeLabel,
   isSpecialSlide,
   isWordcloud,
+  rendersAsBullets,
 } from "@/lib/charts";
 import {
   Dialog,
@@ -1311,7 +1312,7 @@ export default function StepConfigure({
   const activeIndex = activeChart
     ? charts.findIndex((c) => c.question_ref === activeChart.question_ref)
     : -1;
-  const activeSpecial = activeChart ? isSpecialSlide(activeChart) : false;
+  const activeSpecial = activeChart ? rendersAsBullets(activeChart) : false;
   const activeBulletsPending =
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 

@@ -120,9 +120,11 @@ def render_report(
         # slide_index may reference an existing slide or was just appended
         slide = prs.slides[slot.slide_index]
 
-        # --- Special (non-chart) slides: render text/bullets, no series ---
+        # --- Bullet slides (special slides + themes): render text, no series ---
         if renders_as_bullets(spec):
-            render_special_slide(slide, slot, style, spec)
+            render_special_slide(
+                slide, slot, style, spec, heading=_titles.get(spec.question_ref, "")
+            )
             continue
 
         # --- Build context ---

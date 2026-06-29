@@ -21,6 +21,7 @@ import { useWorkspace } from "@/lib/workspace";
 import {
   buildSpecialPages,
   isSpecialSlide,
+  isThemes,
   makeChart,
   makeSpecialSlide,
   normalizeSlots,
@@ -308,6 +309,25 @@ export default function ReportWizard({
         (c) => c.question_ref === ref
       );
       if (!chart) return;
+      // A "themes" chart (open-ended) generates theme bullets, not a title.
+      if (isThemes(chart)) {
+        try {
+          const { bullets } = await api.materials.aiThemes(materialId, {
+            question_ref: ref,
+          });
+          updateChartByRef(ref, {
+            options: { ...(chart.options ?? {}), bullets },
+          });
+        } catch {
+          /* graceful: leave empty */
+        } finally {
+          setAiPending((prev) => ({
+            ...prev,
+            [ref]: { ...prev[ref], bulletsPending: false },
+          }));
+        }
+        return;
+      }
       try {
         const { title } = await api.materials.aiSlideTitle(materialId, {
           question_ref: ref,
@@ -358,17 +378,30 @@ export default function ReportWizard({
         const chart = draftRef.current?.charts.find(
           (c) => c.question_ref === ref
         );
-        if (!chart || chart.slide_title) continue; // keep manual/existing titles
+        if (!chart) continue;
         if (isSpecialSlide(chart)) continue; // special slides carry bullets, not a title
+        const themes = isThemes(chart);
+        const themesNeedsBullets =
+          themes &&
+          !((chart.options?.bullets as string[] | undefined)?.length);
+        // Themes charts generate bullets; other charts generate a title (unless
+        // they already have one).
+        if (themes ? !themesNeedsBullets : !!chart.slide_title) continue;
         titlesAttempted.current.add(ref);
         titleQueue.current.push(ref);
         added = true;
         setAiPending((prev) => ({
           ...prev,
-          [ref]: {
-            titlePending: true,
-            labelsPending: prev[ref]?.labelsPending ?? false,
-          },
+          [ref]: themes
+            ? {
+                titlePending: prev[ref]?.titlePending ?? false,
+                labelsPending: prev[ref]?.labelsPending ?? false,
+                bulletsPending: true,
+              }
+            : {
+                titlePending: true,
+                labelsPending: prev[ref]?.labelsPending ?? false,
+              },
         }));
       }
       if (added) pumpTitles();
@@ -489,6 +522,23 @@ export default function ReportWizard({
   const regenerateSpecial = useCallback(
     async (chart: ChartSpec) => {
       const type = chart.chart_type;
+      // Themes charts (open-ended) just refresh their bullets in place.
+      if (isThemes(chart)) {
+        const ref = chart.question_ref;
+        setBulletsPending(ref, true);
+        try {
+          const { bullets } = await api.materials.aiThemes(materialId, {
+            question_ref: ref,
+          });
+          updateChartByRef(ref, { options: { ...(chart.options ?? {}), bullets } });
+        } catch (e) {
+          toast.error(`Could not regenerate themes: ${errMsg(e)}`);
+        } finally {
+          setBulletsPending(ref, false);
+          setAiSaveTick((t) => t + 1);
+        }
+        return;
+      }
       const group =
         (typeof chart.options?.group === "string" ? chart.options.group : null) ??
         chart.question_ref;
@@ -510,7 +560,14 @@ export default function ReportWizard({
         setAiSaveTick((t) => t + 1);
       }
     },
-    [materialId, reportQuestionRefs, fetchBullets, setBulletsPending, applySpecialPages]
+    [
+      materialId,
+      reportQuestionRefs,
+      fetchBullets,
+      setBulletsPending,
+      applySpecialPages,
+      updateChartByRef,
+    ]
   );
 
   // Persist any unsaved edits before navigating; abort if the save fails

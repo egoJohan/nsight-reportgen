@@ -40,8 +40,11 @@ def _md_runs(text: str) -> list[tuple[str, bool, bool]]:
     return runs or [(text, False, False)]
 
 
-def render_special_slide(slide, slot, style, spec: ChartSpec) -> None:
-    """Paint a heading + bullet list onto *slide* (house style)."""
+def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "") -> None:
+    """Paint a heading + bullet list onto *slide* (house style).
+
+    The heading is ``spec.slide_title`` when set, else the ``heading`` fallback
+    (used by a themes slide, whose heading is the open-ended question text)."""
     sw, sh = _slide_dims(slide)
 
     # 1 — Cream background (full slide)
@@ -60,10 +63,10 @@ def render_special_slide(slide, slot, style, spec: ChartSpec) -> None:
     acc.line.fill.background()
     acc.shadow.inherit = False
 
-    # 3 — Heading (slide_title)
-    heading = (getattr(spec, "slide_title", None) or "").strip()
-    if heading:
-        _heading_box(slide, sw, heading)
+    # 3 — Heading (slide_title, else the fallback — e.g. the question text)
+    heading_text = (getattr(spec, "slide_title", None) or heading or "").strip()
+    if heading_text:
+        _heading_box(slide, sw, heading_text)
 
     # 4 — Bullet list. Tolerate a bare string (don't iterate it into characters).
     raw = spec.options.get("bullets") or []

@@ -23,6 +23,7 @@ export const CHART_TYPES: ChartTypeOption[] = [
   { id: "scatter", label: "Scatter Plot" },
   { id: "funnel", label: "Funnel Chart" },
   { id: "combo", label: "Combo Chart" },
+  { id: "themes", label: "Themes (open-ended)" },
   { id: "wordcloud", label: "Word Cloud" },
 ];
 
@@ -55,6 +56,17 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
 
 export function isSpecialSlide(chart: { chart_type: string }): boolean {
   return chart.chart_type in SPECIAL_SLIDE_LABELS;
+}
+
+/** True when the slide is rendered as a bullet list (special slides or an
+ *  open-ended "themes" summary) rather than a data chart — so it uses the
+ *  full-PNG preview and a bullets editor. */
+export function isThemes(chart: { chart_type: string }): boolean {
+  return chart.chart_type === "themes";
+}
+
+export function rendersAsBullets(chart: { chart_type: string }): boolean {
+  return isSpecialSlide(chart) || isThemes(chart);
 }
 
 export function chartTypeLabel(id: string): string {

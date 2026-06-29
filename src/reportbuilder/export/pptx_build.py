@@ -14,9 +14,14 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
     series_by_ref: dict = {}
     titles: dict = {}
     for spec in report.charts:
-        # Special (non-chart) slides carry no question/series — they render as
-        # text/bullet slides in render_report. Skip stats for them.
+        # Bullet slides (special slides + themes) carry no series — they render
+        # as text in render_report. Skip stats, but record the question text so a
+        # themes slide can use it as its heading.
         if renders_as_bullets(spec):
+            try:
+                titles[spec.question_ref] = model.question(spec.question_ref).text
+            except Exception:
+                pass
             continue
         q = model.question(spec.question_ref)
         series_by_ref[spec.question_ref] = compute(q, spec, data, model)
