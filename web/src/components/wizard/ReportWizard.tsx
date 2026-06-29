@@ -34,7 +34,7 @@ function move<T>(arr: T[], from: number, to: number): T[] {
 
 const STEPS = [
   { id: "select", label: "Select" },
-  { id: "configure", label: "Configure" },
+  { id: "configure", label: "Design" },
   { id: "review", label: "Review" },
   { id: "slides", label: "Slides" },
   { id: "download", label: "Download" },

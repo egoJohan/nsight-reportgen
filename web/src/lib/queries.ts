@@ -38,8 +38,8 @@ export function useRenameCase() {
 // ---- Chart preview cache ----
 // Only the fields that change the rendered PNG; identical content → identical
 // cache entry → the preview is formed ONCE and reused across mounts/steps.
-function previewContentKey(chart: ChartSpec) {
-  return {
+function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
+  const key: Record<string, unknown> = {
     question_ref: chart.question_ref,
     chart_type: chart.chart_type,
     statistic: chart.statistic,
@@ -53,10 +53,14 @@ function previewContentKey(chart: ChartSpec) {
     not_answered_codes: chart.not_answered_codes,
     category_label_overrides: chart.category_label_overrides,
     options: chart.options ?? null,
-    // slide_title/description are baked only when render_title is on.
-    slide_title: chart.slide_title,
-    slide_description: chart.slide_description,
   };
+  // The title/description only affect the PNG when baked (render_title on); when
+  // the frontend owns the title region, editing it must NOT re-render the chart.
+  if (renderTitle) {
+    key.slide_title = chart.slide_title;
+    key.slide_description = chart.slide_description;
+  }
+  return key;
 }
 
 // Cache data URLs (plain strings), not object URLs: they are freed with the
@@ -83,7 +87,7 @@ export function useChartPreview(
 ) {
   const renderTitle = opts?.renderTitle ?? true;
   return useQuery({
-    queryKey: ["chart-preview", materialId, renderTitle, previewContentKey(chart)],
+    queryKey: ["chart-preview", materialId, renderTitle, previewContentKey(chart, renderTitle)],
     queryFn: () =>
       api.materials
         .previewChart(materialId, chart, { renderTitle })

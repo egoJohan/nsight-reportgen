@@ -590,6 +590,12 @@ function ChartControls({
   return (
     <div className="space-y-4">
       <ChartTypeField chart={chart} question={question} onChange={handleTypeChange} />
+      <SlideTitleField
+        chart={chart}
+        materialId={materialId}
+        questionText={question?.text ?? chart.question_ref}
+        onChange={onChange}
+      />
       <ConfigForm
         schema={schema}
         chart={chart}
@@ -599,6 +605,74 @@ function ChartControls({
         onChange={onChange}
       />
     </div>
+  );
+}
+
+// ── Editable slide title (headline) — editable right here in Design ──────────
+function SlideTitleField({
+  chart,
+  materialId,
+  questionText,
+  onChange,
+}: {
+  chart: ChartSpec;
+  materialId: string;
+  questionText: string;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+
+  const regenerate = async () => {
+    setGenerating(true);
+    try {
+      const { title } = await api.materials.aiSlideTitle(materialId, {
+        question_ref: chart.question_ref,
+        statistic: chart.statistic,
+        classifying_var: chart.classifying_var,
+        show_not_answered: chart.show_not_answered,
+        not_answered_codes: chart.not_answered_codes,
+      });
+      if (title) onChange({ slide_title: title });
+      else toast.warning("AI couldn't generate a title (service may be unavailable)");
+    } catch (e) {
+      toast.error(
+        `Couldn't generate a title: ${e instanceof Error ? e.message : "error"}`
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <Field label="Slide title">
+      <div className="flex gap-2">
+        <Input
+          value={chart.slide_title ?? ""}
+          placeholder={questionText}
+          onChange={(e) => onChange({ slide_title: e.target.value })}
+          className="flex-1"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          disabled={generating}
+          onClick={regenerate}
+          title="Regenerate with AI"
+        >
+          {generating ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <SparklesIcon className="size-4" />
+          )}
+          {generating ? "Generating…" : "Regenerate"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The headline shown on the slide. Leave blank to use the question text;
+        edit it freely or regenerate with AI. Updates the preview above live.
+      </p>
+    </Field>
   );
 }
 

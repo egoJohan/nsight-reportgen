@@ -49,7 +49,7 @@ export default function StepReview({
         </div>
         <Button variant="outline" size="sm" onClick={onBack}>
           <ArrowLeftIcon className="size-4" />
-          Back to Configure
+          Back to Design
         </Button>
       </div>
 
