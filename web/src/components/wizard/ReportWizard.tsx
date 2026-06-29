@@ -6,14 +6,18 @@ import {
   ChevronLeftIcon,
   FileXIcon,
   Loader2Icon,
+  PencilIcon,
   SaveIcon,
+  XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { cn, formatReportDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useReport, useUpdateReport } from "@/lib/queries";
+import { useWorkspace } from "@/lib/workspace";
 import {
   isSpecialSlide,
   makeChart,
@@ -116,6 +120,10 @@ export default function ReportWizard({
 }) {
   const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
   const updateReport = useUpdateReport(caseId);
+  const { workspace, renameReport } = useWorkspace(caseId);
+  const createdAt = workspace.reports.find((r) => r.id === reportId)?.createdAt;
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   const [draft, setDraft] = useState<ReportDoc | null>(null);
   const [step, setStep] = useState(0);
@@ -479,6 +487,17 @@ export default function ReportWizard({
     commitThen(() => setStep((s) => Math.max(0, s - 1)));
   }
 
+  // Inline report rename: update the draft (persisted on save), the workspace
+  // listing, and flush to the backend.
+  function commitName() {
+    const next = nameDraft.trim();
+    setEditingName(false);
+    if (!next || next === draft?.name) return;
+    mutate((d) => ({ ...d, name: next }));
+    renameReport(reportId, next);
+    setAiSaveTick((t) => t + 1); // persist via the post-commit save effect
+  }
+
   // Self-heal a stale/deleted report id out of the workspace, once.
   const missingFired = useRef(false);
   useEffect(() => {
@@ -522,8 +541,52 @@ export default function ReportWizard({
     <div>
       {/* Header */}
       <div className="mb-5 flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <h2 className="truncate text-base font-semibold">{draft.name}</h2>
+        <div className="min-w-0">
+          {editingName ? (
+            <div className="flex items-center gap-2">
+              <Input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitName();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+                className="h-9 max-w-sm text-base font-semibold"
+              />
+              <Button size="icon-sm" onClick={commitName}>
+                <CheckIcon className="size-4" />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => setEditingName(false)}
+              >
+                <XIcon className="size-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="group flex items-center gap-2">
+              <h2 className="truncate text-base font-semibold">{draft.name}</h2>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                onClick={() => {
+                  setNameDraft(draft.name);
+                  setEditingName(true);
+                }}
+                title="Rename report"
+              >
+                <PencilIcon className="size-4" />
+              </Button>
+            </div>
+          )}
+          {formatReportDate(createdAt) && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Created {formatReportDate(createdAt)}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {dirty ? (

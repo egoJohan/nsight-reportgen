@@ -14,7 +14,6 @@ import {
   UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import ChartThumb from "@/components/wizard/ChartThumb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1377,19 +1376,7 @@ export default function StepConfigure({
                     </span>
                   </button>
                 </div>
-                {/* auto-rendered thumbnail (batched on entry; shares the preview
-                    cache via renderTitle:false) — no click needed to render */}
-                <button
-                  onClick={() => setActive(c.question_ref)}
-                  className="block w-full px-2 pt-1.5 pb-2"
-                >
-                  <ChartThumb
-                    materialId={materialId}
-                    chart={c}
-                    renderTitle={isSpecialSlide(c)}
-                    className="h-20"
-                  />
-                </button>
+                <div className="px-2 pb-2" />
               </div>
             );
           })}

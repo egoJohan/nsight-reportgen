@@ -8,6 +8,8 @@ export interface WorkspaceReport {
   // Material the report's charts were built against. Optional so legacy
   // entries persisted before this field tolerate parsing (left undefined).
   materialId?: string;
+  // ISO creation timestamp. Optional — legacy entries won't have it.
+  createdAt?: string;
 }
 
 export interface WorkspaceState {

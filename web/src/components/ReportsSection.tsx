@@ -19,6 +19,7 @@ import {
   useReport,
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
+import { formatReportDate } from "@/lib/utils";
 
 // One report row — fetches the report doc to show its status + statistics.
 function ReportRow({
@@ -28,19 +29,21 @@ function ReportRow({
   onDelete,
 }: {
   caseId: string;
-  report: { id: string; name: string };
+  report: { id: string; name: string; createdAt?: string };
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const { data: doc, isLoading } = useReport(caseId, report.id);
   const n = doc?.charts?.length ?? null;
   const status = n == null ? null : n === 0 ? "Empty" : "Draft";
-  const stat =
+  const created = formatReportDate(report.createdAt);
+  const base =
     n == null
       ? "Loading…"
       : n === 0
         ? "No charts yet"
         : `${n} chart${n === 1 ? "" : "s"} · ${n} slide${n === 1 ? "" : "s"}`;
+  const stat = created ? `${base} · ${created}` : base;
 
   return (
     <div
@@ -105,6 +108,8 @@ export default function ReportsSection({
   const reports = workspace.reports.filter(
     (r) => r.materialId === undefined || r.materialId === materialId
   );
+  // Newest first (workspace stores reports in creation order).
+  const orderedReports = [...reports].reverse();
 
   function handleCreate() {
     const name = `Report ${reports.length + 1}`;
@@ -118,7 +123,12 @@ export default function ReportsSection({
       { name, render_mode: "image", template_ref: "", charts },
       {
         onSuccess: ({ report_id }) => {
-          addReport({ id: report_id, name, materialId });
+          addReport({
+            id: report_id,
+            name,
+            materialId,
+            createdAt: new Date().toISOString(),
+          });
           onOpen(report_id);
         },
         onError: (e) => toast.error(`Could not create report: ${e.message}`),
@@ -173,7 +183,7 @@ export default function ReportsSection({
           </div>
         </button>
 
-        {reports.map((r) => (
+        {orderedReports.map((r) => (
           <ReportRow
             key={r.id}
             caseId={caseId}
