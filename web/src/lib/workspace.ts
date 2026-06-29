@@ -50,6 +50,15 @@ export function setMaterial(caseId: string, materialId: string | null) {
   write(caseId, next);
 }
 
+export function clearWorkspace(caseId: string) {
+  try {
+    localStorage.removeItem(key(caseId));
+  } catch {
+    // ignore
+  }
+  window.dispatchEvent(new CustomEvent("nsight-workspace", { detail: caseId }));
+}
+
 export function addReport(caseId: string, report: WorkspaceReport) {
   const ws = getWorkspace(caseId);
   if (ws.reports.some((r) => r.id === report.id)) return;

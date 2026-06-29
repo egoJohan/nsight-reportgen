@@ -27,6 +27,15 @@ def test_rename_missing_case_404():
     assert _client().patch("/cases/nope", json={"name": "x"}).status_code == 404
 
 
+def test_delete_case_removes_it():
+    c = _client()
+    cid = c.post("/cases", json={"name": "to delete"}).json()["case_id"]
+    assert c.delete(f"/cases/{cid}").status_code == 200
+    assert cid not in [x["id"] for x in c.get("/cases").json()]
+    # Deleting again is a 404.
+    assert c.delete(f"/cases/{cid}").status_code == 404
+
+
 def test_rename_empty_name_422():
     c = _client()
     cid = c.post("/cases", json={"name": "x"}).json()["case_id"]

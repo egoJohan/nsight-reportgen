@@ -56,3 +56,19 @@ def rename_case(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found") from exc
     return {"id": case_id, "name": name}
+
+
+@cases_router.delete("/cases/{case_id}")
+def delete_case(
+    case_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Delete a case and its materials."""
+    fn = getattr(client, "delete_case", None)
+    if fn is None:
+        raise HTTPException(status_code=501, detail="Delete not supported by this store")
+    try:
+        fn(case_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found") from exc
+    return {"deleted": case_id}

@@ -116,6 +116,23 @@ class InMemoryDataHiveClient:
         c["name"] = name
         self._save()
 
+    def delete_case(self, case_id: str) -> None:
+        if case_id not in self._cases:
+            raise KeyError(case_id)
+        del self._cases[case_id]
+        # Cascade: drop this case's materials (reports are tracked client-side).
+        mids = [m for m, meta in self._material_meta.items()
+                if meta.get("case_id") == case_id]
+        for mid in mids:
+            self._materials.pop(mid, None)
+            self._material_meta.pop(mid, None)
+            if self.storage_dir is not None:
+                try:
+                    os.remove(os.path.join(self._materials_dir(), f"{mid}.sav"))
+                except OSError:
+                    pass
+        self._save()
+
     # --- materials (byte-exact) ---
     def attach_material(self, case_id: str, name: str, sav_bytes: bytes,
                         codebook_summary: str) -> str:

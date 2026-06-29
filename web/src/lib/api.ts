@@ -196,6 +196,11 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       }).then((r) => json<{ id: string; name: string }>(r)),
+
+    remove: (caseId: string): Promise<{ deleted: string }> =>
+      fetch(`${API_BASE}/cases/${caseId}`, { method: "DELETE" }).then((r) =>
+        json<{ deleted: string }>(r)
+      ),
   },
 
   // Plugin-declared chart-type catalog + config schema (material-independent).

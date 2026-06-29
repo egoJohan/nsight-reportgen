@@ -35,6 +35,14 @@ export function useRenameCase() {
   });
 }
 
+export function useDeleteCase() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (caseId: string) => api.cases.remove(caseId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.cases() }),
+  });
+}
+
 // ---- Chart preview cache ----
 // Only the fields that change the rendered PNG; identical content → identical
 // cache entry → the preview is formed ONCE and reused across mounts/steps.

@@ -1,14 +1,22 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeftIcon, PencilIcon, CheckIcon, XIcon } from "lucide-react";
+import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import DataTab from "@/components/DataTab";
 import ReportsSection from "@/components/ReportsSection";
 import ReportWizard from "@/components/wizard/ReportWizard";
-import { useCases, useRenameCase } from "@/lib/queries";
-import { useWorkspace } from "@/lib/workspace";
+import { useCases, useRenameCase, useDeleteCase } from "@/lib/queries";
+import { useWorkspace, clearWorkspace } from "@/lib/workspace";
 
 function CaseHeading({ caseId, name }: { caseId: string; name: string }) {
   const rename = useRenameCase();
@@ -80,6 +88,20 @@ export default function CaseDetailPage() {
   const { workspace, removeReport } = useWorkspace(id ?? "");
   const materialId = workspace.materialId;
   const [openReportId, setOpenReportId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const deleteCase = useDeleteCase();
+
+  function handleDelete() {
+    if (!id) return;
+    deleteCase.mutate(id, {
+      onSuccess: () => {
+        clearWorkspace(id);
+        toast.success("Case deleted");
+        navigate("/");
+      },
+      onError: (e) => toast.error(`Delete failed: ${e.message}`),
+    });
+  }
 
   if (!id) return null;
 
@@ -105,19 +127,21 @@ export default function CaseDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-8">
-      {/* Back + heading */}
-      <div className="mb-8">
+      {/* Heading + delete */}
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <CaseHeading caseId={id} name={currentCase?.name ?? id} />
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
+        </div>
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="mb-3 -ml-2 text-muted-foreground"
-          onClick={() => navigate("/")}
+          className="shrink-0 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+          onClick={() => setConfirmDelete(true)}
         >
-          <ArrowLeftIcon className="size-4" />
-          All cases
+          <Trash2Icon className="size-4" />
+          Delete case
         </Button>
-        <CaseHeading caseId={id} name={currentCase?.name ?? id} />
-        <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
       </div>
 
       {!materialId ? (
@@ -134,6 +158,31 @@ export default function CaseDetailPage() {
           <DataTab caseId={id} />
         </div>
       )}
+
+      <Dialog open={confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this case?</DialogTitle>
+            <DialogDescription>
+              This permanently removes “{currentCase?.name ?? id}”, its uploaded
+              data, and its reports. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteCase.isPending}
+            >
+              {deleteCase.isPending && <Loader2Icon className="size-4 animate-spin" />}
+              Delete case
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
