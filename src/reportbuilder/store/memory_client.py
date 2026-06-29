@@ -109,6 +109,13 @@ class InMemoryDataHiveClient:
     def list_cases(self) -> list[dict]:
         return list(self._cases.values())
 
+    def rename_case(self, case_id: str, name: str) -> None:
+        c = self._cases.get(case_id)
+        if c is None:
+            raise KeyError(case_id)
+        c["name"] = name
+        self._save()
+
     # --- materials (byte-exact) ---
     def attach_material(self, case_id: str, name: str, sav_bytes: bytes,
                         codebook_summary: str) -> str:

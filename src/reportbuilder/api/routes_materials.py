@@ -3,7 +3,7 @@ import tempfile
 from fastapi import APIRouter, Depends, File, UploadFile
 
 from reportbuilder.api.deps import get_client
-from reportbuilder.ingest.sav_reader import read_sav
+from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.store.datahive_client import DataHiveClient
 
 
@@ -36,6 +36,9 @@ async def upload_material(
 
     try:
         df, model = read_sav(tmp_path)
+        # The SAV's embedded study title (if any) — lets the UI name the case
+        # from the file itself, falling back to the filename.
+        file_label = sav_file_label(tmp_path)
     finally:
         # Clean up the temp file
         import os
@@ -58,4 +61,5 @@ async def upload_material(
     return {
         "material_id": material_id,
         "question_count": len(model.questions),
+        "file_label": file_label,  # SAV study title, or null
     }

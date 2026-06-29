@@ -133,6 +133,20 @@ def _is_metadata(name: str, label: str) -> bool:
 # Public reader
 # ---------------------------------------------------------------------------
 
+def sav_file_label(path: str | pathlib.Path) -> str | None:
+    """The SAV's file-level label (the study title embedded in the file), if any.
+
+    Metadata-only read (fast) so it can be used to name a case from the SAV
+    itself, falling back to the file name when absent.
+    """
+    try:
+        _df, meta = pyreadstat.read_sav(str(path), metadataonly=True)
+    except Exception:
+        return None
+    label = (getattr(meta, "file_label", None) or "").strip()
+    return label or None
+
+
 def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
     df, meta = pyreadstat.read_sav(str(path), apply_value_formats=False, user_missing=True)
     labels = dict(meta.column_names_to_labels)
