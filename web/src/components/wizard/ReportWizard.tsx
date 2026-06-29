@@ -463,6 +463,10 @@ export default function ReportWizard({
     commitThen(() => setStep((s) => Math.min(s + 1, STEPS.length - 1)));
   }
 
+  function goPrev() {
+    commitThen(() => setStep((s) => Math.max(0, s - 1)));
+  }
+
   // Self-heal a stale/deleted report id out of the workspace, once.
   const missingFired = useRef(false);
   useEffect(() => {
@@ -545,13 +549,35 @@ export default function ReportWizard({
         </div>
       </div>
 
-      {/* Stepper */}
-      <div className="mb-6 flex justify-center rounded-xl border bg-card px-3 py-2">
-        <Stepper
-          current={step}
-          onJump={(i) => commitThen(() => setStep(i))}
-          chartCount={draft.charts.length}
-        />
+      {/* Stepper + prev/next nav */}
+      <div className="mb-6 flex items-center gap-2 rounded-xl border bg-card px-3 py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={goPrev}
+          disabled={step === 0}
+        >
+          <ArrowLeftIcon className="size-4" />
+          Prev
+        </Button>
+        <div className="flex flex-1 justify-center">
+          <Stepper
+            current={step}
+            onJump={(i) => commitThen(() => setStep(i))}
+            chartCount={draft.charts.length}
+          />
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0"
+          onClick={goNext}
+          disabled={step >= STEPS.length - 1}
+        >
+          Next
+          <ArrowRightIcon className="size-4" />
+        </Button>
       </div>
 
       {/* Step body */}
@@ -600,22 +626,6 @@ export default function ReportWizard({
             save={save}
           />
         )}
-      </div>
-
-      {/* Footer nav */}
-      <div className="mt-6 flex items-center justify-between border-t pt-4">
-        <Button
-          variant="ghost"
-          onClick={() => commitThen(() => setStep((s) => Math.max(0, s - 1)))}
-          disabled={step === 0}
-        >
-          <ArrowLeftIcon className="size-4" />
-          Back
-        </Button>
-        <Button onClick={goNext} disabled={step >= STEPS.length - 1}>
-          Next
-          <ArrowRightIcon className="size-4" />
-        </Button>
       </div>
     </div>
   );
