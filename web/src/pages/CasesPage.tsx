@@ -34,7 +34,7 @@ export default function CasesPage() {
             <img src="/nsight-logo.svg" alt="nSight" className="h-12 w-auto" />
           </div>
           <h1 className="mt-7 text-3xl font-semibold tracking-tight">
-            Welcome to nSight
+            Welcome to nSight Studio
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
             Turn SPSS survey data into polished, on-brand chart reports. Import a
