@@ -289,10 +289,20 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     else:
         denom = {seg: bases.get(seg, 0) for seg in segments}
 
+    # Natural ("data order") sorting key. For a RATING SCALE, order by the scale
+    # point parsed from the label's leading digit (1..N) — NOT the SAV's stored
+    # code/position, because labelled endpoints ("1=Täysin eri mieltä",
+    # "7=Täysin samaa mieltä") are often stored with large out-of-order codes, so
+    # raw storage order yields e.g. 2,3,4,5,6,1,7. A non-numeric label in a scale
+    # (e.g. "En osaa sanoa") sorts after the numeric points.
+    rating = _rating_scale(var)
+    is_rating = len(rating) >= max(3, len(labels) - 1)
+
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     for idx, (code, label) in enumerate(labels.items()):
         display = overrides.get(label, label)
+        data_index = rating.get(code, 1000 + idx) if is_rating else idx
         for seg in segments:
             c = counts.get((code, seg), 0)
             base = denom.get(seg, 0)
@@ -301,7 +311,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                                          mean=None)
         total_cell = cells[(display, "Total")]
         rows.append((display, code, {"pct": total_cell.pct, "count": total_cell.count,
-                                     "mean": 0.0, "data_index": idx,
+                                     "mean": 0.0, "data_index": data_index,
                                      "topbox": total_cell.pct}))
 
     # Hide categories whose DISPLAYED value rounds to 0 across ALL segments. (Task G.4)

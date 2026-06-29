@@ -141,9 +141,9 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # (~0.94") for up to ~4 wrapped lines at 13.5 pt.
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.90),
-                sw - Inches(1.0), Inches(0.94),
-                [(secondary, 13.5, PX_MUTED, False)],
+                Inches(0.80), Inches(0.86),
+                sw - Inches(1.0), Inches(0.98),
+                [(secondary, 15, PX_MUTED, False)],
                 anchor=MSO_ANCHOR.BOTTOM,
             )
 
