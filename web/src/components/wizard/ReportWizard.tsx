@@ -230,54 +230,94 @@ export default function ReportWizard({
     }
   }, [updateReport, reportId]);
 
-  // ── Lazy AI slide titles ──────────────────────────────────────────────────
-  // Titles are generated on demand — only for the chart the user actually opens
-  // in Design (egoHive is slow, and a report may hold 100+ charts). While a
-  // title is in flight the preview covers the title band with a dashed
-  // placeholder; the AI key-message replaces it automatically when it lands.
-  // Per-chart graceful fallback to the question text on failure; one attempt
-  // per ref per session.
+  // ── Auto AI slide titles (batched, like the chart thumbnails) ─────────────
+  // When the Design step is open, titles are generated automatically for every
+  // chart — the same way the thumbnails auto-render — NOT eagerly on report
+  // load and NOT only for the chart you click. egoHive is slow and a report can
+  // hold 100+ charts, so the work runs through a bounded-concurrency queue.
+  // While a chart's title is in flight the preview covers the title band with a
+  // dashed placeholder; the AI key-message replaces it automatically when it
+  // lands. Graceful fallback to the question text on failure; one attempt per
+  // ref per session.
+  const TITLE_CONCURRENCY = 3;
   const titlesAttempted = useRef<Set<string>>(new Set());
-  // Bumped when a title settles; a separate effect then persists the result so
-  // the generated patch has flushed into the draft before we read it.
+  const titleQueue = useRef<string[]>([]);
+  const titleActive = useRef(0);
+  // Bumped when a batch drains; a separate effect then persists the result so
+  // every generated patch has flushed into the draft before we read it.
   const [aiSaveTick, setAiSaveTick] = useState(0);
 
-  const ensureTitle = useCallback(
-    (ref: string) => {
-      if (!ref || titlesAttempted.current.has(ref)) return;
+  const runTitle = useCallback(
+    async (ref: string) => {
       const chart = draftRef.current?.charts.find(
         (c) => c.question_ref === ref
       );
-      // Skip charts that already carry a (manual or earlier-generated) title.
-      if (!chart || chart.slide_title) return;
-      titlesAttempted.current.add(ref);
-      setAiPending((prev) => ({
-        ...prev,
-        [ref]: { titlePending: true, labelsPending: prev[ref]?.labelsPending ?? false },
-      }));
-      api.materials
-        .aiSlideTitle(materialId, {
+      if (!chart) return;
+      try {
+        const { title } = await api.materials.aiSlideTitle(materialId, {
           question_ref: ref,
           statistic: chart.statistic,
           classifying_var: chart.classifying_var,
           show_not_answered: chart.show_not_answered,
           not_answered_codes: chart.not_answered_codes,
-        })
-        .then(({ title }) => {
-          if (title) updateChartByRef(ref, { slide_title: title });
-        })
-        .catch(() => {
-          /* graceful: fall back to the question text */
-        })
-        .finally(() => {
-          setAiPending((prev) => ({
-            ...prev,
-            [ref]: { ...prev[ref], titlePending: false },
-          }));
-          setAiSaveTick((t) => t + 1);
         });
+        if (title) updateChartByRef(ref, { slide_title: title });
+      } catch {
+        /* graceful: fall back to the question text */
+      } finally {
+        setAiPending((prev) => ({
+          ...prev,
+          [ref]: { ...prev[ref], titlePending: false },
+        }));
+      }
     },
     [materialId, updateChartByRef]
+  );
+
+  const pumpTitles = useCallback(() => {
+    while (
+      titleActive.current < TITLE_CONCURRENCY &&
+      titleQueue.current.length > 0
+    ) {
+      const ref = titleQueue.current.shift()!;
+      titleActive.current += 1;
+      void runTitle(ref).finally(() => {
+        titleActive.current -= 1;
+        if (titleActive.current === 0 && titleQueue.current.length === 0) {
+          // Batch settled — persist all generated titles in one save.
+          setAiSaveTick((t) => t + 1);
+        }
+        pumpTitles();
+      });
+    }
+  }, [runTitle]);
+
+  // Enqueue titles for every chart that still needs one (deduped; one attempt
+  // per ref). Mark the title regions pending up front so their placeholders
+  // appear immediately, then drain through the bounded queue.
+  const ensureTitles = useCallback(
+    (refs: string[]) => {
+      let added = false;
+      for (const ref of refs) {
+        if (!ref || titlesAttempted.current.has(ref)) continue;
+        const chart = draftRef.current?.charts.find(
+          (c) => c.question_ref === ref
+        );
+        if (!chart || chart.slide_title) continue; // keep manual/existing titles
+        titlesAttempted.current.add(ref);
+        titleQueue.current.push(ref);
+        added = true;
+        setAiPending((prev) => ({
+          ...prev,
+          [ref]: {
+            titlePending: true,
+            labelsPending: prev[ref]?.labelsPending ?? false,
+          },
+        }));
+      }
+      if (added) pumpTitles();
+    },
+    [pumpTitles]
   );
 
   // Persist generated overrides/titles once an auto-format pass settles. Runs
@@ -414,7 +454,7 @@ export default function ReportWizard({
             onUpdateChart={updateChart}
             onRemoveChart={removeChart}
             onReorder={reorderCharts}
-            onEnsureTitle={ensureTitle}
+            onEnsureTitles={ensureTitles}
           />
         )}
         {step === 2 && (

@@ -978,7 +978,7 @@ export default function StepConfigure({
   onUpdateChart,
   onRemoveChart,
   onReorder,
-  onEnsureTitle,
+  onEnsureTitles,
 }: {
   materialId: string;
   charts: ChartSpec[];
@@ -986,9 +986,9 @@ export default function StepConfigure({
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   onRemoveChart: (index: number) => void;
   onReorder?: (from: number, to: number) => void;
-  // Called with the active chart's ref so its AI slide title is generated
-  // lazily — only when the user actually opens that chart.
-  onEnsureTitle?: (ref: string) => void;
+  // Called with every chart's ref when Design opens so AI slide titles are
+  // generated automatically in the background (batched, like the thumbnails).
+  onEnsureTitles?: (refs: string[]) => void;
 }) {
   const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
@@ -1006,11 +1006,14 @@ export default function StepConfigure({
     if (active > charts.length - 1) setActive(Math.max(0, charts.length - 1));
   }, [charts.length, active]);
 
-  // Lazily generate the AI slide title for whichever chart is open.
-  const activeRef = charts[active]?.question_ref;
+  // Auto-generate AI slide titles for every chart once Design is open (batched
+  // in the background, just like the thumbnails) — not on report load, and not
+  // gated on opening each chart.
+  const chartRefsKey = charts.map((c) => c.question_ref).join(" ");
   useEffect(() => {
-    if (activeRef) onEnsureTitle?.(activeRef);
-  }, [activeRef, onEnsureTitle]);
+    if (charts.length) onEnsureTitles?.(charts.map((c) => c.question_ref));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartRefsKey, onEnsureTitles]);
 
   if (isError) {
     return (
