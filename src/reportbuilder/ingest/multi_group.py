@@ -19,6 +19,7 @@ and the left-hand sides are the option (category) labels.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from collections import OrderedDict
@@ -73,6 +74,25 @@ def _group_qid(members: tuple[str, ...]) -> str:
     return _prefix(members[0]).lower() or members[0].lower()
 
 
+def _option_labels(model: QuestionModel, members: tuple[str, ...]) -> dict[str, str] | None:
+    """When member labels follow ``<Option>:<SharedQuestion>`` (the survey-export
+    convention) return ``{member_name: option}`` — i.e. the labels with the shared
+    question suffix stripped, so category labels are the actual options. Returns
+    None when the pattern does not hold (labels left untouched).
+    """
+    labels = [model.variables[m].label for m in members]
+    if not labels or ":" not in labels[0]:
+        return None
+    parts = [lbl.split(":", 1) for lbl in labels]
+    if not all(len(p) == 2 for p in parts):
+        return None
+    rights = [p[1].strip() for p in parts]
+    # Same shared question on the right for every member → left parts are options.
+    if len(set(rights)) == 1 and rights[0]:
+        return {m: p[0].strip() for m, p in zip(members, parts) if p[0].strip()}
+    return None
+
+
 # ---- public API -------------------------------------------------------------
 
 def apply_groups(model: QuestionModel, groups: list[tuple[str, ...]]) -> QuestionModel:
@@ -80,17 +100,25 @@ def apply_groups(model: QuestionModel, groups: list[tuple[str, ...]]) -> Questio
     Question; ungrouped variables keep their single Question. variables dict is
     unchanged. (REQ-C-06, M-02)"""
     grouped = {name for g in groups for name in g}
+    variables = dict(model.variables)
     questions: list[Question] = []
     for g in groups:
         members = tuple(g)
+        # Derive the question text from the ORIGINAL labels first, then strip the
+        # shared question suffix off each member so its label is the option only.
+        text = _group_text(model, members)
+        opts = _option_labels(model, members)
+        if opts:
+            for name, option in opts.items():
+                if option and option != variables[name].label:
+                    variables[name] = dataclasses.replace(variables[name], label=option)
         questions.append(Question(
-            qid=_group_qid(members), kind="multi", variables=members,
-            text=_group_text(model, members),
+            qid=_group_qid(members), kind="multi", variables=members, text=text,
         ))
     for q in model.questions:
         if q.kind == "single" and q.variables[0] not in grouped:
             questions.append(q)
-    return QuestionModel(variables=dict(model.variables), questions=questions)
+    return QuestionModel(variables=variables, questions=questions)
 
 
 def suggest_multi_groups(model: QuestionModel) -> list[tuple[str, ...]]:
