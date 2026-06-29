@@ -111,11 +111,13 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         acc.line.fill.background()
         acc.shadow.inherit = False
 
-        # 3 — Title + question text  (REQ-C-24a, REQ-D-04)
-        #     Headline = slide_title (AI key message) when set, else the question
-        #     text. When a distinct headline is set, show the QUESTION TEXT as a
-        #     secondary line so the actual question is always at the top; if no
-        #     distinct headline, the secondary line is the optional description.
+        # 3 — Title (top) + question subtitle (just above the chart)
+        #     The top area is dedicated to the TITLE (AI key message when set,
+        #     else the question). When a distinct headline is set, the actual
+        #     QUESTION is a separate subtitle anchored to the BOTTOM of the header
+        #     band — so the gap between the question and the chart stays constant
+        #     no matter how many lines the question wraps to. It uses a lighter
+        #     (non-bold) weight than the title. (REQ-C-24a, REQ-D-04)
         question = (ctx.title or "").strip()
         slide_title = (getattr(ctx.spec, "slide_title", None) or "").strip()
         slide_description = (getattr(ctx.spec, "slide_description", None) or "").strip()
@@ -132,11 +134,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 [(title, 21, PX_INK, True)],
             )
         if secondary:
+            # Box bottom is fixed just above the chart (~1.80"); BOTTOM anchor
+            # makes multi-line questions grow upward, keeping the chart gap fixed.
             _textbox(
                 slide,
-                Inches(0.80), Inches(1.02),
-                sw - Inches(1.0), Inches(0.40),
-                [(secondary, 13, PX_MUTED, False)],
+                Inches(0.80), Inches(0.98),
+                sw - Inches(1.0), Inches(0.82),
+                [(secondary, 14, PX_MUTED, False)],
+                anchor=MSO_ANCHOR.BOTTOM,
             )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)

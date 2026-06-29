@@ -159,7 +159,10 @@ function ChartPreview({
           )
         )}
 
-        {/* Title region (top band) — frontend-owned since render_title:false. */}
+        {/* Title region (top band) — frontend-owned since render_title:false.
+            The title sits at the top; the question is a separate subtitle
+            anchored to the BOTTOM of the header band (just above the chart) so
+            its gap to the chart stays constant regardless of line count. */}
         {url &&
           (titlePending ? (
             <PendingRegion
@@ -167,22 +170,25 @@ function ChartPreview({
               label="Generating title…"
             />
           ) : (
-            <div
-              className="absolute z-10 flex items-start gap-2.5"
-              style={{ left: "4%", top: "2.5%", width: "92%" }}
-            >
-              <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-              <div className="min-w-0">
-                <p className="line-clamp-2 text-left text-[15px] leading-tight font-bold text-foreground">
+            <>
+              <div
+                className="absolute z-10 flex items-start gap-2.5"
+                style={{ left: "4%", top: "2.5%", width: "92%" }}
+              >
+                <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
+                <p className="min-w-0 line-clamp-2 text-left text-[15px] leading-tight font-bold text-foreground">
                   {headline}
                 </p>
-                {showQuestion && (
-                  <p className="mt-0.5 line-clamp-2 text-left text-[11px] leading-tight text-muted-foreground">
-                    {questionText}
-                  </p>
-                )}
               </div>
-            </div>
+              {showQuestion && (
+                <p
+                  className="absolute z-10 line-clamp-3 pl-[3.5%] text-left text-[11px] leading-tight font-normal text-muted-foreground"
+                  style={{ left: "4%", width: "92%", bottom: "77%" }}
+                >
+                  {questionText}
+                </p>
+              )}
+            </>
           ))}
 
         {/* Label region — placed per chart type; clears when labels land. A
