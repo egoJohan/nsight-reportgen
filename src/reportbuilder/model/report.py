@@ -70,6 +70,18 @@ def is_special_slide(spec: "ChartSpec") -> bool:
     return spec.chart_type in SPECIAL_SLIDE_TYPES
 
 
+# Chart types whose slide is rendered as a bullet list from options["bullets"]
+# rather than a data chart: the special slides plus "themes" (an open-ended
+# question summarised into AI themes).
+_BULLET_TYPES: frozenset[str] = SPECIAL_SLIDE_TYPES | {"themes"}
+
+
+def renders_as_bullets(spec: "ChartSpec") -> bool:
+    """True when the slide is text/bullets (special slides or a themes summary)
+    and so has no computed data series."""
+    return spec.chart_type in _BULLET_TYPES
+
+
 @dataclass(frozen=True)
 class Report:
     name: str

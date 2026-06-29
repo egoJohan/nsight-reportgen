@@ -295,6 +295,43 @@ def generate_conclusion_bullets(
     return _parse_bullets(chat(prompt))
 
 
+# Themes shown for an open-ended question.
+MAX_THEMES = 6
+
+
+def generate_open_themes(
+    question_text: str,
+    word_freqs: list[tuple[str, float]],
+    sample_answers: list[str],
+    *,
+    chat=egohive_chat,
+) -> list[str]:
+    """Summarise an open-ended question's answers into a few key themes.
+
+    Given the question, the most frequent words (with counts) and a sample of
+    verbatim answers, return markdown bullets — each a bold theme name plus an
+    approximate share, e.g. '**Edulliset hinnat** – mainittu noin 40 %:ssa'.
+    """
+    freqs = "\n".join(f"- {w}: {int(c)}" for w, c in word_freqs[:25]) or "- (ei sanoja)"
+    sample = "\n".join(f"- {a.strip()}" for a in sample_answers[:40] if a.strip())
+    prompt = (
+        "Olet markkinatutkimuksen analyytikko. Tiivistät avoimen kysymyksen "
+        "vastaukset muutamaan keskeiseen teemaan.\n\n"
+        f"Avoin kysymys: \"{question_text}\".\n"
+        "Yleisimmät sanat vastauksissa (sana: lukumäärä):\n"
+        f"{freqs}\n\n"
+        "Otos vastauksista:\n"
+        f"{sample or '- (ei otosta)'}\n\n"
+        f"Ryhmittele vastaukset {MAX_THEMES - 2}–{MAX_THEMES} merkitykselliseen teemaan. "
+        "Anna jokaiselle teemalle lyhyt nimi LIHAVOITUNA (markdown **nimi**) ja arvioi "
+        "kuinka yleinen teema on (esim. osuus vastauksista). Järjestä yleisimmästä "
+        "harvinaisimpaan. Yksi teema per ranskalainen viiva, ei numerointia, esim. "
+        "'- **Edulliset hinnat ja tarjoukset** – mainittu noin 40 %:ssa vastauksista'. "
+        "Palauta vain ranskalaiset viivat."
+    )
+    return _parse_bullets(chat(prompt))[:MAX_THEMES]
+
+
 def pick_demographic_questions(
     candidates: list[tuple[str, str]],
     *,
@@ -351,6 +388,7 @@ __all__ = [
     "shorten_labels",
     "generate_overview_bullets",
     "generate_conclusion_bullets",
+    "generate_open_themes",
     "pick_demographic_questions",
     "generate_demographics_bullets",
     "MAX_LABEL_LEN",

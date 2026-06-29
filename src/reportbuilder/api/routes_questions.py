@@ -259,9 +259,10 @@ def list_questions(
             suggested = None
             compatible = []
         elif _is_text_question(model, q):
-            # Open-ended text → chartable as a word cloud ONLY (Task J.3).
-            suggested = "wordcloud"
-            compatible = ["wordcloud"]
+            # Open-ended text → AI-summarised themes by default (more insight than
+            # a raw word frequency); word cloud remains available.
+            suggested = "themes"
+            compatible = ["themes", "wordcloud"]
         else:
             series = _quick_series(q, model)
             suggested = suggest_chart_type(q, series)

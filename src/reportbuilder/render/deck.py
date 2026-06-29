@@ -13,7 +13,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.exc import PackageNotFoundError
 from pptx.util import Inches
 
-from reportbuilder.model.report import Report, is_special_slide
+from reportbuilder.model.report import Report, renders_as_bullets
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
 from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
@@ -55,7 +55,7 @@ def assert_complete(prs: Presentation, report: Report) -> None:
     rendered = charts if report.render_mode == "native" else pics
     # Special (non-chart) slides render as text, not a chart/picture object, so
     # they don't count toward the expected tally.
-    expected = len([c for c in report.charts if not is_special_slide(c)])
+    expected = len([c for c in report.charts if not renders_as_bullets(c)])
     if rendered != expected:
         raise CompletenessError(
             f"expected {expected} {report.render_mode} chart objects, found {rendered}"
@@ -121,7 +121,7 @@ def render_report(
         slide = prs.slides[slot.slide_index]
 
         # --- Special (non-chart) slides: render text/bullets, no series ---
-        if is_special_slide(spec):
+        if renders_as_bullets(spec):
             render_special_slide(slide, slot, style, spec)
             continue
 

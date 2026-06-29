@@ -23,6 +23,7 @@ from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import (
     generate_conclusion_bullets,
     generate_demographics_bullets,
+    generate_open_themes,
     generate_overview_bullets,
     generate_slide_title,
     pick_demographic_questions,
@@ -95,16 +96,19 @@ def _load_df_model_labeled(material_id: str, client: DataHiveClient):
     return df, enrich_model(model), label
 
 
-def _kind_spec(question) -> ChartSpec:
-    """A minimal ChartSpec that compute() accepts for this question's kind.
+def _kind_spec(question, model) -> ChartSpec:
+    """A minimal ChartSpec that compute() accepts for this question.
 
     compute() raises for text questions unless chart_type="wordcloud", and a
-    battery yields findings only with statistic="mean" — so pick per kind.
+    battery yields findings only with statistic="mean" — so pick per kind. Text
+    is detected by variable *measurement* (kind is usually "single").
     """
-    if question.kind == "battery":
-        statistic, chart_type = "mean", "horizontal_bar"
-    elif question.kind == "text":
+    qvars = [model.variables[v] for v in question.variables if v in model.variables]
+    is_text = bool(qvars) and all(v.measurement == "text" for v in qvars)
+    if is_text:
         statistic, chart_type = "count", "wordcloud"
+    elif question.kind == "battery":
+        statistic, chart_type = "mean", "horizontal_bar"
     else:  # single | multi
         statistic, chart_type = "pct", "horizontal_bar"
     return ChartSpec(
@@ -130,7 +134,7 @@ def _findings_for_refs(
     for ref in refs[:cap]:
         try:
             q = model.question(ref)
-            series = compute(q, _kind_spec(q), df, model)
+            series = compute(q, _kind_spec(q, model), df, model)
             findings = _findings_from_series(series, top_n)
         except Exception:
             continue  # skip incompatible/empty questions
@@ -315,6 +319,50 @@ class SpecialSlideBody(BaseModel):
     questions (used for Overview topics / Conclusion findings)."""
 
     question_refs: list[str] = []
+
+
+class ThemesBody(BaseModel):
+    question_ref: str
+
+
+@ai_router.post("/materials/{material_id}/ai/themes")
+def ai_themes(
+    material_id: str,
+    body: ThemesBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Summarise an open-ended question's answers into key themes (bullets)."""
+    try:
+        df, model = _load_df_model(material_id, client)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
+    try:
+        question = model.question(body.question_ref)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Question '{body.question_ref}' not found"
+        ) from exc
+    try:
+        series = compute(question, _kind_spec(question, model), df, model)
+        word_freqs = _findings_from_series(series, 25)
+        var = question.variables[0]
+        answers = [
+            str(x) for x in df[var].dropna().tolist() if str(x).strip()
+        ][:40]
+        if not word_freqs and not answers:
+            return {"bullets": []}
+        bullets = generate_open_themes(
+            question.text, word_freqs, answers, chat=egohive_chat
+        )
+    except EgoHiveError as exc:
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not generate themes: {exc}") from exc
+    return {"bullets": bullets}
 
 
 def _question_texts(refs: list[str], model) -> list[str]:
