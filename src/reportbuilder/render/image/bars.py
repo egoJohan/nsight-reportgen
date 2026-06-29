@@ -152,15 +152,14 @@ def _should_orient_horizontal(cats: list[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 def build_image_column(ctx) -> None:
-    """Vertical grouped bar chart with house style; auto-orients to horizontal
-    when many categories or long labels are detected (REQ-C-24b/f, REQ-C-27a)."""
+    """Vertical grouped (column) bar chart with house style.
+
+    Always renders vertical — `vertical_bar` and `horizontal_bar` are now
+    distinct chart types, so an explicit vertical choice is honoured rather than
+    silently auto-flipped to horizontal. (The suitability scorer already ranks
+    vertical low for many/long labels, so it is never auto-CHOSEN for those.)
+    (REQ-C-24b/f, REQ-C-27a)"""
     cats, segs, data = series_values(ctx.series)
-
-    # Auto-orientation: switch to horizontal if labels would crowd the x-axis
-    if _should_orient_horizontal(cats):
-        _render_bar_h(ctx, cats, segs, data)
-        return
-
     _render_column_v(ctx, cats, segs, data)
 
 
@@ -274,9 +273,34 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
 # build_image_column_stacked
 # ---------------------------------------------------------------------------
 
+def _stacked_layout(series):
+    """Decompose a segmented series into a clean 100%-stacked layout.
+
+    A stacked bar compares composition: each BAR is a classifying-variable
+    segment and the STACK is the question's answer categories. The engine's
+    per-segment percentages sum to 100 within a segment (column %), so each bar
+    fills exactly 100% — no overshoot, no floating 'Total'. Returns
+    (bars, stack, data) where data[stack_member] = [value per bar].
+
+    With no classifier (segments == ('Total',)) there is nothing to compose, so
+    the answer categories become the bars with a single stack member.
+    """
+    cats, segs, data = series_values(series)
+    bars = [s for s in segs if s != "Total"]
+    if len(bars) <= 1:
+        # No real classifier split — fall back to one bar per category.
+        return cats, ["Total"], {"Total": data.get("Total", [0.0] * len(cats))}
+    stack = cats
+    new_data = {
+        qcat: [data[seg][ci] for seg in bars] for ci, qcat in enumerate(cats)
+    }
+    return bars, stack, new_data
+
+
 def build_image_column_stacked(ctx) -> None:
-    """Stacked vertical bar chart with house style."""
-    cats, segs, data = series_values(ctx.series)
+    """Stacked vertical (100%) bar chart: bars = classifier segments, stack =
+    answer categories (house style)."""
+    cats, segs, data = _stacked_layout(ctx.series)
     fig, ax = new_figure(ctx)
     clrs = series_colors(len(segs))
 
@@ -324,8 +348,9 @@ def build_image_column_stacked(ctx) -> None:
 # ---------------------------------------------------------------------------
 
 def build_image_bar_stacked(ctx) -> None:
-    """Stacked horizontal bar chart with house style."""
-    cats, segs, data = series_values(ctx.series)
+    """Stacked horizontal (100%) bar chart: bars = classifier segments, stack =
+    answer categories (house style)."""
+    cats, segs, data = _stacked_layout(ctx.series)
     fig, ax = new_figure(ctx)
     clrs = series_colors(len(segs))
 

@@ -205,3 +205,52 @@ def test_image_line_places_picture():
     result = build_image_line(ctx)
     assert result is None
     _assert_picture(slide, slot)
+
+
+# --- Regression: stacked layout transpose + vertical-bar orientation ---------
+
+def test_stacked_layout_excludes_total_and_transposes():
+    """_stacked_layout: bars = classifier segments (no 'Total'); stack = answer
+    categories; each bar sums to 100 (column %)."""
+    from reportbuilder.render.image.bars import _stacked_layout
+
+    cells = {
+        ("Yes", "A"): Cell(pct=60.0, count=None, mean=None),
+        ("No", "A"): Cell(pct=40.0, count=None, mean=None),
+        ("Yes", "B"): Cell(pct=70.0, count=None, mean=None),
+        ("No", "B"): Cell(pct=30.0, count=None, mean=None),
+        ("Yes", "Total"): Cell(pct=65.0, count=None, mean=None),
+        ("No", "Total"): Cell(pct=35.0, count=None, mean=None),
+    }
+    s = SeriesResult(
+        categories=("Yes", "No"),
+        segments=("A", "B", "Total"),
+        cells=cells,
+        base_n={"Total": 100, "A": 50, "B": 50},
+        statistic="pct",
+    )
+    bars, stack, data = _stacked_layout(s)
+    assert bars == ["A", "B"]  # 'Total' excluded
+    assert list(stack) == ["Yes", "No"]
+    for bi in range(len(bars)):
+        assert abs(sum(data[q][bi] for q in stack) - 100.0) < 1e-6
+
+
+def test_stacked_layout_without_classifier_falls_back():
+    """No classifier (only 'Total') → one bar per category, single stack member."""
+    from reportbuilder.render.image.bars import _stacked_layout
+
+    cells = {
+        ("Yes", "Total"): Cell(pct=65.0, count=None, mean=None),
+        ("No", "Total"): Cell(pct=35.0, count=None, mean=None),
+    }
+    s = SeriesResult(
+        categories=("Yes", "No"),
+        segments=("Total",),
+        cells=cells,
+        base_n={"Total": 100},
+        statistic="pct",
+    )
+    bars, stack, data = _stacked_layout(s)
+    assert list(bars) == ["Yes", "No"]
+    assert stack == ["Total"]
