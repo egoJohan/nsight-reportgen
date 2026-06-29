@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FileTextIcon, PlusIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -10,14 +11,75 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Card } from "@/components/ui/card";
 import { useWorkspace } from "@/lib/workspace";
-import { useCreateReport, useDeleteReport } from "@/lib/queries";
+import { useCreateReport, useDeleteReport, useReport } from "@/lib/queries";
+
+// One report row — fetches the report doc to show its status + statistics.
+function ReportRow({
+  caseId,
+  report,
+  onOpen,
+  onDelete,
+}: {
+  caseId: string;
+  report: { id: string; name: string };
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { data: doc, isLoading } = useReport(caseId, report.id);
+  const n = doc?.charts?.length ?? null;
+  const status = n == null ? null : n === 0 ? "Empty" : "Draft";
+  const stat =
+    n == null
+      ? "Loading…"
+      : n === 0
+        ? "No charts yet"
+        : `${n} chart${n === 1 ? "" : "s"} · ${n} slide${n === 1 ? "" : "s"}`;
+
+  return (
+    <div
+      className="group flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
+      onClick={() => onOpen(report.id)}
+    >
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+        <FileTextIcon className="size-4 text-primary" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{report.name}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {isLoading ? "Loading…" : stat}
+        </p>
+      </div>
+      {status && (
+        <Badge
+          variant="outline"
+          className={
+            status === "Empty"
+              ? "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
+              : "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
+          }
+        >
+          {status}
+        </Badge>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(report.id);
+        }}
+      >
+        <Trash2Icon className="size-4" />
+      </Button>
+    </div>
+  );
+}
 
 /**
- * The Reports section of a case page: a "Create new report" tile first, then
- * the report list. Creating a report auto-names it and opens the wizard
- * immediately (via onOpen). No tabs, no name dialog.
+ * The Reports section: a list (like the Questions list) with "Create new report"
+ * as the top row, then each report showing its status + statistics.
  */
 export default function ReportsSection({
   caseId,
@@ -44,7 +106,7 @@ export default function ReportsSection({
       {
         onSuccess: ({ report_id }) => {
           addReport({ id: report_id, name, materialId });
-          onOpen(report_id); // open the wizard immediately
+          onOpen(report_id);
         },
         onError: (e) => toast.error(`Could not create report: ${e.message}`),
       }
@@ -74,57 +136,38 @@ export default function ReportsSection({
           Build chart reports from this case's survey data.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {/* Topmost item: create a new report */}
+
+      <div className="divide-y overflow-hidden rounded-xl border">
+        {/* Topmost row: create a new report */}
         <button
           type="button"
           onClick={handleCreate}
           disabled={createReport.isPending}
-          className="group flex items-center gap-3 rounded-xl border border-dashed bg-card/50 p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40 disabled:opacity-60"
+          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 disabled:opacity-60"
         >
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             {createReport.isPending ? (
-              <Loader2Icon className="size-5 animate-spin" />
+              <Loader2Icon className="size-4 animate-spin" />
             ) : (
-              <PlusIcon className="size-5" />
+              <PlusIcon className="size-4" />
             )}
           </div>
           <div className="min-w-0">
             <p className="text-sm font-medium">Create new report</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               Pick questions and build charts
             </p>
           </div>
         </button>
 
         {reports.map((r) => (
-          <Card
+          <ReportRow
             key={r.id}
-            className="group flex-row items-center justify-between gap-3 p-4 transition-colors hover:border-primary/30"
-          >
-            <button
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
-              onClick={() => onOpen(r.id)}
-            >
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <FileTextIcon className="size-5 text-primary" />
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{r.name}</p>
-                <p className="truncate font-mono text-xs text-muted-foreground">
-                  {r.id}
-                </p>
-              </div>
-            </button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-              onClick={() => setConfirmDelete(r.id)}
-            >
-              <Trash2Icon className="size-4" />
-            </Button>
-          </Card>
+            caseId={caseId}
+            report={r}
+            onOpen={onOpen}
+            onDelete={setConfirmDelete}
+          />
         ))}
       </div>
 
