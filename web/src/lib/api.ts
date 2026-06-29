@@ -152,18 +152,28 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// The backend renders chart previews through LibreOffice (soffice), which is a
-// single-instance process — firing several preview requests at once (e.g. a
-// grid of thumbnails) makes soffice fail. Serialise preview rendering so only
-// one request is in flight at a time.
-let previewChain: Promise<unknown> = Promise.resolve();
+// The backend renders previews through LibreOffice, which is now concurrency-safe
+// (a small pool of isolated profiles). Run previews through a bounded pool so a
+// grid of thumbnails generates in PARALLEL — but capped, to match the backend's
+// soffice pool and avoid overwhelming it. Cached previews resolve instantly and
+// don't occupy a slot for long.
+const PREVIEW_CONCURRENCY = 4;
+let previewActive = 0;
+const previewQueue: Array<() => void> = [];
+
 function serializePreview<T>(task: () => Promise<T>): Promise<T> {
-  const run = previewChain.then(task, task);
-  previewChain = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      previewActive++;
+      task().then(resolve, reject).finally(() => {
+        previewActive--;
+        const next = previewQueue.shift();
+        if (next) next();
+      });
+    };
+    if (previewActive < PREVIEW_CONCURRENCY) start();
+    else previewQueue.push(start);
+  });
 }
 
 export const api = {
