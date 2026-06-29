@@ -45,6 +45,8 @@ export interface Variable {
 export interface UploadResult {
   material_id: string;
   question_count: number;
+  // The SAV's embedded study title, if any (null otherwise).
+  file_label?: string | null;
 }
 
 // ---- Report / ChartSpec ----
@@ -187,6 +189,13 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       }).then((r) => json<{ case_id: string }>(r)),
+
+    rename: (caseId: string, name: string): Promise<{ id: string; name: string }> =>
+      fetch(`${API_BASE}/cases/${caseId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).then((r) => json<{ id: string; name: string }>(r)),
   },
 
   // Plugin-declared chart-type catalog + config schema (material-independent).

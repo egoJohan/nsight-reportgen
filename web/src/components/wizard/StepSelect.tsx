@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { CheckIcon, SearchIcon, PlusIcon, AlertCircleIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { CheckIcon, SearchIcon, AlertCircleIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -35,15 +34,14 @@ function KindBadge({ q }: { q: Question }) {
 export default function StepSelect({
   materialId,
   addedRefs,
-  onAdd,
+  onToggle,
 }: {
   materialId: string;
   addedRefs: Set<string>;
-  onAdd: (questions: Question[]) => void;
+  onToggle: (question: Question) => void;
 }) {
   const { data: questions, isLoading, isError } = useQuestions(materialId);
   const [search, setSearch] = useState("");
-  const [checked, setChecked] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(
     () =>
@@ -51,34 +49,6 @@ export default function StepSelect({
         q.text.toLowerCase().includes(search.toLowerCase())
       ),
     [questions, search]
-  );
-
-  function toggle(qid: string) {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(qid)) next.delete(qid);
-      else next.add(qid);
-      return next;
-    });
-  }
-
-  function handleAdd() {
-    const toAdd = (questions ?? []).filter(
-      (q) => checked.has(q.qid) && !addedRefs.has(q.qid) && q.chartable !== false
-    );
-    if (toAdd.length > 0) onAdd(toAdd);
-    setChecked(new Set());
-  }
-
-  // Non-chartable (open-ended text) questions can never be added to a report.
-  const nonChartable = useMemo(() => {
-    const m = new Map<string, boolean>();
-    (questions ?? []).forEach((q) => m.set(q.qid, q.chartable === false));
-    return m;
-  }, [questions]);
-
-  const selectableChecked = [...checked].filter(
-    (id) => !addedRefs.has(id) && !nonChartable.get(id)
   );
 
   if (isLoading) {
@@ -97,11 +67,15 @@ export default function StepSelect({
         <AlertCircleIcon className="mb-3 size-8 text-muted-foreground/50" />
         <p className="text-sm font-medium">Couldn't load this material's questions</p>
         <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-          It may have been removed. Re-upload the data in the Data tab.
+          It may have been removed. Re-import the data for this case.
         </p>
       </div>
     );
   }
+
+  const selectedCount = (questions ?? []).filter((q) =>
+    addedRefs.has(q.qid)
+  ).length;
 
   return (
     <div>
@@ -116,55 +90,45 @@ export default function StepSelect({
           />
         </div>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-          {filtered.length} questions
+          {selectedCount} selected · {filtered.length} questions
         </span>
-        <Button
-          onClick={handleAdd}
-          disabled={selectableChecked.length === 0}
-          size="sm"
-        >
-          <PlusIcon className="size-4" />
-          Add selected
-          {selectableChecked.length > 0 ? ` (${selectableChecked.length})` : ""}
-        </Button>
       </div>
+
+      <p className="mb-3 text-sm text-muted-foreground">
+        Toggle a question to add or remove its chart from the report, then press
+        Next.
+      </p>
 
       <div className="space-y-1.5">
         {filtered.map((q) => {
           const isAdded = addedRefs.has(q.qid);
-          const isChecked = checked.has(q.qid);
           const isChartable = q.chartable !== false;
-          const isDisabled = isAdded || !isChartable;
           return (
             <button
               key={q.qid}
-              disabled={isDisabled}
-              onClick={() => toggle(q.qid)}
+              disabled={!isChartable}
+              onClick={() => isChartable && onToggle(q)}
               title={!isChartable ? q.non_chartable_reason ?? undefined : undefined}
               className={cn(
                 "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                isAdded
-                  ? "cursor-default border-transparent bg-muted/40 opacity-70"
-                  : !isChartable
-                    ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
-                    : isChecked
-                      ? "border-primary/40 bg-primary/5"
-                      : "border-border hover:bg-muted/50"
+                !isChartable
+                  ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
+                  : isAdded
+                    ? "border-primary/40 bg-primary/5"
+                    : "border-border hover:bg-muted/50"
               )}
             >
               <span
                 className={cn(
                   "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                  isAdded
-                    ? "border-transparent bg-muted-foreground/30 text-background"
-                    : !isChartable
-                      ? "border-dashed border-muted-foreground/30"
-                      : isChecked
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-input"
+                  !isChartable
+                    ? "border-dashed border-muted-foreground/30"
+                    : isAdded
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-input"
                 )}
               >
-                {(isChecked || isAdded) && <CheckIcon className="size-3.5" />}
+                {isAdded && <CheckIcon className="size-3.5" />}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="line-clamp-2 text-sm leading-snug">
@@ -190,14 +154,6 @@ export default function StepSelect({
                   title={q.non_chartable_reason ?? undefined}
                 >
                   Not chartable
-                </Badge>
-              )}
-              {isAdded && (
-                <Badge
-                  variant="outline"
-                  className="shrink-0 border-emerald-300 bg-emerald-50 font-normal text-emerald-600"
-                >
-                  Added
                 </Badge>
               )}
             </button>

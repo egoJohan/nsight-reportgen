@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Outlet, NavLink, useLocation, useParams } from "react-router-dom";
 import {
   SidebarProvider,
@@ -14,8 +15,9 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { useCases } from "@/lib/queries";
+import NewCaseDialog from "@/components/NewCaseDialog";
 import {
-  BriefcaseIcon,
+  PlusIcon,
   FolderOpenIcon,
   SettingsIcon,
   BarChart3Icon,
@@ -67,6 +69,7 @@ function Breadcrumb() {
 }
 
 export default function AppShell() {
+  const [newCaseOpen, setNewCaseOpen] = useState(false);
   return (
     <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon">
@@ -83,24 +86,25 @@ export default function AppShell() {
         </SidebarHeader>
 
         <SidebarContent>
-          {/* Top-level navigation */}
+          {/* New case — opens the upload dialog (creation = upload). */}
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    render={<NavLink to="/" end />}
-                    tooltip="Cases"
+                    onClick={() => setNewCaseOpen(true)}
+                    tooltip="New case"
+                    className="font-medium text-primary"
                   >
-                    <BriefcaseIcon className="size-4" />
-                    <span>Cases</span>
+                    <PlusIcon className="size-4" />
+                    <span>New case</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Cases sub-nav */}
+          {/* Cases list */}
           <SidebarGroup className="group-data-[collapsible=icon]:hidden">
             <SidebarGroupContent>
               <CasesNav />
@@ -137,6 +141,8 @@ export default function AppShell() {
           <Outlet />
         </main>
       </SidebarInset>
+
+      <NewCaseDialog open={newCaseOpen} onOpenChange={setNewCaseOpen} />
     </SidebarProvider>
   );
 }

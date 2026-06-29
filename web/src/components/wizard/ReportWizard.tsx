@@ -157,17 +157,16 @@ export default function ReportWizard({
     []
   );
 
-  const addCharts = useCallback(
-    (questions: Question[]) => {
+  // Enabling/disabling a question directly edits the report: add its chart when
+  // absent, remove it when present (no separate "Add selected" step).
+  const toggleQuestion = useCallback(
+    (q: Question) => {
       mutate((d) => {
-        const existing = new Set(d.charts.map((c) => c.question_ref));
-        const fresh: ChartSpec[] = questions
-          .filter((q) => !existing.has(q.qid))
-          .map((q) => makeChart(q.qid, q.suggested_chart_type));
-        return {
-          ...d,
-          charts: normalizeSlots([...d.charts, ...fresh]),
-        };
+        const exists = d.charts.some((c) => c.question_ref === q.qid);
+        const charts = exists
+          ? d.charts.filter((c) => c.question_ref !== q.qid)
+          : [...d.charts, makeChart(q.qid, q.suggested_chart_type)];
+        return { ...d, charts: normalizeSlots(charts) };
       });
     },
     [mutate]
@@ -510,10 +509,7 @@ export default function ReportWizard({
           <StepSelect
             materialId={materialId}
             addedRefs={addedRefs}
-            onAdd={(qs) => {
-              addCharts(qs);
-              setStep(1);
-            }}
+            onToggle={toggleQuestion}
           />
         )}
         {step === 1 && (
