@@ -113,6 +113,14 @@ def note_field(text: str) -> ConfigField:
     return ConfigField("note", "note", "", help=text)
 
 
+def combo_secondary_field() -> ConfigField:
+    return ConfigField(
+        "combo_secondary", "numeric_variable", "Secondary variable (line)",
+        help="A numeric/rating variable shown as a mean-per-category line on the "
+             "right axis. Shares this question's categories as the x-axis.",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Composed schemas shared by families of chart types.
 # --------------------------------------------------------------------------- #
@@ -141,3 +149,10 @@ def stacked_schema() -> tuple[ConfigField, ...]:
 def single_series_schema() -> tuple[ConfigField, ...]:
     """Single-series charts (pie/doughnut/funnel): NO classifying variable."""
     return (statistic_field(), *_common_tail())
+
+
+def combo_schema() -> tuple[ConfigField, ...]:
+    """Combo: this question is the x-axis (bars); pick a numeric secondary
+    variable for the mean-per-category line, or split by a classifying variable."""
+    return (statistic_field(), combo_secondary_field(),
+            classifying_var_field(), *_common_tail())

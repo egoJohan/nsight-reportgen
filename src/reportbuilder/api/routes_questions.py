@@ -113,6 +113,22 @@ def _is_text_question(model: QuestionModel, q) -> bool:
     return bool(qvars) and all(v.measurement == "text" for v in qvars)
 
 
+def _aggregatable(var) -> bool:
+    """True when a per-category MEAN of this variable is meaningful — a numeric
+    scale, or a rating whose value labels start with a digit (1..N). Used to
+    offer valid secondary variables for a combo line."""
+    import re as _re
+    if var.measurement == "text":
+        return False
+    if var.measurement == "scale" and not var.value_labels:
+        return True
+    vls = var.value_labels
+    if not vls:
+        return var.measurement == "scale"
+    digit = sum(1 for vl in vls if _re.match(r"^\s*\d", vl.label or ""))
+    return digit >= max(1, int(len(vls) * 0.6))
+
+
 def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
     """Whether a question can be charted, plus a reason when it cannot (Task J.3).
 
@@ -405,6 +421,9 @@ def list_variables(
                 # Number of value labels — lets the UI offer only low-cardinality
                 # categoricals as classifying (segmentation) variables.
                 "n_values": len(var.value_labels),
+                # Can a per-category MEAN be taken (numeric scale, or a rating whose
+                # value labels start with a digit) — i.e. a valid combo secondary.
+                "aggregatable": _aggregatable(var),
             }
             for var in all_vars
         ]

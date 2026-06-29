@@ -41,6 +41,9 @@ export interface Variable {
   label: string;
   measurement: string;
   n_values?: number;
+  // Whether a per-category mean is meaningful (numeric/rating) — a valid combo
+  // secondary variable.
+  aggregatable?: boolean;
 }
 
 // ---- Question details (computed summary) ----

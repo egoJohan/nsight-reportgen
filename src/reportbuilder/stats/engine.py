@@ -391,9 +391,59 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
     )
 
 
+def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
+                   model: QuestionModel) -> SeriesResult:
+    """Two-variable combo: the question's categories are the shared x-axis; the
+    bars are the question's distribution (%), and the line is the MEAN of a
+    compatible numeric secondary variable within each category (dual axis). The
+    secondary mean is stored in the line segment's ``pct`` field so the existing
+    combo renderer (bars=seg0, line=seg1) plots it on the right axis unchanged."""
+    var = model.variable(question.variables[0])
+    sec_name = spec.options.get("combo_secondary")
+    sec = model.variable(sec_name)
+    # Primary distribution (%), single series over the question's categories.
+    base_spec = dataclasses.replace(
+        spec, options={}, classifying_var=None, statistic="pct",
+        chart_type="vertical_bar",
+    )
+    base = _single(question, base_spec, data, model)
+    pcol = pd.to_numeric(data[var.name], errors="coerce")
+    # Secondary values: map rating codes (e.g. 1000x) to their 1..N scale point
+    # via the value-label leading digit; otherwise use the raw numeric value.
+    sec_num = pd.to_numeric(data[sec_name], errors="coerce")
+    sec_scale = _rating_scale(sec)
+    scol = sec_num.map(sec_scale) if sec_scale else sec_num
+    label_to_code = {vl.label: vl.value for vl in var.value_labels}
+    primary_label = (var.label or var.name)[:30]
+    secondary_label = (sec.label or sec.name)[:30]
+
+    cells: dict[tuple[str, str], Cell] = {}
+    for cat in base.categories:
+        ptot = base.cell(cat, "Total")
+        cells[(cat, primary_label)] = Cell(pct=(ptot.pct if ptot else None))
+        code = label_to_code.get(cat)
+        vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
+        cells[(cat, secondary_label)] = Cell(
+            pct=(float(vals.mean()) if len(vals) else None)
+        )
+    return SeriesResult(
+        categories=base.categories,
+        segments=(primary_label, secondary_label),
+        cells=cells,
+        base_n=dict(base.base_n),
+        statistic="pct",
+    )
+
+
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
+    # Two-variable combo: question distribution (bars) + secondary var mean (line).
+    if spec.chart_type == "combo" and spec.options.get("combo_secondary"):
+        try:
+            return _combo_two_var(question, spec, data, model)
+        except Exception:
+            pass  # fall through to the standard (classifier) combo
     # Task J.1: word-cloud chart type — route to the word-frequency path regardless
     # of question kind. Free-text questions become chartable this way; a wordcloud
     # requested on a non-text question yields no words → clean ValueError/422.

@@ -521,6 +521,41 @@ function NoteWidget({ field }: WidgetProps) {
   );
 }
 
+// Picker for a compatible numeric/rating secondary variable (combo line). Only
+// aggregatable variables are offered, guaranteeing a meaningful mean per category.
+function NumericVarWidget({ field, chart, variables, onChange }: WidgetProps) {
+  const current = (readField(chart, field.key) as string | null) ?? null;
+  const candidates = (variables ?? []).filter(
+    (v) => v.aggregatable || v.name === current
+  );
+  return (
+    <Field label={field.label} hint={field.help ?? undefined}>
+      <Select
+        items={{
+          __none__: "None",
+          ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
+        }}
+        value={current ?? "__none__"}
+        onValueChange={(v) =>
+          onChange(patchField(chart, field.key, v === "__none__" ? null : v))
+        }
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder="None" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">None</SelectItem>
+          {candidates.map((v) => (
+            <SelectItem key={v.name} value={v.name}>
+              {v.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 // Dispatch a schema field to its widget. Unknown widget types are skipped so an
 // older UI degrades gracefully against a newer schema.
 function FieldWidget(props: WidgetProps) {
@@ -532,6 +567,8 @@ function FieldWidget(props: WidgetProps) {
       return <SwitchWidget {...props} />;
     case "variable":
       return <ClassifyingVarWidget {...props} />;
+    case "numeric_variable":
+      return <NumericVarWidget {...props} />;
     case "sort":
       return <SortWidget {...props} />;
     case "number_format":
