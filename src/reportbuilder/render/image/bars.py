@@ -112,7 +112,34 @@ def _wrap_xtick_label(text: str) -> str:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _apply_bar_style(ax, max_val: float = 100.0) -> None:
+def _value_axis(max_val: float, statistic: str) -> tuple[float, list[float]]:
+    """Return (axis_max, gridline/tick positions) for the VALUE axis.
+
+    Percentages use the fixed 0..100 scale (capped, 20-step gridlines). Counts
+    and means have no 100 cap — the axis scales to the data with ~5 "nice" ticks,
+    otherwise a count of e.g. 600 would overflow a 0..100 axis and its data
+    labels (placed at x=value) would blow up the tight bounding box, shrinking
+    the whole chart to a stamp."""
+    if statistic == "pct":
+        ax_max = min(100.0, max(max_val * 1.15, 10.0))
+        return ax_max, [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
+    # count / mean: nice round ticks covering the data range.
+    vmax = max(max_val * 1.12, 1.0)
+    raw = vmax / 5.0
+    mag = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    top = math.ceil(vmax / step) * step
+    n = int(round(top / step))
+    ticks = [round(i * step, 6) for i in range(n + 1)]
+    return top, ticks
+
+
+def _tick_text(v: float) -> str:
+    """Integer-looking tick → no decimals; otherwise trim trailing zeros."""
+    return str(int(v)) if float(v).is_integer() else f"{v:g}"
+
+
+def _apply_bar_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None:
     """Apply house-style spines, grid, and tick formatting to a bar axes."""
     # Remove all spines, then restore left spine only (horizontal bars)
     for spine in ax.spines.values():
@@ -121,22 +148,20 @@ def _apply_bar_style(ax, max_val: float = 100.0) -> None:
     ax.spines["left"].set_color("#C9C1B4")
     ax.spines["left"].set_linewidth(1.0)
 
-    # Vertical reference lines at every 20-unit interval
-    ax_max = min(100.0, max(max_val * 1.15, 10.0))
-    for xv in [20, 40, 60, 80, 100]:
-        if xv <= ax_max:
+    ax_max, ticks = _value_axis(max_val, statistic)
+    for xv in ticks:
+        if xv > 0:
             ax.axvline(xv, color=GRIDC, lw=0.8, zorder=1)
 
     ax.tick_params(axis="x", length=0)
     ax.tick_params(axis="y", length=0)
 
-    x_ticks = [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
-    ax.set_xticks(x_ticks)
-    ax.set_xticklabels([str(v) for v in x_ticks], fontsize=9.5, color=MUTED)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([_tick_text(v) for v in ticks], fontsize=9.5, color=MUTED)
     ax.set_xlim(0, ax_max)
 
 
-def _apply_column_style(ax, max_val: float = 100.0) -> None:
+def _apply_column_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None:
     """Apply house-style spines, grid, and tick formatting to a column axes."""
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -144,17 +169,16 @@ def _apply_column_style(ax, max_val: float = 100.0) -> None:
     ax.spines["bottom"].set_color("#C9C1B4")
     ax.spines["bottom"].set_linewidth(1.0)
 
-    ax_max = min(100.0, max(max_val * 1.15, 10.0))
-    for yv in [20, 40, 60, 80, 100]:
-        if yv <= ax_max:
+    ax_max, y_ticks = _value_axis(max_val, statistic)
+    for yv in y_ticks:
+        if yv > 0:
             ax.axhline(yv, color=GRIDC, lw=0.8, zorder=1)
 
     ax.tick_params(axis="x", length=0)
     ax.tick_params(axis="y", length=0)
 
-    y_ticks = [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
     ax.set_yticks(y_ticks)
-    ax.set_yticklabels([str(v) for v in y_ticks], fontsize=9.5, color=MUTED)
+    ax.set_yticklabels([_tick_text(v) for v in y_ticks], fontsize=9.5, color=MUTED)
     ax.set_ylim(0, ax_max)
 
 
@@ -228,7 +252,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
         display_cats, fontsize=10.5, color=INK,
         rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
     )
-    _apply_column_style(ax, max_val)
+    _apply_column_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
         _style_legend(ax)
@@ -300,7 +324,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-    _apply_bar_style(ax, max_val)
+    _apply_bar_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
         _style_legend(ax, loc="lower right")
