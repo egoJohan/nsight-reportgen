@@ -42,10 +42,30 @@ def pie_suitability(question, series) -> float | None:
     return 0.75 if s.n_categories <= 6 else 0.50
 
 
+def _looks_ordinal(series) -> bool:
+    """True when the categories look like an ordered scale (Likert/age bands)
+    rather than nominal groups — i.e. most labels start with a digit
+    ("1=Erittäin huonosti", "55-64 vuotta"). A pie reads composition, not order,
+    so ordered scales keep bars."""
+    import re
+
+    cats = [c for c in series.categories if c]
+    if not cats:
+        return False
+    digit_start = sum(1 for c in cats if re.match(r"^\s*\d", c))
+    return digit_start >= len(cats) * 0.5
+
+
 def pie_suggest(question, series) -> float | None:
-    """Auto-default only for a small parts-of-whole set (<=4 slices)."""
+    """Default for NOMINAL parts-of-whole (unordered groups, few slices) — a pie
+    reads a composition better than a bar there. Ordered scales (Likert, age
+    bands) keep bars. A very small partition (<=4) defaults to pie regardless."""
     s = SeriesShape.of(question, series)
-    if _is_parts_of_whole(s) and s.n_categories <= 4:
+    if not _is_parts_of_whole(s):
+        return None
+    if s.n_categories <= 6 and not _looks_ordinal(series):
+        return 0.95  # nominal parts-of-whole → pie is the natural default
+    if s.n_categories <= 4:
         return 0.60
     return None
 
