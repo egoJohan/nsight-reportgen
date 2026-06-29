@@ -454,3 +454,83 @@ def test_attendo_var18_question_text_is_shared_question():
     assert "Mitä seuraavista" in var18_q.text, (
         f"Expected shared question text, got: {var18_q.text!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Curation corpus — verify ingest/curation across every real export (REQ-C-05).
+# Each is skip-if-absent so the suite still runs without the (PII) SAVs present.
+# ---------------------------------------------------------------------------
+
+from reportbuilder.ingest.sav_reader import _is_metadata as _meta  # noqa: E402
+from reportbuilder.ingest.multi_group import enrich_model  # noqa: E402
+
+
+def _corpus_model(name: str):
+    """Load + fully curate a corpus SAV by short name, or skip if absent."""
+    from reportbuilder import config
+
+    path = config.CORPUS_SAVS[name]
+    if not path.exists():
+        pytest.skip(f"{name} .sav not present")
+    df, model = read_sav(path)
+    return df, enrich_model(model)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("name", ["attendo", "holidayclub", "synsam"])
+def test_corpus_loads_and_has_questions(name):
+    """Every corpus SAV ingests and yields a non-trivial curated question set."""
+    _, model = _corpus_model(name)
+    assert len(model.questions) > 5
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("name", ["attendo", "holidayclub", "synsam"])
+def test_corpus_no_metadata_leaks_into_questions(name):
+    """No survey-platform metadata/paradata variable survives as a question."""
+    _, model = _corpus_model(name)
+    leaked = [
+        q.variables[0]
+        for q in model.questions
+        if q.kind == "single" and _meta(q.variables[0], q.text or q.variables[0])
+    ]
+    assert not leaked, f"{name}: metadata leaked into questions: {leaked}"
+
+
+@pytest.mark.integration
+def test_holidayclub_paradata_and_segments_excluded():
+    """Holiday Club: paradata (Survey timer, answer count, Hidden value, URL
+    captures) and unlabeled segment flags are NOT questions; the segments remain
+    available as classifying variables (kept in the variables dict)."""
+    _, model = _corpus_model("holidayclub")
+    q_texts = {(q.text or "") for q in model.questions}
+
+    for bad in ("Survey timer", "answer count", "Hidden value", "URL_profiili"):
+        assert not any(bad.lower() in t.lower() for t in q_texts), (
+            f"paradata '{bad}' must not be a question"
+        )
+
+    segments = ["vieralijat", "contracts_1", "VillastaiGold", "Perusomistajat"]
+    q_vars = {q.variables[0] for q in model.questions if q.kind == "single"}
+    for seg in segments:
+        assert seg not in q_vars, f"segment '{seg}' must not be a question"
+        assert seg in model.variables, (
+            f"segment '{seg}' must stay available as a classifying variable"
+        )
+
+
+@pytest.mark.integration
+def test_attendo_scale_aggregates_kept_unlabeled_flags_excluded():
+    """Attendo: derived RATING aggregates (Inhimilli, scale) stay chartable as
+    questions; unlabeled nominal flags (Kokemusta) are excluded from questions
+    but remain in the variables dict."""
+    _, model = _corpus_model("attendo")
+    q_vars = {q.variables[0] for q in model.questions if q.kind == "single"}
+
+    assert "Inhimilli" in q_vars, "scale aggregate 'Inhimilli' must remain a question"
+    assert "Luotettava" in q_vars, "scale aggregate 'Luotettava' must remain a question"
+
+    assert "Kokemusta" not in q_vars, "unlabeled nominal flag must not be a question"
+    assert "Kokemusta" in model.variables, (
+        "'Kokemusta' must stay available as a classifying variable"
+    )

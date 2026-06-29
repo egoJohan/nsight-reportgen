@@ -11,7 +11,17 @@ _ROOT = Path(__file__).resolve().parents[2]
 INPUT_DIR = _ROOT / "input"
 WORK_DIR = _ROOT / "work"
 ATTENDO_SAV = INPUT_DIR / "spss AttendoSuomi-Brandiseuranta_112025.sav"
+HOLIDAYCLUB_SAV = INPUT_DIR / "spss_FINAL_HolidayClub.sav"
+SYNSAM_SAV = INPUT_DIR / "spss Synsam_segmenteillä_vainvalittu_segmmalli.sav"
 ATTENDO_TEMPLATE = WORK_DIR / "attendo_blanked.pptx"
+
+# All curation-corpus SAVs, keyed by short name — used by integration tests to
+# verify ingest/curation across every real export we support.
+CORPUS_SAVS = {
+    "attendo": ATTENDO_SAV,
+    "holidayclub": HOLIDAYCLUB_SAV,
+    "synsam": SYNSAM_SAV,
+}
 
 
 def datahive_client_from_env() -> DataHiveClient | None:
