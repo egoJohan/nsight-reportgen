@@ -122,7 +122,11 @@ function ChartPreview({
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
 
-  const title = chart.slide_title?.trim() || questionText;
+  const headline = chart.slide_title?.trim() || questionText;
+  // Show the actual question text under the headline when the headline is a
+  // distinct AI key-message (so the question is always visible at the top).
+  const showQuestion =
+    !!chart.slide_title?.trim() && chart.slide_title.trim() !== questionText;
   const region = labelRegion(chart.chart_type);
 
   return (
@@ -148,18 +152,25 @@ function ChartPreview({
         {url &&
           (titlePending ? (
             <PendingRegion
-              style={{ left: "3%", top: "2.5%", width: "70%", height: "13%" }}
+              style={{ left: "4%", top: "2.5%", width: "92%", height: "13%" }}
               label="Generating title…"
             />
           ) : (
             <div
-              className="absolute z-10 flex items-stretch gap-2.5"
-              style={{ left: "3%", top: "2.5%", width: "72%", height: "13%" }}
+              className="absolute z-10 flex items-start gap-2.5"
+              style={{ left: "4%", top: "2.5%", width: "92%" }}
             >
-              <div className="w-1 shrink-0 rounded-full bg-teal-600" />
-              <p className="line-clamp-2 text-left text-[15px] leading-tight font-bold text-foreground">
-                {title}
-              </p>
+              <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
+              <div className="min-w-0">
+                <p className="line-clamp-2 text-left text-[15px] leading-tight font-bold text-foreground">
+                  {headline}
+                </p>
+                {showQuestion && (
+                  <p className="mt-0.5 line-clamp-2 text-left text-[11px] leading-tight text-muted-foreground">
+                    {questionText}
+                  </p>
+                )}
+              </div>
             </div>
           ))}
 

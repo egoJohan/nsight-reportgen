@@ -111,10 +111,19 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         acc.line.fill.background()
         acc.shadow.inherit = False
 
-        # 3 — Title / question-text textbox  (REQ-C-24a, REQ-D-04)
-        #     Use slide_title when set; fall back to ctx.title (question text).
-        title = getattr(ctx.spec, "slide_title", None) or ctx.title or ""
-        slide_description = getattr(ctx.spec, "slide_description", None) or ""
+        # 3 — Title + question text  (REQ-C-24a, REQ-D-04)
+        #     Headline = slide_title (AI key message) when set, else the question
+        #     text. When a distinct headline is set, show the QUESTION TEXT as a
+        #     secondary line so the actual question is always at the top; if no
+        #     distinct headline, the secondary line is the optional description.
+        question = (ctx.title or "").strip()
+        slide_title = (getattr(ctx.spec, "slide_title", None) or "").strip()
+        slide_description = (getattr(ctx.spec, "slide_description", None) or "").strip()
+        title = slide_title or question
+        if slide_title and question and slide_title != question:
+            secondary = question
+        else:
+            secondary = slide_description
         if title:
             _textbox(
                 slide,
@@ -122,12 +131,12 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 sw - Inches(1.0), Inches(0.60),
                 [(title, 21, PX_INK, True)],
             )
-        if slide_description:
+        if secondary:
             _textbox(
                 slide,
                 Inches(0.80), Inches(1.02),
                 sw - Inches(1.0), Inches(0.40),
-                [(slide_description, 13, PX_MUTED, False)],
+                [(secondary, 13, PX_MUTED, False)],
             )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)

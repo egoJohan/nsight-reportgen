@@ -286,11 +286,18 @@ def test_slide_chrome_uses_ai_title_not_question_text():
 
     add_image_slide_chrome(ctx)
 
+    # The AI headline is the bold title; the question text is shown beneath it as
+    # a secondary line (so the actual question is always at the top).
+    boldlines = [
+        s.text_frame.text
+        for s in slide.shapes
+        if s.has_text_frame and s.text_frame.paragraphs and any(
+            r.font.bold for p in s.text_frame.paragraphs for r in p.runs
+        )
+    ]
     alltext = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
-    assert ai_title in alltext, "AI slide_title not rendered"
-    assert "Mikä on kokemuksesi" not in alltext, (
-        "raw question text was shown even though an AI title was set"
-    )
+    assert any(ai_title in t for t in boldlines), "AI headline should be the bold title"
+    assert "Mikä on kokemuksesi" in alltext, "question text should appear under the headline"
 
 
 def test_add_image_slide_chrome_n_annotation():

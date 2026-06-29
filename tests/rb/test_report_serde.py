@@ -200,8 +200,10 @@ def test_slide_chrome_uses_slide_title(monkeypatch) -> None:
         "Override Title" in s.text_frame.text for s in textboxes
     )
     assert override_found, "slide_title 'Override Title' not found in chrome textboxes"
-    # "Override Description" must appear as the subtitle.
-    desc_found = any(
-        "Override Description" in s.text_frame.text for s in textboxes
+    # When a distinct AI headline is set, the secondary line shows the QUESTION
+    # TEXT (so the actual question is always visible at the top), not the
+    # optional description.
+    question_found = any(
+        "Question Text" in s.text_frame.text for s in textboxes
     )
-    assert desc_found, "slide_description 'Override Description' not found in chrome textboxes"
+    assert question_found, "question text not shown as the secondary line under the headline"
