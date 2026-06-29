@@ -9,8 +9,14 @@ from reportbuilder.render.native.line import build_line
 
 
 def suitability(question, series) -> float | None:
-    """High when categories look temporal; moderate for >=3 ordered categories."""
+    """High when categories look temporal; moderate for >=3 ordered categories.
+
+    Never offered for multi-response sets — a line implies a continuum between
+    adjacent points, meaningless across independent tick-box options.
+    """
     s = SeriesShape.of(question, series)
+    if s.is_multi:
+        return None
     if s.is_temporal:
         return 0.90
     return 0.60 if s.n_categories >= 3 else 0.35
@@ -19,6 +25,8 @@ def suitability(question, series) -> float | None:
 def suggest(question, series) -> float | None:
     """Auto-default only for temporal categories (a trend over time/waves)."""
     s = SeriesShape.of(question, series)
+    if s.is_multi:
+        return None
     return 1.00 if s.is_temporal else None
 
 
