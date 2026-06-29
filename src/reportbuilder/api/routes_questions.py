@@ -685,7 +685,10 @@ def preview_chart(
     try:
         build_pptx(report, model, df, pptx_path)
         pdf_path = pptx_to_pdf(pptx_path, str(out_dir))
-        pngs = rasterize_pages(pdf_path, str(out_dir / "pages"))
+        # Previews are shown at ~640px (big pane) / smaller (thumbs), so 110 DPI
+        # is ample and ~40% lighter than deck DPI — smaller PNGs decode faster
+        # and use less memory across 100+ cached previews.
+        pngs = rasterize_pages(pdf_path, str(out_dir / "pages"), dpi=110)
     except HTTPException:
         raise  # already a well-formed HTTP error — pass through unchanged
     except Exception as exc:

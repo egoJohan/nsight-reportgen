@@ -76,10 +76,17 @@ def _bullet_box(slide, sw, sh, bullets: list[str]) -> None:
     tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.TOP
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    # Hanging indent: the bullet glyph sits at the left edge and wrapped lines
+    # align under the FIRST line's text (not under the bullet). marL = text
+    # start; indent = -marL pulls the bullet back to the margin.
+    _HANG = Inches(0.32)
     for i, text in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.LEFT
         p.space_after = Pt(10)
+        pPr = p._p.get_or_add_pPr()
+        pPr.set("marL", str(int(_HANG)))
+        pPr.set("indent", str(-int(_HANG)))
         # Teal bullet glyph, then the ink body text.
         dot = p.add_run()
         dot.text = "•  "
