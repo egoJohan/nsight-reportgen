@@ -129,6 +129,57 @@ def _aggregatable(var) -> bool:
     return digit >= max(1, int(len(vls) * 0.6))
 
 
+def _is_likert_scale(var) -> bool:
+    """A 1..N Likert rating item (labels are mostly sequential digits starting at
+    1, e.g. '1=Täysin eri mieltä' … '7=Täysin samaa mieltä').
+
+    Such items are what a survey MEASURES, not how respondents are segmented — so
+    they must be excluded from the classifying-variable picker. This is distinct
+    from bracket categoricals (age '18–24', spend '500–999 €') whose leading
+    numbers are NOT a 1..N sequence and which ARE valid segmenters."""
+    import re as _re
+    pts: list[int] = []
+    for vl in var.value_labels:
+        m = _re.match(r"^\s*(\d+)", vl.label or "")
+        if m:
+            pts.append(int(m.group(1)))
+    if len(pts) < max(3, len(var.value_labels) - 1):
+        return False  # not mostly-numeric → not a Likert scale
+    uniq = sorted(set(pts))
+    return uniq[0] == 1 and uniq == list(range(1, len(uniq) + 1)) and uniq[-1] <= 11
+
+
+def _segmentable(var) -> bool:
+    """True when a variable is a MEANINGFUL classifying/segmentation variable.
+
+    A low-cardinality categorical that is background/demographic (age, region,
+    ownership tier, branch, …) — NOT a Likert rating item (measured, not used to
+    segment) and not a high-cardinality single-choice question. This keeps the
+    'Classifying variable' picker to the handful of variables an analyst would
+    actually cross-tabulate by, instead of every categorical in the file."""
+    if var.measurement != "categorical":
+        return False
+    nv = len(var.value_labels)
+    if not (2 <= nv <= 10):
+        return False
+    return not _is_likert_scale(var)
+
+
+def _has_real_category_labels(var) -> bool:
+    """True when a variable's value labels are substantive category names (e.g.
+    'enemmistöomistajat', 'Branch A') rather than generic flags (TRUE/FALSE/EMPTY)
+    — used to keep analyst segment recodes (whose NAME looks like paradata) in the
+    classifying-variable picker while still dropping bare binary URL flags."""
+    generic = {"true", "false", "empty", "yes", "no", "kyllä", "ei", "-", "—", ""}
+    named = [
+        lbl for vl in var.value_labels
+        if (lbl := (vl.label or "").strip())
+        and any(ch.isalpha() for ch in lbl)
+        and lbl.lower() not in generic
+    ]
+    return len(named) >= 2
+
+
 def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
     """Whether a question can be charted, plus a reason when it cannot (Task J.3).
 
@@ -402,12 +453,20 @@ def list_variables(
         v for q in model.questions if q.kind in ("multi", "battery") for v in q.variables
     }
     # Survey-platform paradata (IP address, Survey timer, URL captures, …) is kept
-    # in the variables dict but must not be offered as a segmentation variable.
-    all_vars = [
-        v
-        for v in model.variables.values()
-        if v.name not in grouped and not _is_metadata(v.name, v.label or v.name)
-    ]
+    # in the variables dict but must not be offered as a segmentation variable —
+    # EXCEPT analyst-derived segment recodes (e.g. URLprofiilinew =
+    # enemmistöomistajat/prosenttiomistajat/vierailijat, LinkName, Branch) which
+    # carry a cryptic platform NAME but real category labels. Those are exactly
+    # the classifiers an analyst cross-tabulates by, so keep them when they are a
+    # genuine segment (substantive labels, not TRUE/FALSE flags).
+    def _keep(v) -> bool:
+        if v.name in grouped:
+            return False
+        if not _is_metadata(v.name, v.label or v.name):
+            return True
+        return _segmentable(v) and _has_real_category_labels(v)
+
+    all_vars = [v for v in model.variables.values() if _keep(v)]
     # Stable sort: categorical before scale; original file order within each tier.
     all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
     return {
@@ -424,6 +483,10 @@ def list_variables(
                 # Can a per-category MEAN be taken (numeric scale, or a rating whose
                 # value labels start with a digit) — i.e. a valid combo secondary.
                 "aggregatable": _aggregatable(var),
+                # Is this a MEANINGFUL classifying/segmentation variable (a
+                # background/demographic categorical, not a Likert item) — drives
+                # the classifying-variable picker.
+                "segmentable": _segmentable(var),
             }
             for var in all_vars
         ]

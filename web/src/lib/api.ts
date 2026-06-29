@@ -44,6 +44,9 @@ export interface Variable {
   // Whether a per-category mean is meaningful (numeric/rating) — a valid combo
   // secondary variable.
   aggregatable?: boolean;
+  // Whether this is a meaningful classifying/segmentation variable (background/
+  // demographic categorical, not a Likert item) — drives the classifier picker.
+  segmentable?: boolean;
 }
 
 // ---- Question details (computed summary) ----

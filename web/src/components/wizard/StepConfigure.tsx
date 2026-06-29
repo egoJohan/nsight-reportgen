@@ -332,6 +332,10 @@ function SwitchWidget({ field, chart, onChange }: WidgetProps) {
 // high-cardinality list. Keep the chart's own variable(s) selectable-by-value
 // even if filtered, so an existing pick is never hidden.
 function isSegmenter(v: Variable): boolean {
+  // Prefer the backend's meaningful-classifier flag (excludes Likert rating
+  // items, keeps demographic/segment categoricals). Fall back to a cardinality
+  // heuristic only when the flag is absent (older payloads).
+  if (typeof v.segmentable === "boolean") return v.segmentable;
   const n = v.n_values ?? 0;
   return v.measurement === "categorical" && n >= 2 && n <= 15;
 }
