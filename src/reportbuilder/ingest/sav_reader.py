@@ -190,6 +190,24 @@ def _is_constant_marker(name: str, var: "Variable", series) -> bool:
         return False
 
 
+def _is_unlabeled_helper(name: str, var: "Variable") -> bool:
+    """Return True for an unlabeled derived *categorical* helper/flag — a column
+    with no human label (label == variable name), no value labels, and nominal
+    measurement (e.g. Holiday Club's ``vieralijat``, ``contracts_1``,
+    ``VillastaiGold``, ``Perusomistajat``). These are analyst segmentation flags,
+    not survey questions, so they are excluded from the question browser.
+
+    They are NOT removed from the variables dict, so they remain available as
+    classifying/segmentation variables (nothing is lost). Derived RATING
+    aggregates like Attendo's ``Inhimilli`` have measurement ``"scale"`` and are
+    deliberately NOT matched — they stay chartable as questions. Free text
+    (measurement ``"text"``) is likewise untouched.
+    """
+    if var.value_labels or var.measurement != "categorical":
+        return False
+    return (var.label or "").strip() == name
+
+
 # ---------------------------------------------------------------------------
 # Public reader
 # ---------------------------------------------------------------------------
@@ -234,14 +252,16 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             missing_values=_user_missing(missing_ranges.get(name)),
         )
 
-    # A0.1: build questions from non-metadata variables only.
-    # Metadata variables remain accessible in `variables` but are excluded
-    # from `questions` to keep the question browser clean (REQ-C-05).
+    # A0.1: build questions from non-metadata variables only. Metadata,
+    # constant markers, and unlabeled categorical helper flags remain accessible
+    # in `variables` (the latter still usable as classifying variables) but are
+    # excluded from `questions` to keep the question browser clean (REQ-C-05).
     questions = [
         Question(qid=_slug(name), kind="single", variables=(name,), text=variables[name].label)
         for name in df.columns
         if not _is_metadata(name, variables[name].label)
         and not _is_constant_marker(name, variables[name], df[name])
+        and not _is_unlabeled_helper(name, variables[name])
     ]
     model = QuestionModel(variables=variables, questions=questions)
     return df, model

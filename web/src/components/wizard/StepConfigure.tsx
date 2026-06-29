@@ -76,11 +76,11 @@ function PendingRegion({
 }) {
   return (
     <div
-      className="absolute z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary/40 bg-background/65 px-2 text-center backdrop-blur-[1px]"
+      className="absolute z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-white/40 bg-black/80 px-2 text-center"
       style={style}
     >
-      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <SparklesIcon className="size-3.5 shrink-0 animate-pulse text-primary" />
+      <span className="flex items-center gap-1.5 text-xs font-medium text-white/90">
+        <SparklesIcon className="size-3.5 shrink-0 animate-pulse text-white" />
         {label}
       </span>
     </div>
@@ -978,6 +978,7 @@ export default function StepConfigure({
   onUpdateChart,
   onRemoveChart,
   onReorder,
+  onEnsureTitle,
 }: {
   materialId: string;
   charts: ChartSpec[];
@@ -985,6 +986,9 @@ export default function StepConfigure({
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   onRemoveChart: (index: number) => void;
   onReorder?: (from: number, to: number) => void;
+  // Called with the active chart's ref so its AI slide title is generated
+  // lazily — only when the user actually opens that chart.
+  onEnsureTitle?: (ref: string) => void;
 }) {
   const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
@@ -1001,6 +1005,12 @@ export default function StepConfigure({
   useEffect(() => {
     if (active > charts.length - 1) setActive(Math.max(0, charts.length - 1));
   }, [charts.length, active]);
+
+  // Lazily generate the AI slide title for whichever chart is open.
+  const activeRef = charts[active]?.question_ref;
+  useEffect(() => {
+    if (activeRef) onEnsureTitle?.(activeRef);
+  }, [activeRef, onEnsureTitle]);
 
   if (isError) {
     return (

@@ -9,7 +9,7 @@ import pandas as pd
 import pyreadstat
 import pytest
 
-from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
+from reportbuilder.ingest.sav_reader import read_sav, _is_metadata, _is_unlabeled_helper
 from reportbuilder.ingest.multi_group import suggest_multi_groups, apply_groups, _group_text
 from reportbuilder.model.question import QuestionModel, Question, Variable, ValueLabel
 
@@ -162,6 +162,53 @@ class TestIsMetadata:
     def test_question_mentioning_url_kept(self):
         """A real question that merely mentions a URL must survive (prefix, not substring)."""
         assert _is_metadata("var50", "Kuinka usein käytät verkkosivun URL-osoitetta?") is False
+
+
+# ---------------------------------------------------------------------------
+# Unlabeled categorical helper flags (segments) — excluded from questions,
+# kept as classifying variables. Scale aggregates (Inhimilli) are NOT matched.
+# ---------------------------------------------------------------------------
+
+class TestUnlabeledHelper:
+    def test_unlabeled_categorical_flag_is_helper(self):
+        """label == name, no value labels, categorical → segmentation helper."""
+        v = _var("vieralijat", "vieralijat")  # categorical, no value labels
+        assert _is_unlabeled_helper("vieralijat", v) is True
+
+    def test_unlabeled_binary_segment_is_helper(self):
+        v = _var("Perusomistajat", "Perusomistajat")
+        assert _is_unlabeled_helper("Perusomistajat", v) is True
+
+    def test_scale_aggregate_is_not_helper(self):
+        """A derived RATING aggregate (Inhimilli) is measurement 'scale' → kept."""
+        v = Variable(
+            name="Inhimilli",
+            label="Inhimilli",
+            measurement="scale",
+            value_labels=(),
+            missing_values=frozenset(),
+        )
+        assert _is_unlabeled_helper("Inhimilli", v) is False
+
+    def test_value_labelled_var_is_not_helper(self):
+        """A coded categorical WITH value labels is a real question, not a helper."""
+        v = _var("q1", "q1", binary=True)  # has Yes/No value labels
+        assert _is_unlabeled_helper("q1", v) is False
+
+    def test_labelled_question_is_not_helper(self):
+        """A categorical with a human label (≠ name) is a real question."""
+        v = _var("var3", "Minkä ikäinen olet?")
+        assert _is_unlabeled_helper("var3", v) is False
+
+    def test_text_var_is_not_helper(self):
+        v = Variable(
+            name="var7",
+            label="var7",
+            measurement="text",
+            value_labels=(),
+            missing_values=frozenset(),
+        )
+        assert _is_unlabeled_helper("var7", v) is False
 
 
 # ---------------------------------------------------------------------------

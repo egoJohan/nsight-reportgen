@@ -14,7 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
-import { useQuestions, useReport, useUpdateReport } from "@/lib/queries";
+import { useReport, useUpdateReport } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
@@ -111,7 +111,6 @@ export default function ReportWizard({
   onMissing?: () => void;
 }) {
   const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
-  const { data: questions } = useQuestions(materialId);
   const updateReport = useUpdateReport(caseId);
 
   const [draft, setDraft] = useState<ReportDoc | null>(null);
@@ -231,104 +230,55 @@ export default function ReportWizard({
     }
   }, [updateReport, reportId]);
 
-  // ── Auto AI-formatting (the default, not a manual click) ──────────────────
-  // When charts are added (or a report loads without them), automatically
-  // short-label every chart's categories and generate a descriptive slide
-  // title, then store the results onto the specs so Configure shows SHORT
-  // labels and Slides shows the AI title by default. Per-chart graceful
-  // fallback to the originals on failure; never retried within a session.
-  const aiRunning = useRef(false);
+  // ── Lazy AI slide titles ──────────────────────────────────────────────────
+  // Titles are generated on demand — only for the chart the user actually opens
+  // in Design (egoHive is slow, and a report may hold 100+ charts). While a
+  // title is in flight the preview covers the title band with a dashed
+  // placeholder; the AI key-message replaces it automatically when it lands.
+  // Per-chart graceful fallback to the question text on failure; one attempt
+  // per ref per session.
   const titlesAttempted = useRef<Set<string>>(new Set());
-  // Bumped when an auto-format pass finishes; a separate effect then persists
-  // the result. Saving from a post-commit effect (instead of inline) ensures
-  // every generated patch has flushed into the draft before we read it.
+  // Bumped when a title settles; a separate effect then persists the result so
+  // the generated patch has flushed into the draft before we read it.
   const [aiSaveTick, setAiSaveTick] = useState(0);
 
-  useEffect(() => {
-    // Wait for questions so we only request labels for charts that have
-    // category labels (and compute label + title work in one pass).
-    if (!draft || !questions || aiRunning.current) return;
-
-    const qMap = new Map<string, Question>();
-    questions.forEach((q) => qMap.set(q.qid, q));
-
-    // Category labels are NOT auto-shortened — the cleaned option labels are the
-    // default, and AI shortening is opt-in via the "Shorten with AI" button in
-    // the label editor. We only auto-generate the descriptive slide title.
-    type Task = { ref: string };
-    const tasks: Task[] = [];
-    for (const c of draft.charts) {
-      const needTitle =
-        !titlesAttempted.current.has(c.question_ref) && !c.slide_title;
-      if (needTitle) tasks.push({ ref: c.question_ref });
-    }
-    if (tasks.length === 0) return;
-
-    aiRunning.current = true;
-    // Mark the title region pending up front so the preview shows the
-    // "Generating title…" placeholder immediately.
-    setAiPending((prev) => {
-      const next = { ...prev };
-      for (const t of tasks) {
-        next[t.ref] = { titlePending: true, labelsPending: false };
-      }
-      return next;
-    });
-
-    const clearPending = (ref: string) =>
+  const ensureTitle = useCallback(
+    (ref: string) => {
+      if (!ref || titlesAttempted.current.has(ref)) return;
+      const chart = draftRef.current?.charts.find(
+        (c) => c.question_ref === ref
+      );
+      // Skip charts that already carry a (manual or earlier-generated) title.
+      if (!chart || chart.slide_title) return;
+      titlesAttempted.current.add(ref);
       setAiPending((prev) => ({
         ...prev,
-        [ref]: { ...prev[ref], titlePending: false },
+        [ref]: { titlePending: true, labelsPending: prev[ref]?.labelsPending ?? false },
       }));
-
-    // Per-chart worker: generate the descriptive slide title.
-    const worker = async (task: Task) => {
-      titlesAttempted.current.add(task.ref);
-      const chart = draftRef.current?.charts.find(
-        (c) => c.question_ref === task.ref
-      );
-      const jobs: Promise<unknown>[] = [
-        api.materials
-          .aiSlideTitle(materialId, {
-            question_ref: task.ref,
-            statistic: chart?.statistic,
-            classifying_var: chart?.classifying_var,
-            show_not_answered: chart?.show_not_answered,
-            not_answered_codes: chart?.not_answered_codes,
-          })
-          .then(({ title }) => {
-            if (title) updateChartByRef(task.ref, { slide_title: title });
-          })
-          .catch(() => {
-            /* graceful: fall back to the question text */
-          })
-          .finally(() => clearPending(task.ref)),
-      ];
-      await Promise.allSettled(jobs);
-    };
-
-    // Limited concurrency (≈3 charts in flight); egoHive is slow.
-    const run = async () => {
-      let idx = 0;
-      const lanes = Array.from(
-        { length: Math.min(3, tasks.length) },
-        async () => {
-          while (idx < tasks.length) {
-            const t = tasks[idx++];
-            await worker(t);
-          }
-        }
-      );
-      await Promise.all(lanes);
-    };
-
-    run().finally(() => {
-      aiRunning.current = false;
-      // Persist via the effect below, after the patches have committed.
-      setAiSaveTick((t) => t + 1);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, questions, materialId, updateChartByRef]);
+      api.materials
+        .aiSlideTitle(materialId, {
+          question_ref: ref,
+          statistic: chart.statistic,
+          classifying_var: chart.classifying_var,
+          show_not_answered: chart.show_not_answered,
+          not_answered_codes: chart.not_answered_codes,
+        })
+        .then(({ title }) => {
+          if (title) updateChartByRef(ref, { slide_title: title });
+        })
+        .catch(() => {
+          /* graceful: fall back to the question text */
+        })
+        .finally(() => {
+          setAiPending((prev) => ({
+            ...prev,
+            [ref]: { ...prev[ref], titlePending: false },
+          }));
+          setAiSaveTick((t) => t + 1);
+        });
+    },
+    [materialId, updateChartByRef]
+  );
 
   // Persist generated overrides/titles once an auto-format pass settles. Runs
   // post-commit so draftRef already reflects every generated patch.
@@ -464,6 +414,7 @@ export default function ReportWizard({
             onUpdateChart={updateChart}
             onRemoveChart={removeChart}
             onReorder={reorderCharts}
+            onEnsureTitle={ensureTitle}
           />
         )}
         {step === 2 && (
