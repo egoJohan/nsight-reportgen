@@ -57,13 +57,14 @@ def _group_text(model: QuestionModel, members: tuple[str, ...]) -> str:
     """
     labels = [model.variables[m].label for m in members]
 
-    # Brand:Question pattern — split on ":" and check for a shared right side
+    # Brand:Question pattern — split on ":" and find the shared right side
+    # (tolerant of SPSS truncation: the longest right side is the question).
     if ":" in labels[0]:
         parts = [lbl.split(":", 1) for lbl in labels]
         if all(len(p) == 2 for p in parts):
-            right_parts = [p[1].strip() for p in parts]
-            if len(set(right_parts)) == 1 and right_parts[0]:
-                return right_parts[0]
+            shared = _shared_question([p[1].strip() for p in parts])
+            if shared:
+                return shared
 
     # Fallback: common string prefix
     stem = os.path.commonprefix(labels).rstrip(" :-")
@@ -89,11 +90,43 @@ def enrich_model(model: QuestionModel) -> QuestionModel:
     return model
 
 
+def _shared_question(rights: list[str]) -> str | None:
+    """Return the shared question from the right-hand sides of ``Option:Question``
+    labels, tolerating SPSS label truncation.
+
+    SPSS caps variable labels at ~256 chars, so ``Option:Question`` is cut at a
+    different point per member (the longer the option, the more the question is
+    truncated). The right-hand sides are therefore *prefixes* of one another
+    rather than identical — the LONGEST is the most complete question. Returns it
+    when every right side is a prefix of the longest (covers the identical case
+    too); otherwise None (genuinely different right sides → no shared question).
+    """
+    rights = [r for r in rights if r]
+    if not rights:
+        return None
+    longest = max(rights, key=len)
+    if len(longest) < 4:
+        return None
+    if len(set(rights)) == 1:
+        return longest  # all identical (the untruncated common case)
+    # Truncated copies of one question share a long common prefix; require it to
+    # be a meaningful fraction of the longest so unrelated right sides (a
+    # coincidental colon) are not merged. Using a common prefix (not strict
+    # prefix-of-longest) tolerates a member truncated mid-multibyte-char (→ U+FFFD).
+    common = os.path.commonprefix(rights)
+    if len(common) >= 20 and len(common) >= 0.4 * len(longest):
+        return longest
+    return None
+
+
 def _option_labels(model: QuestionModel, members: tuple[str, ...]) -> dict[str, str] | None:
     """When member labels follow ``<Option>:<SharedQuestion>`` (the survey-export
     convention) return ``{member_name: option}`` — i.e. the labels with the shared
     question suffix stripped, so category labels are the actual options. Returns
     None when the pattern does not hold (labels left untouched).
+
+    The option (left of the first ``:``) is never truncated, so it is reliable
+    even when the shared question on the right is cut to different lengths.
     """
     labels = [model.variables[m].label for m in members]
     if not labels or ":" not in labels[0]:
@@ -102,10 +135,10 @@ def _option_labels(model: QuestionModel, members: tuple[str, ...]) -> dict[str, 
     if not all(len(p) == 2 for p in parts):
         return None
     rights = [p[1].strip() for p in parts]
-    # Same shared question on the right for every member → left parts are options.
-    if len(set(rights)) == 1 and rights[0]:
-        return {m: p[0].strip() for m, p in zip(members, parts) if p[0].strip()}
-    return None
+    # A shared (possibly truncation-varied) question on the right → left parts are options.
+    if _shared_question(rights) is None:
+        return None
+    return {m: p[0].strip() for m, p in zip(members, parts) if p[0].strip()}
 
 
 # ---- public API -------------------------------------------------------------

@@ -10,7 +10,12 @@ import pyreadstat
 import pytest
 
 from reportbuilder.ingest.sav_reader import read_sav, _is_metadata, _is_unlabeled_helper
-from reportbuilder.ingest.multi_group import suggest_multi_groups, apply_groups, _group_text
+from reportbuilder.ingest.multi_group import (
+    suggest_multi_groups,
+    apply_groups,
+    _group_text,
+    _shared_question,
+)
 from reportbuilder.model.question import QuestionModel, Question, Variable, ValueLabel
 
 
@@ -345,6 +350,40 @@ class TestBrandQuestionText:
         m2 = apply_groups(m, groups)
         multi_q = next(q for q in m2.questions if q.kind == "multi")
         assert multi_q.text == "What brand do you know?"
+
+    def test_shared_question_identical(self):
+        assert _shared_question(["A common question?", "A common question?"]) == (
+            "A common question?"
+        )
+
+    def test_shared_question_truncated_prefixes(self):
+        """SPSS truncates Option:Question per member → right sides are prefixes;
+        the longest (most complete) is returned."""
+        full = "Ohessa naet listauksen erilaisia omistajaetuja jotka on tarkoitettu"
+        rights = [full[:40], full[:55], full[:67]]
+        assert _shared_question(rights) == full[:67]
+
+    def test_shared_question_unrelated_returns_none(self):
+        assert _shared_question(["How old are you?", "Where do you live?"]) is None
+
+    def test_truncated_option_question_splits(self):
+        """A var<N>O<M> family whose Option:Question labels are truncated to
+        different lengths still splits into one multi with options as labels."""
+        q = (
+            "Ohessa naet listauksen erilaisia omistajaetuja jotka on tarkoitettu "
+            "oman Holiday Club lomaviikon omistajille valitse enintaan viisi"
+        )
+        m = _model(
+            _var("var47O1", f"Omistajien lisaviikot:{q[:70]}", binary=True),
+            _var("var47O2", f"Alennukset hotellikohteista pidempi optio:{q[:50]}", binary=True),
+            _var("var47O3", f"Joku muu etu:{q[:62]}", binary=True),
+        )
+        groups = suggest_multi_groups(m)
+        m2 = apply_groups(m, groups)
+        mq = next(qq for qq in m2.questions if qq.kind == "multi")
+        assert mq.text == q[:70]  # longest right side
+        assert m2.variables["var47O1"].label == "Omistajien lisaviikot"
+        assert m2.variables["var47O2"].label == "Alennukset hotellikohteista pidempi optio"
 
     def test_numeric_prefix_colon_pattern(self):
         """'1 :Question text' / '2 :Question text' → shared text extracted."""
