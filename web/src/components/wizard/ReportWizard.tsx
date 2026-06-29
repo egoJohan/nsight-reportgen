@@ -19,6 +19,7 @@ import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useReport, useUpdateReport } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import {
+  buildSpecialPages,
   isSpecialSlide,
   makeChart,
   makeSpecialSlide,
@@ -37,6 +38,32 @@ function move<T>(arr: T[], from: number, to: number): T[] {
   const [item] = next.splice(from, 1);
   next.splice(to, 0, item);
   return next;
+}
+
+/** Replace every chart belonging to a special-slide `group` (its anchor ref or
+ *  any member tagged options.group === group) with `pages`, inserting
+ *  `extraAfter` immediately after them. Returns null if the group is gone (the
+ *  slide was removed mid-generation). */
+function replaceSpecialGroup(
+  charts: ChartSpec[],
+  group: string,
+  pages: ChartSpec[],
+  extraAfter: ChartSpec[] = []
+): ChartSpec[] | null {
+  let inserted = false;
+  const out: ChartSpec[] = [];
+  for (const c of charts) {
+    const inGroup = c.question_ref === group || c.options?.group === group;
+    if (inGroup) {
+      if (!inserted) {
+        out.push(...pages, ...extraAfter);
+        inserted = true;
+      }
+    } else {
+      out.push(c);
+    }
+  }
+  return inserted ? out : null;
 }
 
 const STEPS = [
@@ -390,18 +417,44 @@ export default function ReportWizard({
     [materialId]
   );
 
-  // Add a special slide (synchronously, returning its ref so the caller can
-  // select it) and generate its bullets in the background.
+  // Lay out generated bullets across one-or-more pages (the first page keeps the
+  // group's anchor ref so the current selection stays valid), replacing any
+  // existing pages of this special-slide `group`. `extraAfter` (demographic
+  // charts) is inserted right after the pages.
+  const applySpecialPages = useCallback(
+    (
+      group: string,
+      type: string,
+      heading: string,
+      bullets: string[],
+      extraAfter: ChartSpec[] = []
+    ) => {
+      mutate((d) => {
+        const pages = buildSpecialPages(type, heading, bullets, group).map((p, i) =>
+          i === 0 ? { ...p, question_ref: group } : p
+        );
+        const next = replaceSpecialGroup(d.charts, group, pages, extraAfter);
+        return next ? { ...d, charts: normalizeSlots(next) } : d;
+      });
+    },
+    [mutate]
+  );
+
+  // Add a special slide (synchronously, returning its anchor ref so the caller
+  // can select it) and generate its bullets in the background — spanning pages
+  // when the content overflows one slide.
   const addSpecialSlide = useCallback(
     (type: string): string => {
-      const slide = makeSpecialSlide(type, { slide_title: SPECIAL_HEADINGS[type] });
-      const ref = slide.question_ref;
+      const heading = SPECIAL_HEADINGS[type];
+      const placeholder = makeSpecialSlide(type, { slide_title: heading });
+      const group = placeholder.question_ref;
+      const anchor = {
+        ...placeholder,
+        options: { ...placeholder.options, group },
+      };
       // Special slides always go to the front of the deck.
-      mutate((d) => ({
-        ...d,
-        charts: normalizeSlots([slide, ...d.charts]),
-      }));
-      setBulletsPending(ref, true);
+      mutate((d) => ({ ...d, charts: normalizeSlots([anchor, ...d.charts]) }));
+      setBulletsPending(group, true);
       void (async () => {
         try {
           if (type === "special_demographics") {
@@ -409,60 +462,55 @@ export default function ReportWizard({
               materialId,
               { question_refs: reportQuestionRefs() }
             );
-            mutate((d) => {
-              const idx = d.charts.findIndex((c) => c.question_ref === ref);
-              // The slide was removed while generating — drop the result rather
-              // than appending orphaned demographic charts at the end.
-              if (idx < 0) return d;
-              const existing = new Set(d.charts.map((c) => c.question_ref));
-              const newCharts = question_refs
-                .filter((r) => r && !existing.has(r))
-                .map((r) => makeChart(r, "vertical_bar"));
-              const updated = d.charts.map((c) =>
-                c.question_ref === ref ? { ...c, options: { bullets } } : c
-              );
-              const out = [
-                ...updated.slice(0, idx + 1),
-                ...newCharts,
-                ...updated.slice(idx + 1),
-              ];
-              return { ...d, charts: normalizeSlots(out) };
-            });
+            const existing = new Set(
+              (draftRef.current?.charts ?? []).map((c) => c.question_ref)
+            );
+            const newCharts = question_refs
+              .filter((r) => r && !existing.has(r))
+              .map((r) => makeChart(r, "vertical_bar"));
+            applySpecialPages(group, type, heading, bullets, newCharts);
           } else {
             const bullets = await fetchBullets(type, reportQuestionRefs());
-            updateChartByRef(ref, { options: { bullets } });
+            applySpecialPages(group, type, heading, bullets);
           }
         } catch (e) {
           toast.error(`Could not generate slide: ${errMsg(e)}`);
         } finally {
-          setBulletsPending(ref, false);
+          setBulletsPending(group, false);
           setAiSaveTick((t) => t + 1);
         }
       })();
-      return ref;
+      return group;
     },
-    [materialId, mutate, updateChartByRef, reportQuestionRefs, fetchBullets, setBulletsPending]
+    [materialId, mutate, reportQuestionRefs, fetchBullets, setBulletsPending, applySpecialPages]
   );
 
-  // Regenerate the bullets of an existing special slide.
+  // Regenerate a special slide's bullets, re-paginating its whole page group.
   const regenerateSpecial = useCallback(
     async (chart: ChartSpec) => {
-      const ref = chart.question_ref;
-      setBulletsPending(ref, true);
+      const type = chart.chart_type;
+      const group =
+        (typeof chart.options?.group === "string" ? chart.options.group : null) ??
+        chart.question_ref;
+      const heading = (chart.slide_title || SPECIAL_HEADINGS[type] || "").replace(
+        /\s*\(\d+\/\d+\)\s*$/,
+        ""
+      );
+      setBulletsPending(group, true);
       try {
         const bullets =
-          chart.chart_type === "special_demographics"
+          type === "special_demographics"
             ? (await api.materials.aiDemographics(materialId, { question_refs: reportQuestionRefs() })).bullets
-            : await fetchBullets(chart.chart_type, reportQuestionRefs());
-        updateChartByRef(ref, { options: { bullets } });
+            : await fetchBullets(type, reportQuestionRefs());
+        applySpecialPages(group, type, heading, bullets);
       } catch (e) {
         toast.error(`Could not regenerate slide: ${errMsg(e)}`);
       } finally {
-        setBulletsPending(ref, false);
+        setBulletsPending(group, false);
         setAiSaveTick((t) => t + 1);
       }
     },
-    [materialId, updateChartByRef, reportQuestionRefs, fetchBullets, setBulletsPending]
+    [materialId, reportQuestionRefs, fetchBullets, setBulletsPending, applySpecialPages]
   );
 
   // Persist any unsaved edits before navigating; abort if the save fails

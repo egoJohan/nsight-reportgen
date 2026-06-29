@@ -191,7 +191,7 @@ function specialRef(type: string): string {
 
 export function makeSpecialSlide(
   type: keyof typeof SPECIAL_SLIDE_LABELS | string,
-  opts?: { slide_title?: string; bullets?: string[] }
+  opts?: { slide_title?: string; bullets?: string[]; group?: string }
 ): ChartSpec {
   return {
     question_ref: specialRef(type),
@@ -209,8 +209,59 @@ export function makeSpecialSlide(
     category_label_overrides: [],
     slide_title: opts?.slide_title ?? null,
     slide_description: null,
-    options: { bullets: opts?.bullets ?? [] },
+    // `group` ties together the pages of one logical special slide (so a regen
+    // can replace the whole set); absent for single-page slides.
+    options: { bullets: opts?.bullets ?? [], ...(opts?.group ? { group: opts.group } : {}) },
   };
+}
+
+// Heuristic capacity of one special slide's body, in wrapped text lines.
+const SPECIAL_LINES_PER_SLIDE = 12;
+const SPECIAL_CHARS_PER_LINE = 64;
+
+/** Pack bullets into slide-sized pages by estimated wrapped-line count, so long
+ *  content spans multiple slides instead of overflowing one. */
+export function paginateBullets(
+  bullets: string[],
+  linesPerSlide = SPECIAL_LINES_PER_SLIDE
+): string[][] {
+  const pages: string[][] = [];
+  let cur: string[] = [];
+  let lines = 0;
+  for (const b of bullets) {
+    const cost = Math.max(1, Math.ceil(b.length / SPECIAL_CHARS_PER_LINE)) + 1; // +1 spacing
+    if (cur.length && lines + cost > linesPerSlide) {
+      pages.push(cur);
+      cur = [];
+      lines = 0;
+    }
+    cur.push(b);
+    lines += cost;
+  }
+  if (cur.length) pages.push(cur);
+  return pages.length ? pages : [[]];
+}
+
+/** Build the slide spec(s) for a special slide whose content may span pages.
+ *  One page → one plain-heading slide; multiple → "Heading (n/x)" per page,
+ *  all sharing a `group` id so a later regenerate can swap the whole set. */
+export function buildSpecialPages(
+  type: string,
+  heading: string,
+  bullets: string[],
+  group: string
+): ChartSpec[] {
+  const pages = paginateBullets(bullets);
+  if (pages.length <= 1) {
+    return [makeSpecialSlide(type, { slide_title: heading, bullets: pages[0], group })];
+  }
+  return pages.map((page, i) =>
+    makeSpecialSlide(type, {
+      slide_title: `${heading} (${i + 1}/${pages.length})`,
+      bullets: page,
+      group,
+    })
+  );
 }
 
 /** Assign template_slot by position: s1..sN. */
