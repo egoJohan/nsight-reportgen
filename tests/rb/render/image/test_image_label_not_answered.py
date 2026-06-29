@@ -85,30 +85,35 @@ class TestWrapLabel:
 
     def test_short_label_unchanged(self):
         """Labels ≤ wrap width pass through _wrap_label unchanged."""
-        from reportbuilder.render.image.bars import _wrap_label
+        from reportbuilder.render.image.bars import _wrap_label, _LABEL_WRAP_WIDTH
         assert _wrap_label("Yes") == "Yes"
         assert _wrap_label("Kyllä, joskus") == "Kyllä, joskus"
-        assert _wrap_label("A" * 22) == "A" * 22
+        assert _wrap_label("A" * _LABEL_WRAP_WIDTH) == "A" * _LABEL_WRAP_WIDTH
 
     def test_long_label_wrapped_to_multiple_lines(self):
         """Labels > wrap width are wrapped; result contains a newline, lines fit."""
-        from reportbuilder.render.image.bars import _wrap_label
-        long = "Hoitajat kuuntelevat toiveitani"   # 31 chars
+        from reportbuilder.render.image.bars import _wrap_label, _LABEL_WRAP_WIDTH
+        long = "Hoitajat kuuntelevat toiveitani ja tarpeitani"  # > wrap width
         result = _wrap_label(long)
         assert "\n" in result, f"Expected newline in wrapped label; got {result!r}"
         for line in result.split("\n"):
-            assert len(line) <= 22, f"Line too long: {line!r}"
+            assert len(line) <= _LABEL_WRAP_WIDTH, f"Line too long: {line!r}"
 
     def test_very_long_label_never_ellipsized(self):
         """Very long labels are wrapped onto as many lines as needed — never '…'."""
-        from reportbuilder.render.image.bars import _wrap_label
+        from reportbuilder.render.image.bars import _wrap_label, _LABEL_WRAP_WIDTH
         very_long = "Hoitajat kuuntelevat toiveitani ja tarpeitani erittäin hyvin kaikissa tilanteissa"
         result = _wrap_label(very_long)
         assert "…" not in result, f"Ellipsis must never appear; got {result!r}"
         # Full text is preserved (every word survives, only whitespace changes).
         assert _strip_wrap(result) == _strip_wrap(very_long)
         for line in result.split("\n"):
-            assert len(line) <= 22, f"Line too long: {line!r}"
+            assert len(line) <= _LABEL_WRAP_WIDTH, f"Line too long: {line!r}"
+
+    def test_hyphenated_compound_not_split(self):
+        """A hyphenated compound (e.g. a brand) is kept on one piece, not split at '-'."""
+        from reportbuilder.render.image.bars import _wrap_label
+        assert _wrap_label("Mainio-kodit") == "Mainio-kodit"
 
 
 class TestWrapXtickLabel:
@@ -116,9 +121,9 @@ class TestWrapXtickLabel:
 
     def test_short_label_unchanged(self):
         """Labels ≤ x-tick wrap width pass through unchanged."""
-        from reportbuilder.render.image.bars import _wrap_xtick_label
+        from reportbuilder.render.image.bars import _wrap_xtick_label, _XLABEL_WRAP_WIDTH
         assert _wrap_xtick_label("Short") == "Short"
-        assert _wrap_xtick_label("A" * 16) == "A" * 16
+        assert _wrap_xtick_label("A" * _XLABEL_WRAP_WIDTH) == "A" * _XLABEL_WRAP_WIDTH
 
     def test_long_label_wrapped_never_ellipsized(self):
         """Long x-axis labels wrap (full text preserved), never '…'."""
@@ -131,11 +136,11 @@ class TestWrapXtickLabel:
 
     def test_long_unbroken_token_does_not_overflow(self):
         """A single token longer than the wrap width is broken, not ellipsized."""
-        from reportbuilder.render.image.bars import _wrap_xtick_label
+        from reportbuilder.render.image.bars import _wrap_xtick_label, _XLABEL_WRAP_WIDTH
         result = _wrap_xtick_label("A" * 40)
         assert "…" not in result
         for line in result.split("\n"):
-            assert len(line) <= 16, f"Line too long: {line!r}"
+            assert len(line) <= _XLABEL_WRAP_WIDTH, f"Line too long: {line!r}"
 
 
 # ---------------------------------------------------------------------------

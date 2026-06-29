@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useQuestions, useReport, useUpdateReport } from "@/lib/queries";
-import { isWordcloud, makeChart, normalizeSlots } from "@/lib/charts";
+import { makeChart, normalizeSlots } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepReview from "./StepReview";
@@ -244,7 +244,6 @@ export default function ReportWizard({
   // labels and Slides shows the AI title by default. Per-chart graceful
   // fallback to the originals on failure; never retried within a session.
   const aiRunning = useRef(false);
-  const labelsAttempted = useRef<Set<string>>(new Set());
   const titlesAttempted = useRef<Set<string>>(new Set());
   // Bumped when an auto-format pass finishes; a separate effect then persists
   // the result. Saving from a post-commit effect (instead of inline) ensures
@@ -259,91 +258,59 @@ export default function ReportWizard({
     const qMap = new Map<string, Question>();
     questions.forEach((q) => qMap.set(q.qid, q));
 
-    type Task = { ref: string; needLabels: boolean; needTitle: boolean };
+    // Category labels are NOT auto-shortened — the cleaned option labels are the
+    // default, and AI shortening is opt-in via the "Shorten with AI" button in
+    // the label editor. We only auto-generate the descriptive slide title.
+    type Task = { ref: string };
     const tasks: Task[] = [];
     for (const c of draft.charts) {
-      const q = qMap.get(c.question_ref);
-      const needLabels =
-        // A word cloud has no category labels to shorten — skip the AI call
-        // entirely so labelsPending never goes true for it.
-        !isWordcloud(c.chart_type) &&
-        !labelsAttempted.current.has(c.question_ref) &&
-        c.category_label_overrides.length === 0 &&
-        (q?.category_labels?.length ?? 0) > 0;
       const needTitle =
         !titlesAttempted.current.has(c.question_ref) && !c.slide_title;
-      if (needLabels || needTitle)
-        tasks.push({ ref: c.question_ref, needLabels, needTitle });
+      if (needTitle) tasks.push({ ref: c.question_ref });
     }
     if (tasks.length === 0) return;
 
     aiRunning.current = true;
     setAiProgress({ done: 0, total: tasks.length });
-    // Mark each chart's regions pending up front so the preview shows the
-    // placeholders immediately (before any AI call resolves).
+    // Mark the title region pending up front so the preview shows the
+    // "Generating title…" placeholder immediately.
     setAiPending((prev) => {
       const next = { ...prev };
       for (const t of tasks) {
-        next[t.ref] = {
-          titlePending: t.needTitle || (next[t.ref]?.titlePending ?? false),
-          labelsPending: t.needLabels || (next[t.ref]?.labelsPending ?? false),
-        };
+        next[t.ref] = { titlePending: true, labelsPending: false };
       }
       return next;
     });
 
-    const clearPending = (ref: string, field: "titlePending" | "labelsPending") =>
+    const clearPending = (ref: string) =>
       setAiPending((prev) => ({
         ...prev,
-        [ref]: { ...prev[ref], [field]: false },
+        [ref]: { ...prev[ref], titlePending: false },
       }));
 
-    // Per-chart worker: labels + title run concurrently for one chart.
+    // Per-chart worker: generate the descriptive slide title.
     const worker = async (task: Task) => {
-      const jobs: Promise<unknown>[] = [];
-      if (task.needLabels) {
-        labelsAttempted.current.add(task.ref);
-        jobs.push(
-          api.materials
-            .aiShortLabels(materialId, { question_ref: task.ref })
-            .then(({ overrides }) => {
-              const useful = overrides.filter(
-                ([full, short]) => short.trim() && short.trim() !== full
-              );
-              if (useful.length > 0)
-                updateChartByRef(task.ref, {
-                  category_label_overrides: useful,
-                });
-            })
-            .catch(() => {
-              /* graceful: keep original labels */
-            })
-            .finally(() => clearPending(task.ref, "labelsPending"))
-        );
-      }
-      if (task.needTitle) {
-        titlesAttempted.current.add(task.ref);
-        const chart = draftRef.current?.charts.find(
-          (c) => c.question_ref === task.ref
-        );
-        jobs.push(
-          api.materials
-            .aiSlideTitle(materialId, {
-              question_ref: task.ref,
-              statistic: chart?.statistic,
-              classifying_var: chart?.classifying_var,
-              show_not_answered: chart?.show_not_answered,
-              not_answered_codes: chart?.not_answered_codes,
-            })
-            .then(({ title }) => {
-              if (title) updateChartByRef(task.ref, { slide_title: title });
-            })
-            .catch(() => {
-              /* graceful: fall back to the question text */
-            })
-            .finally(() => clearPending(task.ref, "titlePending"))
-        );
-      }
+      titlesAttempted.current.add(task.ref);
+      const chart = draftRef.current?.charts.find(
+        (c) => c.question_ref === task.ref
+      );
+      const jobs: Promise<unknown>[] = [
+        api.materials
+          .aiSlideTitle(materialId, {
+            question_ref: task.ref,
+            statistic: chart?.statistic,
+            classifying_var: chart?.classifying_var,
+            show_not_answered: chart?.show_not_answered,
+            not_answered_codes: chart?.not_answered_codes,
+          })
+          .then(({ title }) => {
+            if (title) updateChartByRef(task.ref, { slide_title: title });
+          })
+          .catch(() => {
+            /* graceful: fall back to the question text */
+          })
+          .finally(() => clearPending(task.ref)),
+      ];
       await Promise.allSettled(jobs);
       setAiProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
     };
@@ -488,7 +455,7 @@ export default function ReportWizard({
             Preparing your report
           </span>
           <span className="text-muted-foreground">
-            formatting titles &amp; labels… {aiProgress.done}/{aiProgress.total}
+            generating slide titles… {aiProgress.done}/{aiProgress.total}
           </span>
           <Loader2Icon className="ml-auto size-4 shrink-0 animate-spin text-muted-foreground" />
         </div>

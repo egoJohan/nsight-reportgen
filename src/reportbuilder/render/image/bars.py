@@ -23,6 +23,7 @@ House style applied:
 """
 from __future__ import annotations
 
+import math
 import textwrap
 
 import numpy as np
@@ -37,8 +38,8 @@ from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 # ---------------------------------------------------------------------------
 # Label-wrap constants — labels are wrapped, never truncated/ellipsis-cut.
 # ---------------------------------------------------------------------------
-_LABEL_WRAP_WIDTH: int = 22   # chars per line for horizontal-bar y-axis labels
-_XLABEL_WRAP_WIDTH: int = 16  # chars per line for (rotated) vertical-bar x-axis labels
+_LABEL_WRAP_WIDTH: int = 30   # chars per line for horizontal-bar y-axis labels (wider gutter)
+_XLABEL_WRAP_WIDTH: int = 20  # chars per line for (rotated) vertical-bar x-axis labels
 _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
 
 
@@ -47,15 +48,31 @@ _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labe
 # ---------------------------------------------------------------------------
 
 def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
-    """Wrap a category label at word boundaries onto as many lines as needed.
+    """Wrap a category label at word boundaries onto balanced lines.
 
-    The full label text is always preserved — labels are never truncated and an
-    ellipsis ('…') is never appended.  Words longer than *width* are broken so a
-    single long token can never overflow the column either.
+    Smarter line layout: wraps at word boundaries, keeps hyphenated compounds
+    (e.g. "Mainio-kodit") intact, and BALANCES the lines — once the number of
+    lines is fixed it uses the narrowest width that still fits in that many
+    lines, so we don't get one full line plus a lonely orphan word. The full
+    text is always preserved (never truncated, never an ellipsis); a single
+    token longer than *width* is broken only as a last resort.
     """
     if len(text) <= width:
         return text
-    return textwrap.fill(text, width=width, break_long_words=True)
+
+    def _wrap(w: int) -> list[str]:
+        return textwrap.wrap(
+            text, width=w, break_long_words=True, break_on_hyphens=False
+        )
+
+    n_lines = len(_wrap(width))
+    # Find the narrowest width that still fits in n_lines → balanced line lengths.
+    target = width
+    for w in range(math.ceil(len(text) / max(n_lines, 1)), width + 1):
+        if len(_wrap(w)) <= n_lines:
+            target = w
+            break
+    return "\n".join(_wrap(target))
 
 
 def _wrap_xtick_label(text: str) -> str:
