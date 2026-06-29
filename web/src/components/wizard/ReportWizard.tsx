@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
@@ -238,6 +237,19 @@ export default function ReportWizard({
     }
   }, [updateReport, reportId]);
 
+  // Persist unsaved edits if the report is closed (e.g. via the top-bar close)
+  // without going through a commit-then-navigate path. Refs keep the unmount
+  // cleanup stable so it runs only on unmount.
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current) void saveRef.current();
+    };
+  }, []);
+
   // ── Auto AI slide titles (batched, like the chart thumbnails) ─────────────
   // When the Design step is open, titles are generated automatically for every
   // chart — the same way the thumbnails auto-render — NOT eagerly on report
@@ -376,10 +388,10 @@ export default function ReportWizard({
     (type: string): string => {
       const slide = makeSpecialSlide(type, { slide_title: SPECIAL_HEADINGS[type] });
       const ref = slide.question_ref;
-      const atFront = type !== "special_conclusion"; // conclusion goes last
+      // Special slides always go to the front of the deck.
       mutate((d) => ({
         ...d,
-        charts: normalizeSlots(atFront ? [slide, ...d.charts] : [...d.charts, slide]),
+        charts: normalizeSlots([slide, ...d.charts]),
       }));
       setBulletsPending(ref, true);
       void (async () => {
@@ -511,16 +523,6 @@ export default function ReportWizard({
       {/* Header */}
       <div className="mb-5 flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-2 shrink-0 text-muted-foreground"
-            onClick={() => commitThen(onClose)}
-          >
-            <ChevronLeftIcon className="size-4" />
-            Back to reports
-          </Button>
-          <Separator orientation="vertical" className="h-5" />
           <h2 className="truncate text-base font-semibold">{draft.name}</h2>
         </div>
         <div className="flex shrink-0 items-center gap-3">

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -87,7 +87,24 @@ export default function CaseDetailPage() {
   const currentCase = cases?.find((c) => c.id === id);
   const { workspace, removeReport } = useWorkspace(id ?? "");
   const materialId = workspace.materialId;
-  const [openReportId, setOpenReportId] = useState<string | null>(null);
+  // The open report lives in the URL (?report=<id>) so the app-shell breadcrumb
+  // row can show a close button for it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openReportId = searchParams.get("report");
+  const setOpenReportId = useCallback(
+    (rid: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (rid) next.set("report", rid);
+          else next.delete("report");
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteCase = useDeleteCase();
 

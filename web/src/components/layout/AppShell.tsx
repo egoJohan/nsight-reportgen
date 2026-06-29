@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { Outlet, NavLink, useLocation, useParams } from "react-router-dom";
+import {
+  Outlet,
+  NavLink,
+  useLocation,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   SidebarProvider,
   Sidebar,
@@ -16,7 +22,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useCases } from "@/lib/queries";
 import NewCaseDialog from "@/components/NewCaseDialog";
-import { PlusIcon, FolderOpenIcon, SettingsIcon } from "lucide-react";
+import { PlusIcon, FolderOpenIcon, SettingsIcon, XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 function CasesNav() {
   const { data: cases } = useCases();
@@ -72,6 +79,33 @@ function Breadcrumb() {
         </>
       )}
     </nav>
+  );
+}
+
+// Right-aligned close (X) on the top-bar row, shown only while a report is open
+// (?report=<id>). Clearing the param returns to the case's report list.
+function CloseReportButton() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  if (!searchParams.get("report")) return null;
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="ml-auto text-muted-foreground"
+      onClick={() =>
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("report");
+            return next;
+          },
+          { replace: true }
+        )
+      }
+    >
+      <XIcon className="size-4" />
+      Close report
+    </Button>
   );
 }
 
@@ -140,6 +174,7 @@ export default function AppShell() {
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
           <Breadcrumb />
+          <CloseReportButton />
         </header>
 
         {/* Main content */}
