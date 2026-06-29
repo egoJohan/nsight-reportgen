@@ -68,9 +68,12 @@ export default function ReportsSection({
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-medium tracking-wide text-muted-foreground uppercase">
-        Reports
-      </h2>
+      <div className="mb-3">
+        <h2 className="text-base font-semibold">Reports</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Build chart reports from this case's survey data.
+        </p>
+      </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {/* Topmost item: create a new report */}
         <button

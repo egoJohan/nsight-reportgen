@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, NavLink, useLocation, useParams } from "react-router-dom";
 import {
   SidebarProvider,
@@ -26,6 +26,14 @@ import {
 function CasesNav() {
   const { data: cases } = useCases();
   const { id: activeId } = useParams();
+
+  // The active case (e.g. one just created) may be far down a long list —
+  // scroll it into view so it's visibly selected, not hidden below the fold.
+  useEffect(() => {
+    if (!activeId) return;
+    const el = document.querySelector(`a[href="/cases/${activeId}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [activeId, cases]);
 
   return (
     <SidebarMenu>
