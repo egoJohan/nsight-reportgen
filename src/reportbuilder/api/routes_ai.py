@@ -162,6 +162,11 @@ def ai_slide_title(
         spec = _spec_from_title_body(body)
         series = compute(question, spec, df, model)
         findings = _findings_from_series(series, body.top_n)
+        # No computable findings (e.g. an empty/degenerate variable) → the LLM
+        # would have nothing to summarise and tends to reply with a meta-question.
+        # Fall back to the question text instead of generating a bogus headline.
+        if not findings:
+            return {"title": question.text}
         title = generate_slide_title(question.text, findings, chat=egohive_chat)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc

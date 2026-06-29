@@ -49,6 +49,22 @@ def test_slide_title_egohive_error_returns_503(monkeypatch) -> None:
     assert "egoHive" in resp.json()["detail"]
 
 
+def test_slide_title_empty_findings_falls_back(monkeypatch) -> None:
+    """No computable findings → return the question text, never call the LLM
+    (which would otherwise reply with a meta-question)."""
+    def boom(*a, **k):
+        raise AssertionError("egohive_chat must not be called when findings are empty")
+
+    monkeypatch.setattr("reportbuilder.api.routes_ai.egohive_chat", boom)
+    monkeypatch.setattr(
+        "reportbuilder.api.routes_ai._findings_from_series", lambda series, n: []
+    )
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/slide-title", json={"question_ref": "q1"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["title"]  # the question text (non-empty), not LLM gibberish
+
+
 def test_slide_title_unknown_question_returns_404(monkeypatch) -> None:
     monkeypatch.setattr(
         "reportbuilder.api.routes_ai.egohive_chat", lambda prompt, **kw: "x"
