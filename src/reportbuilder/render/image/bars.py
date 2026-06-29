@@ -306,8 +306,9 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         _style_legend(ax, loc="lower right")
 
     png = render_png(fig)
-    # Aspect-preserving placement: never stretch/squeeze the chart into the slot.
-    place_picture_square(ctx, png)
+    # Aspect-preserving placement, top-aligned so the chart hugs the question
+    # text above it (never stretch/squeeze into the slot).
+    place_picture_square(ctx, png, valign="top")
 
 
 # ---------------------------------------------------------------------------

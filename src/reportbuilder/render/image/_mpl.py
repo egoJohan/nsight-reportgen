@@ -122,9 +122,10 @@ def place_picture(ctx, png_path: str) -> None:
     """Place png_path onto ctx.slide, scaled to FIT the slot preserving aspect.
 
     No chart element may ever be stretched or squeezed: the PNG is scaled by the
-    limiting slot dimension and centred (letterbox), so the rendered chart keeps
-    its true aspect ratio. (Identical behaviour to place_picture_square.)"""
-    place_picture_square(ctx, png_path)
+    limiting slot dimension (letterbox), so the rendered chart keeps its true
+    aspect ratio.  Top-aligned so bar/line/funnel charts hug the question text
+    above them rather than floating mid-slot with a large gap."""
+    place_picture_square(ctx, png_path, valign="top")
 
 
 def series_values(series):
@@ -246,14 +247,18 @@ def new_square_figure(ctx):
     return fig, ax
 
 
-def place_picture_square(ctx, png_path: str) -> None:
-    """Place a PNG centred in ctx.slot preserving the PNG's true aspect ratio.
+def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
+    """Place a PNG in ctx.slot preserving the PNG's true aspect ratio (letterbox).
 
     Reads the PNG's real pixel dimensions and scales it to fit *inside* the slot
-    (letterbox: scale to the limiting dimension, centred).  This keeps a circular
-    pie/radar chart circular — even when ``bbox_inches="tight"`` trimmed the saved
-    PNG asymmetrically and it is no longer perfectly square — instead of forcing it
-    into a min(w,h) square box that would squish a non-square PNG into an oval.
+    (scale to the limiting dimension).  This keeps a circular pie/radar chart
+    circular — even when ``bbox_inches="tight"`` trimmed the saved PNG
+    asymmetrically — instead of squishing a non-square PNG into an oval.
+
+    Horizontally always centred.  Vertically: ``valign='center'`` (default, for
+    symmetric charts like pie/radar) or ``valign='top'`` (for bar/line/funnel
+    charts, so the chart hugs the question text above it instead of floating in
+    the middle of the slot with a big gap).
     """
     from PIL import Image
 
@@ -267,7 +272,10 @@ def place_picture_square(ctx, png_path: str) -> None:
     disp_w = int(round(px_w * scale))
     disp_h = int(round(px_h * scale))
     left = ctx.slot.left + (slot_w - disp_w) // 2
-    top = ctx.slot.top + (slot_h - disp_h) // 2
+    if valign == "top":
+        top = ctx.slot.top
+    else:
+        top = ctx.slot.top + (slot_h - disp_h) // 2
     ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h)
 
 

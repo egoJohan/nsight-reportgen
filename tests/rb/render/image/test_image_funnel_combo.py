@@ -131,7 +131,7 @@ def _assert_picture(slide, slot):
     touches = (abs(pic.width - slot.width) <= 2) or (abs(pic.height - slot.height) <= 2)
     assert touches, "Picture should be scaled to the largest fit inside the slot"
     assert abs(pic.left - (slot.left + (slot.width - pic.width) // 2)) <= 2, "not centred horizontally"
-    assert abs(pic.top - (slot.top + (slot.height - pic.height) // 2)) <= 2, "not centred vertically"
+    assert abs(pic.top - slot.top) <= 2, "bar/line/funnel charts top-align in the slot"
 
 
 # ---------------------------------------------------------------------------

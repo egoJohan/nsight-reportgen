@@ -134,13 +134,16 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 [(title, 21, PX_INK, True)],
             )
         if secondary:
-            # Box bottom is fixed just above the chart (~1.80"); BOTTOM anchor
-            # makes multi-line questions grow upward, keeping the chart gap fixed.
+            # The question subtitle binds to the CHART: its box bottom sits just
+            # above the chart (~1.84") and BOTTOM anchor makes multi-line
+            # questions grow UPWARD toward the title, so a long question is never
+            # cut and the gap to the chart stays minimal. The box is tall enough
+            # (~0.94") for up to ~4 wrapped lines at 13.5 pt.
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.98),
-                sw - Inches(1.0), Inches(0.82),
-                [(secondary, 14, PX_MUTED, False)],
+                Inches(0.80), Inches(0.90),
+                sw - Inches(1.0), Inches(0.94),
+                [(secondary, 13.5, PX_MUTED, False)],
                 anchor=MSO_ANCHOR.BOTTOM,
             )
 
