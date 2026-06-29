@@ -55,13 +55,20 @@ def _wrap_legend_label(text: str) -> str:
 
 
 def _make_square_fig_ax(ctx):
-    """Create a square figure/axes sized to min(slot width, slot height)."""
+    """Create a wide figure filling the slot, with the (square, set_aspect=equal)
+    pie axes on the LEFT and room for the legend on the right.
+
+    A square figure letterboxed the pie into the wide 4:3 slot, leaving big empty
+    side margins so the circle looked small. Matching the slot's aspect and
+    pinning the pie to the left lets it grow to the full slot HEIGHT and uses the
+    whole width (pie + legend)."""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
-    sq = min(w_in, h_in)
-    fig, ax = plt.subplots(figsize=(sq, sq), dpi=200)
+    fig = plt.figure(figsize=(w_in, h_in), dpi=200)
     fig.patch.set_facecolor(CREAM)
+    # Pie axes: left ~62% of the width, full height — the circle fills the height.
+    ax = fig.add_axes([0.0, 0.0, 0.62, 1.0])
     ax.set_facecolor(CREAM)
     return fig, ax
 
