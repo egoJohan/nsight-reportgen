@@ -88,6 +88,16 @@ export default function StepDownload({
     }
   }
 
+  // Auto-generate the deck on entering Download (no manual "Generate" click).
+  // Reuses the per-slide renders the backend already warmed; runs once on mount.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || noCharts) return;
+    autoStarted.current = true;
+    void handleGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pending = render.isPending;
 
   return (

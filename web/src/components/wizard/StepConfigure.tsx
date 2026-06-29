@@ -1232,6 +1232,52 @@ function AddSpecialDialog({
 }
 
 // ── Main Configure step ─────────────────────────────────────────────────────
+// Warm ONE slide's preview into the shared cache (renders nothing).
+function PrefetchOne({
+  materialId,
+  chart,
+}: {
+  materialId: string;
+  chart: ChartSpec;
+}) {
+  useChartPreview(materialId, chart, {
+    renderTitle: rendersFullSlide(chart),
+    enabled: true,
+  });
+  return null;
+}
+
+// Lazily render EVERY slide's preview in the background so the whole deck is
+// ready without the user clicking each slide one by one. Renders nothing; the
+// shared content-keyed cache + the previewChart concurrency gate keep the UI
+// responsive (a few render at a time). Debounced so live edits don't spam.
+function DeckPrefetch({
+  materialId,
+  charts,
+}: {
+  materialId: string;
+  charts: ChartSpec[];
+}) {
+  const key = JSON.stringify(charts);
+  const [debounced, setDebounced] = useState(charts);
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(charts), 400);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return (
+    <>
+      {debounced.map((c, i) => (
+        <PrefetchOne
+          key={`${c.question_ref}-${i}`}
+          materialId={materialId}
+          chart={c}
+        />
+      ))}
+    </>
+  );
+}
+
 export default function StepConfigure({
   materialId,
   charts,
@@ -1359,6 +1405,9 @@ export default function StepConfigure({
 
   return (
     <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-6">
+      {/* Background: warm every slide's preview so the deck is ready without
+          clicking each slide (renders nothing). */}
+      <DeckPrefetch materialId={materialId} charts={charts} />
       {/* Left: chart list */}
       <div className="space-y-2">
         {addSpecialBar}

@@ -29,8 +29,6 @@ import {
 } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
-import StepReview from "./StepReview";
-import StepSlides from "./StepSlides";
 import StepDownload from "./StepDownload";
 
 /** Move an item within an array, returning a new array. */
@@ -71,8 +69,6 @@ function replaceSpecialGroup(
 const STEPS = [
   { id: "select", label: "Select" },
   { id: "configure", label: "Design" },
-  { id: "review", label: "Review" },
-  { id: "slides", label: "Slides" },
   { id: "download", label: "Download" },
 ];
 
@@ -91,8 +87,8 @@ function Stepper({
         const done = i < current;
         const active = i === current;
         const future = i > current;
-        // All steps reachable; Download requires at least one chart.
-        const reachable = i < 4 || chartCount > 0;
+        // All steps reachable; Download (last step) requires at least one chart.
+        const reachable = i < STEPS.length - 1 || chartCount > 0;
         return (
           <div key={s.id} className="flex items-center">
             <button
@@ -797,21 +793,6 @@ export default function ReportWizard({
           />
         )}
         {step === 2 && (
-          <StepReview
-            materialId={materialId}
-            charts={draft.charts}
-            onBack={() => setStep(1)}
-          />
-        )}
-        {step === 3 && (
-          <StepSlides
-            materialId={materialId}
-            charts={draft.charts}
-            onUpdateChart={updateChart}
-            onReorder={reorderCharts}
-          />
-        )}
-        {step === 4 && (
           <StepDownload
             caseId={caseId}
             reportId={reportId}
