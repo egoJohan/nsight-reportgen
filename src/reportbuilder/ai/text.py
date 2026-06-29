@@ -216,9 +216,11 @@ def _parse_bullets(reply: str) -> list[str]:
         line = raw.strip()
         if not line:
             continue
-        # Strip a leading "1." / "1)" / "-" / "•" / "*" marker.
+        # Strip a leading "1." / "1)" / "-" / "•" / "*" marker. Require a space
+        # after a "*" marker so a bullet that STARTS with markdown bold
+        # (**avainsana**) is not mangled into "*avainsana**".
         line = re.sub(r"^\(?\d+[\.\):\-]\s*", "", line)
-        line = re.sub(r"^[\-•\*]\s*", "", line)
+        line = re.sub(r"^([\-•]\s*|\*\s+)", "", line)
         line = line.strip().strip('"').strip()
         if line:
             out.append(line)
@@ -285,7 +287,8 @@ def generate_conclusion_bullets(
         f"{_findings_block(findings_by_question)}\n\n"
         f"Kirjoita {MAX_BULLETS - 1}–{MAX_BULLETS} ranskalaista viivaa suomeksi, jotka "
         "tiivistävät tutkimuksen TÄRKEIMMÄT johtopäätökset. Tulkitse tuloksia (mitä "
-        "data kokonaisuutena kertoo), älä luettele yksittäisiä lukuja. Yksi "
+        "data kokonaisuutena kertoo), älä luettele yksittäisiä lukuja. Korosta kunkin "
+        "rivin avainsanat lihavoinnilla markdown-muodossa (**avainsana**). Yksi "
         "johtopäätös per rivi, ei numerointia, ei lainausmerkkejä. Palauta vain "
         "ranskalaiset viivat."
     )

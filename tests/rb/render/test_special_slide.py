@@ -134,3 +134,37 @@ def test_special_slide_renders_heading_and_bullets(tmp_path):
     )
     assert "Tutkimuksen taustaa" in alltext
     assert "Eka havainto" in alltext and "Toka havainto" in alltext
+
+
+def test_md_runs_parses_bold_italic():
+    from reportbuilder.render.image.special_slide import _md_runs
+    assert _md_runs("a **b** c *d*") == [
+        ("a ", False, False),
+        ("b", True, False),
+        (" c ", False, False),
+        ("d", False, True),
+    ]
+    assert _md_runs("plain") == [("plain", False, False)]
+
+
+def test_bullet_markdown_renders_bold(tmp_path):
+    """A **bold** bullet produces a bold run in the rendered slide."""
+    model, df = tiny_model_and_data()
+    spec = _spec(
+        chart_type="special_conclusion",
+        slide_title="C",
+        options={"bullets": ["Tämä on **tärkeä** kohta"]},
+    )
+    rep = Report(name="r", render_mode="image", template_ref="", charts=(spec,))
+    out = str(tmp_path / "d.pptx")
+    build_pptx(rep, model, df, out)
+    prs = Presentation(out)
+    runs = [
+        r
+        for s in prs.slides[0].shapes
+        if s.has_text_frame
+        for p in s.text_frame.paragraphs
+        for r in p.runs
+    ]
+    bold = [r.text for r in runs if r.font.bold]
+    assert "tärkeä" in bold

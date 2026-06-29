@@ -8,12 +8,36 @@ no RenderContext, no SeriesResult, no plugin dispatch.
 """
 from __future__ import annotations
 
+import re
+
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
 from reportbuilder.render.image.slide_chrome import _FONT, _slide_dims
+
+
+# Inline markdown: **bold** / __bold__ and *italic* / _italic_ (non-nested).
+_MD_RE = re.compile(r"(\*\*|__)(.+?)\1|(\*|_)(.+?)\3")
+
+
+def _md_runs(text: str) -> list[tuple[str, bool, bool]]:
+    """Split inline markdown into (text, bold, italic) runs so slide bullets can
+    render emphasis. Returns the plain text as a single run when no markers."""
+    runs: list[tuple[str, bool, bool]] = []
+    pos = 0
+    for m in _MD_RE.finditer(text):
+        if m.start() > pos:
+            runs.append((text[pos:m.start()], False, False))
+        if m.group(1):  # **bold** / __bold__
+            runs.append((m.group(2), True, False))
+        else:  # *italic* / _italic_
+            runs.append((m.group(4), False, True))
+        pos = m.end()
+    if pos < len(text):
+        runs.append((text[pos:], False, False))
+    return runs or [(text, False, False)]
 
 
 def render_special_slide(slide, slot, style, spec: ChartSpec) -> None:
@@ -87,15 +111,18 @@ def _bullet_box(slide, sw, sh, bullets: list[str]) -> None:
         pPr = p._p.get_or_add_pPr()
         pPr.set("marL", str(int(_HANG)))
         pPr.set("indent", str(-int(_HANG)))
-        # Teal bullet glyph, then the ink body text.
+        # Teal bullet glyph, then the ink body text (inline markdown → runs).
         dot = p.add_run()
         dot.text = "•  "
         dot.font.size = Pt(16)
         dot.font.bold = True
         dot.font.color.rgb = PX_TEAL
         dot.font.name = _FONT
-        body = p.add_run()
-        body.text = text
-        body.font.size = Pt(16)
-        body.font.color.rgb = PX_INK
-        body.font.name = _FONT
+        for seg, bold, italic in _md_runs(text):
+            body = p.add_run()
+            body.text = seg
+            body.font.size = Pt(16)
+            body.font.bold = bold
+            body.font.italic = italic
+            body.font.color.rgb = PX_INK
+            body.font.name = _FONT
