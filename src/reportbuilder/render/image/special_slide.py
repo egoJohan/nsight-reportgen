@@ -12,6 +12,7 @@ import re
 
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.oxml.ns import qn
 
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
@@ -72,14 +73,36 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
     raw = spec.options.get("bullets") or []
     if isinstance(raw, str):
         raw = [raw]
-    bullets = [str(b).strip() for b in raw if str(b).strip()]
+    # Drop degenerate "odd" bullets — empties or lines that are only markers /
+    # punctuation / stray markdown with no real letters (defence in depth on top
+    # of _parse_bullets, in case options carry junk).
+    bullets = [
+        s for s in (str(b).strip() for b in raw)
+        if s and re.search(r"[^\s\-•*_:.,–—]", s)
+    ]
     if bullets:
         _bullet_box(slide, sw, sh, bullets)
 
 
+def _heading_size(text: str) -> int:
+    """Heading font size adapted to length.
+
+    Overview/Conclusion/Demographics headings are short → large (26 pt). A themes
+    heading is the full open-ended QUESTION, which is long; a fixed 26 pt makes it
+    overflow toward the bullets ("title too big"), so longer headings step down."""
+    n = len(text)
+    if n <= 42:
+        return 26
+    if n <= 72:
+        return 22
+    if n <= 110:
+        return 19
+    return 16
+
+
 def _heading_box(slide, sw, text: str) -> None:
     tb = slide.shapes.add_textbox(
-        Inches(0.80), Inches(0.42), sw - Inches(1.0), Inches(0.80)
+        Inches(0.80), Inches(0.42), sw - Inches(1.0), Inches(0.92)
     )
     tf = tb.text_frame
     tf.word_wrap = True
@@ -89,7 +112,7 @@ def _heading_box(slide, sw, text: str) -> None:
     p.alignment = PP_ALIGN.LEFT
     r = p.add_run()
     r.text = text
-    r.font.size = Pt(26)
+    r.font.size = Pt(_heading_size(text))
     r.font.bold = True
     r.font.color.rgb = PX_INK
     r.font.name = _FONT
@@ -103,10 +126,12 @@ def _bullet_box(slide, sw, sh, bullets: list[str]) -> None:
     tf.word_wrap = True
     tf.vertical_anchor = MSO_ANCHOR.TOP
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
-    # Hanging indent: the bullet glyph sits at the left edge and wrapped lines
-    # align under the FIRST line's text (not under the bullet). marL = text
-    # start; indent = -marL pulls the bullet back to the margin.
-    _HANG = Inches(0.32)
+    # Hanging indent: the bullet glyph sits at the left margin and wrapped lines
+    # align EXACTLY under the first line's text. marL = text start, indent = -marL
+    # pulls the bullet back to the margin, and an explicit left TAB STOP at marL
+    # (with a tab after the bullet) snaps the first line's text to precisely the
+    # same x as the wrapped lines — so continuation lines match the first line.
+    _HANG = Inches(0.30)
     for i, text in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.LEFT
@@ -114,9 +139,12 @@ def _bullet_box(slide, sw, sh, bullets: list[str]) -> None:
         pPr = p._p.get_or_add_pPr()
         pPr.set("marL", str(int(_HANG)))
         pPr.set("indent", str(-int(_HANG)))
-        # Teal bullet glyph, then the ink body text (inline markdown → runs).
+        tab_lst = pPr.makeelement(qn("a:tabLst"), {})
+        tab_lst.append(pPr.makeelement(qn("a:tab"), {"pos": str(int(_HANG)), "algn": "l"}))
+        pPr.append(tab_lst)
+        # Teal bullet glyph + tab (snaps body text to the marL tab stop).
         dot = p.add_run()
-        dot.text = "•  "
+        dot.text = "•\t"
         dot.font.size = Pt(16)
         dot.font.bold = True
         dot.font.color.rgb = PX_TEAL

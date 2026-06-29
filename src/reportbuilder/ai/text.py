@@ -222,8 +222,11 @@ def _parse_bullets(reply: str) -> list[str]:
         line = re.sub(r"^\(?\d+[\.\):\-]\s*", "", line)
         line = re.sub(r"^([\-•]\s*|\*\s+)", "", line)
         line = line.strip().strip('"').strip()
-        if line:
-            out.append(line)
+        # Drop degenerate "odd" bullets: empties, or a line that is only markers
+        # / punctuation / stray markdown left after stripping (no real letters).
+        if not line or not re.search(r"[^\s\-•*_:.,–—]", line):
+            continue
+        out.append(line)
     return out[:MAX_BULLETS]
 
 
