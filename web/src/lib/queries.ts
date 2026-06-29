@@ -1,4 +1,9 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { api } from "./api";
 import type { ChartSpec, ReportDoc } from "./api";
 
@@ -104,6 +109,10 @@ export function useChartPreview(
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     retry: false,
+    // Keep the previously rendered slide visible while the new render loads, so
+    // editing a spec shows the old image + an "Updating…" badge instead of
+    // flashing the whole-slide "Rendering preview…" placeholder.
+    placeholderData: keepPreviousData,
   });
 }
 
