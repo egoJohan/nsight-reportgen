@@ -379,7 +379,12 @@ def list_variables(
     picker groups them sensibly. (RX-be.1)
     """
     model = load_model_for_material(material_id, client)
-    all_vars = list(model.variables.values())
+    # Exclude variables that are members of a grouped question (multi/battery) —
+    # those are sub-options/rating cells, not standalone segmentation variables.
+    grouped = {
+        v for q in model.questions if q.kind in ("multi", "battery") for v in q.variables
+    }
+    all_vars = [v for v in model.variables.values() if v.name not in grouped]
     # Stable sort: categorical before scale; original file order within each tier.
     all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
     return {
@@ -390,6 +395,9 @@ def list_variables(
                 # when no SPSS label is set), so we expose it directly.
                 "label": var.label,
                 "measurement": var.measurement,
+                # Number of value labels — lets the UI offer only low-cardinality
+                # categoricals as classifying (segmentation) variables.
+                "n_values": len(var.value_labels),
             }
             for var in all_vars
         ]

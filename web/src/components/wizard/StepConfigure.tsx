@@ -293,12 +293,24 @@ function SwitchWidget({ field, chart, onChange }: WidgetProps) {
   );
 }
 
+// A "good" classifying (segmentation) variable is a low-cardinality categorical
+// — gender, age group, region, experience — not a scale, free text, or a
+// high-cardinality list. Keep the chart's own variable(s) selectable-by-value
+// even if filtered, so an existing pick is never hidden.
+function isSegmenter(v: Variable): boolean {
+  const n = v.n_values ?? 0;
+  return v.measurement === "categorical" && n >= 2 && n <= 15;
+}
+
 function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps) {
   const required = !!field.required;
   const missing = required && !chart.classifying_var;
+  const candidates = (variables ?? []).filter(
+    (v) => isSegmenter(v) || v.name === chart.classifying_var
+  );
   const items: Record<string, string> = {
     __none__: "None",
-    ...Object.fromEntries((variables ?? []).map((v) => [v.name, v.label])),
+    ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
   };
   return (
     <Field
@@ -318,7 +330,7 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">None</SelectItem>
-          {(variables ?? []).map((v) => (
+          {candidates.map((v) => (
             <SelectItem key={v.name} value={v.name}>
               {v.label}
             </SelectItem>
@@ -568,7 +580,13 @@ function ChartControls({
     () => new Map((chartTypes ?? []).map((c) => [c.id, c])),
     [chartTypes]
   );
-  const schema = catalog.get(chart.chart_type)?.config ?? [];
+  const rawSchema = catalog.get(chart.chart_type)?.config ?? [];
+  // A battery is already a single-series chart (one bar per attribute), so a
+  // classifying split doesn't apply — drop that field for battery questions.
+  const isBattery = question?.kind === "battery";
+  const schema = isBattery
+    ? rawSchema.filter((f) => f.key !== "classifying_var")
+    : rawSchema;
   const supportsClassifying = (typeId: string) =>
     (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var");
 
@@ -753,6 +771,45 @@ function NotAnsweredPicker({
   );
 }
 
+// A label-override text field with LOCAL state, committing to the report on
+// blur/Enter. Typing stays local so the heavy per-keystroke re-render cascade
+// (preview re-fetch, draft update) can't steal focus or reset the cursor.
+function LabelOverrideInput({
+  full,
+  value,
+  onCommit,
+}: {
+  full: string;
+  value: string;
+  onCommit: (v: string) => void;
+}) {
+  const [local, setLocal] = useState(value);
+  const focused = useRef(false);
+  // Sync external changes (e.g. "Shorten with AI" rewrites all) only when the
+  // user isn't actively editing this field.
+  useEffect(() => {
+    if (!focused.current) setLocal(value);
+  }, [value]);
+  return (
+    <Input
+      value={local}
+      placeholder={full}
+      className="h-8"
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        focused.current = false;
+        if (local !== value) onCommit(local);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
+}
+
 // ── Category-label editor (editable short labels + Shorten with AI) ──────────
 function CategoryLabelEditor({
   chart,
@@ -836,11 +893,10 @@ function CategoryLabelEditor({
             <span className="text-sm leading-snug text-muted-foreground break-words">
               {full}
             </span>
-            <Input
+            <LabelOverrideInput
+              full={full}
               value={overrideMap.get(full) ?? ""}
-              placeholder={full}
-              className="h-8"
-              onChange={(e) => setOverride(full, e.target.value)}
+              onCommit={(v) => setOverride(full, v)}
             />
           </div>
         ))}

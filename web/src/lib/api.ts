@@ -40,6 +40,7 @@ export interface Variable {
   name: string;
   label: string;
   measurement: string;
+  n_values?: number;
 }
 
 // ---- Question details (computed summary) ----
