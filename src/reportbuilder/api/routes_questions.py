@@ -11,7 +11,7 @@ import pathlib
 import shutil
 import tempfile
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -536,6 +536,10 @@ class ChartSpecBody(BaseModel):
     # title + description) so the frontend can own that region with a progressive
     # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
     render_title: bool = True
+    # Free-form per-chart-type options (plugin-declared config keys). Carries
+    # special-slide bullet content (options["bullets"]); part of the cache key via
+    # model_dump_json so editing bullets re-renders.
+    options: dict[str, Any] = {}
 
 
 def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
@@ -580,6 +584,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         slide_title=body.slide_title,
         slide_description=body.slide_description,
+        options=dict(body.options or {}),
     )
 
 

@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question } from "@/lib/api";
 import { useQuestions } from "@/lib/queries";
-import { chartTypeLabel } from "@/lib/charts";
+import { chartTypeLabel, isSpecialSlide } from "@/lib/charts";
 import ChartThumb from "./ChartThumb";
 
 export default function StepSlides({
@@ -43,6 +43,8 @@ export default function StepSlides({
   // Generate a title for one slide via egoHive; returns the title or null.
   const generateTitle = async (index: number): Promise<string | null> => {
     const chart = charts[index];
+    // Special (non-chart) slides have no question to title.
+    if (isSpecialSlide(chart)) return null;
     setGenerating((prev) => new Set(prev).add(index));
     try {
       const { title } = await api.materials.aiSlideTitle(materialId, {

@@ -15,7 +15,12 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import { useReport, useUpdateReport } from "@/lib/queries";
-import { makeChart, normalizeSlots } from "@/lib/charts";
+import {
+  isSpecialSlide,
+  makeChart,
+  makeSpecialSlide,
+  normalizeSlots,
+} from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepReview from "./StepReview";
@@ -122,7 +127,10 @@ export default function ReportWizard({
   // regions that are still being produced. Set true when a chart's AI call
   // starts, false when it resolves/fails.
   const [aiPending, setAiPending] = useState<
-    Record<string, { titlePending: boolean; labelsPending: boolean }>
+    Record<
+      string,
+      { titlePending: boolean; labelsPending: boolean; bulletsPending?: boolean }
+    >
   >({});
 
   // Initialise the working draft once the report loads.
@@ -304,6 +312,7 @@ export default function ReportWizard({
           (c) => c.question_ref === ref
         );
         if (!chart || chart.slide_title) continue; // keep manual/existing titles
+        if (isSpecialSlide(chart)) continue; // special slides carry bullets, not a title
         titlesAttempted.current.add(ref);
         titleQueue.current.push(ref);
         added = true;
@@ -327,6 +336,106 @@ export default function ReportWizard({
     void save();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiSaveTick]);
+
+  // ── Special (non-chart) slides: Overview / Conclusion / Demographics ──────
+  const SPECIAL_HEADINGS: Record<string, string> = {
+    special_overview: "Tutkimuksen taustaa",
+    special_conclusion: "Johtopäätökset",
+    special_demographics: "Vastaajat",
+  };
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
+  const reportQuestionRefs = useCallback(
+    () =>
+      (draftRef.current?.charts ?? [])
+        .filter((c) => !isSpecialSlide(c))
+        .map((c) => c.question_ref),
+    []
+  );
+  const setBulletsPending = useCallback((ref: string, pending: boolean) => {
+    setAiPending((prev) => ({
+      ...prev,
+      [ref]: {
+        titlePending: prev[ref]?.titlePending ?? false,
+        labelsPending: prev[ref]?.labelsPending ?? false,
+        bulletsPending: pending,
+      },
+    }));
+  }, []);
+  const fetchBullets = useCallback(
+    async (type: string, refs: string[]): Promise<string[]> => {
+      if (type === "special_overview")
+        return (await api.materials.aiOverview(materialId, { question_refs: refs })).bullets;
+      return (await api.materials.aiConclusion(materialId, { question_refs: refs })).bullets;
+    },
+    [materialId]
+  );
+
+  // Add a special slide and generate its bullets in the background.
+  const addSpecialSlide = useCallback(
+    async (type: string) => {
+      const slide = makeSpecialSlide(type, { slide_title: SPECIAL_HEADINGS[type] });
+      const ref = slide.question_ref;
+      const atFront = type !== "special_conclusion"; // conclusion goes last
+      mutate((d) => ({
+        ...d,
+        charts: normalizeSlots(atFront ? [slide, ...d.charts] : [...d.charts, slide]),
+      }));
+      setBulletsPending(ref, true);
+      try {
+        if (type === "special_demographics") {
+          const { bullets, question_refs } = await api.materials.aiDemographics(
+            materialId,
+            { question_refs: reportQuestionRefs() }
+          );
+          mutate((d) => {
+            const existing = new Set(d.charts.map((c) => c.question_ref));
+            const newCharts = question_refs
+              .filter((r) => r && !existing.has(r))
+              .map((r) => makeChart(r, "vertical_bar"));
+            const idx = d.charts.findIndex((c) => c.question_ref === ref);
+            const updated = d.charts.map((c) =>
+              c.question_ref === ref ? { ...c, options: { bullets } } : c
+            );
+            const out =
+              idx >= 0
+                ? [...updated.slice(0, idx + 1), ...newCharts, ...updated.slice(idx + 1)]
+                : [...updated, ...newCharts];
+            return { ...d, charts: normalizeSlots(out) };
+          });
+        } else {
+          const bullets = await fetchBullets(type, reportQuestionRefs());
+          updateChartByRef(ref, { options: { bullets } });
+        }
+      } catch (e) {
+        toast.error(`Could not generate slide: ${errMsg(e)}`);
+      } finally {
+        setBulletsPending(ref, false);
+        setAiSaveTick((t) => t + 1);
+      }
+    },
+    [materialId, mutate, updateChartByRef, reportQuestionRefs, fetchBullets, setBulletsPending]
+  );
+
+  // Regenerate the bullets of an existing special slide.
+  const regenerateSpecial = useCallback(
+    async (chart: ChartSpec) => {
+      const ref = chart.question_ref;
+      setBulletsPending(ref, true);
+      try {
+        const bullets =
+          chart.chart_type === "special_demographics"
+            ? (await api.materials.aiDemographics(materialId, { question_refs: reportQuestionRefs() })).bullets
+            : await fetchBullets(chart.chart_type, reportQuestionRefs());
+        updateChartByRef(ref, { options: { bullets } });
+      } catch (e) {
+        toast.error(`Could not regenerate slide: ${errMsg(e)}`);
+      } finally {
+        setBulletsPending(ref, false);
+        setAiSaveTick((t) => t + 1);
+      }
+    },
+    [materialId, updateChartByRef, reportQuestionRefs, fetchBullets, setBulletsPending]
+  );
 
   // Persist any unsaved edits before navigating; abort if the save fails
   // (save() already toasts on failure). Used by every exit/transition so
@@ -455,6 +564,8 @@ export default function ReportWizard({
             onRemoveChart={removeChart}
             onReorder={reorderCharts}
             onEnsureTitles={ensureTitles}
+            onAddSpecial={addSpecialSlide}
+            onRegenerateSpecial={regenerateSpecial}
           />
         )}
         {step === 2 && (

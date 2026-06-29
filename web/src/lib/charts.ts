@@ -43,8 +43,26 @@ export function isWordcloud(chartType: string): boolean {
   return chartType === "wordcloud";
 }
 
+// ---- Special (non-chart) slide types ----
+// These ride inside the charts list as ChartSpecs with question_ref="" and
+// options.bullets; they render as text/bullet slides (Overview/Conclusion/
+// Demographics), not data charts.
+export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
+  special_overview: "Overview",
+  special_conclusion: "Conclusion",
+  special_demographics: "Demographics",
+};
+
+export function isSpecialSlide(chart: { chart_type: string }): boolean {
+  return chart.chart_type in SPECIAL_SLIDE_LABELS;
+}
+
 export function chartTypeLabel(id: string): string {
-  return CHART_TYPES.find((c) => c.id === id)?.label ?? id;
+  return (
+    CHART_TYPES.find((c) => c.id === id)?.label ??
+    SPECIAL_SLIDE_LABELS[id] ??
+    id
+  );
 }
 
 /** base-ui Select renders the raw value unless given an items map; these resolve labels. */
@@ -151,6 +169,35 @@ export function makeChart(
     category_label_overrides: [],
     slide_title: null,
     slide_description: null,
+  };
+}
+
+/**
+ * Build a fresh special (non-chart) slide spec. Heading goes in slide_title,
+ * bullet content in options.bullets. Carries all serde-required ChartSpec
+ * fields so the backend report_from_json accepts it like any chart.
+ */
+export function makeSpecialSlide(
+  type: keyof typeof SPECIAL_SLIDE_LABELS | string,
+  opts?: { slide_title?: string; bullets?: string[] }
+): ChartSpec {
+  return {
+    question_ref: "",
+    chart_type: type,
+    statistic: "pct",
+    classifying_var: null,
+    number_format: { ...DEFAULT_NUMBER_FORMAT },
+    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    template_slot: "s1",
+    elements: { ...DEFAULT_ELEMENTS },
+    scatter_xy: null,
+    show_not_answered: false,
+    show_empty_categories: false,
+    not_answered_codes: null,
+    category_label_overrides: [],
+    slide_title: opts?.slide_title ?? null,
+    slide_description: null,
+    options: { bullets: opts?.bullets ?? [] },
   };
 }
 

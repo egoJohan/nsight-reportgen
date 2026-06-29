@@ -183,6 +183,30 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// POST a special-slide AI request, surfacing the backend {detail} on error.
+async function postAi<T>(
+  materialId: string,
+  kind: string,
+  body: unknown
+): Promise<T> {
+  const res = await fetch(`${API_BASE}/materials/${materialId}/ai/${kind}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b && typeof b.detail === "string") detail = b.detail;
+    } catch {
+      // not JSON
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
 // The backend renders previews through LibreOffice, which is now concurrency-safe
 // (a small pool of isolated profiles). Run previews through a bounded pool so a
 // grid of thumbnails generates in PARALLEL — but capped, to match the backend's
@@ -350,6 +374,25 @@ export const api = {
       }
       return res.json() as Promise<{ overrides: [string, string][] }>;
     },
+
+    // AI: special-slide bullet generators. All may 503 if egoHive is down.
+    aiOverview: (
+      materialId: string,
+      body: { question_refs?: string[] }
+    ): Promise<{ bullets: string[] }> =>
+      postAi(materialId, "overview", body),
+
+    aiConclusion: (
+      materialId: string,
+      body: { question_refs?: string[] }
+    ): Promise<{ bullets: string[] }> =>
+      postAi(materialId, "conclusion", body),
+
+    aiDemographics: (
+      materialId: string,
+      body: { question_refs?: string[] }
+    ): Promise<{ bullets: string[]; question_refs: string[] }> =>
+      postAi(materialId, "demographics", body),
   },
 
   reports: {

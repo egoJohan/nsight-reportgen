@@ -197,4 +197,160 @@ def shorten_labels(
     return out
 
 
-__all__ = ["generate_slide_title", "shorten_labels", "MAX_LABEL_LEN", "MAX_TITLE_LEN"]
+# --------------------------------------------------------------------------- #
+# Special slides — Overview / Conclusion / Demographics (bullet lists)
+# --------------------------------------------------------------------------- #
+# Soft cap on how many bullets a special slide shows.
+MAX_BULLETS = 6
+
+
+def _parse_bullets(reply: str) -> list[str]:
+    """Parse an LLM reply into clean bullet strings.
+
+    Accepts numbered ("1. …"), dashed ("- …"/"• …"/"* …") or plain lines; strips
+    the marker and surrounding quotes/whitespace; drops empties. Capped to
+    ``MAX_BULLETS``.
+    """
+    out: list[str] = []
+    for raw in reply.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Strip a leading "1." / "1)" / "-" / "•" / "*" marker.
+        line = re.sub(r"^\(?\d+[\.\):\-]\s*", "", line)
+        line = re.sub(r"^[\-•\*]\s*", "", line)
+        line = line.strip().strip('"').strip()
+        if line:
+            out.append(line)
+    return out[:MAX_BULLETS]
+
+
+def _study_line(study_label: str, prefix: str = "Tutkimus") -> str:
+    """A '<prefix>: "<label>".' line, or empty when no real study label is known."""
+    label = (study_label or "").strip()
+    return f'{prefix}: "{label}".\n' if label else ""
+
+
+def _findings_block(findings_by_question: list[tuple[str, list[tuple[str, float]]]]) -> str:
+    """Render per-question top findings as a compact text block for a prompt."""
+    blocks = []
+    for q_text, findings in findings_by_question:
+        if not findings:
+            continue
+        lines = []
+        for label, value in findings:
+            v = f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
+            lines.append(f"    - {label}: {v}")
+        blocks.append(f"- {q_text}\n" + "\n".join(lines))
+    return "\n".join(blocks) if blocks else "- (ei tuloksia)"
+
+
+def generate_overview_bullets(
+    study_label: str,
+    question_texts: list[str],
+    total_n: int | None,
+    *,
+    chat=egohive_chat,
+) -> list[str]:
+    """Generate Finnish background/overview bullets describing the research."""
+    topics = "\n".join(f"- {t}" for t in question_texts[:30]) or "- (ei kysymyksiä)"
+    n_line = f"Vastaajia yhteensä: {total_n}.\n" if total_n else ""
+    prompt = (
+        "Olet markkinatutkimuksen analyytikko. Kirjoitat raportin aloitusdialle "
+        "lyhyet taustatiedot tutkimuksesta.\n\n"
+        f"{_study_line(study_label, 'Tutkimuksen nimi')}"
+        f"{n_line}"
+        "Tutkimuksessa käsitellyt aiheet (kysymykset):\n"
+        f"{topics}\n\n"
+        f"Kirjoita {MAX_BULLETS - 1}–{MAX_BULLETS} ranskalaista viivaa suomeksi, jotka "
+        "kuvaavat tutkimuksen taustan ja tavoitteet: mitä tutkittiin, keneltä ja mitä "
+        "teemoja kartoitettiin. Yksi tiivis havainto per rivi, ei numerointia, ei "
+        "lainausmerkkejä. Palauta vain ranskalaiset viivat."
+    )
+    return _parse_bullets(chat(prompt))
+
+
+def generate_conclusion_bullets(
+    study_label: str,
+    findings_by_question: list[tuple[str, list[tuple[str, float]]]],
+    *,
+    chat=egohive_chat,
+) -> list[str]:
+    """Generate Finnish conclusion bullets summarising the major findings."""
+    prompt = (
+        "Olet markkinatutkimuksen analyytikko. Kirjoitat raportin "
+        "johtopäätösdialle keskeiset johtopäätökset.\n\n"
+        f"{_study_line(study_label)}"
+        "Kysymysten kärkitulokset (kysymys ja sen vastausten kärki):\n"
+        f"{_findings_block(findings_by_question)}\n\n"
+        f"Kirjoita {MAX_BULLETS - 1}–{MAX_BULLETS} ranskalaista viivaa suomeksi, jotka "
+        "tiivistävät tutkimuksen TÄRKEIMMÄT johtopäätökset. Tulkitse tuloksia (mitä "
+        "data kokonaisuutena kertoo), älä luettele yksittäisiä lukuja. Yksi "
+        "johtopäätös per rivi, ei numerointia, ei lainausmerkkejä. Palauta vain "
+        "ranskalaiset viivat."
+    )
+    return _parse_bullets(chat(prompt))
+
+
+def pick_demographic_questions(
+    candidates: list[tuple[str, str]],
+    *,
+    chat=egohive_chat,
+) -> list[str]:
+    """Return the qids the LLM judges to be demographic/background variables.
+
+    ``candidates`` is ``[(qid, label), …]``. The reply is intersected with the
+    candidate qids, so hallucinated ids are dropped by the caller too.
+    """
+    listing = "\n".join(f"{qid}: {label}" for qid, label in candidates)
+    prompt = (
+        "Olet markkinatutkimuksen analyytikko. Alla on tutkimuksen kysymykset "
+        "muodossa 'tunnus: kysymys'.\n\n"
+        f"{listing}\n\n"
+        "Valitse NIIDEN kysymysten tunnukset, jotka kuvaavat vastaajien "
+        "taustatietoja eli demografiaa (esim. ikä, sukupuoli, asuinalue/maantiede, "
+        "kotitalous, koulutus, tulot). Palauta VAIN tunnukset pilkulla erotettuna, "
+        "ei muuta tekstiä. Jos demografisia kysymyksiä ei ole, palauta tyhjä rivi."
+    )
+    reply = chat(prompt)
+    valid = {qid for qid, _ in candidates}
+    picked: list[str] = []
+    for token in re.split(r"[,\s]+", reply.strip()):
+        t = token.strip().strip(".:)")
+        if t in valid and t not in picked:
+            picked.append(t)
+    return picked
+
+
+def generate_demographics_bullets(
+    study_label: str,
+    findings_by_question: list[tuple[str, list[tuple[str, float]]]],
+    *,
+    chat=egohive_chat,
+) -> list[str]:
+    """Generate Finnish 'facts about the respondents' bullets from demographics."""
+    prompt = (
+        "Olet markkinatutkimuksen analyytikko. Kirjoitat raportin dialle, joka "
+        "kuvaa vastaajajoukon (keitä tutkimukseen vastasivat).\n\n"
+        f"{_study_line(study_label)}"
+        "Demografisten kysymysten jakaumat:\n"
+        f"{_findings_block(findings_by_question)}\n\n"
+        f"Kirjoita {MAX_BULLETS - 1}–{MAX_BULLETS} ranskalaista viivaa suomeksi, jotka "
+        "esittävät keskeiset faktat vastaajista (esim. ikäjakauma, sukupuolijakauma, "
+        "maantieteellinen jakauma). Käytä lukuja jakaumista. Yksi fakta per rivi, ei "
+        "numerointia, ei lainausmerkkejä. Palauta vain ranskalaiset viivat."
+    )
+    return _parse_bullets(chat(prompt))
+
+
+__all__ = [
+    "generate_slide_title",
+    "shorten_labels",
+    "generate_overview_bullets",
+    "generate_conclusion_bullets",
+    "pick_demographic_questions",
+    "generate_demographics_bullets",
+    "MAX_LABEL_LEN",
+    "MAX_TITLE_LEN",
+    "MAX_BULLETS",
+]

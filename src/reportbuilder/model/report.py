@@ -55,6 +55,21 @@ class ChartSpec:
         return {full: short for full, short in self.category_label_overrides}
 
 
+# Special (non-chart) slide types. These ride inside Report.charts as ChartSpecs
+# with question_ref="" and their bullet content in options["bullets"]; the heading
+# is slide_title. They are rendered as text/bullet slides, NOT data charts.
+SPECIAL_SLIDE_TYPES: frozenset[str] = frozenset({
+    "special_overview",
+    "special_conclusion",
+    "special_demographics",
+})
+
+
+def is_special_slide(spec: "ChartSpec") -> bool:
+    """True for a non-chart special slide (Overview/Conclusion/Demographics)."""
+    return spec.chart_type in SPECIAL_SLIDE_TYPES
+
+
 @dataclass(frozen=True)
 class Report:
     name: str

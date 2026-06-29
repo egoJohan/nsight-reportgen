@@ -20,11 +20,18 @@ from pydantic import BaseModel
 from nsight.agent.egohive_client import EgoHiveError, egohive_chat
 
 from reportbuilder.ai.reference import ReferenceLabels
-from reportbuilder.ai.text import generate_slide_title, shorten_labels
+from reportbuilder.ai.text import (
+    generate_conclusion_bullets,
+    generate_demographics_bullets,
+    generate_overview_bullets,
+    generate_slide_title,
+    pick_demographic_questions,
+    shorten_labels,
+)
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.ingest.multi_group import enrich_model
-from reportbuilder.ingest.sav_reader import read_sav
+from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.model.report import (
     ChartSpec,
     ElementToggles,
@@ -67,6 +74,69 @@ def _load_df_model(material_id: str, client: DataHiveClient):
     finally:
         os.unlink(tmp_path)
     return df, enrich_model(model)
+
+
+def _load_df_model_labeled(material_id: str, client: DataHiveClient):
+    """Like _load_df_model but also return the SAV's study label (file label).
+
+    Falls back to the material id when the .sav carries no embedded label.
+    """
+    raw = client.get_material(material_id)
+    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    try:
+        df, model = read_sav(tmp_path)
+        # Empty when the .sav carries no embedded study label — the prompts then
+        # omit the name line rather than printing an internal material id.
+        label = sav_file_label(tmp_path) or ""
+    finally:
+        os.unlink(tmp_path)
+    return df, enrich_model(model), label
+
+
+def _kind_spec(question) -> ChartSpec:
+    """A minimal ChartSpec that compute() accepts for this question's kind.
+
+    compute() raises for text questions unless chart_type="wordcloud", and a
+    battery yields findings only with statistic="mean" — so pick per kind.
+    """
+    if question.kind == "battery":
+        statistic, chart_type = "mean", "horizontal_bar"
+    elif question.kind == "text":
+        statistic, chart_type = "count", "wordcloud"
+    else:  # single | multi
+        statistic, chart_type = "pct", "horizontal_bar"
+    return ChartSpec(
+        question_ref=question.qid,
+        chart_type=chart_type,
+        statistic=statistic,
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"),
+        template_slot="ai",
+        elements=ElementToggles(),
+    )
+
+
+def _findings_for_refs(
+    refs: list[str], df, model, *, top_n: int = 3, cap: int = 25
+) -> list[tuple[str, list[tuple[str, float]]]]:
+    """Per-question top findings for the given refs, guarded against compute()
+    raising on incompatible kinds and skipping questions that yield nothing.
+    Capped to bound egoHive latency.
+    """
+    out: list[tuple[str, list[tuple[str, float]]]] = []
+    for ref in refs[:cap]:
+        try:
+            q = model.question(ref)
+            series = compute(q, _kind_spec(q), df, model)
+            findings = _findings_from_series(series, top_n)
+        except Exception:
+            continue  # skip incompatible/empty questions
+        if findings:
+            out.append((q.text, findings))
+    return out
 
 
 def _findings_from_series(
@@ -235,6 +305,107 @@ def ai_short_labels(
         ) from exc
 
     return {"overrides": [[full, short] for full, short in overrides]}
+
+
+# --------------------------------------------------------------------------- #
+# Special slides — Overview / Conclusion / Demographics (bullet lists)
+# --------------------------------------------------------------------------- #
+class SpecialSlideBody(BaseModel):
+    """Optional report context. ``question_refs`` are the report's current chart
+    questions (used for Overview topics / Conclusion findings)."""
+
+    question_refs: list[str] = []
+
+
+def _question_texts(refs: list[str], model) -> list[str]:
+    texts: list[str] = []
+    for ref in refs:
+        try:
+            texts.append(model.question(ref).text)
+        except KeyError:
+            continue
+    return texts
+
+
+@ai_router.post("/materials/{material_id}/ai/overview")
+def ai_overview(
+    material_id: str,
+    body: SpecialSlideBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Background/overview bullets about the research. Returns {"bullets": [...]}."""
+    try:
+        df, model, label = _load_df_model_labeled(material_id, client)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
+
+    texts = _question_texts(body.question_refs, model) or [q.text for q in model.questions]
+    try:
+        bullets = generate_overview_bullets(label, texts, len(df), chat=egohive_chat)
+    except EgoHiveError as exc:
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not generate overview: {exc}") from exc
+    return {"bullets": bullets}
+
+
+@ai_router.post("/materials/{material_id}/ai/conclusion")
+def ai_conclusion(
+    material_id: str,
+    body: SpecialSlideBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Conclusion bullets summarising findings across the report's questions."""
+    try:
+        df, model, label = _load_df_model_labeled(material_id, client)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
+
+    refs = body.question_refs or [q.qid for q in model.questions]
+    findings = _findings_for_refs(refs, df, model)
+    if not findings:
+        return {"bullets": []}  # nothing computable to conclude from
+    try:
+        bullets = generate_conclusion_bullets(label, findings, chat=egohive_chat)
+    except EgoHiveError as exc:
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not generate conclusion: {exc}") from exc
+    return {"bullets": bullets}
+
+
+@ai_router.post("/materials/{material_id}/ai/demographics")
+def ai_demographics(
+    material_id: str,
+    body: SpecialSlideBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Pick demographic questions and write 'about the respondents' bullets.
+
+    Returns {"bullets": [...], "question_refs": [...]} where question_refs are the
+    LLM-selected demographic questions (validated against the model).
+    """
+    try:
+        df, model, label = _load_df_model_labeled(material_id, client)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
+
+    candidates = [(q.qid, q.text) for q in model.questions]
+    try:
+        picked = pick_demographic_questions(candidates, chat=egohive_chat)
+        findings = _findings_for_refs(picked, df, model)
+        bullets = generate_demographics_bullets(label, findings, chat=egohive_chat) if findings else []
+    except EgoHiveError as exc:
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not generate demographics: {exc}") from exc
+    return {"bullets": bullets, "question_refs": picked}
 
 
 __all__ = ["ai_router"]

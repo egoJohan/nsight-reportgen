@@ -160,6 +160,82 @@ def test_short_labels_requires_categories_or_question_ref() -> None:
 # --------------------------------------------------------------------------- #
 # Optional live egoHive smoke test (skipped unless reachable)
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Special slides: /ai/overview, /ai/conclusion, /ai/demographics
+# --------------------------------------------------------------------------- #
+def test_overview_returns_bullets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "reportbuilder.api.routes_ai.egohive_chat",
+        lambda prompt, **kw: "- Tutkimus kartoitti asiakastyytyväisyyttä\n- Vastaajia oli runsaasti",
+    )
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/overview", json={"question_refs": ["q1"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bullets"] == [
+        "Tutkimus kartoitti asiakastyytyväisyyttä",
+        "Vastaajia oli runsaasti",
+    ]
+
+
+def test_overview_egohive_error_returns_503(monkeypatch) -> None:
+    def boom(prompt, **kw):
+        raise EgoHiveError("down")
+
+    monkeypatch.setattr("reportbuilder.api.routes_ai.egohive_chat", boom)
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/overview", json={})
+    assert resp.status_code == 503
+
+
+def test_conclusion_returns_bullets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "reportbuilder.api.routes_ai.egohive_chat",
+        lambda prompt, **kw: "1. Tyytyväisyys on korkealla\n2. Suosittelu yleistä",
+    )
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/conclusion", json={"question_refs": ["q1"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bullets"]  # non-empty
+
+
+def test_conclusion_no_findings_returns_empty(monkeypatch) -> None:
+    """Unknown refs → no computable findings → empty bullets, no LLM call."""
+    def boom(*a, **k):
+        raise AssertionError("egohive must not be called without findings")
+
+    monkeypatch.setattr("reportbuilder.api.routes_ai.egohive_chat", boom)
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/conclusion", json={"question_refs": ["nope"]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["bullets"] == []
+
+
+def test_demographics_picks_and_returns_bullets(monkeypatch) -> None:
+    # First call (pick) returns a valid qid; second call (facts) returns bullets.
+    def chat(prompt, **kw):
+        if "tunnukset" in prompt:  # the pick prompt
+            return "q1"
+        return "- Vastaajista enemmistö on tyytyväisiä"
+
+    monkeypatch.setattr("reportbuilder.api.routes_ai.egohive_chat", chat)
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/demographics", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["question_refs"] == ["q1"]
+    assert body["bullets"]
+
+
+def test_demographics_egohive_error_returns_503(monkeypatch) -> None:
+    def boom(prompt, **kw):
+        raise EgoHiveError("down")
+
+    monkeypatch.setattr("reportbuilder.api.routes_ai.egohive_chat", boom)
+    client = _client_with_material()
+    resp = client.post("/materials/mat-1/ai/demographics", json={})
+    assert resp.status_code == 503
+
+
 @pytest.mark.live
 def test_live_egohive_slide_title_smoke() -> None:
     from reportbuilder.ai.text import generate_slide_title

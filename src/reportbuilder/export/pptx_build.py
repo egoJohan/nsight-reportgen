@@ -1,5 +1,5 @@
 from __future__ import annotations
-from reportbuilder.model.report import Report
+from reportbuilder.model.report import Report, is_special_slide
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
 from reportbuilder.render.deck import render_to_file
@@ -14,6 +14,10 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
     series_by_ref: dict = {}
     titles: dict = {}
     for spec in report.charts:
+        # Special (non-chart) slides carry no question/series — they render as
+        # text/bullet slides in render_report. Skip stats for them.
+        if is_special_slide(spec):
+            continue
         q = model.question(spec.question_ref)
         series_by_ref[spec.question_ref] = compute(q, spec, data, model)
         titles[spec.question_ref] = q.text

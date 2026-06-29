@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BarChart3Icon,
+  FileTextIcon,
   GripVerticalIcon,
   ImageIcon,
+  ListChecksIcon,
   Loader2Icon,
+  PlusIcon,
   RotateCcwIcon,
   SparklesIcon,
   Trash2Icon,
+  UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import ChartThumb from "@/components/wizard/ChartThumb";
@@ -33,13 +37,21 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   chartTypeLabel,
+  isSpecialSlide,
   isWordcloud,
 } from "@/lib/charts";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Per-chart pending flags (keyed by question_ref) from the auto-AI orchestrator.
 export type AiPendingMap = Record<
   string,
-  { titlePending: boolean; labelsPending: boolean }
+  { titlePending: boolean; labelsPending: boolean; bulletsPending?: boolean }
 >;
 
 type Region = { left: string; top: string; width: string; height: string };
@@ -970,6 +982,191 @@ function ChartTypeField({
   );
 }
 
+// ── Special-slide preview (full PNG; no title overlay / label region) ────────
+function SpecialPreview({
+  materialId,
+  chart,
+  bulletsPending,
+}: {
+  materialId: string;
+  chart: ChartSpec;
+  bulletsPending: boolean;
+}) {
+  // The whole slide (heading + bullets) is baked server-side → render the full
+  // PNG (renderTitle:true) and show it plainly.
+  const { data: url, error: qError, isFetching: loading } = useChartPreview(
+    materialId,
+    chart,
+    { renderTitle: true }
+  );
+  const error =
+    qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
+  return (
+    <div className="rounded-xl border bg-muted/30 p-4">
+      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl overflow-hidden rounded-lg">
+        {url ? (
+          <img
+            src={url}
+            alt="Slide preview"
+            className="absolute inset-0 size-full rounded-md object-fill shadow-sm"
+          />
+        ) : (
+          !error && (
+            <div className="flex size-full flex-col items-center justify-center gap-3 text-muted-foreground">
+              <ImageIcon className="size-8 opacity-40" />
+              <span className="text-sm">Rendering preview…</span>
+            </div>
+          )
+        )}
+        {url && bulletsPending && (
+          <PendingRegion
+            style={{ left: "6%", top: "26%", width: "88%", height: "62%" }}
+            label="Generating…"
+          />
+        )}
+        {loading && (
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm ring-1 ring-border">
+            <div className="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            Updating…
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-x-4 bottom-4 z-20 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive shadow-sm">
+            <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+            <span className="leading-snug">{error}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Special-slide controls: editable heading + bullets + Regenerate ──────────
+function SpecialSlideControls({
+  chart,
+  pending,
+  onChange,
+  onRegenerate,
+}: {
+  chart: ChartSpec;
+  pending: boolean;
+  onChange: (patch: Partial<ChartSpec>) => void;
+  onRegenerate: () => void;
+}) {
+  const bullets = ((chart.options?.bullets as string[] | undefined) ?? []).join("\n");
+  const [draft, setDraft] = useState(bullets);
+  // Resync when the generated bullets land (or when switching slides).
+  useEffect(() => setDraft(bullets), [bullets]);
+
+  const commit = () => {
+    const next = draft
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    onChange({ options: { ...(chart.options ?? {}), bullets: next } });
+  };
+
+  return (
+    <div className="space-y-4">
+      <Field label="Heading">
+        <LabelOverrideInput
+          full="Slide heading"
+          value={chart.slide_title ?? ""}
+          onCommit={(v) => onChange({ slide_title: v || null })}
+        />
+      </Field>
+      <Field label="Bullets" hint="One bullet per line.">
+        <textarea
+          className="min-h-40 w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed shadow-sm focus:ring-2 focus:ring-primary/30 focus:outline-none"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          placeholder={pending ? "Generating…" : "One bullet per line"}
+        />
+      </Field>
+      <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
+        {pending ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <SparklesIcon className="size-4" />
+        )}
+        Regenerate
+      </Button>
+    </div>
+  );
+}
+
+// ── Add-special-slide dialog ─────────────────────────────────────────────────
+const SPECIAL_SLIDE_CHOICES: {
+  type: string;
+  label: string;
+  description: string;
+  Icon: typeof FileTextIcon;
+}[] = [
+  {
+    type: "special_overview",
+    label: "Overview",
+    description: "Background about the research, generated from the available information.",
+    Icon: FileTextIcon,
+  },
+  {
+    type: "special_conclusion",
+    label: "Conclusion",
+    description: "The major conclusions drawn across the report's questions.",
+    Icon: ListChecksIcon,
+  },
+  {
+    type: "special_demographics",
+    label: "Demographics",
+    description: "Facts about the respondents plus a chart per demographic question.",
+    Icon: UsersIcon,
+  },
+];
+
+function AddSpecialDialog({
+  open,
+  onOpenChange,
+  onPick,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onPick: (type: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add a special slide</DialogTitle>
+          <DialogDescription>
+            Special slides are written by AI from the report's data.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          {SPECIAL_SLIDE_CHOICES.map(({ type, label, description, Icon }) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => {
+                onPick(type);
+                onOpenChange(false);
+              }}
+              className="flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50"
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Icon className="size-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{label}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Configure step ─────────────────────────────────────────────────────
 export default function StepConfigure({
   materialId,
@@ -979,6 +1176,8 @@ export default function StepConfigure({
   onRemoveChart,
   onReorder,
   onEnsureTitles,
+  onAddSpecial,
+  onRegenerateSpecial,
 }: {
   materialId: string;
   charts: ChartSpec[];
@@ -989,9 +1188,13 @@ export default function StepConfigure({
   // Called with every chart's ref when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
   onEnsureTitles?: (refs: string[]) => void;
+  // Add / regenerate special (non-chart) slides.
+  onAddSpecial?: (type: string) => void;
+  onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
   const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
+  const [specialDialogOpen, setSpecialDialogOpen] = useState(false);
   const { dragIndex, overIndex, containerRef, itemProps } =
     useDragReorder(onReorder);
 
@@ -1027,27 +1230,54 @@ export default function StepConfigure({
     );
   }
 
+  // "+ Add special slide" affordance + its dialog (shown in both the empty
+  // state and the normal layout).
+  const addSpecialBar = onAddSpecial ? (
+    <>
+      <button
+        type="button"
+        onClick={() => setSpecialDialogOpen(true)}
+        className="flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+      >
+        <PlusIcon className="size-4" />
+        Add special slide
+      </button>
+      <AddSpecialDialog
+        open={specialDialogOpen}
+        onOpenChange={setSpecialDialogOpen}
+        onPick={(type) => onAddSpecial(type)}
+      />
+    </>
+  ) : null;
+
   if (charts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
-        <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
-        <p className="text-sm font-medium">No charts yet</p>
-        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-          Go back to <span className="font-medium">Select</span> and add
-          questions to configure their charts here.
-        </p>
+      <div className="space-y-4">
+        {addSpecialBar}
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
+          <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
+          <p className="text-sm font-medium">No charts yet</p>
+          <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+            Go back to <span className="font-medium">Select</span> and add
+            questions, or add a special slide above.
+          </p>
+        </div>
       </div>
     );
   }
 
   const activeChart = charts[active];
+  const activeSpecial = activeChart ? isSpecialSlide(activeChart) : false;
+  const activeBulletsPending =
+    aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 
   return (
     <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-6">
       {/* Left: chart list */}
       <div className="space-y-2">
+        {addSpecialBar}
         <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Charts ({charts.length})
+          Slides ({charts.length})
         </p>
         <div className="space-y-1.5" ref={containerRef as React.RefObject<HTMLDivElement>}>
           {charts.map((c, i) => {
@@ -1097,7 +1327,9 @@ export default function StepConfigure({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="line-clamp-2 text-sm leading-snug">
-                        {q?.text ?? c.question_ref}
+                        {isSpecialSlide(c)
+                          ? c.slide_title || chartTypeLabel(c.chart_type)
+                          : q?.text ?? c.question_ref}
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {chartTypeLabel(c.chart_type)}
@@ -1114,7 +1346,7 @@ export default function StepConfigure({
                   <ChartThumb
                     materialId={materialId}
                     chart={c}
-                    renderTitle={false}
+                    renderTitle={isSpecialSlide(c)}
                     className="h-20"
                   />
                 </button>
@@ -1130,11 +1362,15 @@ export default function StepConfigure({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h3 className="truncate text-sm font-semibold">
-                {questionMap.get(activeChart.question_ref)?.text ??
-                  activeChart.question_ref}
+                {activeSpecial
+                  ? activeChart.slide_title || chartTypeLabel(activeChart.chart_type)
+                  : questionMap.get(activeChart.question_ref)?.text ??
+                    activeChart.question_ref}
               </h3>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {activeChart.question_ref}
+                {activeSpecial
+                  ? chartTypeLabel(activeChart.chart_type)
+                  : activeChart.question_ref}
               </p>
             </div>
             <Button
@@ -1148,30 +1384,51 @@ export default function StepConfigure({
             </Button>
           </div>
 
-          <ChartPreview
-            key={`${activeChart.question_ref}-${active}`}
-            materialId={materialId}
-            chart={activeChart}
-            titlePending={
-              aiPending?.[activeChart.question_ref]?.titlePending ?? false
-            }
-            labelsPending={
-              aiPending?.[activeChart.question_ref]?.labelsPending ?? false
-            }
-            questionText={
-              questionMap.get(activeChart.question_ref)?.text ??
-              activeChart.question_ref
-            }
-          />
+          {activeSpecial ? (
+            <>
+              <SpecialPreview
+                key={`${activeChart.question_ref}-${active}`}
+                materialId={materialId}
+                chart={activeChart}
+                bulletsPending={activeBulletsPending}
+              />
+              <div className="rounded-xl border bg-card p-4">
+                <SpecialSlideControls
+                  chart={activeChart}
+                  pending={activeBulletsPending}
+                  onChange={(patch) => onUpdateChart(active, patch)}
+                  onRegenerate={() => onRegenerateSpecial?.(activeChart)}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <ChartPreview
+                key={`${activeChart.question_ref}-${active}`}
+                materialId={materialId}
+                chart={activeChart}
+                titlePending={
+                  aiPending?.[activeChart.question_ref]?.titlePending ?? false
+                }
+                labelsPending={
+                  aiPending?.[activeChart.question_ref]?.labelsPending ?? false
+                }
+                questionText={
+                  questionMap.get(activeChart.question_ref)?.text ??
+                  activeChart.question_ref
+                }
+              />
 
-          <div className="rounded-xl border bg-card p-4">
-            <ChartControls
-              chart={activeChart}
-              materialId={materialId}
-              question={questionMap.get(activeChart.question_ref)}
-              onChange={(patch) => onUpdateChart(active, patch)}
-            />
-          </div>
+              <div className="rounded-xl border bg-card p-4">
+                <ChartControls
+                  chart={activeChart}
+                  materialId={materialId}
+                  question={questionMap.get(activeChart.question_ref)}
+                  onChange={(patch) => onUpdateChart(active, patch)}
+                />
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
