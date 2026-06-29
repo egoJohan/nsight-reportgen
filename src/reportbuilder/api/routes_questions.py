@@ -32,6 +32,7 @@ from reportbuilder.model.report import (
     SortSpec,
 )
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
+from reportbuilder.stats.engine import compute
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -198,6 +199,42 @@ def load_model_for_material(material_id: str, client: DataHiveClient) -> Questio
     return model
 
 
+def _load_df_model(material_id: str, client: DataHiveClient):
+    """Like load_model_for_material but also returns the DataFrame (for stats)."""
+    raw = client.get_material(material_id)
+    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
+        tmp.write(raw)
+        tmp_path = tmp.name
+    try:
+        df, model = read_sav(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+    groups = suggest_multi_groups(model)
+    if groups:
+        model = apply_groups(model, groups)
+    return df, model
+
+
+def _question_measurement(model: QuestionModel, q) -> str:
+    """Overall measurement label for a question: 'multi', 'text', or the primary
+    variable's measurement (categorical/scale)."""
+    if q.kind == "multi":
+        return "multi"
+    var = model.variables[q.variables[0]]
+    return var.measurement or "categorical"
+
+
+def _summary_spec(qid: str) -> ChartSpec:
+    """Minimal spec to compute a question's overall distribution."""
+    return ChartSpec(
+        question_ref=qid, chart_type="horizontal_bar", statistic="pct",
+        classifying_var=None, number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"), template_slot="summary",
+        elements=ElementToggles(), show_not_answered=False,
+        show_empty_categories=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -241,6 +278,84 @@ def list_questions(
             "category_labels": _category_labels(model, q),
         })
     return {"questions": questions}
+
+
+@questions_router.get("/materials/{material_id}/questions/{qid}/summary")
+def question_summary(
+    material_id: str,
+    qid: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Rich detail for one question: full metadata + the computed response
+    distribution (counts, %, base N) and mean for scale questions. Stats failures
+    degrade to nulls (never a 500); a genuinely unknown qid is a 404."""
+    df, model = _load_df_model(material_id, client)
+    try:
+        q = model.question(qid)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Question '{qid}' not found") from exc
+
+    chartable, reason = _question_chartable(model, q)
+    is_text = _is_text_question(model, q)
+    out: dict = {
+        "qid": q.qid,
+        "kind": q.kind,
+        "text": q.text,
+        "measurement": "text" if is_text else _question_measurement(model, q),
+        "variables": [
+            {
+                "name": v,
+                "label": model.variables[v].label,
+                "measurement": model.variables[v].measurement,
+            }
+            for v in q.variables
+        ],
+        "value_labels": _value_list(model, q),
+        "missing_values": _missing_value_list(model, q.qid),
+        "category_labels": _category_labels(model, q),
+        "chartable": chartable,
+        "non_chartable_reason": reason,
+        "respondent_total": int(len(df)),
+        "base_n": None,
+        "statistic": "pct",
+        "distribution": None,
+        "mean": None,
+    }
+
+    if not chartable or is_text:
+        return out
+
+    # Computed distribution (count + pct per category) + base N.
+    try:
+        series = compute(q, _summary_spec(q.qid), df, model)
+        seg = series.segments[0] if series.segments else "Total"
+        out["base_n"] = series.base_n.get(seg)
+        dist = []
+        for cat in series.categories:
+            cell = series.cells.get((cat, seg))
+            if cell is None:
+                continue
+            dist.append({"category": cat, "count": cell.count, "pct": cell.pct})
+        out["distribution"] = dist
+        out["suggested_chart_type"] = suggest_chart_type(q, series)
+        out["compatible_chart_types"] = _compatible_chart_types(q, series)
+    except Exception:
+        # Stats are best-effort; metadata above is always returned.
+        pass
+
+    # Mean for a single scale variable (excluding user-missing + sysmis).
+    if q.kind == "single" and _question_measurement(model, q) == "scale":
+        try:
+            import pandas as pd  # local import; pandas already loaded via ingest
+            var = model.variables[q.variables[0]]
+            s = pd.to_numeric(df[var.name], errors="coerce")
+            s = s[~s.isin(list(var.missing_values))]
+            if s.notna().any():
+                out["mean"] = float(s.mean())
+        except Exception:
+            pass
+
+    return out
 
 
 @questions_router.get("/materials/{material_id}/variables")

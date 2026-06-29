@@ -42,6 +42,33 @@ export interface Variable {
   measurement: string;
 }
 
+// ---- Question details (computed summary) ----
+export interface QuestionDistRow {
+  category: string;
+  count: number | null;
+  pct: number | null;
+}
+
+export interface QuestionSummary {
+  qid: string;
+  kind: string;
+  text: string;
+  measurement: string;
+  variables: { name: string; label: string; measurement: string }[];
+  value_labels: ValueLabel[];
+  missing_values: MissingValue[];
+  category_labels: string[];
+  chartable: boolean;
+  non_chartable_reason: string | null;
+  respondent_total: number;
+  base_n: number | null;
+  statistic: string;
+  distribution: QuestionDistRow[] | null;
+  mean: number | null;
+  suggested_chart_type?: string;
+  compatible_chart_types?: string[];
+}
+
 export interface UploadResult {
   material_id: string;
   question_count: number;
@@ -227,6 +254,11 @@ export const api = {
     variables: (materialId: string): Promise<{ variables: Variable[] }> =>
       fetch(`${API_BASE}/materials/${materialId}/variables`).then((r) =>
         json<{ variables: Variable[] }>(r)
+      ),
+
+    questionSummary: (materialId: string, qid: string): Promise<QuestionSummary> =>
+      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/summary`).then(
+        (r) => json<QuestionSummary>(r)
       ),
 
     previewChart: (

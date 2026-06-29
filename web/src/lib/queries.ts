@@ -125,6 +125,15 @@ export function useQuestions(materialId: string | null) {
   });
 }
 
+export function useQuestionSummary(materialId: string, qid: string | null) {
+  return useQuery({
+    queryKey: ["question-summary", materialId, qid ?? ""],
+    queryFn: () => api.materials.questionSummary(materialId, qid!),
+    enabled: !!materialId && !!qid,
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useVariables(materialId: string | null) {
   return useQuery({
     queryKey: qk.variables(materialId ?? ""),

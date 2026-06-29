@@ -1,0 +1,185 @@
+import { Loader2Icon, AlertCircleIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { useQuestionSummary } from "@/lib/queries";
+import type { QuestionSummary } from "@/lib/api";
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border bg-muted/30 px-3 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-sm font-medium tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function Distribution({ s }: { s: QuestionSummary }) {
+  const rows = s.distribution ?? [];
+  if (rows.length === 0) return null;
+  const max = Math.max(...rows.map((r) => r.pct ?? 0), 1);
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">Response distribution</p>
+      <div className="space-y-1.5">
+        {rows.map((r, i) => (
+          <div key={`${r.category}-${i}`} className="flex items-center gap-3">
+            <div className="w-1/2 min-w-0 shrink-0 truncate text-sm" title={r.category}>
+              {r.category}
+            </div>
+            <div className="relative h-5 flex-1 overflow-hidden rounded bg-muted">
+              <div
+                className="absolute inset-y-0 left-0 rounded bg-primary/80"
+                style={{ width: `${((r.pct ?? 0) / max) * 100}%` }}
+              />
+            </div>
+            <div className="w-24 shrink-0 text-right text-sm tabular-nums">
+              {r.pct != null ? `${r.pct.toFixed(0)} %` : "—"}
+              <span className="ml-1 text-xs text-muted-foreground">
+                ({r.count ?? "—"})
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function QuestionDetailsDialog({
+  materialId,
+  qid,
+  onOpenChange,
+}: {
+  materialId: string;
+  qid: string | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
+
+  return (
+    <Dialog open={!!qid} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="pr-6 text-left text-base leading-snug">
+            {s?.text ?? "Question details"}
+          </DialogTitle>
+          <DialogDescription className="text-left font-mono text-xs">
+            {qid}
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16 text-muted-foreground">
+            <Loader2Icon className="size-5 animate-spin" />
+          </div>
+        ) : isError || !s ? (
+          <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm text-destructive">
+            <AlertCircleIcon className="size-4 shrink-0" />
+            Couldn't load question details.
+          </div>
+        ) : (
+          <div className="space-y-5 py-2">
+            {/* Tags */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="font-normal">
+                {s.kind === "multi"
+                  ? `Multi-response · ${s.variables.length}`
+                  : "Single"}
+              </Badge>
+              <Badge variant="outline" className="font-normal">
+                {s.measurement}
+              </Badge>
+              {s.chartable === false ? (
+                <Badge
+                  variant="outline"
+                  className="border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
+                >
+                  Not chartable
+                </Badge>
+              ) : (
+                s.suggested_chart_type && (
+                  <Badge
+                    variant="outline"
+                    className="border-teal-300 bg-teal-50 font-normal text-teal-700"
+                  >
+                    Suggested: {s.suggested_chart_type.replace(/_/g, " ")}
+                  </Badge>
+                )
+              )}
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-2">
+              <Stat label="Respondents (n)" value={s.respondent_total} />
+              <Stat label="Answered (base)" value={s.base_n ?? "—"} />
+              <Stat
+                label="Mean"
+                value={s.mean != null ? s.mean.toFixed(2) : "—"}
+              />
+            </div>
+
+            {/* Distribution */}
+            <Distribution s={s} />
+
+            {/* Value labels (codes) */}
+            {s.value_labels.length > 0 && (
+              <div>
+                <p className="mb-2 text-sm font-medium">Value labels</p>
+                <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border bg-muted/20 p-2">
+                  {s.value_labels.map((v) => (
+                    <div key={v.code} className="flex gap-3 px-1.5 py-0.5 text-sm">
+                      <span className="w-14 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                        {v.code}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{v.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Missing values */}
+            {s.missing_values.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-sm font-medium">
+                  "Not answered" / missing values
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {s.missing_values.map((m) => (
+                    <Badge
+                      key={m.code}
+                      variant="outline"
+                      className="border-amber-300 bg-amber-50 font-normal text-amber-700"
+                    >
+                      <span className="font-mono">{m.code}</span> · {m.label}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Variables */}
+            <div>
+              <p className="mb-1.5 text-sm font-medium">
+                {s.variables.length === 1 ? "Variable" : "Variables"}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {s.variables.map((v) => (
+                  <Badge key={v.name} variant="outline" className="font-mono font-normal" title={v.label}>
+                    {v.name}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}

@@ -28,6 +28,7 @@ import {
 import { useQuestions, useUploadMaterial } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
+import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 
 // ---- Sort options ----
 type SortKey = "default" | "text_asc" | "text_desc" | "kind";
@@ -76,6 +77,7 @@ function QuestionTable({
   const { data: questions, isLoading, isError, error } = useQuestions(materialId);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("default");
+  const [detailQid, setDetailQid] = useState<string | null>(null);
 
   // Stored materialId may 404 after a demo-backend restart — let the parent
   // decide whether to drop it (only on a genuine 404, not a transient blip).
@@ -161,7 +163,12 @@ function QuestionTable({
             </TableHeader>
             <TableBody>
               {sorted.map((q) => (
-                <TableRow key={q.qid} className="group">
+                <TableRow
+                  key={q.qid}
+                  className="group cursor-pointer hover:bg-muted/40"
+                  onClick={() => setDetailQid(q.qid)}
+                  title="View question details"
+                >
                   <TableCell className="py-3 max-w-0">
                     <p className="text-sm leading-snug line-clamp-2 group-hover:line-clamp-none transition-all">
                       {q.text}
@@ -206,6 +213,12 @@ function QuestionTable({
           </Table>
         </div>
       )}
+
+      <QuestionDetailsDialog
+        materialId={materialId}
+        qid={detailQid}
+        onOpenChange={(open) => !open && setDetailQid(null)}
+      />
     </div>
   );
 }
