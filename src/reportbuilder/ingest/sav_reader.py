@@ -108,23 +108,65 @@ _METADATA_LABEL_EXACT: frozenset[str] = frozenset({
     "latitude",
     "user agent",
     "comments",
+    "link name",
 })
+
+# Exact variable names (case-insensitive) for platform-derived recode/counter
+# columns that are not survey questions: branch/quota recodes and the
+# per-question choice counter.
+_METADATA_NAMES_EXTRA: frozenset[str] = frozenset({
+    "branch_numeric",
+    "q_nchoices",
+    "linkname",
+})
+
+# Label *prefixes* (case-insensitive) that signal survey-engine paradata whose
+# trailing text varies per export (so they can't be matched exactly):
+#   - "URL_…"      URL query-string captures / their numeric recodes
+#   - "Hidden value …"  platform hidden fields
+#   - "Survey timer", "Answer count", "New Percent Branch …"  paradata/quota
+# Prefix (not substring) matching keeps a real question that merely *mentions*
+# one of these words from being dropped.
+_METADATA_LABEL_PREFIXES: tuple[str, ...] = (
+    "url_",
+    "hidden value",
+    "survey timer",
+    "answer count",
+    "new percent branch",
+)
+
+# Variable-name prefixes for URL-derived recode columns (URLprofiilinew,
+# URLregion, URL_Villas_numeric, …). Survey questions use the `var<N>` scheme,
+# so a leading "url" never collides with a real question.
+_METADATA_NAME_PREFIXES: tuple[str, ...] = (
+    "url",
+)
 
 
 def _is_metadata(name: str, label: str) -> bool:
     """Return True if this variable is a survey-platform metadata/system field.
 
-    Checks against:
-    - _METADATA_NAMES: known system variable names (case-insensitive).
+    Checks (all case-insensitive):
+    - _METADATA_NAMES / _METADATA_NAMES_EXTRA: known system/recode variable names.
+    - _METADATA_NAME_PREFIXES: name prefixes for URL-derived recodes.
     - _METADATA_LABEL_EXACT: exact label strings that identify metadata.
+    - _METADATA_LABEL_PREFIXES: label prefixes for paradata with varying suffixes.
 
-    Conservative by design: uses exact-match on labels so real questions
-    (e.g. label "Employment Status") are not accidentally dropped.
-    (REQ-C-05)
+    Conservative by design: label matching is exact or prefix-anchored (never a
+    loose substring) so real questions (e.g. label "Employment Status", or a
+    question that merely mentions a URL) are not accidentally dropped. Analyst
+    segmentation variables (binary flags, aggregate ratings) carry real data and
+    are intentionally NOT matched here. (REQ-C-05)
     """
-    if name.lower() in _METADATA_NAMES:
+    nm = name.lower().strip()
+    if nm in _METADATA_NAMES or nm in _METADATA_NAMES_EXTRA:
         return True
-    if label.lower().strip() in _METADATA_LABEL_EXACT:
+    if nm.startswith(_METADATA_NAME_PREFIXES):
+        return True
+    lbl = label.lower().strip()
+    if lbl in _METADATA_LABEL_EXACT:
+        return True
+    if lbl.startswith(_METADATA_LABEL_PREFIXES):
         return True
     return False
 

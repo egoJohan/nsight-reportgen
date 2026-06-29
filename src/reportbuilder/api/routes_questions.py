@@ -22,7 +22,7 @@ from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.ingest.multi_group import apply_groups, enrich_model
-from reportbuilder.ingest.sav_reader import read_sav
+from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.model.report import (
     ChartSpec,
@@ -384,7 +384,13 @@ def list_variables(
     grouped = {
         v for q in model.questions if q.kind in ("multi", "battery") for v in q.variables
     }
-    all_vars = [v for v in model.variables.values() if v.name not in grouped]
+    # Survey-platform paradata (IP address, Survey timer, URL captures, …) is kept
+    # in the variables dict but must not be offered as a segmentation variable.
+    all_vars = [
+        v
+        for v in model.variables.values()
+        if v.name not in grouped and not _is_metadata(v.name, v.label or v.name)
+    ]
     # Stable sort: categorical before scale; original file order within each tier.
     all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
     return {

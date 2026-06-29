@@ -7,7 +7,6 @@ import {
   FileXIcon,
   Loader2Icon,
   SaveIcon,
-  SparklesIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -119,11 +118,6 @@ export default function ReportWizard({
   const [step, setStep] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  // Auto AI-formatting progress overlay ({done, total}); null when idle.
-  const [aiProgress, setAiProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
   // Per-chart pending flags (keyed by question_ref) so the Configure preview
   // can show "Generating title…" / "Shortening labels…" placeholders over the
   // regions that are still being produced. Set true when a chart's AI call
@@ -271,7 +265,6 @@ export default function ReportWizard({
     if (tasks.length === 0) return;
 
     aiRunning.current = true;
-    setAiProgress({ done: 0, total: tasks.length });
     // Mark the title region pending up front so the preview shows the
     // "Generating title…" placeholder immediately.
     setAiPending((prev) => {
@@ -312,7 +305,6 @@ export default function ReportWizard({
           .finally(() => clearPending(task.ref)),
       ];
       await Promise.allSettled(jobs);
-      setAiProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
     };
 
     // Limited concurrency (≈3 charts in flight); egoHive is slow.
@@ -332,7 +324,6 @@ export default function ReportWizard({
 
     run().finally(() => {
       aiRunning.current = false;
-      setAiProgress(null);
       // Persist via the effect below, after the patches have committed.
       setAiSaveTick((t) => t + 1);
     });
@@ -446,20 +437,6 @@ export default function ReportWizard({
           </Button>
         </div>
       </div>
-
-      {/* Auto AI-formatting progress */}
-      {aiProgress && (
-        <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
-          <SparklesIcon className="size-4 shrink-0 animate-pulse text-primary" />
-          <span className="font-medium text-foreground">
-            Preparing your report
-          </span>
-          <span className="text-muted-foreground">
-            generating slide titles… {aiProgress.done}/{aiProgress.total}
-          </span>
-          <Loader2Icon className="ml-auto size-4 shrink-0 animate-spin text-muted-foreground" />
-        </div>
-      )}
 
       {/* Stepper */}
       <div className="mb-6 flex justify-center rounded-xl border bg-card px-3 py-2">

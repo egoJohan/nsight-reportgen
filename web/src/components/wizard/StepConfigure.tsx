@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BarChart3Icon,
-  ChevronDownIcon,
-  ChevronUpIcon,
+  GripVerticalIcon,
   ImageIcon,
   Loader2Icon,
   RotateCcwIcon,
@@ -27,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable } from "@/lib/api";
 import { useChartPreview, useChartTypes, useQuestions, useVariables } from "@/lib/queries";
+import { useDragReorder } from "@/lib/useDragReorder";
 import {
   CHART_TYPES,
   CHART_TYPE_ITEMS,
@@ -988,6 +988,8 @@ export default function StepConfigure({
 }) {
   const { data: questions, isError } = useQuestions(materialId);
   const [active, setActive] = useState(0);
+  const { dragIndex, overIndex, containerRef, itemProps } =
+    useDragReorder(onReorder);
 
   const questionMap = useMemo(() => {
     const m = new Map<string, Question>();
@@ -1034,21 +1036,38 @@ export default function StepConfigure({
         <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Charts ({charts.length})
         </p>
-        <div className="space-y-1.5">
+        <div className="space-y-1.5" ref={containerRef as React.RefObject<HTMLDivElement>}>
           {charts.map((c, i) => {
             const q = questionMap.get(c.question_ref);
+            const dragging = dragIndex === i;
+            const dropTarget =
+              dragIndex !== null && overIndex === i && dragIndex !== i;
             return (
               <div
                 key={`${c.question_ref}-${i}`}
+                {...itemProps(i)}
                 className={cn(
                   "group overflow-hidden rounded-lg border transition-colors",
                   i === active
                     ? "border-primary/40 bg-primary/5"
-                    : "border-border hover:bg-muted/40"
+                    : "border-border hover:bg-muted/40",
+                  dragging && "opacity-50",
+                  dropTarget &&
+                    (dragIndex !== null && i > dragIndex
+                      ? "border-b-2 border-b-primary"
+                      : "border-t-2 border-t-primary")
                 )}
               >
-                {/* header: number + text + reorder */}
-                <div className="flex items-start gap-2 px-2 pt-2">
+                {/* header: drag handle + number + text */}
+                <div className="flex items-start gap-1.5 px-2 pt-2">
+                  {onReorder && (
+                    <span
+                      className="mt-0.5 shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
+                      title="Drag to reorder"
+                    >
+                      <GripVerticalIcon className="size-4" />
+                    </span>
+                  )}
                   <button
                     onClick={() => setActive(i)}
                     className="flex min-w-0 flex-1 items-start gap-2 text-left"
@@ -1072,26 +1091,6 @@ export default function StepConfigure({
                       </span>
                     </span>
                   </button>
-                  {onReorder && (
-                    <div className="flex shrink-0 flex-col -my-0.5">
-                      <button
-                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-                        disabled={i === 0}
-                        title="Move up"
-                        onClick={() => onReorder(i, i - 1)}
-                      >
-                        <ChevronUpIcon className="size-4" />
-                      </button>
-                      <button
-                        className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-                        disabled={i === charts.length - 1}
-                        title="Move down"
-                        onClick={() => onReorder(i, i + 1)}
-                      >
-                        <ChevronDownIcon className="size-4" />
-                      </button>
-                    </div>
-                  )}
                 </div>
                 {/* auto-rendered thumbnail (batched on entry; shares the preview
                     cache via renderTitle:false) — no click needed to render */}

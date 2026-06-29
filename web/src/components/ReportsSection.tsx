@@ -12,7 +12,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useWorkspace } from "@/lib/workspace";
-import { useCreateReport, useDeleteReport, useReport } from "@/lib/queries";
+import {
+  useCreateReport,
+  useDeleteReport,
+  useQuestions,
+  useReport,
+} from "@/lib/queries";
+import { makeChart, normalizeSlots } from "@/lib/charts";
 
 // One report row — fetches the report doc to show its status + statistics.
 function ReportRow({
@@ -93,6 +99,7 @@ export default function ReportsSection({
   const { workspace, addReport, removeReport } = useWorkspace(caseId);
   const createReport = useCreateReport(caseId);
   const deleteReport = useDeleteReport(caseId);
+  const { data: questions } = useQuestions(materialId);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const reports = workspace.reports.filter(
@@ -101,8 +108,14 @@ export default function ReportsSection({
 
   function handleCreate() {
     const name = `Report ${reports.length + 1}`;
+    // Pre-select every question by default: seed the report with a chart per
+    // question (in the questions' natural order). The user removes the ones
+    // they don't want in the Select step.
+    const charts = normalizeSlots(
+      (questions ?? []).map((q) => makeChart(q.qid, q.suggested_chart_type))
+    );
     createReport.mutate(
-      { name, render_mode: "image", template_ref: "", charts: [] },
+      { name, render_mode: "image", template_ref: "", charts },
       {
         onSuccess: ({ report_id }) => {
           addReport({ id: report_id, name, materialId });
@@ -142,7 +155,7 @@ export default function ReportsSection({
         <button
           type="button"
           onClick={handleCreate}
-          disabled={createReport.isPending}
+          disabled={createReport.isPending || !questions}
           className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 disabled:opacity-60"
         >
           <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

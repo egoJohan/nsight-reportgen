@@ -111,6 +111,58 @@ class TestIsMetadata:
     def test_case_insensitive_name(self):
         assert _is_metadata("VIP", "Whatever") is True
 
+    # --- survey-engine paradata with varying suffixes (label prefixes) ---
+
+    def test_survey_timer_label(self):
+        assert _is_metadata("var128", "Survey timer") is True
+
+    def test_answer_count_label(self):
+        assert _is_metadata("var145", "answer count") is True
+
+    def test_hidden_value_label_prefix(self):
+        """'Hidden value: <varying text>' is a platform hidden field."""
+        assert _is_metadata("var149", "Hidden value: joku muu mikä vastaajat") is True
+
+    def test_new_percent_branch_label(self):
+        assert _is_metadata("var129", "New Percent Branch - Concept") is True
+
+    def test_url_capture_label_prefix(self):
+        """Labels like 'URL_profiili' / 'URL_Region' are URL query-string captures."""
+        assert _is_metadata("var18", "URL_profiili") is True
+        assert _is_metadata("var130", "URL_Region") is True
+
+    def test_link_name_label(self):
+        assert _is_metadata("LinkName", "Link Name") is True
+
+    # --- platform recode columns by variable name ---
+
+    def test_url_name_prefix(self):
+        """URL-derived recodes (label == name) caught by the 'url' name prefix."""
+        assert _is_metadata("URLprofiilinew", "URLprofiilinew") is True
+        assert _is_metadata("URL_Villas_numeric", "URL_Villas_numeric") is True
+
+    def test_branch_numeric_name(self):
+        assert _is_metadata("Branch_numeric", "Branch_numeric") is True
+
+    def test_q_nchoices_name(self):
+        assert _is_metadata("Q_nchoices", "Q_nchoices") is True
+
+    # --- analyst segmentation variables must NOT be dropped (like Inhimilli) ---
+
+    def test_segment_vieralijat_kept(self):
+        assert _is_metadata("vieralijat", "vieralijat") is False
+
+    def test_segment_contracts_kept(self):
+        assert _is_metadata("contracts_1", "contracts_1") is False
+
+    def test_segment_owner_flags_kept(self):
+        assert _is_metadata("VillastaiGold", "VillastaiGold") is False
+        assert _is_metadata("Perusomistajat", "Perusomistajat") is False
+
+    def test_question_mentioning_url_kept(self):
+        """A real question that merely mentions a URL must survive (prefix, not substring)."""
+        assert _is_metadata("var50", "Kuinka usein käytät verkkosivun URL-osoitetta?") is False
+
 
 # ---------------------------------------------------------------------------
 # A0.1 — Metadata filter via read_sav
