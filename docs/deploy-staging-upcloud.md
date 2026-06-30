@@ -1,8 +1,39 @@
 # Staging deployment — nSight Studio on UpCloud
 
-Status: **artifacts ready, not yet provisioned.** The production-style images
-build green and the containerized stack runs locally (`docker compose up`, UI on
-:8090, API proxied — verified). What remains is provisioning the server + DNS.
+Status: **LIVE — https://nsight.egohive.ai** (Let's Encrypt TLS, http→https).
+
+## Live deployment (record)
+
+| | |
+|---|---|
+| URL | **https://nsight.egohive.ai** |
+| Server | `nsight-staging` UUID `00f2cb37-f49c-4f4f-8bc1-bf22ac4e9976`, **fi-hel2**, 2xCPU-4GB, Ubuntu 24.04 |
+| Public IP | `85.9.223.140` (main); **floating `94.237.12.104`** (DNS target, on eth0 via `/etc/netplan/99-floating-ip.yaml`) |
+| Utility IP | `10.6.17.230` (fi-hel2 — same zone as the egoHive/datahive fleet) |
+| Code | rsync'd from the local working tree to `/opt/nsight` (GitHub master is behind — never pushed; deploy from local) |
+| Run | `cd /opt/nsight && docker compose -f docker-compose.staging.yml up -d --build` |
+| TLS | Caddy (host) `/etc/caddy/Caddyfile` (= `deploy/Caddyfile`) → loopback `:8090` |
+| egoHive/AI | **pending** — creds point to `localhost:8000`; egoHive runs on the egoHive boxes, not nsight. AI/chat degrade to 503 until egoHive is reachable (see below). |
+
+Redeploy (from the local machine):
+```bash
+rsync -az --delete \
+  --exclude='.git' --exclude='.venv' --exclude='node_modules' --exclude='__pycache__' \
+  --exclude='*.pyc' --exclude='/web/dist' --exclude='/work' --exclude='/input' \
+  --exclude='/ui' --exclude='/chart_lab' --exclude='*.sav' --exclude='*.pptx' \
+  -e 'ssh -i ~/.ssh/egohive-staging' ./ root@85.9.223.140:/opt/nsight/
+ssh -i ~/.ssh/egohive-staging root@85.9.223.140 \
+  'cd /opt/nsight && docker compose -f docker-compose.staging.yml up -d --build'
+```
+NOTE on rsync excludes: anchor host-only dirs with a leading slash (`/ui`, `/input`)
+— an un-anchored `ui` also matches `web/src/components/ui/` and breaks the build.
+
+---
+
+The notes below are the original provisioning runbook (kept for reference / rebuilds).
+
+Status: **artifacts ready.** The production-style images build green and the
+containerized stack runs locally (`docker compose up`, UI on :8090, API proxied).
 
 **Locked decisions (this round):**
 
