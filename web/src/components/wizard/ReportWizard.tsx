@@ -306,23 +306,50 @@ export default function ReportWizard({
         (c) => c.question_ref === ref
       );
       if (!chart) return;
-      // A "themes" chart (open-ended) generates theme bullets, not a title.
+      // A "themes" chart (open-ended) generates theme bullets AND an AI heading
+      // (a key message from the answers) — otherwise it falls back to showing its
+      // raw, often messy, question text as the title.
       if (isThemes(chart)) {
-        try {
-          const { bullets } = await api.materials.aiThemes(materialId, {
-            question_ref: ref,
-          });
-          updateChartByRef(ref, {
-            options: { ...(chart.options ?? {}), bullets },
-          });
-        } catch {
-          /* graceful: leave empty */
-        } finally {
-          setAiPending((prev) => ({
-            ...prev,
-            [ref]: { ...prev[ref], bulletsPending: false },
-          }));
-        }
+        const hasBullets = !!(chart.options?.bullets as string[] | undefined)
+          ?.length;
+        const bulletsP = hasBullets
+          ? Promise.resolve()
+          : api.materials
+              .aiThemes(materialId, { question_ref: ref })
+              .then(({ bullets }) =>
+                updateChartByRef(ref, {
+                  options: { ...(chart.options ?? {}), bullets },
+                })
+              )
+              .catch(() => {
+                /* graceful: leave empty */
+              })
+              .finally(() =>
+                setAiPending((prev) => ({
+                  ...prev,
+                  [ref]: { ...prev[ref], bulletsPending: false },
+                }))
+              );
+        const titleP = chart.slide_title
+          ? Promise.resolve()
+          : api.materials
+              .aiSlideTitle(materialId, {
+                question_ref: ref,
+                statistic: chart.statistic,
+              })
+              .then(({ title }) => {
+                if (title) updateChartByRef(ref, { slide_title: title });
+              })
+              .catch(() => {
+                /* graceful: fall back to the question text */
+              })
+              .finally(() =>
+                setAiPending((prev) => ({
+                  ...prev,
+                  [ref]: { ...prev[ref], titlePending: false },
+                }))
+              );
+        await Promise.all([bulletsP, titleP]);
         return;
       }
       try {
@@ -378,12 +405,12 @@ export default function ReportWizard({
         if (!chart) continue;
         if (isSpecialSlide(chart)) continue; // special slides carry bullets, not a title
         const themes = isThemes(chart);
-        const themesNeedsBullets =
-          themes &&
-          !((chart.options?.bullets as string[] | undefined)?.length);
-        // Themes charts generate bullets; other charts generate a title (unless
-        // they already have one).
-        if (themes ? !themesNeedsBullets : !!chart.slide_title) continue;
+        const needsBullets =
+          themes && !((chart.options?.bullets as string[] | undefined)?.length);
+        const needsTitle = !chart.slide_title;
+        // Themes charts generate BOTH bullets and an AI heading; other charts
+        // generate a title (unless they already have one).
+        if (themes ? !needsBullets && !needsTitle : !needsTitle) continue;
         titlesAttempted.current.add(ref);
         titleQueue.current.push(ref);
         added = true;
@@ -391,9 +418,9 @@ export default function ReportWizard({
           ...prev,
           [ref]: themes
             ? {
-                titlePending: prev[ref]?.titlePending ?? false,
+                titlePending: needsTitle,
                 labelsPending: prev[ref]?.labelsPending ?? false,
-                bulletsPending: true,
+                bulletsPending: needsBullets,
               }
             : {
                 titlePending: true,

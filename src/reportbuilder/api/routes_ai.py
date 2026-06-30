@@ -233,7 +233,13 @@ def ai_slide_title(
         ) from exc
 
     try:
-        spec = _spec_from_title_body(body)
+        # Text/open-ended questions (e.g. a "themes" slide) can't compute a
+        # category distribution; use a kind-aware spec so findings are the top
+        # answer WORDS instead — otherwise the route 503s and the themes slide
+        # falls back to showing its raw (often messy) question text as the title.
+        qvars = [model.variables[v] for v in question.variables if v in model.variables]
+        is_text = bool(qvars) and all(v.measurement == "text" for v in qvars)
+        spec = _kind_spec(question, model) if is_text else _spec_from_title_body(body)
         series = compute(question, spec, df, model)
         findings = _findings_from_series(series, body.top_n)
         # No computable findings (e.g. an empty/degenerate variable) → the LLM
