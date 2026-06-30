@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatReportDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
-import { useReport, useUpdateReport } from "@/lib/queries";
+import { useReport, useUpdateReport, useQuestions } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import {
   buildDemographicsGrids,
@@ -190,19 +190,57 @@ export default function ReportWizard({
     []
   );
 
+  // SAV (questionnaire) order: rank each question by its position in the source
+  // file so newly added slides land in questionnaire order, matching how the
+  // source decks are sequenced (the user can still drag to reorder).
+  const { data: orderedQuestions } = useQuestions(materialId);
+  const qRank = useMemo(() => {
+    const m = new Map<string, number>();
+    (orderedQuestions ?? []).forEach((q, i) => m.set(q.qid, i));
+    return m;
+  }, [orderedQuestions]);
+
   // Enabling/disabling a question directly edits the report: add its chart when
-  // absent, remove it when present (no separate "Add selected" step).
+  // absent (inserted in SAV order), remove it when present (no separate "Add
+  // selected" step).
   const toggleQuestion = useCallback(
     (q: Question) => {
       mutate((d) => {
         const exists = d.charts.some((c) => c.question_ref === q.qid);
-        const charts = exists
-          ? d.charts.filter((c) => c.question_ref !== q.qid)
-          : [...d.charts, makeChart(q.qid, q.suggested_chart_type)];
+        if (exists) {
+          return {
+            ...d,
+            charts: normalizeSlots(
+              d.charts.filter((c) => c.question_ref !== q.qid)
+            ),
+          };
+        }
+        // Insert the new chart in SAV order: after any front special slides and
+        // earlier-ranked question slides, before higher-ranked ones and a
+        // trailing conclusion slide.
+        const newRank = qRank.get(q.qid) ?? Number.POSITIVE_INFINITY;
+        const charts = [...d.charts];
+        let pos = charts.length;
+        for (let i = 0; i < charts.length; i++) {
+          const c = charts[i];
+          if (isSpecialSlide(c)) {
+            if (c.chart_type === "special_conclusion") {
+              pos = i;
+              break;
+            }
+            continue; // front special slide → insert after it
+          }
+          const r = qRank.get(c.question_ref) ?? Number.POSITIVE_INFINITY;
+          if (r > newRank) {
+            pos = i;
+            break;
+          }
+        }
+        charts.splice(pos, 0, makeChart(q.qid, q.suggested_chart_type));
         return { ...d, charts: normalizeSlots(charts) };
       });
     },
-    [mutate]
+    [mutate, qRank]
   );
 
   const updateChart = useCallback(
