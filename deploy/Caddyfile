@@ -1,0 +1,20 @@
+# Caddy reverse proxy for nSight Studio staging.
+# Caddy auto-provisions a Let's Encrypt TLS cert for the domain and proxies to
+# the loopback-published frontend container (docker-compose.staging.yml).
+#
+# Install + run on the UpCloud host (not in a container):
+#   sudo apt install -y caddy           # or the official Caddy repo
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# DNS prerequisite: an A record  nsight.egohive.ai -> <server public IP>  at
+# Gandi must resolve before Caddy can obtain the certificate.
+
+nsight.egohive.ai {
+    encode zstd gzip
+    # SAV uploads can be a few MB; renders can take a while.
+    request_body {
+        max_size 50MB
+    }
+    reverse_proxy localhost:8090
+}

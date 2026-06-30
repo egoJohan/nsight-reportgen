@@ -1,0 +1,45 @@
+# Staging stack for nSight Studio (UpCloud) — build on the server.
+#
+#   docker compose -f docker-compose.staging.yml up -d --build
+#
+# Differences from the local docker-compose.yml:
+#   - frontend publishes on 127.0.0.1:8090 (LOOPBACK only) so the plain-HTTP app
+#     is NOT exposed publicly; the host's Caddy terminates TLS and proxies to it.
+#   - restart: always (survives reboots).
+#   - egoHive creds mounted into the backend so AI features (titles, themes,
+#     word-cloud help, chat-with-data) work. Without the file the app degrades
+#     gracefully (AI endpoints return 503).
+#
+# This file is self-contained (NOT an override) to avoid compose port-merge
+# ambiguity — use it alone, not combined with docker-compose.yml.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      NSIGHT_DEMO: "1"
+      NSIGHT_HOST: "0.0.0.0"
+      NSIGHT_PORT: "8200"
+      NSIGHT_DEMO_DIR: /data/demo-store
+    volumes:
+      - nsight-demo:/data/demo-store
+      # egoHive credentials (base_url + endpoint_id). Read-only. The container's
+      # default creds path is /app/work/egohive_creds.json. Place the file at
+      # ./work/egohive_creds.json on the server before `up`.
+      - ./work/egohive_creds.json:/app/work/egohive_creds.json:ro
+    expose:
+      - "8200"
+    restart: always
+
+  frontend:
+    build:
+      context: ./web
+    ports:
+      - "127.0.0.1:8090:80"   # loopback only — Caddy (host) fronts TLS
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  nsight-demo:
