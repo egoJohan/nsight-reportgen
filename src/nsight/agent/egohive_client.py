@@ -29,6 +29,7 @@ Public API
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -54,14 +55,42 @@ class EgoHiveError(RuntimeError):
 def load_creds(creds_path: str | Path | None = None) -> dict[str, Any]:
     """Load the egoHive credential/config blob.
 
-    Raises EgoHiveError with an actionable message if the file is missing or
-    malformed.
+    Resolution order (12-factor — config lives in the deploy/build spec, not the
+    source tree):
+      1. Environment variables ``EGOHIVE_BASE_URL`` + ``EGOHIVE_ENDPOINT_ID``
+         (plus optional ``EGOHIVE_AGENT_ID`` / ``EGOHIVE_AUTH_SCHEME`` /
+         ``EGOHIVE_MODEL`` / ``EGOHIVE_EMAIL`` / ``EGOHIVE_PASSWORD``). Used in
+         deployment (staging/prod) so credentials are supplied by the environment.
+      2. An explicit ``creds_path`` argument.
+      3. ``EGOHIVE_CREDS_PATH`` env var (path to a mounted secret file).
+      4. ``DEFAULT_CREDS_PATH`` (``work/egohive_creds.json``) — local-dev fallback.
+
+    Raises EgoHiveError with an actionable message if nothing is configured or the
+    file is missing/malformed.
     """
-    path = Path(creds_path) if creds_path else DEFAULT_CREDS_PATH
+    env_base = os.environ.get("EGOHIVE_BASE_URL")
+    env_endpoint = os.environ.get("EGOHIVE_ENDPOINT_ID")
+    if env_base and env_endpoint:
+        return {
+            "base_url": env_base,
+            "endpoint_id": env_endpoint,
+            "agent_id": os.environ.get("EGOHIVE_AGENT_ID", ""),
+            "auth_scheme": os.environ.get("EGOHIVE_AUTH_SCHEME", "bearer"),
+            "model": os.environ.get("EGOHIVE_MODEL", ""),
+            "email": os.environ.get("EGOHIVE_EMAIL", ""),
+            "password": os.environ.get("EGOHIVE_PASSWORD", ""),
+        }
+
+    path = (
+        Path(creds_path) if creds_path
+        else Path(os.environ["EGOHIVE_CREDS_PATH"]) if os.environ.get("EGOHIVE_CREDS_PATH")
+        else DEFAULT_CREDS_PATH
+    )
     if not path.exists():
         raise EgoHiveError(
-            f"egoHive credentials file not found at {path}. "
-            "Expected a JSON file with at least 'base_url' and 'endpoint_id'."
+            f"egoHive not configured: set EGOHIVE_BASE_URL + EGOHIVE_ENDPOINT_ID, "
+            f"or provide a credentials file (looked at {path}) with 'base_url' and "
+            "'endpoint_id'."
         )
     try:
         creds = json.loads(path.read_text())

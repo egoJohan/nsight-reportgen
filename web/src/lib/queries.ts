@@ -4,7 +4,8 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import { api } from "./api";
+import { useEffect } from "react";
+import { api, setActivePreviewKey } from "./api";
 import type { ChartSpec, ReportDoc } from "./api";
 
 // ---- Query keys ----
@@ -99,11 +100,28 @@ export function useChartPreview(
   opts?: { renderTitle?: boolean; enabled?: boolean; priority?: boolean }
 ) {
   const renderTitle = opts?.renderTitle ?? true;
+  const queryKey = [
+    "chart-preview",
+    materialId,
+    renderTitle,
+    previewContentKey(chart, renderTitle),
+  ];
+  // Stable string key shared with the render gate so it can match this slide's
+  // queued render and promote it when this slide is the active one.
+  const gateKey = JSON.stringify(queryKey);
+  const priority = opts?.priority ?? false;
+  // The ACTIVE slide announces its key so the gate runs its render first (in the
+  // reserved slot) even if the background prefetch already queued it.
+  useEffect(() => {
+    if (!priority) return;
+    setActivePreviewKey(gateKey);
+    return () => setActivePreviewKey(null);
+  }, [priority, gateKey]);
   return useQuery({
-    queryKey: ["chart-preview", materialId, renderTitle, previewContentKey(chart, renderTitle)],
+    queryKey,
     queryFn: () =>
       api.materials
-        .previewChart(materialId, chart, { renderTitle, priority: opts?.priority })
+        .previewChart(materialId, chart, { renderTitle, key: gateKey })
         .then(blobToDataURL),
     enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,
