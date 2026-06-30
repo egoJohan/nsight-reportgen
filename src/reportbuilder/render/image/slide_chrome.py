@@ -127,23 +127,29 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         else:
             secondary = slide_description
         if title:
+            # Title font steps down for a long (2-line) key message so it doesn't
+            # grow to 3 lines and overrun the question subtitle below it.
+            t_size = 21 if len(title) <= 60 else (18 if len(title) <= 110 else 16)
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.38),
-                sw - Inches(1.0), Inches(0.60),
-                [(title, 21, PX_INK, True)],
+                Inches(0.80), Inches(0.34),
+                sw - Inches(1.0), Inches(0.56),
+                [(title, t_size, PX_INK, True)],
             )
         if secondary:
             # The question subtitle binds to the CHART: its box bottom sits just
-            # above the chart (~1.84") and BOTTOM anchor makes multi-line
-            # questions grow UPWARD toward the title, so a long question is never
-            # cut and the gap to the chart stays minimal. The box is tall enough
-            # (~0.94") for up to ~4 wrapped lines at 13.5 pt.
+            # above the chart (~1.84") and BOTTOM anchor makes multi-line questions
+            # grow UPWARD toward the title. Its font steps down with length so a
+            # long question always fits the box and is NEVER clipped at the top
+            # (a bottom-anchored box clips overflow above it), while staying as
+            # large as possible.
+            n = len(secondary)
+            s_size = 15 if n <= 110 else (13 if n <= 180 else (12 if n <= 260 else 11))
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.86),
-                sw - Inches(1.0), Inches(0.98),
-                [(secondary, 15, PX_MUTED, False)],
+                Inches(0.80), Inches(0.92),
+                sw - Inches(1.0), Inches(0.92),
+                [(secondary, s_size, PX_MUTED, False)],
                 anchor=MSO_ANCHOR.BOTTOM,
             )
 
