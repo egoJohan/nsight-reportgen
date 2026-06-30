@@ -397,27 +397,31 @@ def build_image_column_stacked(ctx) -> None:
     clrs = scale_colors(len(segs))
 
     x = np.arange(len(cats))
-    bottoms = np.zeros(len(cats))
-    all_vals = [sum(data[s][i] or 0 for s in segs) for i in range(len(cats))]
-    max_val = max(all_vals, default=0.0)
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
+    # 100%-stacked: every column must reach exactly 100. Normalise each column's
+    # segment HEIGHTS to its own total (rounded percentages sum to 99–101) so the
+    # tops align, while the data LABELS still show the original percentages.
+    totals = np.array([sum(data[s][i] or 0.0 for s in segs) for i in range(len(cats))])
+    norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    bottoms = np.zeros(len(cats))
+
     for i, seg in enumerate(segs):
-        vals = np.array([v or 0.0 for v in data[seg]])
+        orig = np.array([data[seg][j] or 0.0 for j in range(len(cats))])
+        heights = orig * norm
         # R4.2: "Not answered" category bars get MUTED grey.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
-        bars = ax.bar(x, vals, bottom=bottoms, label=seg, color=bar_clrs,
+        bars = ax.bar(x, heights, bottom=bottoms, label=seg, color=bar_clrs,
                       edgecolor="none", zorder=3)
-        for bar, v, b in zip(bars, vals, bottoms):
-            mid = b + v / 2
-            if v > 1:   # skip label if segment is too thin
+        for bar, ov, b, h in zip(bars, orig, bottoms, heights):
+            if h > 1:   # skip label if segment is too thin
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2, mid,
-                    format_value(v, ctx.series.statistic, ctx.spec.number_format, flat_vals),
+                    bar.get_x() + bar.get_width() / 2, b + h / 2,
+                    format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )
-        bottoms = bottoms + vals
+        bottoms = bottoms + heights
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
     display_cats = [_wrap_xtick_label(c) for c in cats]
@@ -426,7 +430,7 @@ def build_image_column_stacked(ctx) -> None:
         display_cats, fontsize=10.5, color=INK,
         rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
     )
-    _apply_column_style(ax, max_val)
+    _apply_column_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))
@@ -449,34 +453,39 @@ def build_image_bar_stacked(ctx) -> None:
 
     n_cats = len(cats)
     y = np.arange(n_cats)[::-1]
-    lefts = np.zeros(n_cats)
-    all_totals = [sum(data[s][i] or 0 for s in segs) for i in range(n_cats)]
-    max_val = max(all_totals, default=0.0)
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
+    # 100%-stacked: every bar must fill exactly to 100. Rounded category
+    # percentages sum to 99–101 per bar, so normalise each bar's segment WIDTHS to
+    # its own total — the right edges then align perfectly — while the data LABELS
+    # still show the original (rounded) percentages.
+    totals = np.array([sum(data[s][i] or 0.0 for s in segs) for i in range(n_cats)])
+    norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    lefts = np.zeros(n_cats)
+
     for i, seg in enumerate(segs):
-        vals = np.array([v or 0.0 for v in data[seg]])
+        orig = np.array([data[seg][j] or 0.0 for j in range(n_cats)])
+        widths = orig * norm
         # R4.2: "Not answered" category bars get MUTED grey.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
-        ax.barh(y, vals, left=lefts, label=seg, color=bar_clrs,
+        ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
                 edgecolor="none", zorder=3)
-        for yi, v, l in zip(y, vals, lefts):
-            mid = l + v / 2
-            if v > 1:
+        for yi, ov, l, w in zip(y, orig, lefts, widths):
+            if w > 1:
                 ax.text(
-                    mid, yi,
-                    format_value(v, ctx.series.statistic, ctx.spec.number_format, flat_vals),
+                    l + w / 2, yi,
+                    format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
                     fontsize=9.0, fontweight="bold", color=INK, zorder=5,
                 )
-        lefts = lefts + vals
+        lefts = lefts + widths
 
     # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
     display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-    _apply_bar_style(ax, max_val)
+    _apply_bar_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))
