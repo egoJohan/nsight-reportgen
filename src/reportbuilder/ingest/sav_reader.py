@@ -191,19 +191,22 @@ def _is_constant_marker(name: str, var: "Variable", series) -> bool:
 
 
 def _is_unlabeled_helper(name: str, var: "Variable") -> bool:
-    """Return True for an unlabeled derived *categorical* helper/flag — a column
-    with no human label (label == variable name), no value labels, and nominal
-    measurement (e.g. Holiday Club's ``vieralijat``, ``contracts_1``,
-    ``VillastaiGold``, ``Perusomistajat``). These are analyst segmentation flags,
-    not survey questions, so they are excluded from the question browser.
+    """Return True for an unlabeled derived helper/recode column — one with no
+    human label (label == variable name) and no value labels. Two flavours:
 
-    They are NOT removed from the variables dict, so they remain available as
-    classifying/segmentation variables (nothing is lost). Derived RATING
-    aggregates like Attendo's ``Inhimilli`` have measurement ``"scale"`` and are
-    deliberately NOT matched — they stay chartable as questions. Free text
-    (measurement ``"text"``) is likewise untouched.
+    - categorical flags/segments (Holiday Club's ``vieralijat``, ``contracts_1``,
+      ``VillastaiGold``); and
+    - scale RATING aggregates (Attendo's ``MahdHyvänArjen``, ``TarjLaadHoiva``,
+      ``Inhimilli`` … — per-attribute recodes that just duplicate a rating
+      battery's statements under a cryptic code).
+
+    Both are analyst working columns, NOT survey questions, so they are excluded
+    from the question browser. They are NOT removed from the variables dict, so
+    they remain available as classifying / combo-secondary variables (nothing is
+    lost). Free text (``measurement == "text"``) is untouched — those are real
+    open-ended questions.
     """
-    if var.value_labels or var.measurement != "categorical":
+    if var.value_labels or var.measurement == "text":
         return False
     return (var.label or "").strip() == name
 

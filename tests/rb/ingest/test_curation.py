@@ -184,8 +184,11 @@ class TestUnlabeledHelper:
         v = _var("Perusomistajat", "Perusomistajat")
         assert _is_unlabeled_helper("Perusomistajat", v) is True
 
-    def test_scale_aggregate_is_not_helper(self):
-        """A derived RATING aggregate (Inhimilli) is measurement 'scale' → kept."""
+    def test_scale_aggregate_is_helper(self):
+        """A derived RATING aggregate (Inhimilli: scale, label==name, no value
+        labels) is an analyst working column that just duplicates a battery's
+        statements → helper (excluded from the question browser, kept as a
+        variable)."""
         v = Variable(
             name="Inhimilli",
             label="Inhimilli",
@@ -193,7 +196,18 @@ class TestUnlabeledHelper:
             value_labels=(),
             missing_values=frozenset(),
         )
-        assert _is_unlabeled_helper("Inhimilli", v) is False
+        assert _is_unlabeled_helper("Inhimilli", v) is True
+
+    def test_labelled_scale_var_is_not_helper(self):
+        """A scale variable WITH a real descriptive label is a real question."""
+        v = Variable(
+            name="q12",
+            label="How satisfied are you overall?",
+            measurement="scale",
+            value_labels=(),
+            missing_values=frozenset(),
+        )
+        assert _is_unlabeled_helper("q12", v) is False
 
     def test_value_labelled_var_is_not_helper(self):
         """A coded categorical WITH value labels is a real question, not a helper."""
@@ -559,17 +573,15 @@ def test_holidayclub_paradata_and_segments_excluded():
 
 
 @pytest.mark.integration
-def test_attendo_scale_aggregates_kept_unlabeled_flags_excluded():
-    """Attendo: derived RATING aggregates (Inhimilli, scale) stay chartable as
-    questions; unlabeled nominal flags (Kokemusta) are excluded from questions
-    but remain in the variables dict."""
+def test_attendo_unlabeled_recodes_excluded_from_questions_kept_as_variables():
+    """Attendo: derived recodes — both RATING aggregates (Inhimilli, Luotettava:
+    scale, label==name) and unlabeled nominal flags (Kokemusta) — are excluded
+    from the question browser (they just duplicate the rating battery / are
+    working columns) but remain in the variables dict for use as classifying /
+    combo-secondary variables."""
     _, model = _corpus_model("attendo")
     q_vars = {q.variables[0] for q in model.questions if q.kind == "single"}
 
-    assert "Inhimilli" in q_vars, "scale aggregate 'Inhimilli' must remain a question"
-    assert "Luotettava" in q_vars, "scale aggregate 'Luotettava' must remain a question"
-
-    assert "Kokemusta" not in q_vars, "unlabeled nominal flag must not be a question"
-    assert "Kokemusta" in model.variables, (
-        "'Kokemusta' must stay available as a classifying variable"
-    )
+    for nm in ("Inhimilli", "Luotettava", "Kokemusta"):
+        assert nm not in q_vars, f"derived recode '{nm}' must not be a question"
+        assert nm in model.variables, f"'{nm}' must stay available as a variable"
