@@ -73,12 +73,16 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
     raw = spec.options.get("bullets") or []
     if isinstance(raw, str):
         raw = [raw]
-    # Drop degenerate "odd" bullets — empties or lines that are only markers /
-    # punctuation / stray markdown with no real letters (defence in depth on top
-    # of _parse_bullets, in case options carry junk).
+    # Drop degenerate "odd" bullets — empties, markdown code-fence lines
+    # ("```question:yes_no"), or lines that are only markers / punctuation with no
+    # real letters (defence in depth on top of _parse_bullets, in case options
+    # carry junk from an already-saved report).
     bullets = [
         s for s in (str(b).strip() for b in raw)
-        if s and re.search(r"[^\s\-•*_:.,–—]", s)
+        if s
+        and not s.startswith("```")
+        and not s.startswith("~~~")
+        and re.search(r"[^\s\-•*_:.,–—]", s)
     ]
     if bullets:
         _bullet_box(slide, sw, sh, bullets)

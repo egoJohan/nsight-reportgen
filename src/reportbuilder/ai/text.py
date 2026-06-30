@@ -216,6 +216,11 @@ def _parse_bullets(reply: str) -> list[str]:
         line = raw.strip()
         if not line:
             continue
+        # Drop markdown code-fence lines — some models wrap the whole reply in a
+        # ``` block, so the opening/closing fence ("```", "```json",
+        # "```question:yes_no") would otherwise leak through as a final bullet.
+        if line.startswith("```") or line.startswith("~~~"):
+            continue
         # Strip a leading "1." / "1)" / "-" / "•" / "*" marker. Require a space
         # after a "*" marker so a bullet that STARTS with markdown bold
         # (**avainsana**) is not mangled into "*avainsana**".
