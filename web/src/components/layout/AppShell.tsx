@@ -21,8 +21,16 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { useCases } from "@/lib/queries";
+import { useWorkspace } from "@/lib/workspace";
 import NewCaseDialog from "@/components/NewCaseDialog";
-import { PlusIcon, FolderOpenIcon, SettingsIcon, XIcon } from "lucide-react";
+import ChatPanel from "@/components/ChatPanel";
+import {
+  PlusIcon,
+  FolderOpenIcon,
+  SettingsIcon,
+  XIcon,
+  MessageSquareTextIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function CasesNav() {
@@ -84,6 +92,35 @@ function Breadcrumb() {
 
 // Right-aligned close (X) on the top-bar row, shown only while a report is open
 // (?report=<id>). Clearing the param returns to the case's report list.
+// Persistent "Chat" launcher in the top bar — always present (rightmost) while a
+// case with data is selected, so it's available both in the case view and while a
+// report is open. Reads the case id from the route and its material from the
+// workspace; the panel is a fixed overlay.
+function ChatLauncher() {
+  const { pathname } = useLocation();
+  const match = pathname.match(/^\/cases\/([^/]+)/);
+  const caseId = match ? match[1] : null;
+  const { workspace } = useWorkspace(caseId ?? "");
+  const materialId = caseId ? workspace.materialId : null;
+  const [open, setOpen] = useState(false);
+  if (!caseId || !materialId) return null;
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-muted-foreground"
+        onClick={() => setOpen(true)}
+        title="Keskustele datasta"
+      >
+        <MessageSquareTextIcon className="size-4" />
+        Chat
+      </Button>
+      <ChatPanel materialId={materialId} open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
 function CloseReportButton() {
   const [searchParams, setSearchParams] = useSearchParams();
   if (!searchParams.get("report")) return null;
@@ -91,7 +128,7 @@ function CloseReportButton() {
     <Button
       variant="ghost"
       size="sm"
-      className="ml-auto text-muted-foreground"
+      className="text-muted-foreground"
       onClick={() =>
         setSearchParams(
           (prev) => {
@@ -174,7 +211,11 @@ export default function AppShell() {
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
           <Breadcrumb />
-          <CloseReportButton />
+          {/* Right side: Close report (left) then Chat (always rightmost). */}
+          <div className="ml-auto flex items-center gap-2">
+            <CloseReportButton />
+            <ChatLauncher />
+          </div>
         </header>
 
         {/* Main content */}
