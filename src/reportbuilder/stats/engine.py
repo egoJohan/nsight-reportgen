@@ -39,7 +39,30 @@ _WORDCLOUD_STOPWORDS: frozenset[str] = frozenset({
     "niin", "kun", "jos", "vai", "joka", "tämä", "tää", "nyt", "vielä", "myös",
     "sekä", "mikä", "kaikki", "ihan", "sitä", "tuo", "tämän", "olla", "ovat",
     "hyvin", "the", "of", "and", "for", "with", "not", "you", "are",
+    # Filler / non-answer fragments — esp. the words of "en osaa sanoa" / "en
+    # tiedä" so a leaked token from a partial match can't pollute the cloud.
+    "osaa", "sanoa", "tiedä", "tieda", "mitään", "mitaan", "joku", "jotain",
+    "jotakin", "muu", "muuta", "jne", "yms", "ehkä", "vaan", "ois", "olisi",
 })
+
+# Whole answers that are NON-RESPONSES — dropped entirely (every word) before
+# tokenising, so "en osaa sanoa" / "en tiedä" never contribute "osaa"/"sanoa"/
+# "tiedä" to the cloud.
+_WORDCLOUD_NON_ANSWERS: frozenset[str] = frozenset({
+    "", "-", "--", "?", "ei", "en", "eos", "e o s", "en tiedä", "en tieda",
+    "en osaa sanoa", "ei osaa sanoa", "en osaa", "ei mitään", "ei mitaan",
+    "ei tietoa", "ei kokemusta", "ei kommentteja", "ei kommenttia",
+    "ei mielipidettä", "ei vastausta", "ei käsitystä", "en muista", "en keksi",
+    "na", "n a", "ei oo", "ei ole", "tyhjä", "tyhja", "x", "xx",
+})
+
+
+def _is_non_answer(text: str) -> bool:
+    """True when an open-ended answer is a non-response ('en osaa sanoa', '-',
+    'en tiedä', …) and should contribute NOTHING to the word cloud."""
+    t = re.sub(r"[^\wäöåÄÖÅ\s]", " ", text.lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    return t in _WORDCLOUD_NON_ANSWERS
 # Tokens shorter than this are dropped (e.g. "ok", "ei" handled by stopwords).
 _WORDCLOUD_MIN_LEN: int = 3
 # Maximum number of distinct words carried into the SeriesResult / cloud.
@@ -74,6 +97,10 @@ def _wordcloud(question: Question, spec: ChartSpec, data: pd.DataFrame,
         is_str = col.map(lambda x: isinstance(x, str) and x.strip() != "")
         answered_mask = answered_mask | is_str
         for text in col[is_str]:
+            # Skip whole non-responses ("en osaa sanoa", "-") so their words
+            # never reach the cloud.
+            if _is_non_answer(text):
+                continue
             for tok in re.findall(r"\w+", text.lower(), re.UNICODE):
                 if len(tok) < _WORDCLOUD_MIN_LEN:
                     continue
