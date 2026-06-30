@@ -465,7 +465,13 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
     if question.kind == "battery":
-        result = _battery(question, spec, data, model)
+        # A battery shown as a stacked bar is a 100% DISTRIBUTION: each statement
+        # is a bar split by the shared rating-scale levels (the source decks'
+        # agreement-scale slides). Otherwise it's the mean-per-statement bars.
+        if spec.chart_type in ("stacked_horizontal_bar", "stacked_vertical_bar"):
+            result = _battery_stacked(question, spec, data, model)
+        else:
+            result = _battery(question, spec, data, model)
     else:
         stat = get_statistic(spec.statistic)   # clear KeyError if unregistered
         if stat.family == "summary":
@@ -518,3 +524,49 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     categories = tuple(sort_categories(rows, spec.sort))
     return SeriesResult(categories=categories, segments=("Total",), cells=cells,
                         base_n={"Total": base}, statistic="mean")
+
+
+def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
+                     model: QuestionModel) -> SeriesResult:
+    """A rating battery rendered as a 100%-STACKED distribution.
+
+    Each member statement becomes a BAR; the stack SEGMENTS are the shared
+    rating-scale levels (1..N, e.g. 'Täysin eri mieltä' … 'Täysin samaa mieltä'),
+    each cell the % of that statement's answers at that level. The stacked
+    renderer consumes this as categories = levels (stack), segments = statements
+    (bars). Mirrors the source decks' agreement-scale slides.
+    """
+    vars_ = [model.variable(n) for n in question.variables]
+    # Shared scale levels from the first member that has a parseable rating scale.
+    level_label: dict[float, str] = {}
+    for v in vars_:
+        scale = _rating_scale(v)
+        if scale:
+            by_code = {vl.value: vl.label for vl in v.value_labels}
+            for code, point in scale.items():
+                level_label.setdefault(point, by_code.get(code, str(int(point))))
+            if level_label:
+                break
+    points = sorted(level_label)                       # 1..N ascending
+    levels = [level_label[p] for p in points]          # stack-segment labels
+    statements = [v.label for v in vars_]              # bar labels (member order)
+
+    cells: dict[tuple[str, str], Cell] = {}
+    base_by_stmt: dict[str, int] = {}
+    answered_any = pd.Series(False, index=data.index)
+    for v in vars_:
+        scale = _rating_scale(v)
+        mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
+        answered_any = answered_any | mapped.notna()
+        n = int(mapped.notna().sum())
+        base_by_stmt[v.label] = n
+        vc = mapped.value_counts()
+        for p, lbl in zip(points, levels):
+            c = int(vc.get(p, 0))
+            cells[(lbl, v.label)] = Cell(
+                pct=pct(c, n, spec.number_format), count=float(c), mean=None
+            )
+
+    base_n = {"Total": int(answered_any.sum()), **base_by_stmt}
+    return SeriesResult(categories=tuple(levels), segments=tuple(statements),
+                        cells=cells, base_n=base_n, statistic="pct")

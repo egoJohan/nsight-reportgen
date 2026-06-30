@@ -752,17 +752,6 @@ def preview_chart(
             detail="LibreOffice (soffice) is not available; chart preview requires it.",
         )
 
-    # Guard (RX-be.3): stacked charts require a classifying variable for their segments
-    _STACKED = {"stacked_vertical_bar", "stacked_horizontal_bar"}
-    if body.chart_type in _STACKED and not body.classifying_var:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"{body.chart_type}: Stacked charts need a classifying variable "
-                "to define the segments"
-            ),
-        )
-
     # Guard (RX-be.2): scatter requires explicit X and Y variables
     if body.chart_type == "scatter" and not body.scatter_xy:
         raise HTTPException(
@@ -791,6 +780,23 @@ def preview_chart(
         os.unlink(tmp_path)
 
     model = enrich_model(model)
+
+    # Guard (RX-be.3): a stacked single/multi chart needs a classifying variable
+    # for its segments. A BATTERY is exempt — its stack segments are the shared
+    # rating-scale levels (no external classifier).
+    if body.chart_type in ("stacked_vertical_bar", "stacked_horizontal_bar") and not body.classifying_var:
+        try:
+            _is_battery = model.question(body.question_ref).kind == "battery"
+        except Exception:
+            _is_battery = False
+        if not _is_battery:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{body.chart_type}: Stacked charts need a classifying variable "
+                    "to define the segments"
+                ),
+            )
 
     # 2. Convert request body to ChartSpec
     spec = _chart_spec_from_body(body)

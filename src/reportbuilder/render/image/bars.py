@@ -141,6 +141,20 @@ def _tick_text(v: float) -> str:
     return str(int(v)) if float(v).is_integer() else f"{v:g}"
 
 
+def _legend_below(ax, n_segs: int) -> None:
+    """Place a stacked chart's scale legend in a single horizontal row BELOW the
+    plot (a stacked bar fills the whole plot width, so an in-axes legend would
+    cover the bars). bbox_inches='tight' expands the figure to include it."""
+    leg = ax.legend(
+        loc="upper center", bbox_to_anchor=(0.5, -0.08),
+        ncol=min(n_segs, 5), frameon=False, fontsize=9.5,
+        handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
+    )
+    if leg is not None:
+        for t in leg.get_texts():
+            t.set_color(INK)
+
+
 def _apply_bar_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None:
     """Apply house-style spines, grid, and tick formatting to a bar axes."""
     # Remove all spines, then restore left spine only (horizontal bars)
@@ -414,7 +428,7 @@ def build_image_column_stacked(ctx) -> None:
     _apply_column_style(ax, max_val)
 
     if ctx.spec.elements.legend and len(segs) > 1:
-        _style_legend(ax)
+        _legend_below(ax, len(segs))
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -463,7 +477,7 @@ def build_image_bar_stacked(ctx) -> None:
     _apply_bar_style(ax, max_val)
 
     if ctx.spec.elements.legend and len(segs) > 1:
-        _style_legend(ax, loc="lower right")
+        _legend_below(ax, len(segs))
 
     png = render_png(fig)
     place_picture(ctx, png)

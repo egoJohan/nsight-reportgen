@@ -65,19 +65,6 @@ def orchestrate_render(
     # 1. Load and parse the report definition
     report = report_from_json(client.load_report(case_id, report_id))
 
-    # Guard (RX-be.3): stacked charts require a classifying variable for their segments.
-    # Validated here so the render endpoint also returns a clean 422 rather than a crash.
-    _STACKED = {"stacked_vertical_bar", "stacked_horizontal_bar"}
-    for _chart in report.charts:
-        if _chart.chart_type in _STACKED and not _chart.classifying_var:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Chart '{_chart.question_ref}' ({_chart.chart_type}): "
-                    "Stacked charts need a classifying variable to define the segments"
-                ),
-            )
-
     # 2. Fetch material bytes, write to temp .sav, ingest
     raw = client.get_material(material_id)
     with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
@@ -90,6 +77,25 @@ def orchestrate_render(
 
     # Enrich model with multi-response + battery grouping
     model = enrich_model(model)
+
+    # Guard (RX-be.3): a stacked single/multi chart needs a classifying variable
+    # to define its segments. A BATTERY is exempt — its stack segments are the
+    # shared rating-scale levels (no external classifier). Clean 422, not a crash.
+    _STACKED = {"stacked_vertical_bar", "stacked_horizontal_bar"}
+    for _chart in report.charts:
+        if _chart.chart_type in _STACKED and not _chart.classifying_var:
+            try:
+                _is_battery = model.question(_chart.question_ref).kind == "battery"
+            except Exception:
+                _is_battery = False
+            if not _is_battery:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Chart '{_chart.question_ref}' ({_chart.chart_type}): "
+                        "Stacked charts need a classifying variable to define the segments"
+                    ),
+                )
 
     # 3. Build the PPTX deck into UNIQUE work files, then atomically publish to
     #    the canonical deck.pptx/deck.pdf names. Two concurrent renders of the
