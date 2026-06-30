@@ -64,7 +64,17 @@ def update_report(
     body: dict = Body(...),
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
-    """Versioned-replace an existing report doc. Returns the (possibly new) report_id. (REQ-C-08)"""
+    """Versioned-replace an EXISTING report doc. Returns the report_id. (REQ-C-08)
+
+    A PUT must not resurrect a deleted report: if it no longer exists (e.g. a
+    late save-on-unmount fires after the user deleted it) we return 404 instead
+    of silently re-creating it."""
+    try:
+        client.load_report(case_id, report_id)
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Report '{report_id}' not found"
+        ) from exc
     _report, report_json, readable = _canonicalize(body)
     returned_id = client.save_report(case_id, report_id, report_json, readable)
     return {"report_id": returned_id}
@@ -77,7 +87,12 @@ def get_report(
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Return the exact report definition JSON (parsed) for a report doc. (REQ-C-08)"""
-    raw = client.load_report(case_id, report_id)
+    try:
+        raw = client.load_report(case_id, report_id)
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Report '{report_id}' not found"
+        ) from exc
     return json.loads(raw)
 
 
