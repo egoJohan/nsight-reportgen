@@ -113,6 +113,28 @@ def _is_text_question(model: QuestionModel, q) -> bool:
     return bool(qvars) and all(v.measurement == "text" for v in qvars)
 
 
+def _text_is_short(df, q, *, max_words: float = 2.0) -> bool:
+    """True when an open-ended question's answers are SHORT (association lists like
+    brand names or "describe in three words") → best shown as a word cloud rather
+    than AI-summarised themes. Measured by the median word count of non-empty
+    answers, which is robust to a few long outliers."""
+    try:
+        import statistics
+        col = q.variables[0]
+        if col not in df.columns:
+            return False
+        counts = []
+        for x in df[col].dropna().tolist():
+            s = str(x).strip()
+            if s and s.lower() not in ("nan", "none"):
+                counts.append(len(s.split()))
+        if len(counts) < 5:
+            return False
+        return statistics.median(counts) <= max_words
+    except Exception:
+        return False
+
+
 def _aggregatable(var) -> bool:
     """True when a per-category MEAN of this variable is meaningful — a numeric
     scale, or a rating whose value labels start with a digit (1..N). Used to
@@ -319,6 +341,19 @@ def list_questions(
     render-resolvable. Each question includes a suggested chart type (REQ-C-13) and the
     missing-value mapping (REQ-D-06). (REQ-C-05)"""
     model = load_model_for_material(material_id, client)
+    # The short-answer word-cloud heuristic needs the data; load it lazily and
+    # only once, and tolerate failure (e.g. a model-only mock in tests) by
+    # degrading to themes.
+    _df_box: dict = {}
+
+    def _df_or_none():
+        if "df" not in _df_box:
+            try:
+                _df_box["df"], _ = _load_df_model(material_id, client)
+            except Exception:
+                _df_box["df"] = None
+        return _df_box["df"]
+
     questions = []
     for q in model.questions:
         chartable, reason = _question_chartable(model, q)
@@ -326,10 +361,17 @@ def list_questions(
             suggested = None
             compatible = []
         elif _is_text_question(model, q):
-            # Open-ended text → AI-summarised themes by default (more insight than
-            # a raw word frequency); word cloud remains available.
-            suggested = "themes"
-            compatible = ["themes", "wordcloud"]
+            # Open-ended text: SHORT answers (brand names, "describe in 3 words")
+            # are association lists → a WORD CLOUD (as the source decks do); longer
+            # answers (opinions / suggestions) → AI-summarised themes. Both remain
+            # available, ordered with the suggested one first.
+            df = _df_or_none()
+            if df is not None and _text_is_short(df, q):
+                suggested = "wordcloud"
+                compatible = ["wordcloud", "themes"]
+            else:
+                suggested = "themes"
+                compatible = ["themes", "wordcloud"]
         else:
             series = _quick_series(q, model)
             suggested = suggest_chart_type(q, series)
