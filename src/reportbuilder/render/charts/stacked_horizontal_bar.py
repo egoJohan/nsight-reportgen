@@ -18,12 +18,22 @@ def suitability(question, series) -> float | None:
     return 0.40
 
 
+def suggest(question, series) -> float | None:
+    """A rating BATTERY (Likert grid: many statements on one shared scale) defaults
+    to a 100%-stacked distribution — the standard research-report format that shows
+    how each statement's answers spread across the scale (disagree→agree). Beats
+    the plain bar/column suggestion so suitable questions stack by default."""
+    if getattr(question, "kind", None) == "battery":
+        return 1.20
+    return None
+
+
 register(ChartPlugin(
     id="stacked_horizontal_bar",
     label="Stacked Horizontal Bar",
     image_build=build_image_bar_stacked,
     native_build=build_stacked_horizontal_bar,
     suitability=suitability,
-    suggest=None,
+    suggest=suggest,
     config_schema=stacked_schema(),
 ))
