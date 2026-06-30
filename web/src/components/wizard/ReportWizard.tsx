@@ -196,7 +196,11 @@ export default function ReportWizard({
   const { data: orderedQuestions } = useQuestions(materialId);
   const qRank = useMemo(() => {
     const m = new Map<string, number>();
-    (orderedQuestions ?? []).forEach((q, i) => m.set(q.qid, i));
+    // Demographics float to the front (rank offset); SAV order kept within each
+    // group, matching the demographics-first seeding of a new report.
+    (orderedQuestions ?? []).forEach((q, i) =>
+      m.set(q.qid, q.is_demographic ? i - 100000 : i)
+    );
     return m;
   }, [orderedQuestions]);
 

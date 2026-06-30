@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import uuid
@@ -220,6 +221,40 @@ def _is_binary_flag(var, df) -> bool:
     return bool(vals) and vals <= {0.0, 1.0} and 1.0 in vals and 0.0 in vals
 
 
+# Respondent-background concepts a demographic question asks about. Matched on the
+# question label so demographics (who the respondent IS) can be floated to the
+# front of a deck — distinct from opinion/brand questions (what they THINK), which
+# can look structurally identical (a low-cardinality single-choice). Finnish + EN.
+_DEMOGRAPHIC_RE = re.compile(
+    r"\b("
+    r"ik[äa]|ik[äa]inen|vuotias|syntym|age|"                      # age
+    r"sukupuoli|identifioit|mies\b|nais|gender|"                  # gender
+    r"asu[ity]|asuinpaikk|asuinalue|maakun|kaupungi|postinumero|" # region/location
+    r"miss[äa]\s+p[äa]in|alue|seutu|region|location|area|"
+    r"tulot|tulota|ansio|bruttotul|income|"                       # income
+    r"koulutus|education|"                                        # education
+    r"kotitalou|asuntokun|household|"                             # household (specific:
+    r"montako\s+.*taloud|taloutee?si\s+kuulu|"                    #   avoid generic perhe/lapsi
+    r"ty[öo]tilan|occupation|employment|siviilis[äa]"             # occupation / marital
+    r")", re.IGNORECASE,
+)
+
+
+def _is_demographic(model: QuestionModel, q) -> bool:
+    """True for a respondent-BACKGROUND question (age/gender/region/income/…): a
+    single-choice low-cardinality categorical whose label names a demographic
+    concept. Used to float demographics to the front of a report."""
+    if q.kind != "single":
+        return False
+    try:
+        var = model.variable(q.variables[0])
+    except Exception:
+        return False
+    if var.measurement != "categorical" or not (2 <= len(var.value_labels) <= 15):
+        return False
+    return bool(_DEMOGRAPHIC_RE.search(q.text or "")) or bool(_DEMOGRAPHIC_RE.search(var.label or ""))
+
+
 def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
     """Whether a question can be charted, plus a reason when it cannot (Task J.3).
 
@@ -407,6 +442,9 @@ def list_questions(
             "missing_values": _missing_value_list(model, q.qid),
             "values": _value_list(model, q),
             "category_labels": _category_labels(model, q),
+            # Respondent-background question (age/gender/region/…) → floated to
+            # the front of a new report (demographics-first convention).
+            "is_demographic": _is_demographic(model, q),
         })
     return {"questions": questions}
 

@@ -34,6 +34,9 @@ export interface Question {
   values: ValueLabel[];
   // Base category label strings, in render order — the label-editor's list.
   category_labels: string[];
+  // Respondent-background question (age/gender/region/…) — floated to the front
+  // of a new report (demographics-first convention).
+  is_demographic?: boolean;
 }
 
 export interface Variable {

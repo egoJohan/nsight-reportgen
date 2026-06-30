@@ -114,10 +114,14 @@ export default function ReportsSection({
   function handleCreate() {
     const name = `Report ${reports.length + 1}`;
     // Pre-select every question by default: seed the report with a chart per
-    // question (in the questions' natural order). The user removes the ones
-    // they don't want in the Select step.
+    // question. Demographics (age/gender/region/…) are floated to the FRONT
+    // (a stable sort keeps questionnaire/SAV order within each group); the user
+    // removes the ones they don't want in the Select step.
+    const ordered = [...(questions ?? [])].sort(
+      (a, b) => (a.is_demographic ? 0 : 1) - (b.is_demographic ? 0 : 1)
+    );
     const charts = normalizeSlots(
-      (questions ?? []).map((q) => makeChart(q.qid, q.suggested_chart_type))
+      ordered.map((q) => makeChart(q.qid, q.suggested_chart_type))
     );
     createReport.mutate(
       { name, render_mode: "image", template_ref: "", charts },
