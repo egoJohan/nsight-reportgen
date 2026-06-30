@@ -494,9 +494,14 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if question.kind == "battery":
         # A battery shown as a stacked bar is a 100% DISTRIBUTION: each statement
         # is a bar split by the shared rating-scale levels (the source decks'
-        # agreement-scale slides). Otherwise it's the mean-per-statement bars.
+        # agreement-scale slides). A radar of a battery that has PARALLEL siblings
+        # (the same attribute set rated for several entities/brands) compares
+        # those entities across the attributes (the source decks' brand-image
+        # radar). Otherwise it's the mean-per-statement bars.
         if spec.chart_type in ("stacked_horizontal_bar", "stacked_vertical_bar"):
             result = _battery_stacked(question, spec, data, model)
+        elif spec.chart_type == "radar" and len(_parallel_batteries(question, model)) > 1:
+            result = _battery_comparison(question, spec, data, model)
         else:
             result = _battery(question, spec, data, model)
     else:
@@ -551,6 +556,71 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     categories = tuple(sort_categories(rows, spec.sort))
     return SeriesResult(categories=categories, segments=("Total",), cells=cells,
                         base_n={"Total": base}, statistic="mean")
+
+
+def _parallel_batteries(question: Question, model: QuestionModel) -> list[Question]:
+    """All batteries (including *question*) whose member ATTRIBUTE LABEL-SET is
+    identical — i.e. the same rating grid asked for several entities/brands.
+
+    These are exactly what a brand-image radar compares across entities. Matching
+    is by the SET of member labels (order-independent), so the batteries don't
+    need their attributes in the same column order."""
+    if question.kind != "battery":
+        return [question]
+    target = frozenset(model.variable(v).label for v in question.variables)
+    sibs = [
+        q for q in model.questions
+        if q.kind == "battery"
+        and frozenset(model.variable(v).label for v in q.variables) == target
+    ]
+    return sibs or [question]
+
+
+def _entity_label(question: Question) -> str:
+    """A short entity (brand) label for a battery, taken from the lead-in before
+    the question prompt: 'Attendo — Arvioi …' -> 'Attendo'."""
+    text = (question.text or "").strip()
+    for sep in (" — ", " – ", " - ", ": ", ":"):
+        if sep in text:
+            head = text.split(sep, 1)[0].strip()
+            if head:
+                return head
+    return question.qid.replace("battery-", "").replace("-", " ").title()
+
+
+def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
+                        model: QuestionModel) -> SeriesResult:
+    """Compare PARALLEL rating batteries (same attributes, one per entity/brand):
+    categories = the shared attributes, segments = the entities, each cell the
+    MEAN rating of that entity on that attribute (shared 1..N scale). Mirrors the
+    source decks' brand-image radar (attributes × brands)."""
+    sibs = _parallel_batteries(question, model)
+    attrs = [model.variable(v).label for v in question.variables]   # canonical order
+    cells: dict[tuple[str, str], Cell] = {}
+    base_n: dict[str, int] = {}
+    entities: list[str] = []
+    for q in sibs:
+        ent = _entity_label(q)
+        entities.append(ent)
+        by_label = {model.variable(v).label: v for v in q.variables}
+        answered = pd.Series(False, index=data.index)
+        for attr in attrs:
+            vn = by_label.get(attr)
+            if vn is None:
+                cells[(attr, ent)] = Cell(pct=None, count=0.0, mean=None)
+                continue
+            scale = _rating_scale(model.variable(vn))
+            mapped = pd.to_numeric(data[vn], errors="coerce").map(scale)
+            answered = answered | mapped.notna()
+            n = int(mapped.notna().sum())
+            cells[(attr, ent)] = Cell(
+                pct=None, count=float(n),
+                mean=float(mapped.mean()) if n > 0 else None,
+            )
+        base_n[ent] = int(answered.sum())
+    base_n["Total"] = max(base_n.values(), default=0)
+    return SeriesResult(categories=tuple(attrs), segments=tuple(entities),
+                        cells=cells, base_n=base_n, statistic="mean")
 
 
 def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,

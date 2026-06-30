@@ -83,7 +83,12 @@ def build_image_radar(ctx) -> None:
 
     # Radial grid
     ax.set_ylim(0, r_max)
-    r_ticks = [v for v in [20, 40, 60, 80, 100] if v <= r_max]
+    # Radial ticks adapt to the value range: pct uses the 0–100 scale; a mean
+    # radar (e.g. a 1–5 rating comparison) uses integer scale points.
+    if r_max <= 12:
+        r_ticks = [v for v in range(1, int(r_max) + 1)]
+    else:
+        r_ticks = [v for v in [20, 40, 60, 80, 100] if v <= r_max]
     ax.set_yticks(r_ticks)
     ax.set_yticklabels([str(v) for v in r_ticks], fontsize=8.0, color=MUTED)
     ax.grid(color=GRIDC, linewidth=0.8)
@@ -91,7 +96,16 @@ def build_image_radar(ctx) -> None:
     ax.spines["polar"].set_linewidth(1.0)
 
     if ctx.spec.elements.legend and len(segs) > 1:
-        style_legend(ax, loc="upper right")
+        # Place the entity legend BELOW the chart so it never covers the
+        # perimeter attribute labels that ring the radar.
+        leg = ax.legend(
+            loc="upper center", bbox_to_anchor=(0.5, -0.06),
+            ncol=min(len(segs), 4), frameon=False, fontsize=9.0,
+            handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
+        )
+        if leg is not None:
+            for t in leg.get_texts():
+                t.set_color(INK)
 
     png = render_png(fig)
     place_picture_square(ctx, png)
