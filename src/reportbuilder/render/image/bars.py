@@ -33,7 +33,7 @@ from reportbuilder.render.image._mpl import (
     wrap_label_capped,
 )
 from reportbuilder.render.house_style import (
-    series_colors, INK, MUTED, GRIDC,
+    series_colors, scale_colors, INK, MUTED, GRIDC,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 
@@ -393,7 +393,8 @@ def build_image_column_stacked(ctx) -> None:
     answer categories (house style)."""
     cats, segs, data = _stacked_layout(ctx.series)
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs))
+    # Stack segments are ordered scale levels → monotonic light→dark gradient.
+    clrs = scale_colors(len(segs))
 
     x = np.arange(len(cats))
     bottoms = np.zeros(len(cats))
@@ -443,7 +444,8 @@ def build_image_bar_stacked(ctx) -> None:
     answer categories (house style)."""
     cats, segs, data = _stacked_layout(ctx.series)
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs))
+    # Stack segments are ordered scale levels → monotonic light→dark gradient.
+    clrs = scale_colors(len(segs))
 
     n_cats = len(cats)
     y = np.arange(n_cats)[::-1]

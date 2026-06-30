@@ -89,6 +89,25 @@ def register_fonts() -> None:
 # Colour helpers
 # ---------------------------------------------------------------------------
 
+def scale_colors(n: int) -> list[str]:
+    """*n* colours forming a MONOTONIC light→dark teal gradient.
+
+    For ORDERED scale segments — the Likert/rating levels of a stacked bar
+    (disagree→agree). Unlike series_colors (a categorical palette that cycles
+    after 4), this interpolates so a 5- or 7-point scale reads as a clean
+    gradient with no repeated colour."""
+    if n <= 1:
+        return [TEAL]
+    lo = (0xCF, 0xE3, 0xE2)  # palest teal
+    hi = (0x13, 0x61, 0x5E)  # strongest teal
+    out: list[str] = []
+    for i in range(n):
+        t = i / (n - 1)
+        r, g, b = (round(lo[k] + (hi[k] - lo[k]) * t) for k in range(3))
+        out.append(f"#{r:02X}{g:02X}{b:02X}")
+    return out
+
+
 def series_colors(n: int) -> list[str]:
     """Return *n* hex colour strings from the teal ramp (REQ-C-27a).
 
