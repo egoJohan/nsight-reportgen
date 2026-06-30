@@ -202,6 +202,24 @@ def _has_real_category_labels(var) -> bool:
     return len(named) >= 2
 
 
+def _is_binary_flag(var, df) -> bool:
+    """True for a derived BINARY SEGMENT FLAG: an unlabeled categorical column
+    (label == name, no value labels) whose data is 0/1 membership — e.g. Attendo's
+    "Suosittelijat", "Kokemusta", "Ammattilainen". These are the overlapping
+    respondent segments an analyst cross-tabs by; offered as classifiers and
+    labelled (flag name vs "Muut") by the engine's segment relabeller."""
+    if df is None or var.measurement != "categorical" or var.value_labels:
+        return False
+    if (var.label or "").strip() != var.name or var.name not in getattr(df, "columns", []):
+        return False
+    try:
+        import pandas as pd
+        vals = set(pd.to_numeric(df[var.name], errors="coerce").dropna().unique().tolist())
+    except Exception:
+        return False
+    return bool(vals) and vals <= {0.0, 1.0} and 1.0 in vals and 0.0 in vals
+
+
 def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
     """Whether a question can be charted, plus a reason when it cannot (Task J.3).
 
@@ -489,6 +507,18 @@ def list_variables(
     picker groups them sensibly. (RX-be.1)
     """
     model = load_model_for_material(material_id, client)
+    # The binary-segment-flag detector needs the data; load it lazily and tolerate
+    # absence (model-only mocks) by skipping flag detection.
+    _df_box: dict = {}
+
+    def _df_or_none():
+        if "df" not in _df_box:
+            try:
+                _df_box["df"], _ = _load_df_model(material_id, client)
+            except Exception:
+                _df_box["df"] = None
+        return _df_box["df"]
+
     # Exclude variables that are members of a grouped question (multi/battery) —
     # those are sub-options/rating cells, not standalone segmentation variables.
     grouped = {
@@ -525,10 +555,12 @@ def list_variables(
                 # Can a per-category MEAN be taken (numeric scale, or a rating whose
                 # value labels start with a digit) — i.e. a valid combo secondary.
                 "aggregatable": _aggregatable(var),
-                # Is this a MEANINGFUL classifying/segmentation variable (a
-                # background/demographic categorical, not a Likert item) — drives
-                # the classifying-variable picker.
-                "segmentable": _segmentable(var),
+                # Is this a MEANINGFUL classifying/segmentation variable — a
+                # background/demographic categorical (not a Likert item), OR a
+                # derived binary SEGMENT FLAG (e.g. "Suosittelijat", "Kokemusta":
+                # 0/1 membership the analyst cross-tabs by). Drives the
+                # classifying-variable picker.
+                "segmentable": _segmentable(var) or _is_binary_flag(var, _df_or_none()),
             }
             for var in all_vars
         ]

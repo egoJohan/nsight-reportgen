@@ -413,7 +413,15 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
         key = str(int(vl.value)) if float(vl.value).is_integer() else str(vl.value)
         code_to_label[key] = vl.label
     if not code_to_label:
-        return result
+        # A derived binary SEGMENT FLAG (no value labels, label == name, values
+        # 0/1) — e.g. "Suosittelijat", "Kokemusta": label the flagged group by the
+        # flag's own name and the rest as "Muut", so cross-tabbing by it reads
+        # cleanly instead of "0"/"1".
+        seg_codes = {s for s in result.segments if s != "Total"}
+        if (var.label or "").strip() == var.name and seg_codes and seg_codes <= {"0", "1"}:
+            code_to_label = {"1": var.label, "0": "Muut"}
+        else:
+            return result
 
     def rl(seg: str) -> str:
         return seg if seg == "Total" else code_to_label.get(seg, seg)
