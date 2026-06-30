@@ -22,6 +22,7 @@ from nsight.agent.egohive_client import EgoHiveError, egohive_chat
 from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import (
     generate_conclusion_bullets,
+    generate_data_chat,
     generate_demographics_bullets,
     generate_open_themes,
     generate_overview_bullets,
@@ -475,6 +476,50 @@ def ai_demographics(
         except Exception:
             charts.append({"question_ref": ref, "chart_type": "vertical_bar"})
     return {"bullets": bullets, "question_refs": picked, "charts": charts}
+
+
+# --------------------------------------------------------------------------- #
+# Chat-with-data agent
+# --------------------------------------------------------------------------- #
+class ChatMessage(BaseModel):
+    role: str          # "user" | "assistant"
+    content: str
+
+
+class ChatBody(BaseModel):
+    messages: list[ChatMessage]
+
+
+@ai_router.post("/materials/{material_id}/chat")
+def ai_chat(
+    material_id: str,
+    body: ChatBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Answer a question about the material's survey DATA, grounded in the
+    per-question findings (a data-aware assistant). Returns {"reply": "..."}.
+    egoHive/data failures degrade to 503 — never a 500."""
+    if not body.messages or not any(m.content.strip() for m in body.messages):
+        raise HTTPException(status_code=422, detail="No message to answer")
+    try:
+        df, model, label = _load_df_model_labeled(material_id, client)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not load material: {exc}") from exc
+
+    refs = [q.qid for q in model.questions]
+    findings = _findings_for_refs(refs, df, model, top_n=4, cap=30)
+    try:
+        reply = generate_data_chat(
+            label, findings, [m.model_dump() for m in body.messages],
+            total_n=int(len(df)), chat=egohive_chat,
+        )
+    except EgoHiveError as exc:
+        raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Chat failed: {exc}") from exc
+    return {"reply": reply or "En osaa vastata tähän käytettävissä olevan datan perusteella."}
 
 
 __all__ = ["ai_router"]

@@ -255,6 +255,48 @@ def _findings_block(findings_by_question: list[tuple[str, list[tuple[str, float]
     return "\n".join(blocks) if blocks else "- (ei tuloksia)"
 
 
+def generate_data_chat(
+    study_label: str,
+    findings_by_question: list[tuple[str, list[tuple[str, float]]]],
+    messages: list[dict],
+    total_n: int | None = None,
+    *,
+    chat=egohive_chat,
+) -> str:
+    """Answer the user's question about the survey DATA, grounded in the per-question
+    findings. ``messages`` is the conversation so far ([{role, content}, …]); only
+    the recent turns are kept to bound prompt size. The model is told to use ONLY
+    the data below and to reply in the user's language."""
+    study = _study_line(study_label)
+    n_line = f"Vastaajia yhteensä: {total_n}.\n" if total_n else ""
+    data = _findings_block(findings_by_question)
+    recent = [m for m in messages if m.get("content", "").strip()][-10:]
+    convo = "\n".join(
+        f"{'Käyttäjä' if m.get('role') == 'user' else 'Avustaja'}: {m['content'].strip()}"
+        for m in recent
+    )
+    prompt = (
+        "Olet kyselytutkimuksen data-analyytikko ja avustaja nSight Studiossa. "
+        "Vastaat käyttäjän kysymyksiin TÄSMÄLLEEN alla olevan tutkimusdatan "
+        "perusteella. ÄLÄ keksi lukuja äläkä tietoja; jos vastaus ei löydy "
+        "datasta, kerro se rehellisesti. Vastaa lyhyesti, selkeästi ja samalla "
+        "kielellä jota käyttäjä käyttää. Vastaa PELKKÄNÄ tekstinä — älä käytä "
+        "koodilohkoja (```), 'question:'-lohkoja tai muita rakenteisia "
+        "valikoita.\n\n"
+        f"{study}{n_line}\n"
+        "Tutkimusdata (kysymys ja yleisimmät vastaukset / keskiarvot):\n"
+        f"{data}\n\n"
+        "Keskustelu tähän asti:\n"
+        f"{convo}\n"
+        "Avustaja:"
+    )
+    reply = (chat(prompt) or "").strip()
+    # Strip any ```…``` / ~~~…~~~ fenced blocks the model appends (it sometimes
+    # adds a 'question:single_select' follow-up menu we don't want shown raw).
+    reply = re.sub(r"\n*(```|~~~).*?(\1|\Z)", "", reply, flags=re.DOTALL).strip()
+    return reply
+
+
 def generate_overview_bullets(
     study_label: str,
     question_texts: list[str],

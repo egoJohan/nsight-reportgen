@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon, MessageSquareTextIcon } from "lucide-react";
+import ChatPanel from "@/components/ChatPanel";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,6 +107,7 @@ export default function CaseDetailPage() {
     [setSearchParams]
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const deleteCase = useDeleteCase();
 
   function handleDelete() {
@@ -150,16 +152,37 @@ export default function CaseDetailPage() {
           <CaseHeading caseId={id} name={currentCase?.name ?? id} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
-          onClick={() => setConfirmDelete(true)}
-        >
-          <Trash2Icon className="size-4" />
-          Delete case
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {materialId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setChatOpen(true)}
+              title="Keskustele datasta"
+            >
+              <MessageSquareTextIcon className="size-4" />
+              Chat
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2Icon className="size-4" />
+            Delete case
+          </Button>
+        </div>
       </div>
+
+      {materialId && (
+        <ChatPanel
+          materialId={materialId}
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
 
       {!materialId ? (
         // No data yet (e.g. a legacy case): let the user import a SAV into it.

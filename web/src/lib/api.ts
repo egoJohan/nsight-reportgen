@@ -432,6 +432,13 @@ export const api = {
       body: { question_ref: string }
     ): Promise<{ bullets: string[] }> =>
       aiPost(`/materials/${materialId}/ai/themes`, body),
+
+    // AI: chat with a data-aware assistant about this material's survey data.
+    chat: (
+      materialId: string,
+      messages: { role: "user" | "assistant"; content: string }[]
+    ): Promise<{ reply: string }> =>
+      aiPost(`/materials/${materialId}/chat`, { messages }),
   },
 
   reports: {
