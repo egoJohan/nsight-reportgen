@@ -18,7 +18,8 @@ recreating the agent) and are used by :func:`login` -> a bearer token.
 Configuration is read from ``work/egohive_creds.json`` (gitignored) so no
 secrets are hardcoded. Expected keys:
 
-    base_url, endpoint_id, agent_id, model, auth_scheme,
+    base_url, endpoint_id, endpoint_key (for auth_type=api_key endpoints),
+    agent_id, model, auth_scheme,
     email, password  (optional, for management calls)
 
 Public API
@@ -58,9 +59,10 @@ def load_creds(creds_path: str | Path | None = None) -> dict[str, Any]:
     Resolution order (12-factor — config lives in the deploy/build spec, not the
     source tree):
       1. Environment variables ``EGOHIVE_BASE_URL`` + ``EGOHIVE_ENDPOINT_ID``
-         (plus optional ``EGOHIVE_AGENT_ID`` / ``EGOHIVE_AUTH_SCHEME`` /
-         ``EGOHIVE_MODEL`` / ``EGOHIVE_EMAIL`` / ``EGOHIVE_PASSWORD``). Used in
-         deployment (staging/prod) so credentials are supplied by the environment.
+         (plus optional ``EGOHIVE_ENDPOINT_KEY`` / ``EGOHIVE_AGENT_ID`` /
+         ``EGOHIVE_AUTH_SCHEME`` / ``EGOHIVE_MODEL`` / ``EGOHIVE_EMAIL`` /
+         ``EGOHIVE_PASSWORD``). Used in deployment (staging/prod) so credentials
+         are supplied by the environment.
       2. An explicit ``creds_path`` argument.
       3. ``EGOHIVE_CREDS_PATH`` env var (path to a mounted secret file).
       4. ``DEFAULT_CREDS_PATH`` (``work/egohive_creds.json``) — local-dev fallback.
@@ -74,6 +76,7 @@ def load_creds(creds_path: str | Path | None = None) -> dict[str, Any]:
         return {
             "base_url": env_base,
             "endpoint_id": env_endpoint,
+            "endpoint_key": os.environ.get("EGOHIVE_ENDPOINT_KEY", ""),
             "agent_id": os.environ.get("EGOHIVE_AGENT_ID", ""),
             "auth_scheme": os.environ.get("EGOHIVE_AUTH_SCHEME", "bearer"),
             "model": os.environ.get("EGOHIVE_MODEL", ""),
@@ -189,16 +192,31 @@ def login(creds: Mapping[str, Any], *, timeout: float = DEFAULT_TIMEOUT) -> str:
 # Chat
 # --------------------------------------------------------------------------- #
 def _create_session(
-    base_url: str, endpoint_id: str, *, timeout: float = DEFAULT_TIMEOUT
+    base_url: str,
+    endpoint_id: str,
+    *,
+    endpoint_key: str | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> str:
-    """Mint a chat session from the agent endpoint, returning the session_id."""
+    """Mint a chat session from the agent endpoint, returning the session_id.
+
+    If ``endpoint_key`` is supplied it is sent as the ``X-Endpoint-Key`` header,
+    which endpoints configured with ``auth_type=api_key`` require (the key is
+    SHA-256 compared to the stored hash server-side). For ``auth_type=none``
+    endpoints the header is simply ignored, so passing the key is always safe.
+    """
+    headers = {
+        # auth_type=none validates Origin against allowed_origins (empty -> any),
+        # but sending an Origin keeps us compatible if it is ever locked down.
+        "Origin": base_url,
+    }
+    if endpoint_key:
+        headers["X-Endpoint-Key"] = endpoint_key
     resp = _request(
         "POST",
         f"{base_url}/session/{endpoint_id}",
         body={},
-        # auth_type=none validates Origin against allowed_origins (empty -> any),
-        # but sending an Origin keeps us compatible if it is ever locked down.
-        headers={"Origin": base_url},
+        headers=headers,
         timeout=timeout,
     )
     session_id = (resp or {}).get("session_id")
@@ -272,8 +290,9 @@ def egohive_narrate(
     creds = load_creds(creds_path)
     base = (base_url or creds["base_url"]).rstrip("/")
     ep = endpoint_id or creds["endpoint_id"]
+    key = creds.get("endpoint_key") or creds.get("token_or_api_key") or None
 
-    session_id = _create_session(base, ep, timeout=timeout)
+    session_id = _create_session(base, ep, endpoint_key=key, timeout=timeout)
     prompt = _build_prompt(topic, numbers)
     return _clean(_send_message(base, session_id, prompt, timeout=timeout))
 
@@ -313,8 +332,9 @@ def egohive_chat(
     creds = load_creds(creds_path)
     base = (base_url or creds["base_url"]).rstrip("/")
     ep = endpoint_id or creds["endpoint_id"]
+    key = creds.get("endpoint_key") or creds.get("token_or_api_key") or None
 
-    session_id = _create_session(base, ep, timeout=timeout)
+    session_id = _create_session(base, ep, endpoint_key=key, timeout=timeout)
     reply = _send_message(base, session_id, prompt, timeout=timeout)
 
     # Light cleanup that keeps newlines (single-line callers apply _clean).
