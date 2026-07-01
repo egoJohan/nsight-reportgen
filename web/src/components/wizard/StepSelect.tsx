@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +59,25 @@ export default function StepSelect({
   );
   const [search, setSearch] = useState("");
   const [groupingOpen, setGroupingOpen] = useState(false);
+
+  // Auto-select a newly-created group: when the reshaped list gains a group
+  // question that wasn't there before (i.e. the user just grouped some
+  // variables), add it to the report by default. Skips the first load so
+  // opening a report doesn't add everything.
+  const prevQids = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!questions) return;
+    const current = new Set(questions.map((q) => q.qid));
+    if (prevQids.current) {
+      for (const q of questions) {
+        const isGroup = q.kind === "multi" || q.kind === "battery";
+        if (isGroup && !prevQids.current.has(q.qid) && !addedRefs.has(q.qid)) {
+          onToggle(q);
+        }
+      }
+    }
+    prevQids.current = current;
+  }, [questions, addedRefs, onToggle]);
 
   const filtered = useMemo(
     () =>
