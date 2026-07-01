@@ -51,8 +51,14 @@ One override **per material**, a small JSON object:
 }
 ```
 
-- `groups`: explicit manual groups. `kind` ∈ `"multi"` (Phase 1); `"battery"` added in Phase 2 (with extra scale/subject fields). `label` optional (display name; defaults to the derived group text).
-- `singles`: variables **forced back to single** — the record of a split/ungroup, so auto-detection won't re-group them.
+- `groups`: explicit manual groups over **variable names** (the full `read_sav`
+  variable set — including vars curation dropped from the question list, since
+  those can still be legitimate tick-box members). `kind` ∈ `"multi"` (Phase 1);
+  a `"battery"` entry is **tolerated but skipped** in Phase 1 (forward-compat) and
+  implemented in Phase 2. `label` optional — when set it becomes the group
+  question's text; else the engine's derived group text is used.
+- `singles`: variables **forced back to single** — the record of a split/ungroup,
+  so auto-detection won't re-group them.
 - Absent / `{}` → behaves exactly as today (pure auto-detection).
 
 ## 2. Composition — how manual overrides combine with auto-detection
@@ -64,9 +70,23 @@ New pure function `reportbuilder.ingest.grouping_override.apply_grouping_overrid
 3. Run auto-detection (`suggest_multi_groups`, `suggest_batteries`) but **drop any suggested group that includes a var in `manual_members ∪ forced_singles`**, then apply the survivors.
 4. Everything else stays as auto-detected / single.
 
-**Rule: manual wins; forced singles stay single; auto fills the gaps.** Validation
-(reuse today's rules): a multi group needs ≥2 known, non-scale variables; unknown
-or scale members → 422.
+**Rule: manual wins; forced singles stay single; auto fills the gaps.**
+
+Conflict / edge rules (make deterministic):
+- A variable in **two** manual groups → the override is **rejected** at `PUT`
+  (422); a variable may belong to at most one group.
+- A variable in both a manual group and `singles` → the **group wins** (it's
+  grouped); `singles` only suppresses *auto* grouping, never overrides an explicit
+  group. (Normalise on save: drop from `singles` anything that's a group member.)
+- Manual group members are taken from the **full variable set**; a member curated
+  out of the question list is still valid (`apply_groups` builds the group from
+  `model.variables`).
+- A `battery`-kind group in the stored override is skipped in Phase 1 (its members
+  fall through to auto/single) and honoured in Phase 2 — never an error.
+
+Validation at `PUT` (reuse today's rules from `set_grouping`): each `multi` group
+needs ≥2 **known, non-scale** variables; unknown or scale members, or a
+double-assigned variable → **422**.
 
 The three operations reduce to edits of this object:
 - **Combine** → append a `{kind:"multi", variables}` to `groups`.
@@ -80,26 +100,38 @@ Store (per material), mirroring `report_meta`:
 - Real `DataHiveClient`: `save_material_config` / `load_material_config` against an assumed datahive material-metadata endpoint — **flagged for verification** (staging runs the demo client, as in Task #5).
 
 API (in `routes_questions`):
-- `GET /materials/{id}/grouping` → `{ "override": {groups, singles} }` (empty object when unset).
-- `PUT /materials/{id}/grouping` → validate + persist the full override; returns the resulting question list (so the UI can refresh). Replaces the stateless-preview role; the same validation (≥2 vars, non-scale, known) applies and returns 422 on violation.
+- `GET /materials/{id}/grouping` → `{ "override": {"groups": [...], "singles": [...]} }` (empty arrays when unset).
+- `PUT /materials/{id}/grouping` — body `{"groups": [...], "singles": [...]}`; validate (§2) + normalise (drop group members from `singles`) + persist; returns `{"questions": [...]}` (the reshaped list) so the UI refreshes.
+- **Endpoint migration:** this **repurposes** the existing stateless single-group *preview* `PUT /materials/{id}/grouping` (`GroupingRequest{variables, kind}`), which no frontend uses. The old body/behaviour is removed and its tests (`tests/rb/api/test_routes_questions.py` grouping cases) are rewritten to the new persisted contract. The one-group preview is no longer needed — the dialog shows the reshaped list from the `PUT` response.
+
+Cascade / lifecycle: `delete_case` drops `material_config` for that case's
+materials (alongside materials/reports). A newly uploaded material starts with **no
+override** (the override is per material_id; "Replace file" = a new material = fresh).
 
 ## 4. Applying the override everywhere (consistency)
 
 The override must reshape the model at **every** material-model load site, or a
-report built on a manual group wouldn't render it. Centralize: `load_model_for_material`
-and `_load_df_model` (questions) apply the override, and **`routes_render` and
-`routes_ai` are refactored to load through the same override-aware helper** instead
-of calling `enrich_model` directly. Net: one place builds a material's model =
-`apply_grouping_override(read_sav(...), load_material_config(...))`.
+report built on a manual group wouldn't render it. Centralize a single helper
+(e.g. `model_for_material(material_id, client)` = `apply_grouping_override(read_sav(bytes),
+load_material_config(...))`) and route **all** of these through it (each currently
+calls `enrich_model` directly — the plan must cover every one):
+
+- `routes_questions.load_model_for_material` and `_load_df_model` (questions, summary, variables, preview-chart).
+- `routes_render.orchestrate_render` (`enrich_model` at ~L79 → the deck build).
+- `routes_ai._load_df_model` / `_load_df_model_labeled`.
+
+Net: one function builds a material's model everywhere; grouping flows into
+questions, previews, AI findings, and rendered decks alike.
 
 ## 5. UI — "Manage grouping" dialog
 
 - **Entry:** a "Manage grouping" button in the **Questions** section header (`DataTab`, beside "Replace file").
-- **Dialog** (`ManageGroupingDialog`):
-  - **Left** — the groupable-variable pool (non-scale) from `GET /materials/{id}/variables`, with a **"show all"** toggle to reveal hidden/paradata vars (the pool ≠ the visible question rows).
-  - **Right** — group cards (multi/battery), each with members + an **Ungroup/Split** action; auto-detected groups show an "auto" tag and are editable. A **"＋ New multi group"** builds one from the checked pool variables.
-  - **Save** → `PUT /materials/{id}/grouping`, then invalidate the questions query so the list + Status column reflect the new shape.
-- **api.ts / queries.ts:** `getGrouping` / `putGrouping` + a `useGrouping` hook; invalidate `questions` (and `variables`) on save.
+- **Dialog** (`ManageGroupingDialog`) — data sources:
+  - **Right (group cards)** = the effective grouped questions from `GET /materials/{id}/questions` where `kind ∈ {multi, battery}` → each card shows the group's `text` + member variables. `GET /grouping` (the override) flags which are **manual** vs **auto** (for the "auto" tag). Each card has **Ungroup/Split**; manual/auto both editable.
+  - **Left (pool)** = ungrouped groupable variables from `GET /materials/{id}/variables` (already excludes grouped members and scales). A **"show all"** toggle re-requests with **`?include_all=1`** — a new query param on `list_variables` that keeps the grouped/scale exclusions but **skips the paradata filter**, so an otherwise-hidden tick-box var is reachable.
+  - **"＋ New multi group"** builds a `{kind:"multi", variables}` from the checked pool vars (optional label).
+  - Edits mutate a working copy of the override; **Save** → `PUT /materials/{id}/grouping`, then invalidate `questions` + `variables` queries so the list + Status column reflect the new shape.
+- **api.ts / queries.ts:** `getGrouping` / `putGrouping`, `variables(materialId, {all})`, and a `useGrouping` hook.
 
 ## 6. Testing
 
