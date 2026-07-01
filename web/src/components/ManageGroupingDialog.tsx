@@ -109,7 +109,7 @@ export default function ManageGroupingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="flex h-[85vh] w-[85vw] max-w-[85vw] flex-col">
         <DialogHeader>
           <DialogTitle>Manage grouping</DialogTitle>
           <DialogDescription>
@@ -118,8 +118,8 @@ export default function ManageGroupingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-lg border">
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
+          <div className="flex min-h-0 flex-col rounded-lg border">
             <div className="flex items-center justify-between border-b px-3 py-2">
               <span className="text-xs font-medium uppercase text-muted-foreground">Variables</span>
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -127,7 +127,7 @@ export default function ManageGroupingDialog({
                 show all
               </label>
             </div>
-            <div className="max-h-[28rem] overflow-y-auto p-1.5">
+            <div className="flex-1 overflow-y-auto p-1.5">
               {pool.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">No ungrouped variables</p>
               ) : (
@@ -153,11 +153,11 @@ export default function ManageGroupingDialog({
             </div>
           </div>
 
-          <div className="rounded-lg border">
+          <div className="flex min-h-0 flex-col rounded-lg border">
             <div className="border-b px-3 py-2">
               <span className="text-xs font-medium uppercase text-muted-foreground">Groups</span>
             </div>
-            <div className="max-h-[28rem] space-y-2 overflow-y-auto p-2">
+            <div className="flex-1 space-y-2 overflow-y-auto p-2">
               {cards.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">No groups</p>
               ) : (
