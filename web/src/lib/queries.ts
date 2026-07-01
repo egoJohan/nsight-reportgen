@@ -180,12 +180,21 @@ export function useQuestionSummary(materialId: string, qid: string | null) {
   });
 }
 
-export function useVariables(materialId: string | null) {
+export function useVariables(materialId: string | null, all = false) {
   return useQuery({
-    queryKey: qk.variables(materialId ?? ""),
-    queryFn: () => api.materials.variables(materialId!),
+    queryKey: [...qk.variables(materialId ?? ""), all ? "all" : "default"],
+    queryFn: () => api.materials.variables(materialId!, { all }),
     enabled: !!materialId,
     select: (d) => d.variables,
+  });
+}
+
+export function useGrouping(materialId: string | null) {
+  return useQuery({
+    queryKey: ["grouping", materialId ?? ""],
+    queryFn: () => api.materials.grouping(materialId!),
+    enabled: !!materialId,
+    select: (d) => d.override,
   });
 }
 

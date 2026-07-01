@@ -311,6 +311,17 @@ function serializePreview<T>(task: () => Promise<T>, key = ""): Promise<T> {
   });
 }
 
+export interface GroupSpec {
+  kind: "multi" | "battery";
+  variables: string[];
+  label?: string | null;
+}
+
+export interface GroupingOverride {
+  groups: GroupSpec[];
+  singles: string[];
+}
+
 export interface CaseMaterial {
   material_id: string;
   name: string;
@@ -373,10 +384,28 @@ export const api = {
         json<{ questions: Question[] }>(r)
       ),
 
-    variables: (materialId: string): Promise<{ variables: Variable[] }> =>
-      fetch(`${API_BASE}/materials/${materialId}/variables`).then((r) =>
-        json<{ variables: Variable[] }>(r)
+    variables: (
+      materialId: string,
+      opts?: { all?: boolean }
+    ): Promise<{ variables: Variable[] }> =>
+      fetch(
+        `${API_BASE}/materials/${materialId}/variables${opts?.all ? "?include_all=true" : ""}`
+      ).then((r) => json<{ variables: Variable[] }>(r)),
+
+    grouping: (materialId: string): Promise<{ override: GroupingOverride }> =>
+      fetch(`${API_BASE}/materials/${materialId}/grouping`).then((r) =>
+        json<{ override: GroupingOverride }>(r)
       ),
+
+    putGrouping: (
+      materialId: string,
+      override: GroupingOverride
+    ): Promise<{ questions: Question[] }> =>
+      fetch(`${API_BASE}/materials/${materialId}/grouping`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(override),
+      }).then((r) => json<{ questions: Question[] }>(r)),
 
     questionSummary: (materialId: string, qid: string): Promise<QuestionSummary> =>
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/summary`).then(
