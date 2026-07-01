@@ -5,6 +5,7 @@ import {
   SearchIcon,
   AlertCircleIcon,
   DatabaseIcon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -204,12 +205,15 @@ function QuestionTable({
                         Word cloud
                       </Badge>
                     ) : q.missing_values && q.missing_values.length > 0 ? (
-                      <Badge
-                        variant="outline"
-                        className="text-amber-600 border-amber-300 bg-amber-50 whitespace-nowrap font-normal"
+                      <span
+                        className="inline-flex"
+                        aria-label="Has 'Not answered' / missing-value codes"
+                        title={
+                          "Has \"Not answered\" / missing-value codes — open for details."
+                        }
                       >
-                        Not answered
-                      </Badge>
+                        <TriangleAlertIcon className="size-4 text-amber-500" />
+                      </span>
                     ) : (
                       <span className="text-xs text-muted-foreground/60">—</span>
                     )}

@@ -160,8 +160,17 @@ export default function QuestionDetailsDialog({
             {/* Missing values */}
             {s.missing_values.length > 0 && (
               <div>
-                <p className="mb-1.5 text-sm font-medium">
-                  "Not answered" / missing values
+                <p className="mb-1 text-sm font-medium">
+                  Non-response values{" "}
+                  <span className="font-normal text-muted-foreground">
+                    (excluded from the base by default)
+                  </span>
+                </p>
+                <p className="mb-2 text-xs leading-snug text-muted-foreground">
+                  Answer codes the data marks as a non-response — e.g. "Don't
+                  know"/EOS, skipped, or not asked. Percentages are calculated
+                  over valid answers; these can be shown as a "Not answered"
+                  category per chart.
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {s.missing_values.map((m) => (
