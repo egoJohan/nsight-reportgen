@@ -42,4 +42,5 @@ markers = [
     "judge: live Claude-as-judge test, needs ANTHROPIC_API_KEY",
     "live: live egoHive smoke test, skipped when egoHive is unreachable",
     "demo: local-filesystem demo-mode e2e (NSIGHT_DEMO=1); auto-skips otherwise",
+    "export: needs LibreOffice (soffice) and/or poppler; skips when absent",
 ]
