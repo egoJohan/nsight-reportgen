@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+import json
+
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
@@ -647,6 +649,41 @@ def regroup(
     }
     model = apply_grouping_override(base, override)
     return {"questions": _questions_payload(model, material_id, client)}
+
+
+class QuestionLabelBody(BaseModel):
+    label: str = ""
+
+
+@questions_router.patch("/materials/{material_id}/questions/{qid}/label")
+def set_question_label(
+    material_id: str,
+    qid: str,
+    body: QuestionLabelBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Rename a question for THIS material (case-page edit). Persisted in the
+    material config as {question_labels: {qid: text}}; a blank label reverts to the
+    original SAV label. The rename flows through the model seam to the questions
+    list, reports, previews, and the rendered deck."""
+    raw = client.load_material_config(material_id)
+    try:
+        cfg = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    labels = cfg.get("question_labels")
+    if not isinstance(labels, dict):
+        labels = {}
+    text = (body.label or "").strip()
+    if text:
+        labels[qid] = text
+    else:
+        labels.pop(qid, None)
+    cfg["question_labels"] = labels
+    client.save_material_config(material_id, json.dumps(cfg))
+    return {"qid": qid, "label": text or None}
 
 
 # ---------------------------------------------------------------------------
