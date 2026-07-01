@@ -6,6 +6,7 @@ POST /materials/{material_id}/preview-chart (single-chart PNG thumbnail).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -22,7 +23,13 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.multi_group import apply_groups, enrich_model
+from reportbuilder.ingest.multi_group import apply_groups
+from reportbuilder.ingest.grouping_override import apply_grouping_override
+from reportbuilder.api.model_loader import (
+    model_for_material,
+    df_model_for_material,
+    load_override,
+)
 from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.model.report import (
@@ -338,24 +345,14 @@ def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
 
 
 def load_model_for_material(material_id: str, client: DataHiveClient) -> QuestionModel:
-    """Fetch the material's stored .sav bytes from the store and build the QuestionModel with
-    auto-detected multi groups applied (render-resolvable qids). Manual-grouping persistence is
-    deferred to Phase 4. (REQ-C-05)"""
-    model = _load_singles(material_id, client)
-    return enrich_model(model)
+    """Build the material's QuestionModel with auto-detection AND any manual
+    grouping override applied (the single seam — see api.model_loader). (REQ-C-05)"""
+    return model_for_material(material_id, client)
 
 
 def _load_df_model(material_id: str, client: DataHiveClient):
     """Like load_model_for_material but also returns the DataFrame (for stats)."""
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        df, model = read_sav(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-    return df, enrich_model(model)
+    return df_model_for_material(material_id, client)
 
 
 def _question_measurement(model: QuestionModel, q) -> str:
@@ -536,6 +533,7 @@ def question_summary(
 @questions_router.get("/materials/{material_id}/variables")
 def list_variables(
     material_id: str,
+    include_all: bool = False,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """List all variables for a material with display labels and measurement.
@@ -572,6 +570,10 @@ def list_variables(
     def _keep(v) -> bool:
         if v.name in grouped:
             return False
+        if include_all:
+            # Grouping's "show all": reveal otherwise-hidden paradata/helper vars
+            # (still excluding current group members).
+            return True
         if not _is_metadata(v.name, v.label or v.name):
             return True
         return _segmentable(v) and _has_real_category_labels(v)
@@ -605,74 +607,84 @@ def list_variables(
     }
 
 
-class GroupingRequest(BaseModel):
-    """Request body for PUT /materials/{material_id}/grouping."""
+class GroupSpec(BaseModel):
+    """One manual group in the override. `battery` is reserved for Phase 2."""
+    kind: Literal["multi", "battery"] = "multi"
     variables: list[str]
-    kind: Literal["single", "multi"]
+    label: str | None = None
+
+
+class GroupingOverride(BaseModel):
+    """PUT /materials/{material_id}/grouping body — the persisted grouping override."""
+    groups: list[GroupSpec] = []
+    singles: list[str] = []
+
+
+def _validate_override(base: QuestionModel, body: GroupingOverride) -> dict:
+    """Validate + normalise a grouping override → a plain dict for persistence.
+
+    Each `multi` group needs ≥2 known, non-scale variables; a variable may belong
+    to at most one group; a group member is dropped from `singles` (a group wins
+    over a forced-single). `battery` groups are accepted but not validated here
+    (Phase 2). Raises HTTP 422 on violations. (REQ-C-06, M-02)
+    """
+    seen: set[str] = set()
+    for g in body.groups:
+        if g.kind != "multi":
+            continue
+        vs = g.variables
+        if len(vs) < 2:
+            raise HTTPException(422, f"A multi group needs at least 2 variables; got {vs}.")
+        unknown = [v for v in vs if v not in base.variables]
+        if unknown:
+            raise HTTPException(422, f"Unknown variable(s) {unknown} — not in the material.")
+        scale = [v for v in vs if base.variables[v].measurement == "scale"]
+        if scale:
+            raise HTTPException(
+                422,
+                f"Scale variable(s) {scale} cannot be in a multi group — members must "
+                "be binary/categorical tick-box variables.",
+            )
+        dup = [v for v in vs if v in seen]
+        if dup:
+            raise HTTPException(422, f"Variable(s) {dup} assigned to more than one group.")
+        seen.update(vs)
+    groups = [
+        {"kind": g.kind, "variables": list(g.variables), **({"label": g.label} if g.label else {})}
+        for g in body.groups
+    ]
+    singles = [v for v in body.singles if v not in seen]
+    return {"groups": groups, "singles": singles}
+
+
+@questions_router.get("/materials/{material_id}/grouping")
+def get_grouping(
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Return the material's stored grouping override (empty when none). (REQ-C-06)"""
+    ov = load_override(material_id, client)
+    return {"override": {"groups": ov.get("groups", []), "singles": ov.get("singles", [])}}
 
 
 @questions_router.put("/materials/{material_id}/grouping")
 def set_grouping(
     material_id: str,
-    body: GroupingRequest,
+    body: GroupingOverride,
     client: DataHiveClient = Depends(get_client),
-) -> object:
-    """Stateless preview of a grouping override — applies the requested single/multi grouping to a
-    freshly-loaded model and returns the resulting question(s). Does NOT persist. Persistence of
-    manual single/multi overrides is DEFERRED to Phase 4 (datahive material metadata).
-    (REQ-C-06, M-02)"""
+) -> dict:
+    """Validate + PERSIST a manual grouping override, then return the reshaped
+    question list so the UI can refresh. (REQ-C-06, M-02)"""
     base = _load_singles(material_id, client)
-
-    if body.kind == "multi":
-        var_set = tuple(body.variables)
-        # Order-independent binary-eligibility validation (REQ-C-06, M-02):
-        # A valid multi group requires >=2 variables, all known, none of them a scale.
-        if len(var_set) < 2:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"A multi group requires at least 2 variables; got {list(body.variables)}."
-                ),
-            )
-        unknown = [v for v in var_set if v not in base.variables]
-        if unknown:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Unknown variable(s) {unknown} — not present in the material."
-                ),
-            )
-        scale_vars = [v for v in var_set if base.variables[v].measurement == "scale"]
-        if scale_vars:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Scale variable(s) {scale_vars} cannot be members of a multi group. "
-                    "Multi-response groups must be binary/categorical tick-box variables."
-                ),
-            )
-        grouped_model = apply_groups(base, [var_set])
-        var_set_sorted = tuple(sorted(var_set))
-        for q in grouped_model.questions:
-            if q.kind == "multi" and tuple(sorted(q.variables)) == var_set_sorted:
-                return {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
-        # Defensive: apply_groups always produces exactly the requested group; this is an internal error.
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"The variables {list(body.variables)} could not be resolved to a multi group "
-                "after grouping. This is an internal error."
-            ),
-        )
-
-    # kind == "single": return individual single question(s) for each requested variable
-    result = []
-    for var_name in body.variables:
-        for q in base.questions:
-            if q.kind == "single" and q.variables == (var_name,):
-                result.append({"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text})
-                break
-    return result
+    normalised = _validate_override(base, body)
+    client.save_material_config(material_id, json.dumps(normalised))
+    model = load_model_for_material(material_id, client)
+    return {
+        "questions": [
+            {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
+            for q in model.questions
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -849,7 +861,7 @@ def preview_chart(
     finally:
         os.unlink(tmp_path)
 
-    model = enrich_model(model)
+    model = apply_grouping_override(model, load_override(material_id, client))
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories

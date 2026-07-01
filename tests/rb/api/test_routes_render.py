@@ -160,12 +160,12 @@ def test_orchestrate_render_wiring() -> None:
         return pdf
 
     with (
-        patch("reportbuilder.api.routes_render.read_sav") as mock_read_sav,
+        patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
         patch("reportbuilder.api.routes_render.pptx_to_pdf") as mock_pptx_to_pdf,
         patch("reportbuilder.api.routes_render.slide_view") as mock_slide_view,
     ):
-        mock_read_sav.return_value = (fake_df, small_model)
+        mock_load.return_value = (fake_df, small_model)
         mock_build_pptx.side_effect = _fake_build
         mock_pptx_to_pdf.side_effect = _fake_pdf
         mock_slide_view.return_value = ["/t/p1.png"]
@@ -181,8 +181,7 @@ def test_orchestrate_render_wiring() -> None:
     assert result["preview"] == ["/t/p1.png"]
 
     mock_client.load_report.assert_called_once_with("case-3", "rep-3")
-    mock_client.get_material.assert_called_once_with("mat-3")
-    mock_read_sav.assert_called_once()
+    mock_load.assert_called_once()
     mock_build_pptx.assert_called_once()
     mock_pptx_to_pdf.assert_called_once()
     mock_slide_view.assert_called_once()
@@ -210,10 +209,10 @@ def test_orchestrate_render_value_error_becomes_422() -> None:
     mock_client.get_material.return_value = b"x"
 
     with (
-        patch("reportbuilder.api.routes_render.read_sav") as mock_read_sav,
+        patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
     ):
-        mock_read_sav.return_value = (fake_df, small_model)
+        mock_load.return_value = (fake_df, small_model)
         # Simulate scatter chart with null scatter_xy raising ValueError.
         mock_build_pptx.side_effect = ValueError("scatter chart requires scatter_xy")
 

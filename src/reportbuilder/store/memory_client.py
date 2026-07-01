@@ -42,6 +42,8 @@ class InMemoryDataHiveClient:
         # (the verbatim JSON stays in _reports). Legacy reports without an entry
         # here remain loadable by id but aren't listed per case.
         self._report_meta: dict[str, dict] = {}
+        # material_id -> config JSON string (the grouping override lives here).
+        self._material_config: dict[str, str] = {}
         self._n = 0
         # FastAPI runs sync routes on a threadpool → these methods are called from
         # multiple threads in parallel. A single re-entrant lock makes every
@@ -91,11 +93,13 @@ class InMemoryDataHiveClient:
         meta = self._read_json(os.path.join(d, "material_meta.json"), {})
         reports = self._read_json(os.path.join(d, "reports.json"), {})
         report_meta = self._read_json(os.path.join(d, "report_meta.json"), {})
+        material_config = self._read_json(os.path.join(d, "material_config.json"), {})
         state = self._read_json(os.path.join(d, "state.json"), {})
         self._cases = cases if isinstance(cases, dict) else {}
         self._material_meta = meta if isinstance(meta, dict) else {}
         self._reports = reports if isinstance(reports, dict) else {}
         self._report_meta = report_meta if isinstance(report_meta, dict) else {}
+        self._material_config = material_config if isinstance(material_config, dict) else {}
         n = state.get("_n", 0) if isinstance(state, dict) else 0
         self._n = n if isinstance(n, int) and n >= 0 else 0
         # Material bytes are loaded lazily from disk in get_material; nothing to do here.
@@ -109,6 +113,7 @@ class InMemoryDataHiveClient:
         self._atomic_write_json(os.path.join(d, "material_meta.json"), self._material_meta)
         self._atomic_write_json(os.path.join(d, "reports.json"), self._reports)
         self._atomic_write_json(os.path.join(d, "report_meta.json"), self._report_meta)
+        self._atomic_write_json(os.path.join(d, "material_config.json"), self._material_config)
         self._atomic_write_json(os.path.join(d, "state.json"), {"_n": self._n})
 
     def _id(self, prefix: str) -> str:
@@ -146,6 +151,7 @@ class InMemoryDataHiveClient:
             for mid in mids:
                 self._materials.pop(mid, None)
                 self._material_meta.pop(mid, None)
+                self._material_config.pop(mid, None)
                 if self.storage_dir is not None:
                     try:
                         os.remove(os.path.join(self._materials_dir(), f"{mid}.sav"))
@@ -225,6 +231,16 @@ class InMemoryDataHiveClient:
             self._reports.pop(report_doc_id, None)
             self._report_meta.pop(report_doc_id, None)
             self._save()
+
+    # --- per-material config (grouping override) ---
+    def save_material_config(self, material_id: str, config_json: str) -> None:
+        with self._lock:
+            self._material_config[material_id] = config_json
+            self._save()
+
+    def load_material_config(self, material_id: str) -> str | None:
+        with self._lock:
+            return self._material_config.get(material_id)
 
     # --- aggregation (demo stub) ---
     def aggregate(self, material_id: str, group_by: list[str], filters: dict,

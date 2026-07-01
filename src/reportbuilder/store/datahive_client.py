@@ -135,6 +135,28 @@ class DataHiveClient:
         self._raise_for_status(resp)
         return resp.json()["text"]
 
+    def load_material_config(self, material_id: str) -> str | None:
+        """Return a material's stored config JSON (the grouping override), or None.
+
+        Assumed datahive contract: GET /api/v1/projects/blobs/{id}/config →
+        {"config": <json>}; 404 → None. NOTE: verify against the live datahive —
+        staging runs the in-memory client (this is the assumed shape).
+        """
+        resp = self._client.get(f"/api/v1/projects/blobs/{material_id}/config")
+        if resp.status_code == 404:
+            return None
+        self._raise_for_status(resp)
+        return resp.json().get("config")
+
+    def save_material_config(self, material_id: str, config_json: str) -> None:
+        """Persist a material's config JSON. Assumed contract:
+        PUT /api/v1/projects/blobs/{id}/config body {"config": <json>}. VERIFY."""
+        resp = self._client.put(
+            f"/api/v1/projects/blobs/{material_id}/config",
+            json={"config": config_json},
+        )
+        self._raise_for_status(resp)
+
     def list_reports(self, case_id: str) -> list[dict]:
         """List a case's report docs — [{report_id, name}, …].
 

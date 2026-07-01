@@ -22,8 +22,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.multi_group import enrich_model
-from reportbuilder.ingest.sav_reader import read_sav
+from reportbuilder.api.model_loader import df_model_for_material
 from reportbuilder.model.report import report_from_json
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -65,18 +64,9 @@ def orchestrate_render(
     # 1. Load and parse the report definition
     report = report_from_json(client.load_report(case_id, report_id))
 
-    # 2. Fetch material bytes, write to temp .sav, ingest
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        df, model = read_sav(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-
-    # Enrich model with multi-response + battery grouping
-    model = enrich_model(model)
+    # 2. Fetch material data + build the model (auto-detection + any manual
+    #    grouping override), via the single centralized loader.
+    df, model = df_model_for_material(material_id, client)
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories

@@ -32,8 +32,10 @@ from reportbuilder.ai.text import (
 )
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_questions import _category_labels
-from reportbuilder.ingest.multi_group import enrich_model
-from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
+from reportbuilder.api.model_loader import (
+    df_model_for_material,
+    df_model_label_for_material,
+)
 from reportbuilder.model.report import (
     ChartSpec,
     ElementToggles,
@@ -66,35 +68,13 @@ def _reference_labels() -> ReferenceLabels:
 
 
 def _load_df_model(material_id: str, client: DataHiveClient):
-    """Fetch the material's .sav bytes and return (df, model) with multi-groups applied."""
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        df, model = read_sav(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-    return df, enrich_model(model)
+    """Fetch (df, model) with auto-detection AND any manual grouping override applied."""
+    return df_model_for_material(material_id, client)
 
 
 def _load_df_model_labeled(material_id: str, client: DataHiveClient):
-    """Like _load_df_model but also return the SAV's study label (file label).
-
-    Falls back to the material id when the .sav carries no embedded label.
-    """
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        df, model = read_sav(tmp_path)
-        # Empty when the .sav carries no embedded study label — the prompts then
-        # omit the name line rather than printing an internal material id.
-        label = sav_file_label(tmp_path) or ""
-    finally:
-        os.unlink(tmp_path)
-    return df, enrich_model(model), label
+    """Like _load_df_model but also return the SAV's study label (or "" when absent)."""
+    return df_model_label_for_material(material_id, client)
 
 
 def _kind_spec(question, model) -> ChartSpec:

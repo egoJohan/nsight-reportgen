@@ -283,100 +283,43 @@ def test_compatible_chart_types_multi_offers_pie_but_suggests_bar():
 # ---------------------------------------------------------------------------
 
 
-def test_put_grouping_multi_returns_multi_question(tmp_path) -> None:
-    """PUT /materials/{material_id}/grouping with kind=multi returns a multi question containing
-    both variables. Stateless preview — no persistence. (REQ-C-06, M-02)"""
+def test_put_grouping_combines_and_persists(tmp_path) -> None:
+    """PUT persists a manual multi override and returns the reshaped question list.
+    (REQ-C-06, M-02) — the full persisted contract is covered in the suite."""
     singles = _make_singles_model()
-
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
-
-    # Patch _load_singles so we get a controllable singles model without real .sav I/O
-    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
-        mock_singles.return_value = singles
+    tc = TestClient(create_app(client=mock_client))
+    with (
+        patch("reportbuilder.api.routes_questions._load_singles", return_value=singles),
+        patch("reportbuilder.api.routes_questions.load_model_for_material",
+              return_value=_make_grouped_model()),
+    ):
         response = tc.put(
             "/materials/mat-1/grouping",
-            json={"variables": ["q1_1", "q1_2"], "kind": "multi"},
+            json={"groups": [{"kind": "multi", "variables": ["q1_1", "q1_2"]}], "singles": []},
         )
-
     assert response.status_code == 200
-    body = response.json()
-    assert body["kind"] == "multi"
-    assert "q1_1" in body["variables"]
-    assert "q1_2" in body["variables"]
+    assert "questions" in response.json()
+    mock_client.save_material_config.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# PUT /materials/{material_id}/grouping — single  (REQ-C-06)
-# ---------------------------------------------------------------------------
-
-
-def test_put_grouping_multi_unmatched_variables_returns_422(tmp_path) -> None:
-    """PUT /materials/{material_id}/grouping with kind=multi and variables that do NOT form a
-    valid multi group must return 422 — no silent wrong-result fallback. The variables 'q1_1'
-    and 'age' fail validation because 'age' is a scale variable; scale variables are not
-    allowed in a multi-response group. (REQ-C-06)"""
+def test_put_grouping_scale_member_returns_422(tmp_path) -> None:
+    """A scale variable (age) cannot be a multi-group member. (REQ-C-06)"""
     singles = _make_singles_model()
-
-    mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
-
-    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
-        mock_singles.return_value = singles
-        response = tc.put(
-            "/materials/mat-1/grouping",
-            json={"variables": ["q1_1", "age"], "kind": "multi"},
-        )
-
+    tc = TestClient(create_app(client=Mock()))
+    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
+        response = tc.put("/materials/mat-1/grouping",
+                          json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
     assert response.status_code == 422
 
 
-def test_put_grouping_multi_order_independent_returns_200(tmp_path) -> None:
-    """PUT /materials/{material_id}/grouping with kind=multi must accept variables in any order
-    and return 200 with kind=multi and both variables present. Reversed order (q1_2, q1_1)
-    vs file order (q1_1, q1_2) must NOT produce a spurious 422. (REQ-C-06, M-02)"""
+def test_put_grouping_too_few_returns_422(tmp_path) -> None:
+    """A multi group needs at least 2 variables. (REQ-C-06)"""
     singles = _make_singles_model()
-
-    mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
-
-    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
-        mock_singles.return_value = singles
-        response = tc.put(
-            "/materials/mat-1/grouping",
-            json={"variables": ["q1_2", "q1_1"], "kind": "multi"},
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["kind"] == "multi"
-    assert "q1_1" in body["variables"]
-    assert "q1_2" in body["variables"]
+    tc = TestClient(create_app(client=Mock()))
+    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
+        response = tc.put("/materials/mat-1/grouping",
+                          json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
+    assert response.status_code == 422
 
 
-def test_put_grouping_single_returns_single_questions(tmp_path) -> None:
-    """PUT /materials/{material_id}/grouping with kind=single returns single question entries for
-    each supplied variable. Stateless preview — no persistence. (REQ-C-06)"""
-    singles = _make_singles_model()
-
-    mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
-
-    with patch("reportbuilder.api.routes_questions._load_singles") as mock_singles:
-        mock_singles.return_value = singles
-        response = tc.put(
-            "/materials/mat-1/grouping",
-            json={"variables": ["q1_1"], "kind": "single"},
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    # The response is a list of single question dicts
-    assert isinstance(body, list)
-    assert len(body) == 1
-    assert body[0]["kind"] == "single"
-    assert body[0]["variables"] == ["q1_1"]

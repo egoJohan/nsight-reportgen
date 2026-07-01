@@ -134,44 +134,34 @@ def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
 # ---------------------------------------------------------------------------
 
 
-def test_grouping_multi_with_single_var_is_422(client_mock):
+def test_grouping_too_few_is_422(client_mock):
     r = client_mock.put("/materials/mat-x/grouping",
-                        json={"variables": ["q1"], "kind": "multi"})
+                        json={"groups": [{"kind": "multi", "variables": ["q1"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_multi_unknown_var_is_422(client_mock):
+def test_grouping_unknown_var_is_422(client_mock):
     r = client_mock.put("/materials/mat-x/grouping",
-                        json={"variables": ["q1", "no-such-var"], "kind": "multi"})
+                        json={"groups": [{"kind": "multi", "variables": ["q1", "no-such-var"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_multi_scale_member_is_422(client_mock):
+def test_grouping_scale_member_is_422(client_mock):
     """A scale variable cannot be a member of a multi (tick-box) group."""
     r = client_mock.put("/materials/mat-x/grouping",
-                        json={"variables": ["q1", "age"], "kind": "multi"})
+                        json={"groups": [{"kind": "multi", "variables": ["q1", "age"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_valid_multi_returns_single_dict(client_mock):
-    """m1/m2 are two binary categoricals → a valid multi group; the endpoint
-    returns ONE grouped-question dict (not a list)."""
+def test_grouping_valid_multi_returns_questions(client_mock):
+    """m1/m2 form a valid multi group; the PUT returns the reshaped question list."""
     r = client_mock.put("/materials/mat-x/grouping",
-                        json={"variables": ["m1", "m2"], "kind": "multi"})
+                        json={"groups": [{"kind": "multi", "variables": ["m1", "m2"]}], "singles": []})
     assert r.status_code == 200
-    body = r.json()
-    assert isinstance(body, dict)
-    assert body["kind"] == "multi"
-    assert sorted(body["variables"]) == ["m1", "m2"]
+    assert "questions" in r.json()
 
 
-def test_grouping_single_kind_returns_list(client_mock):
-    """kind='single' returns a LIST of individual single questions."""
-    r = client_mock.put("/materials/mat-x/grouping",
-                        json={"variables": ["q1"], "kind": "single"})
+def test_grouping_get_returns_override_shape(client_mock):
+    r = client_mock.get("/materials/mat-x/grouping")
     assert r.status_code == 200
-    body = r.json()
-    assert isinstance(body, list)
-    assert len(body) == 1
-    assert body[0]["qid"] == "q1"
-    assert body[0]["kind"] == "single"
+    assert set(r.json()["override"]) == {"groups", "singles"}
