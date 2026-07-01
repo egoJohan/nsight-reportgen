@@ -16,22 +16,6 @@ from reportbuilder.ingest.grouping_override import apply_grouping_override
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 
 
-def load_override(material_id: str, client) -> dict:
-    """Return the material's stored grouping override, or {} — defensively.
-
-    Tolerates a client without the method, a non-string return (e.g. a test Mock),
-    or unparseable JSON, all of which mean "no override" (pure auto-detection).
-    """
-    getter = getattr(client, "load_material_config", None)
-    if not callable(getter):
-        return {}
-    try:
-        raw = getter(material_id)
-        return json.loads(raw) if isinstance(raw, str) and raw else {}
-    except Exception:
-        return {}
-
-
 def _read(material_id: str, client):
     raw = client.get_material(material_id)
     with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
@@ -45,16 +29,16 @@ def _read(material_id: str, client):
     return df, model, label
 
 
-def model_for_material(material_id: str, client):
+def model_for_material(material_id: str, client, override: dict | None = None):
     _df, model, _label = _read(material_id, client)
-    return apply_grouping_override(model, load_override(material_id, client))
+    return apply_grouping_override(model, override or {})
 
 
-def df_model_for_material(material_id: str, client):
+def df_model_for_material(material_id: str, client, override: dict | None = None):
     df, model, _label = _read(material_id, client)
-    return df, apply_grouping_override(model, load_override(material_id, client))
+    return df, apply_grouping_override(model, override or {})
 
 
-def df_model_label_for_material(material_id: str, client):
+def df_model_label_for_material(material_id: str, client, override: dict | None = None):
     df, model, label = _read(material_id, client)
-    return df, apply_grouping_override(model, load_override(material_id, client)), label
+    return df, apply_grouping_override(model, override or {}), label

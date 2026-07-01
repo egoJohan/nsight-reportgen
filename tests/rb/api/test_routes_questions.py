@@ -283,43 +283,38 @@ def test_compatible_chart_types_multi_offers_pie_but_suggests_bar():
 # ---------------------------------------------------------------------------
 
 
-def test_put_grouping_combines_and_persists(tmp_path) -> None:
-    """PUT persists a manual multi override and returns the reshaped question list.
-    (REQ-C-06, M-02) — the full persisted contract is covered in the suite."""
+def test_regroup_combines_returns_reshaped_questions(tmp_path) -> None:
+    """POST /regroup returns the reshaped (stateless) question list with the group.
+    (REQ-C-06, M-02) — the full contract is covered in the suite."""
     singles = _make_singles_model()
-    mock_client = Mock()
-    tc = TestClient(create_app(client=mock_client))
-    with (
-        patch("reportbuilder.api.routes_questions._load_singles", return_value=singles),
-        patch("reportbuilder.api.routes_questions.load_model_for_material",
-              return_value=_make_grouped_model()),
-    ):
-        response = tc.put(
-            "/materials/mat-1/grouping",
+    tc = TestClient(create_app(client=Mock()))
+    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
+        response = tc.post(
+            "/materials/mat-1/regroup",
             json={"groups": [{"kind": "multi", "variables": ["q1_1", "q1_2"]}], "singles": []},
         )
     assert response.status_code == 200
-    assert "questions" in response.json()
-    mock_client.save_material_config.assert_called_once()
+    qs = response.json()["questions"]
+    assert any(q["kind"] == "multi" and set(q["variables"]) == {"q1_1", "q1_2"} for q in qs)
 
 
-def test_put_grouping_scale_member_returns_422(tmp_path) -> None:
+def test_regroup_scale_member_returns_422(tmp_path) -> None:
     """A scale variable (age) cannot be a multi-group member. (REQ-C-06)"""
     singles = _make_singles_model()
     tc = TestClient(create_app(client=Mock()))
     with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
-        response = tc.put("/materials/mat-1/grouping",
-                          json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
+        response = tc.post("/materials/mat-1/regroup",
+                           json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
     assert response.status_code == 422
 
 
-def test_put_grouping_too_few_returns_422(tmp_path) -> None:
+def test_regroup_too_few_returns_422(tmp_path) -> None:
     """A multi group needs at least 2 variables. (REQ-C-06)"""
     singles = _make_singles_model()
     tc = TestClient(create_app(client=Mock()))
     with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
-        response = tc.put("/materials/mat-1/grouping",
-                          json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
+        response = tc.post("/materials/mat-1/regroup",
+                           json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
     assert response.status_code == 422
 
 

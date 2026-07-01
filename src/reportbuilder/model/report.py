@@ -94,6 +94,12 @@ class Report:
     render_mode: str                            # "native" | "image" (per report)
     template_ref: str
     charts: tuple[ChartSpec, ...]
+    # Report-specific manual grouping override {"groups": [...], "singles": [...]}
+    # applied to this report's question model (auto-detection fills the gaps).
+    # Default normalised so report_from_json(report_to_json(r)) == r.
+    grouping: dict[str, Any] = field(
+        default_factory=lambda: {"groups": [], "singles": []}
+    )
 
 
 def report_to_json(report: Report) -> str:
@@ -153,9 +159,17 @@ def report_from_json(data: dict | str) -> Report:
             options=dict(c.get("options") or {}),
         )
 
+    def _grouping(c: dict) -> dict:
+        g = c.get("grouping") or {}
+        return {
+            "groups": [dict(x) for x in g.get("groups", [])],
+            "singles": list(g.get("singles", [])),
+        }
+
     return Report(
         name=d["name"],
         render_mode=d["render_mode"],
         template_ref=d["template_ref"],
         charts=tuple(_chart(c) for c in d["charts"]),
+        grouping=_grouping(d),
     )

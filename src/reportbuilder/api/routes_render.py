@@ -64,9 +64,9 @@ def orchestrate_render(
     # 1. Load and parse the report definition
     report = report_from_json(client.load_report(case_id, report_id))
 
-    # 2. Fetch material data + build the model (auto-detection + any manual
-    #    grouping override), via the single centralized loader.
-    df, model = df_model_for_material(material_id, client)
+    # 2. Fetch material data + build the model with THIS report's grouping applied
+    #    (auto-detection fills the gaps).
+    df, model = df_model_for_material(material_id, client, report.grouping)
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories

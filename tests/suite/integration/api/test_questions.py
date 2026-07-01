@@ -134,34 +134,28 @@ def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
 # ---------------------------------------------------------------------------
 
 
-def test_grouping_too_few_is_422(client_mock):
-    r = client_mock.put("/materials/mat-x/grouping",
-                        json={"groups": [{"kind": "multi", "variables": ["q1"]}]})
+def test_regroup_too_few_is_422(client_mock):
+    r = client_mock.post("/materials/mat-x/regroup",
+                         json={"groups": [{"kind": "multi", "variables": ["q1"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_unknown_var_is_422(client_mock):
-    r = client_mock.put("/materials/mat-x/grouping",
-                        json={"groups": [{"kind": "multi", "variables": ["q1", "no-such-var"]}]})
+def test_regroup_unknown_var_is_422(client_mock):
+    r = client_mock.post("/materials/mat-x/regroup",
+                         json={"groups": [{"kind": "multi", "variables": ["q1", "no-such-var"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_scale_member_is_422(client_mock):
+def test_regroup_scale_member_is_422(client_mock):
     """A scale variable cannot be a member of a multi (tick-box) group."""
-    r = client_mock.put("/materials/mat-x/grouping",
-                        json={"groups": [{"kind": "multi", "variables": ["q1", "age"]}]})
+    r = client_mock.post("/materials/mat-x/regroup",
+                         json={"groups": [{"kind": "multi", "variables": ["q1", "age"]}]})
     assert r.status_code == 422
 
 
-def test_grouping_valid_multi_returns_questions(client_mock):
-    """m1/m2 form a valid multi group; the PUT returns the reshaped question list."""
-    r = client_mock.put("/materials/mat-x/grouping",
-                        json={"groups": [{"kind": "multi", "variables": ["m1", "m2"]}], "singles": []})
+def test_regroup_valid_multi_returns_questions(client_mock):
+    """m1/m2 form a valid multi group; regroup returns the reshaped question list."""
+    r = client_mock.post("/materials/mat-x/regroup",
+                         json={"groups": [{"kind": "multi", "variables": ["m1", "m2"]}], "singles": []})
     assert r.status_code == 200
     assert "questions" in r.json()
-
-
-def test_grouping_get_returns_override_shape(client_mock):
-    r = client_mock.get("/materials/mat-x/grouping")
-    assert r.status_code == 200
-    assert set(r.json()["override"]) == {"groups", "singles"}

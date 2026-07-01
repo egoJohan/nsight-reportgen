@@ -6,7 +6,6 @@ POST /materials/{material_id}/preview-chart (single-chart PNG thumbnail).
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pathlib
 import re
@@ -23,12 +22,10 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.multi_group import apply_groups
 from reportbuilder.ingest.grouping_override import apply_grouping_override
 from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
-    load_override,
 )
 from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
 from reportbuilder.model.question import QuestionModel
@@ -391,9 +388,14 @@ def list_questions(
     render-resolvable. Each question includes a suggested chart type (REQ-C-13) and the
     missing-value mapping (REQ-D-06). (REQ-C-05)"""
     model = load_model_for_material(material_id, client)
+    return {"questions": _questions_payload(model, material_id, client)}
+
+
+def _questions_payload(model: QuestionModel, material_id: str, client) -> list[dict]:
+    """Build the browse-questions payload for a (possibly regrouped) model."""
     # The short-answer word-cloud heuristic needs the data; load it lazily and
     # only once, and tolerate failure (e.g. a model-only mock in tests) by
-    # degrading to themes.
+    # degrading to themes. (Grouping doesn't change the raw DataFrame columns.)
     _df_box: dict = {}
 
     def _df_or_none():
@@ -443,7 +445,7 @@ def list_questions(
             # the front of a new report (demographics-first convention).
             "is_demographic": _is_demographic(model, q),
         })
-    return {"questions": questions}
+    return questions
 
 
 @questions_router.get("/materials/{material_id}/questions/{qid}/summary")
@@ -657,34 +659,20 @@ def _validate_override(base: QuestionModel, body: GroupingOverride) -> dict:
     return {"groups": groups, "singles": singles}
 
 
-@questions_router.get("/materials/{material_id}/grouping")
-def get_grouping(
-    material_id: str,
-    client: DataHiveClient = Depends(get_client),
-) -> dict:
-    """Return the material's stored grouping override (empty when none). (REQ-C-06)"""
-    ov = load_override(material_id, client)
-    return {"override": {"groups": ov.get("groups", []), "singles": ov.get("singles", [])}}
-
-
-@questions_router.put("/materials/{material_id}/grouping")
-def set_grouping(
+@questions_router.post("/materials/{material_id}/regroup")
+def regroup(
     material_id: str,
     body: GroupingOverride,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
-    """Validate + PERSIST a manual grouping override, then return the reshaped
-    question list so the UI can refresh. (REQ-C-06, M-02)"""
+    """Stateless PREVIEW: validate a grouping override and return the reshaped
+    question list (full browse payload) without persisting. The report wizard
+    calls this live as the user edits a report's grouping; the override itself is
+    saved WITH the report. (REQ-C-06, M-02)"""
     base = _load_singles(material_id, client)
     normalised = _validate_override(base, body)
-    client.save_material_config(material_id, json.dumps(normalised))
-    model = load_model_for_material(material_id, client)
-    return {
-        "questions": [
-            {"qid": q.qid, "kind": q.kind, "variables": list(q.variables), "text": q.text}
-            for q in model.questions
-        ]
-    }
+    model = apply_grouping_override(base, normalised)
+    return {"questions": _questions_payload(model, material_id, client)}
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +735,9 @@ class ChartSpecBody(BaseModel):
     # special-slide bullet content (options["bullets"]); part of the cache key via
     # model_dump_json so editing bullets re-renders.
     options: dict[str, Any] = {}
+    # The report's grouping override, so a preview of a chart on a manually-grouped
+    # question resolves the same way the rendered deck will. Absent = auto-detect.
+    grouping: dict[str, Any] | None = None
 
 
 def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
@@ -861,7 +852,7 @@ def preview_chart(
     finally:
         os.unlink(tmp_path)
 
-    model = apply_grouping_override(model, load_override(material_id, client))
+    model = apply_grouping_override(model, body.grouping or {})
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories
