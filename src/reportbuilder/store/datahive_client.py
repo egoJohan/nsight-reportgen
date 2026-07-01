@@ -135,6 +135,28 @@ class DataHiveClient:
         self._raise_for_status(resp)
         return resp.json()["text"]
 
+    def list_reports(self, case_id: str) -> list[dict]:
+        """List a case's report docs — [{report_id, name}, …].
+
+        Expected datahive contract: GET /api/v1/projects/{case_id}/docs →
+        {"docs": [{"reference_id", "name", "label"}, …]}, filtered to
+        label == "report" (docs with no label are kept). NOTE: verify against
+        the live datahive — staging runs the in-memory client.
+        """
+        resp = self._client.get(f"/api/v1/projects/{case_id}/docs")
+        self._raise_for_status(resp)
+        data = resp.json()
+        docs = data.get("docs", []) if isinstance(data, dict) else (data or [])
+        out = []
+        for d in docs:
+            label = d.get("label")
+            if label and label != "report":
+                continue
+            rid = d.get("reference_id") or d.get("id")
+            if rid:
+                out.append({"report_id": rid, "name": d.get("name", rid)})
+        return out
+
     def delete_report(self, case_id: str, report_doc_id: str) -> None:
         """Delete a report doc. (REQ-C-12)
 
@@ -213,3 +235,22 @@ class DataHiveClient:
         resp = self._client.get(f"/api/v1/projects/blobs/{material_id}")
         self._raise_for_status(resp)
         return resp.content
+
+    def list_materials(self, case_id: str) -> list[dict]:
+        """List a case's materials — [{material_id, name}, …].
+
+        Expected datahive contract: GET /api/v1/projects/{case_id}/blobs →
+        {"blobs": [{"reference_id"/"id", "name"}, …]} (a bare list is also
+        tolerated). NOTE: verify against the live datahive — staging runs the
+        in-memory client, so this is the assumed shape.
+        """
+        resp = self._client.get(f"/api/v1/projects/{case_id}/blobs")
+        self._raise_for_status(resp)
+        data = resp.json()
+        blobs = data.get("blobs", []) if isinstance(data, dict) else (data or [])
+        out = []
+        for b in blobs:
+            mid = b.get("reference_id") or b.get("id") or b.get("material_id")
+            if mid:
+                out.append({"material_id": mid, "name": b.get("name", mid)})
+        return out

@@ -57,6 +57,19 @@ def create_report(
     return {"report_id": rid}
 
 
+@reports_router.get("/cases/{case_id}/reports")
+def list_case_reports(
+    case_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """List a case's reports — {"reports": [{report_id, name}]}.
+
+    Server-side so reports are visible to any user/device, not just the creator's
+    browser. (REQ-C-08)
+    """
+    return {"reports": client.list_reports(case_id)}
+
+
 @reports_router.put("/cases/{case_id}/reports/{report_id}")
 def update_report(
     case_id: str,

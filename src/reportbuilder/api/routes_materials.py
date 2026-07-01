@@ -10,6 +10,19 @@ from reportbuilder.store.datahive_client import DataHiveClient
 materials_router = APIRouter()
 
 
+@materials_router.get("/cases/{case_id}/materials")
+def list_case_materials(
+    case_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """List the materials attached to a case — {"materials": [{material_id, name}]}.
+
+    Server-side so any user/device opening the case sees its material(s), instead
+    of relying on the uploader's browser-local state. (REQ-C-04)
+    """
+    return {"materials": client.list_materials(case_id)}
+
+
 @materials_router.post("/cases/{case_id}/materials")
 async def upload_material(
     case_id: str,

@@ -38,6 +38,10 @@ class InMemoryDataHiveClient:
         self._materials: dict[str, bytes] = {}
         self._material_meta: dict[str, dict] = {}
         self._reports: dict[str, str] = {}
+        # report_id -> {"case_id", "name"} so reports can be listed per case
+        # (the verbatim JSON stays in _reports). Legacy reports without an entry
+        # here remain loadable by id but aren't listed per case.
+        self._report_meta: dict[str, dict] = {}
         self._n = 0
         # FastAPI runs sync routes on a threadpool → these methods are called from
         # multiple threads in parallel. A single re-entrant lock makes every
@@ -86,10 +90,12 @@ class InMemoryDataHiveClient:
         cases = self._read_json(os.path.join(d, "cases.json"), {})
         meta = self._read_json(os.path.join(d, "material_meta.json"), {})
         reports = self._read_json(os.path.join(d, "reports.json"), {})
+        report_meta = self._read_json(os.path.join(d, "report_meta.json"), {})
         state = self._read_json(os.path.join(d, "state.json"), {})
         self._cases = cases if isinstance(cases, dict) else {}
         self._material_meta = meta if isinstance(meta, dict) else {}
         self._reports = reports if isinstance(reports, dict) else {}
+        self._report_meta = report_meta if isinstance(report_meta, dict) else {}
         n = state.get("_n", 0) if isinstance(state, dict) else 0
         self._n = n if isinstance(n, int) and n >= 0 else 0
         # Material bytes are loaded lazily from disk in get_material; nothing to do here.
@@ -102,6 +108,7 @@ class InMemoryDataHiveClient:
         self._atomic_write_json(os.path.join(d, "cases.json"), self._cases)
         self._atomic_write_json(os.path.join(d, "material_meta.json"), self._material_meta)
         self._atomic_write_json(os.path.join(d, "reports.json"), self._reports)
+        self._atomic_write_json(os.path.join(d, "report_meta.json"), self._report_meta)
         self._atomic_write_json(os.path.join(d, "state.json"), {"_n": self._n})
 
     def _id(self, prefix: str) -> str:
@@ -133,7 +140,7 @@ class InMemoryDataHiveClient:
             if case_id not in self._cases:
                 raise KeyError(case_id)
             del self._cases[case_id]
-            # Cascade: drop this case's materials (reports are tracked client-side).
+            # Cascade: drop this case's materials AND reports.
             mids = [m for m, meta in self._material_meta.items()
                     if meta.get("case_id") == case_id]
             for mid in mids:
@@ -144,6 +151,11 @@ class InMemoryDataHiveClient:
                         os.remove(os.path.join(self._materials_dir(), f"{mid}.sav"))
                     except OSError:
                         pass
+            rids = [r for r, meta in self._report_meta.items()
+                    if meta.get("case_id") == case_id]
+            for rid in rids:
+                self._reports.pop(rid, None)
+                self._report_meta.pop(rid, None)
             self._save()
 
     # --- materials (byte-exact) ---
@@ -158,6 +170,15 @@ class InMemoryDataHiveClient:
                 self._atomic_write(os.path.join(self._materials_dir(), f"{mid}.sav"), data)
             self._save()
             return mid
+
+    def list_materials(self, case_id: str) -> list[dict]:
+        """List a case's materials (newest first) — {material_id, name}."""
+        with self._lock:
+            out = [{"material_id": mid, "name": meta.get("name", mid)}
+                   for mid, meta in self._material_meta.items()
+                   if meta.get("case_id") == case_id]
+            out.reverse()
+            return out
 
     def get_material(self, material_id: str) -> bytes:
         with self._lock:
@@ -177,6 +198,12 @@ class InMemoryDataHiveClient:
         with self._lock:
             rid = report_id or self._id("rep-")
             self._reports[rid] = report_json
+            # Prefer the report's own display name; fall back to the readable summary.
+            try:
+                name = json.loads(report_json).get("name") or readable or "report"
+            except (ValueError, TypeError):
+                name = readable or "report"
+            self._report_meta[rid] = {"case_id": case_id, "name": name}
             self._save()
             return rid
 
@@ -184,9 +211,19 @@ class InMemoryDataHiveClient:
         with self._lock:
             return self._reports[report_doc_id]
 
+    def list_reports(self, case_id: str) -> list[dict]:
+        """List a case's reports (newest first) — {report_id, name}."""
+        with self._lock:
+            out = [{"report_id": rid, "name": meta.get("name", rid)}
+                   for rid, meta in self._report_meta.items()
+                   if meta.get("case_id") == case_id]
+            out.reverse()
+            return out
+
     def delete_report(self, case_id: str, report_doc_id: str) -> None:
         with self._lock:
             self._reports.pop(report_doc_id, None)
+            self._report_meta.pop(report_doc_id, None)
             self._save()
 
     # --- aggregation (demo stub) ---
