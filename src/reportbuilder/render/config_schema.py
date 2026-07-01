@@ -142,8 +142,11 @@ def standard_schema() -> tuple[ConfigField, ...]:
 
 
 def stacked_schema() -> tuple[ConfigField, ...]:
-    """Stacked charts: the classifying variable is required."""
-    return (statistic_field(), classifying_var_field(required=True), *_common_tail())
+    """Stacked charts: the classifying variable is OPTIONAL. With one, each bar is
+    a classifier group split by the shared answer categories; without one, the
+    chart is a single 100%-stacked bar of the question's answer distribution
+    (the 'total')."""
+    return (statistic_field(), classifying_var_field(), *_common_tail())
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:

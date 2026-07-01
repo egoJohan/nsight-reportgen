@@ -159,10 +159,10 @@ def test_standard_schema_classifying_var_is_optional():
     assert cv.required is False
 
 
-def test_stacked_schema_marks_classifying_var_required():
-    # TODO(stacked-total-only): flips to optional when the queued fix lands.
+def test_stacked_schema_classifying_var_is_optional():
+    # Total-only stacked bars are valid, so the classifying variable is optional.
     cv = next(f for f in stacked_schema() if f.key == "classifying_var")
-    assert cv.required is True
+    assert cv.required is False
 
 
 def test_stacked_schema_same_field_set_as_standard():

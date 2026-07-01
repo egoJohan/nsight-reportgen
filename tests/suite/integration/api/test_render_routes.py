@@ -119,10 +119,10 @@ def test_preview_pptx_404_before_render(client_memory):
 # ---------------------------------------------------------------------------
 
 
-def test_render_stacked_without_classifying_var_is_422(client_memory):
-    """A non-battery stacked chart with no classifying variable → clean 422
-    (not a 500), independent of LibreOffice (RX-be.3)."""
-    # TODO(stacked-total-only): becomes a successful render when the queued fix lands
+def test_render_stacked_without_classifying_var_not_blocked(client_memory):
+    """A non-battery stacked chart with no classifying variable is a valid
+    total-only distribution — the render must NOT be rejected with a
+    'classifying variable' 422 (holds with or without LibreOffice)."""
     cid, rid, mid = _seed_case_material_report(
         client_memory, "stacked_vertical_bar", classifying_var=None,
     )
@@ -130,8 +130,10 @@ def test_render_stacked_without_classifying_var_is_422(client_memory):
         f"/cases/{cid}/reports/{rid}/render",
         json={"material_id": mid, "view": "slides"},
     )
-    assert r.status_code == 422
-    assert "classifying variable" in r.json()["detail"].lower()
+    assert not (r.status_code == 422
+                and "classifying variable" in r.json().get("detail", "").lower()), (
+        f"total-only stacked render must no longer be blocked: {r.text[:200]}"
+    )
 
 
 # ---------------------------------------------------------------------------

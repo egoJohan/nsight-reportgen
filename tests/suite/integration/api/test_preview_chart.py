@@ -45,34 +45,34 @@ def test_scatter_without_scatter_xy_is_422(client_mock):
     assert "scatter" in r.json()["detail"].lower()
 
 
-def test_stacked_vertical_bar_without_classifying_var_is_422(client_mock):
-    """A non-battery stacked chart needs a classifying variable for its segments;
-    the 422 detail names the classifying variable (RX-be.3).
-
-    q1 is a single (non-battery) question so the battery exemption does not apply.
-    """
-    # TODO(stacked-total-only): becomes 200 when the queued fix lands
+def test_stacked_vertical_bar_without_classifying_var_not_blocked(client_mock):
+    """A non-battery stacked chart with no classifying variable renders the
+    answer distribution as a single total bar — it must NOT be rejected with a
+    'classifying variable' 422 (total-only stacked bars are valid)."""
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value="soffice"):
         r = client_mock.post(
             "/materials/mat-stacked-v/preview-chart",
             json=_spec(chart_type="stacked_vertical_bar", question_ref="q1"),
         )
-    assert r.status_code == 422
-    assert "classifying variable" in r.json()["detail"].lower()
+    assert not (r.status_code == 422
+                and "classifying variable" in r.json().get("detail", "").lower()), (
+        f"stacked chart without classifying_var must no longer be blocked: {r.text[:200]}"
+    )
 
 
-def test_stacked_horizontal_bar_without_classifying_var_is_422(client_mock):
-    """Same guard for the horizontal stacked variant (RX-be.3)."""
-    # TODO(stacked-total-only): becomes 200 when the queued fix lands
+def test_stacked_horizontal_bar_without_classifying_var_not_blocked(client_mock):
+    """Same for the horizontal stacked variant — total-only is allowed."""
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value="soffice"):
         r = client_mock.post(
             "/materials/mat-stacked-h/preview-chart",
             json=_spec(chart_type="stacked_horizontal_bar", question_ref="q1"),
         )
-    assert r.status_code == 422
-    assert "classifying variable" in r.json()["detail"].lower()
+    assert not (r.status_code == 422
+                and "classifying variable" in r.json().get("detail", "").lower()), (
+        f"stacked chart without classifying_var must no longer be blocked: {r.text[:200]}"
+    )
 
 
 def test_valid_bar_returns_503_when_soffice_absent(client_mock):

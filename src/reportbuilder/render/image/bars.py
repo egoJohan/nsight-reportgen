@@ -373,14 +373,16 @@ def _stacked_layout(series):
     fills exactly 100% — no overshoot, no floating 'Total'. Returns
     (bars, stack, data) where data[stack_member] = [value per bar].
 
-    With no classifier (segments == ('Total',)) there is nothing to compose, so
-    the answer categories become the bars with a single stack member.
+    With no classifier (segments == ('Total',)) there is nothing to split by, so
+    the single 'Total' column IS the one bar and the answer categories become its
+    stack — the classic single 100%-stacked distribution bar (the "just total"
+    case).
     """
     cats, segs, data = series_values(series)
     bars = [s for s in segs if s != "Total"]
-    if len(bars) <= 1:
-        # No real classifier split — fall back to one bar per category.
-        return cats, ["Total"], {"Total": data.get("Total", [0.0] * len(cats))}
+    if not bars:
+        # No classifier: one 'Total' bar, stacked by the answer categories.
+        bars = ["Total"]
     stack = cats
     new_data = {
         qcat: [data[seg][ci] for seg in bars] for ci, qcat in enumerate(cats)

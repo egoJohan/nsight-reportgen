@@ -244,11 +244,10 @@ def test_preview_chart_scatter_without_xy_returns_422_not_500() -> None:
     )
 
 
-def test_preview_chart_stacked_vertical_without_classifying_var_returns_422() -> None:
-    """POST preview-chart with stacked_vertical_bar but no classifying_var returns 422.
-
-    The detail must mention 'classifying variable' so the UI can show a helpful message.
-    (RX-be.3)
+def test_preview_chart_stacked_vertical_without_classifying_var_not_blocked() -> None:
+    """POST preview-chart with stacked_vertical_bar and no classifying_var renders
+    the answer distribution as a single total bar — it must NOT be rejected with a
+    'classifying variable' 422 (total-only stacked bars are valid).
     """
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
@@ -258,21 +257,15 @@ def test_preview_chart_stacked_vertical_without_classifying_var_returns_422() ->
 
     response = tc.post("/materials/mat-rx2/preview-chart", json=_STACKED_VERT_NO_DIM_SPEC)
 
-    assert response.status_code == 422, (
-        f"Expected 422 for stacked_vertical_bar without classifying_var, "
-        f"got {response.status_code}: {response.text}"
-    )
-    detail = response.json().get("detail", "")
-    assert "classifying variable" in detail.lower(), (
-        f"422 detail must mention 'classifying variable'; got: {detail!r}"
+    detail = response.json().get("detail", "") if response.status_code != 200 else ""
+    assert not (response.status_code == 422 and "classifying variable" in detail.lower()), (
+        f"stacked_vertical_bar without classifying_var must no longer be blocked; "
+        f"got {response.status_code}: {response.text[:300]}"
     )
 
 
-def test_preview_chart_stacked_horizontal_without_classifying_var_returns_422() -> None:
-    """POST preview-chart with stacked_horizontal_bar but no classifying_var returns 422.
-
-    Both stacked subtypes must be guarded. (RX-be.3)
-    """
+def test_preview_chart_stacked_horizontal_without_classifying_var_not_blocked() -> None:
+    """Same for the horizontal stacked variant — total-only is allowed."""
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
@@ -281,11 +274,8 @@ def test_preview_chart_stacked_horizontal_without_classifying_var_returns_422() 
 
     response = tc.post("/materials/mat-rx2/preview-chart", json=_STACKED_HORIZ_NO_DIM_SPEC)
 
-    assert response.status_code == 422, (
-        f"Expected 422 for stacked_horizontal_bar without classifying_var, "
-        f"got {response.status_code}: {response.text}"
-    )
-    detail = response.json().get("detail", "")
-    assert "classifying variable" in detail.lower(), (
-        f"422 detail must mention 'classifying variable'; got: {detail!r}"
+    detail = response.json().get("detail", "") if response.status_code != 200 else ""
+    assert not (response.status_code == 422 and "classifying variable" in detail.lower()), (
+        f"stacked_horizontal_bar without classifying_var must no longer be blocked; "
+        f"got {response.status_code}: {response.text[:300]}"
     )

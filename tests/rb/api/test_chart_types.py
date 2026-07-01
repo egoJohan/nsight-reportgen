@@ -49,11 +49,13 @@ def test_single_series_types_hide_classifying_var():
         )
 
 
-def test_stacked_requires_classifying_var():
+def test_stacked_classifying_var_optional():
+    """Total-only stacked bars are valid, so classifying_var is optional (present
+    but not required)."""
     cat = _catalog()
     for cid in ("stacked_vertical_bar", "stacked_horizontal_bar"):
         fld = next(f for f in cat[cid]["config"] if f["key"] == "classifying_var")
-        assert fld.get("required") is True
+        assert fld.get("required") in (False, None)
 
 
 def test_select_fields_carry_their_options():

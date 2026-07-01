@@ -851,22 +851,9 @@ def preview_chart(
 
     model = enrich_model(model)
 
-    # Guard (RX-be.3): a stacked single/multi chart needs a classifying variable
-    # for its segments. A BATTERY is exempt — its stack segments are the shared
-    # rating-scale levels (no external classifier).
-    if body.chart_type in ("stacked_vertical_bar", "stacked_horizontal_bar") and not body.classifying_var:
-        try:
-            _is_battery = model.question(body.question_ref).kind == "battery"
-        except Exception:
-            _is_battery = False
-        if not _is_battery:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"{body.chart_type}: Stacked charts need a classifying variable "
-                    "to define the segments"
-                ),
-            )
+    # A stacked chart with no classifying variable is a valid single 100%-stacked
+    # distribution bar (the "total-only" case) — it renders the answer categories
+    # as the stack, so no classifying-variable guard is needed.
 
     # 2. Convert request body to ChartSpec
     spec = _chart_spec_from_body(body)

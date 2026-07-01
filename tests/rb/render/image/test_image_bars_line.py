@@ -242,8 +242,9 @@ def test_stacked_layout_excludes_total_and_transposes():
         assert abs(sum(data[q][bi] for q in stack) - 100.0) < 1e-6
 
 
-def test_stacked_layout_without_classifier_falls_back():
-    """No classifier (only 'Total') → one bar per category, single stack member."""
+def test_stacked_layout_without_classifier_single_total_bar():
+    """No classifier (only 'Total') → a single 'Total' bar stacked by the answer
+    categories (the total-only distribution bar), summing to 100%."""
     from reportbuilder.render.image.bars import _stacked_layout
 
     cells = {
@@ -258,5 +259,6 @@ def test_stacked_layout_without_classifier_falls_back():
         statistic="pct",
     )
     bars, stack, data = _stacked_layout(s)
-    assert list(bars) == ["Yes", "No"]
-    assert stack == ["Total"]
+    assert list(bars) == ["Total"]
+    assert list(stack) == ["Yes", "No"]
+    assert abs(sum(data[c][0] for c in stack) - 100.0) < 1e-6
