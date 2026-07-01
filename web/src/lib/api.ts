@@ -180,6 +180,7 @@ export interface ReportDoc {
   render_mode: "image";
   template_ref: string;
   charts: ChartSpec[];
+  grouping?: GroupingOverride;
 }
 
 // ---- Client ----
@@ -392,17 +393,14 @@ export const api = {
         `${API_BASE}/materials/${materialId}/variables${opts?.all ? "?include_all=true" : ""}`
       ).then((r) => json<{ variables: Variable[] }>(r)),
 
-    grouping: (materialId: string): Promise<{ override: GroupingOverride }> =>
-      fetch(`${API_BASE}/materials/${materialId}/grouping`).then((r) =>
-        json<{ override: GroupingOverride }>(r)
-      ),
-
-    putGrouping: (
+    // Stateless preview: reshape the question list for a report's grouping override
+    // (the override itself is saved WITH the report, not per material).
+    regroup: (
       materialId: string,
       override: GroupingOverride
     ): Promise<{ questions: Question[] }> =>
-      fetch(`${API_BASE}/materials/${materialId}/grouping`, {
-        method: "PUT",
+      fetch(`${API_BASE}/materials/${materialId}/regroup`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(override),
       }).then((r) => json<{ questions: Question[] }>(r)),
@@ -415,15 +413,18 @@ export const api = {
     previewChart: (
       materialId: string,
       chart: ChartSpec,
-      opts?: { renderTitle?: boolean; key?: string }
+      opts?: { renderTitle?: boolean; key?: string; grouping?: GroupingOverride }
     ): Promise<Blob> =>
       serializePreview(async () => {
         // When renderTitle is false the PNG omits the baked title block, so the
-        // frontend owns the title region (progressive preview overlay).
-        const body =
-          opts?.renderTitle === undefined
-            ? chart
-            : { ...chart, render_title: opts.renderTitle };
+        // frontend owns the title region (progressive preview overlay). The
+        // report's grouping is included so a chart on a manually-grouped question
+        // previews the same way it renders.
+        const body: Record<string, unknown> = {
+          ...chart,
+          ...(opts?.renderTitle === undefined ? {} : { render_title: opts.renderTitle }),
+          ...(opts?.grouping ? { grouping: opts.grouping } : {}),
+        };
         const res = await fetch(
           `${API_BASE}/materials/${materialId}/preview-chart`,
           {

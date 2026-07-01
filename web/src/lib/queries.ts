@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setActivePreviewKey } from "./api";
-import type { ChartSpec, ReportDoc } from "./api";
+import type { ChartSpec, ReportDoc, GroupingOverride } from "./api";
 
 // ---- Query keys ----
 export const qk = {
@@ -116,14 +116,21 @@ function blobToDataURL(blob: Blob): Promise<string> {
 export function useChartPreview(
   materialId: string,
   chart: ChartSpec,
-  opts?: { renderTitle?: boolean; enabled?: boolean; priority?: boolean }
+  opts?: {
+    renderTitle?: boolean;
+    enabled?: boolean;
+    priority?: boolean;
+    grouping?: GroupingOverride;
+  }
 ) {
   const renderTitle = opts?.renderTitle ?? true;
+  const groupingKey = JSON.stringify(opts?.grouping ?? {});
   const queryKey = [
     "chart-preview",
     materialId,
     renderTitle,
     previewContentKey(chart, renderTitle),
+    groupingKey,
   ];
   // Stable string key shared with the render gate so it can match this slide's
   // queued render and promote it when this slide is the active one.
@@ -140,7 +147,7 @@ export function useChartPreview(
     queryKey,
     queryFn: () =>
       api.materials
-        .previewChart(materialId, chart, { renderTitle, key: gateKey })
+        .previewChart(materialId, chart, { renderTitle, key: gateKey, grouping: opts?.grouping })
         .then(blobToDataURL),
     enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,
@@ -189,12 +196,16 @@ export function useVariables(materialId: string | null, all = false) {
   });
 }
 
-export function useGrouping(materialId: string | null) {
+// Questions reshaped by a report's grouping override (stateless preview).
+export function useRegroupedQuestions(
+  materialId: string | null,
+  grouping: GroupingOverride
+) {
   return useQuery({
-    queryKey: ["grouping", materialId ?? ""],
-    queryFn: () => api.materials.grouping(materialId!),
+    queryKey: ["regrouped-questions", materialId ?? "", JSON.stringify(grouping)],
+    queryFn: () => api.materials.regroup(materialId!, grouping),
     enabled: !!materialId,
-    select: (d) => d.override,
+    select: (d) => d.questions,
   });
 }
 

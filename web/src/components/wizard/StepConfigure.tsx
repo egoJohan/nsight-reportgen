@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   BarChart3Icon,
@@ -27,8 +27,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { ChartSpec, ConfigField, Question, Variable } from "@/lib/api";
-import { useChartPreview, useChartTypes, useQuestions, useVariables } from "@/lib/queries";
+import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
+import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
 import { useDragReorder } from "@/lib/useDragReorder";
 import {
   CHART_TYPES,
@@ -49,6 +49,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+// The report's grouping override, shared with the leaf preview components so a
+// chart on a manually-grouped question previews the way it renders.
+const GroupingCtx = createContext<GroupingOverride>({ groups: [], singles: [] });
 
 // Per-chart pending flags (keyed by question_ref) from the auto-AI orchestrator.
 export type AiPendingMap = Record<
@@ -128,10 +132,11 @@ function ChartPreview({
 
   // render_title:false — the PNG omits the title block; the frontend owns the
   // title region (progressive overlay). Cached by content via useChartPreview.
+  const grouping = useContext(GroupingCtx);
   const { data: url, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: false, priority: true }
+    { renderTitle: false, priority: true, grouping }
   );
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
@@ -1043,10 +1048,11 @@ function SpecialPreview({
 }) {
   // The whole slide (heading + bullets) is baked server-side → render the full
   // PNG (renderTitle:true) and show it plainly.
+  const grouping = useContext(GroupingCtx);
   const { data: url, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     chart,
-    { renderTitle: true, priority: true }
+    { renderTitle: true, priority: true, grouping }
   );
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
@@ -1244,9 +1250,11 @@ function PrefetchOne({
   materialId: string;
   chart: ChartSpec;
 }) {
+  const grouping = useContext(GroupingCtx);
   useChartPreview(materialId, chart, {
     renderTitle: rendersFullSlide(chart),
     enabled: true,
+    grouping,
   });
   return null;
 }
@@ -1282,9 +1290,10 @@ function DeckPrefetch({
   );
 }
 
-export default function StepConfigure({
+function StepConfigureInner({
   materialId,
   charts,
+  grouping,
   aiPending,
   onUpdateChart,
   onRemoveChart,
@@ -1295,6 +1304,7 @@ export default function StepConfigure({
 }: {
   materialId: string;
   charts: ChartSpec[];
+  grouping: GroupingOverride;
   aiPending?: AiPendingMap;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   onRemoveChart: (index: number) => void;
@@ -1307,7 +1317,7 @@ export default function StepConfigure({
   onAddSpecial?: (type: string) => string | void;
   onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
-  const { data: questions, isError } = useQuestions(materialId);
+  const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
   // The active slide is tracked by question_ref (not index) so inserting a slide
   // at the front or reordering never silently changes which slide is shown.
   const [active, setActive] = useState<string | null>(null);
@@ -1568,5 +1578,17 @@ export default function StepConfigure({
         </div>
       )}
     </div>
+  );
+}
+
+// Provide the report's grouping to the leaf preview components (via context) so
+// they don't need it prop-drilled through the whole Design tree.
+export default function StepConfigure(
+  props: Parameters<typeof StepConfigureInner>[0]
+) {
+  return (
+    <GroupingCtx.Provider value={props.grouping}>
+      <StepConfigureInner {...props} />
+    </GroupingCtx.Provider>
   );
 }

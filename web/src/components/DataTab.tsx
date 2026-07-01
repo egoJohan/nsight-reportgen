@@ -6,7 +6,6 @@ import {
   AlertCircleIcon,
   DatabaseIcon,
   TriangleAlertIcon,
-  Layers2Icon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +34,6 @@ import {
   qk,
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
-import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import type { Question } from "@/lib/api";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 
@@ -328,7 +326,6 @@ export default function DataTab({ caseId }: { caseId: string }) {
   const { workspace, setMaterial } = useWorkspace(caseId);
   const qc = useQueryClient();
   const [replacing, setReplacing] = useState(false);
-  const [groupingOpen, setGroupingOpen] = useState(false);
   // Prefer this browser's local pointer; else fall back to the case's material
   // on the server (so a case opened by another user/device isn't shown empty).
   const { data: caseMaterials } = useCaseMaterials(caseId);
@@ -364,30 +361,15 @@ export default function DataTab({ caseId }: { caseId: string }) {
                 <span className="font-mono text-xs">{materialId}</span>
               </p>
             </div>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setGroupingOpen(true)}
-              >
-                <Layers2Icon className="size-4" />
-                Manage grouping
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setReplacing(true)}
-                className="text-muted-foreground"
-              >
-                Replace file
-              </Button>
-            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setReplacing(true)}
+              className="text-muted-foreground"
+            >
+              Replace file
+            </Button>
           </div>
-          <ManageGroupingDialog
-            materialId={materialId}
-            open={groupingOpen}
-            onOpenChange={setGroupingOpen}
-          />
           <QuestionTable
             materialId={materialId}
             onInvalid={(error) => {

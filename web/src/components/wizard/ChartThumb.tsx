@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircleIcon, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ChartSpec } from "@/lib/api";
+import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
 
 /**
@@ -19,6 +19,7 @@ export default function ChartThumb({
   chart,
   className,
   renderTitle,
+  grouping,
 }: {
   materialId: string;
   chart: ChartSpec;
@@ -26,6 +27,7 @@ export default function ChartThumb({
   // When false, shares the Design preview's cache entry (title-less PNG) so the
   // thumbnail and the large preview render only ONCE per chart.
   renderTitle?: boolean;
+  grouping?: GroupingOverride;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
@@ -49,6 +51,7 @@ export default function ChartThumb({
   const { data: url, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
     enabled: seen,
+    grouping,
   });
   const message =
     error instanceof Error ? error.message : error ? "Preview failed" : null;

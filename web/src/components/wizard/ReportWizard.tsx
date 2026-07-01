@@ -72,6 +72,13 @@ const STEPS = [
   { id: "download", label: "Download" },
 ];
 
+// Per-phase instruction shown centered under the stepper (report-specific).
+const STEP_INSTRUCTIONS = [
+  "Toggle a question to add or remove its chart from the report, then press Next.",
+  "",
+  "",
+];
+
 function Stepper({
   current,
   onJump,
@@ -173,6 +180,7 @@ export default function ReportWizard({
         render_mode: "image",
         template_ref: loaded.template_ref ?? "",
         charts: loaded.charts ?? [],
+        grouping: loaded.grouping ?? { groups: [], singles: [] },
       });
     }
   }, [loaded, draft]);
@@ -808,35 +816,42 @@ export default function ReportWizard({
         </div>
       </div>
 
-      {/* Stepper + prev/next nav */}
-      <div className="mb-6 flex items-center gap-2 rounded-xl border bg-card px-3 py-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0"
-          onClick={goPrev}
-          disabled={step === 0}
-        >
-          <ArrowLeftIcon className="size-4" />
-          Prev
-        </Button>
-        <div className="flex flex-1 justify-center">
-          <Stepper
-            current={step}
-            onJump={(i) => commitThen(() => setStep(i))}
-            chartCount={draft.charts.length}
-          />
+      {/* Stepper + prev/next nav, with the phase instruction centered below */}
+      <div className="mb-6 rounded-xl border bg-card px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            onClick={goPrev}
+            disabled={step === 0}
+          >
+            <ArrowLeftIcon className="size-4" />
+            Prev
+          </Button>
+          <div className="flex flex-1 justify-center">
+            <Stepper
+              current={step}
+              onJump={(i) => commitThen(() => setStep(i))}
+              chartCount={draft.charts.length}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            onClick={goNext}
+            disabled={step >= STEPS.length - 1}
+          >
+            Next
+            <ArrowRightIcon className="size-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0"
-          onClick={goNext}
-          disabled={step >= STEPS.length - 1}
-        >
-          Next
-          <ArrowRightIcon className="size-4" />
-        </Button>
+        {STEP_INSTRUCTIONS[step] && (
+          <p className="mt-1.5 text-center text-xs text-muted-foreground">
+            {STEP_INSTRUCTIONS[step]}
+          </p>
+        )}
       </div>
 
       {/* Step body */}
@@ -846,12 +861,15 @@ export default function ReportWizard({
             materialId={materialId}
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
+            grouping={draft.grouping ?? { groups: [], singles: [] }}
+            onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
           />
         )}
         {step === 1 && (
           <StepConfigure
             materialId={materialId}
             charts={draft.charts}
+            grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
             onUpdateChart={updateChart}
             onRemoveChart={removeChart}

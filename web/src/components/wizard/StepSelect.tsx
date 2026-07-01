@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react";
-import { CheckIcon, SearchIcon, AlertCircleIcon } from "lucide-react";
+import { CheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Question } from "@/lib/api";
-import { useQuestions } from "@/lib/queries";
+import type { Question, GroupingOverride } from "@/lib/api";
+import { useRegroupedQuestions } from "@/lib/queries";
+import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 
 // A question whose only compatible chart type is the word cloud (an open-ended
 // free-text question). It's chartable — just rendered as a cloud, not a bar.
@@ -42,13 +44,21 @@ export default function StepSelect({
   materialId,
   addedRefs,
   onToggle,
+  grouping,
+  onGroupingChange,
 }: {
   materialId: string;
   addedRefs: Set<string>;
   onToggle: (question: Question) => void;
+  grouping: GroupingOverride;
+  onGroupingChange: (override: GroupingOverride) => void;
 }) {
-  const { data: questions, isLoading, isError } = useQuestions(materialId);
+  const { data: questions, isLoading, isError } = useRegroupedQuestions(
+    materialId,
+    grouping
+  );
   const [search, setSearch] = useState("");
+  const [groupingOpen, setGroupingOpen] = useState(false);
 
   const filtered = useMemo(
     () =>
@@ -96,15 +106,27 @@ export default function StepSelect({
             className="pl-9"
           />
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => setGroupingOpen(true)}
+        >
+          <Layers2Icon className="size-4" />
+          Manage grouping
+        </Button>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {selectedCount} selected · {filtered.length} questions
         </span>
       </div>
 
-      <p className="mb-3 text-sm text-muted-foreground">
-        Toggle a question to add or remove its chart from the report, then press
-        Next.
-      </p>
+      <ManageGroupingDialog
+        materialId={materialId}
+        open={groupingOpen}
+        onOpenChange={setGroupingOpen}
+        grouping={grouping}
+        onSave={onGroupingChange}
+      />
 
       <div className="space-y-1.5">
         {filtered.map((q) => {
