@@ -7,4 +7,5 @@ __pycache__/
 .superpowers/
 
 # Local-only client SAV copies for demo-group e2e (IPR — never commit)
-tests/rb/e2e/data/
+# Ignore the binaries but keep the README that explains how to populate them.
+tests/rb/e2e/data/sav/
