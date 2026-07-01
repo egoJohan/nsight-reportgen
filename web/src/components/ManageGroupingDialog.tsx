@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Layers2Icon, Undo2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,7 @@ export default function ManageGroupingDialog({
   const [cards, setCards] = useState<Card[]>([]);
   const [pool, setPool] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
 
   const labelOf = useMemo(() => {
@@ -88,13 +90,18 @@ export default function ManageGroupingDialog({
   function groupSelected() {
     const vars = [...selected];
     if (vars.length < 2) return;
-    setGroups((g) => [...g, { kind: "multi", variables: vars }]);
+    // Always send a meaningful label: the typed name, else the member labels
+    // joined (so the group is never named by a weak common-prefix like "Mi").
+    const label =
+      groupName.trim() || vars.map((v) => labelOf.get(v) ?? v).join(" · ");
+    setGroups((g) => [...g, { kind: "multi", variables: vars, label }]);
     setCards((c) => [
-      { key: `manual:${setKey(vars)}`, label: vars.map((v) => labelOf.get(v) ?? v).join(" · "), variables: vars, source: "manual" },
+      { key: `manual:${setKey(vars)}`, label, variables: vars, source: "manual" },
       ...c,
     ]);
     setPool((p) => p.filter((n) => !selected.has(n)));
     setSelected(new Set());
+    setGroupName("");
   }
 
   function ungroup(card: Card) {
@@ -146,7 +153,13 @@ export default function ManageGroupingDialog({
                 ))
               )}
             </div>
-            <div className="border-t p-2">
+            <div className="space-y-2 border-t p-2">
+              <Input
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                placeholder="Group name (optional)"
+                className="h-8"
+              />
               <Button size="sm" className="w-full" disabled={selected.size < 2} onClick={groupSelected}>
                 <Layers2Icon className="size-4" /> Group as multi ({selected.size})
               </Button>
