@@ -15,7 +15,12 @@ import {
 import DataTab from "@/components/DataTab";
 import ReportsSection from "@/components/ReportsSection";
 import ReportWizard from "@/components/wizard/ReportWizard";
-import { useCases, useRenameCase, useDeleteCase } from "@/lib/queries";
+import {
+  useCases,
+  useRenameCase,
+  useDeleteCase,
+  useCaseMaterials,
+} from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
 
 function CaseHeading({ caseId, name }: { caseId: string; name: string }) {
@@ -86,7 +91,11 @@ export default function CaseDetailPage() {
   const { data: cases } = useCases();
   const currentCase = cases?.find((c) => c.id === id);
   const { workspace, removeReport } = useWorkspace(id ?? "");
-  const materialId = workspace.materialId;
+  // The case→material link is server-side; fall back to it when this browser has
+  // no local pointer (e.g. the case was created by someone else / another device).
+  const { data: caseMaterials } = useCaseMaterials(id ?? null);
+  const serverMaterialId = caseMaterials?.materials?.[0]?.material_id ?? null;
+  const materialId = workspace.materialId ?? serverMaterialId;
   // The open report lives in the URL (?report=<id>) so the app-shell breadcrumb
   // row can show a close button for it.
   const [searchParams, setSearchParams] = useSearchParams();

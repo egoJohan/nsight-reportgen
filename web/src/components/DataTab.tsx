@@ -26,7 +26,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useQuestions, useUploadMaterial } from "@/lib/queries";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useQuestions,
+  useUploadMaterial,
+  useCaseMaterials,
+  qk,
+} from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -318,11 +324,17 @@ function UploadArea({
 // ---- Main DataTab ----
 export default function DataTab({ caseId }: { caseId: string }) {
   const { workspace, setMaterial } = useWorkspace(caseId);
-  const materialId = workspace.materialId;
+  const qc = useQueryClient();
+  const [replacing, setReplacing] = useState(false);
+  // Prefer this browser's local pointer; else fall back to the case's material
+  // on the server (so a case opened by another user/device isn't shown empty).
+  const { data: caseMaterials } = useCaseMaterials(caseId);
+  const serverMaterialId = caseMaterials?.materials?.[0]?.material_id ?? null;
+  const materialId = workspace.materialId ?? serverMaterialId;
 
   return (
     <div>
-      {!materialId ? (
+      {!materialId || replacing ? (
         <>
           <div className="mb-6">
             <h3 className="text-base font-semibold">Data source</h3>
@@ -332,7 +344,11 @@ export default function DataTab({ caseId }: { caseId: string }) {
           </div>
           <UploadArea
             caseId={caseId}
-            onUploaded={(id) => setMaterial(id)}
+            onUploaded={(id) => {
+              setMaterial(id);
+              setReplacing(false);
+              qc.invalidateQueries({ queryKey: qk.caseMaterials(caseId) });
+            }}
           />
         </>
       ) : (
@@ -348,7 +364,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setMaterial(null)}
+              onClick={() => setReplacing(true)}
               className="text-muted-foreground"
             >
               Replace file

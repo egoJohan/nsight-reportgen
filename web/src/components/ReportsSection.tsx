@@ -11,12 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "@/lib/workspace";
 import {
   useCreateReport,
   useDeleteReport,
   useQuestions,
   useReport,
+  useCaseReports,
+  qk,
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import { formatReportDate } from "@/lib/utils";
@@ -99,20 +102,25 @@ export default function ReportsSection({
   materialId: string;
   onOpen: (reportId: string) => void;
 }) {
+  const qc = useQueryClient();
   const { workspace, addReport, removeReport } = useWorkspace(caseId);
   const createReport = useCreateReport(caseId);
   const deleteReport = useDeleteReport(caseId);
   const { data: questions } = useQuestions(materialId);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const reports = workspace.reports.filter(
-    (r) => r.materialId === undefined || r.materialId === materialId
-  );
-  // Newest first (workspace stores reports in creation order).
-  const orderedReports = [...reports].reverse();
+  // Reports come from the SERVER (visible to any user/device), newest first.
+  // Enrich with this browser's locally-remembered createdAt when we have it.
+  const { data: serverReports } = useCaseReports(caseId);
+  const wsById = new Map(workspace.reports.map((r) => [r.id, r]));
+  const orderedReports = (serverReports?.reports ?? []).map((r) => ({
+    id: r.report_id,
+    name: r.name,
+    createdAt: wsById.get(r.report_id)?.createdAt,
+  }));
 
   function handleCreate() {
-    const name = `Report ${reports.length + 1}`;
+    const name = `Report ${orderedReports.length + 1}`;
     // Pre-select every question by default: seed the report with a chart per
     // question. Demographics (age/gender/region/…) are floated to the FRONT
     // (a stable sort keeps questionnaire/SAV order within each group); the user
@@ -133,6 +141,7 @@ export default function ReportsSection({
             materialId,
             createdAt: new Date().toISOString(),
           });
+          qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
           onOpen(report_id);
         },
         onError: (e) => toast.error(`Could not create report: ${e.message}`),
@@ -144,11 +153,13 @@ export default function ReportsSection({
     deleteReport.mutate(id, {
       onSuccess: () => {
         removeReport(id);
+        qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
         setConfirmDelete(null);
         toast.success("Report deleted");
       },
       onError: (e) => {
         if (e instanceof Error && e.message.startsWith("404")) removeReport(id);
+        qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
         setConfirmDelete(null);
         toast.error(`Delete failed: ${e.message}`);
       },

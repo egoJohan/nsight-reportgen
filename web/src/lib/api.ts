@@ -311,6 +311,16 @@ function serializePreview<T>(task: () => Promise<T>, key = ""): Promise<T> {
   });
 }
 
+export interface CaseMaterial {
+  material_id: string;
+  name: string;
+}
+
+export interface CaseReportInfo {
+  report_id: string;
+  name: string;
+}
+
 export const api = {
   cases: {
     list: (): Promise<Case[]> =>
@@ -343,6 +353,12 @@ export const api = {
     ),
 
   materials: {
+    // Server-side list of a case's materials (visible to any user/device).
+    listForCase: (caseId: string): Promise<{ materials: CaseMaterial[] }> =>
+      fetch(`${API_BASE}/cases/${caseId}/materials`).then((r) =>
+        json<{ materials: CaseMaterial[] }>(r)
+      ),
+
     upload: (caseId: string, file: File): Promise<UploadResult> => {
       const form = new FormData();
       form.append("file", file);
@@ -455,6 +471,12 @@ export const api = {
   },
 
   reports: {
+    // Server-side list of a case's reports (visible to any user/device).
+    listForCase: (caseId: string): Promise<{ reports: CaseReportInfo[] }> =>
+      fetch(`${API_BASE}/cases/${caseId}/reports`).then((r) =>
+        json<{ reports: CaseReportInfo[] }>(r)
+      ),
+
     create: (
       caseId: string,
       report: ReportDoc

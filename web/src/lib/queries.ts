@@ -16,7 +16,26 @@ export const qk = {
   variables: (materialId: string) => ["variables", materialId] as const,
   report: (caseId: string, reportId: string) =>
     ["report", caseId, reportId] as const,
+  caseMaterials: (caseId: string) => ["case-materials", caseId] as const,
+  caseReports: (caseId: string) => ["case-reports", caseId] as const,
 };
+
+// ---- Case-scoped, server-side listings (so any user/device sees them) ----
+export function useCaseMaterials(caseId: string | null) {
+  return useQuery({
+    queryKey: qk.caseMaterials(caseId ?? ""),
+    queryFn: () => api.materials.listForCase(caseId!),
+    enabled: !!caseId,
+  });
+}
+
+export function useCaseReports(caseId: string | null) {
+  return useQuery({
+    queryKey: qk.caseReports(caseId ?? ""),
+    queryFn: () => api.reports.listForCase(caseId!),
+    enabled: !!caseId,
+  });
+}
 
 // ---- Hooks ----
 
