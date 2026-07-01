@@ -134,23 +134,14 @@ def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
 # ---------------------------------------------------------------------------
 
 
-def test_regroup_too_few_is_422(client_mock):
-    r = client_mock.post("/materials/mat-x/regroup",
-                         json={"groups": [{"kind": "multi", "variables": ["q1"]}]})
-    assert r.status_code == 422
-
-
-def test_regroup_unknown_var_is_422(client_mock):
-    r = client_mock.post("/materials/mat-x/regroup",
-                         json={"groups": [{"kind": "multi", "variables": ["q1", "no-such-var"]}]})
-    assert r.status_code == 422
-
-
-def test_regroup_scale_member_is_422(client_mock):
-    """A scale variable cannot be a member of a multi (tick-box) group."""
-    r = client_mock.post("/materials/mat-x/regroup",
-                         json={"groups": [{"kind": "multi", "variables": ["q1", "age"]}]})
-    assert r.status_code == 422
+def test_regroup_invalid_groups_are_ignored(client_mock):
+    """Regroup is lenient: invalid groups (too few / unknown / scale-or-non-tick)
+    are silently skipped, returning 200 with the reshaped list."""
+    def post(groups):
+        return client_mock.post("/materials/mat-x/regroup", json={"groups": groups})
+    assert post([{"kind": "multi", "variables": ["q1"]}]).status_code == 200
+    assert post([{"kind": "multi", "variables": ["q1", "no-such-var"]}]).status_code == 200
+    assert post([{"kind": "multi", "variables": ["q1", "age"]}]).status_code == 200
 
 
 def test_regroup_valid_multi_returns_questions(client_mock):

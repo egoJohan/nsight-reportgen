@@ -77,11 +77,12 @@ def test_stale_unknown_variable_is_skipped(tmp_path):
     assert all("ghost" not in q.variables for q in got.questions)
 
 
-def test_manual_group_of_arbitrary_singles(tmp_path):
-    # Combine two variables that auto-detection would NOT group on its own.
+def test_non_tickbox_group_is_skipped(tmp_path):
+    # q1 is single-choice (Yes/No coded 1/2), not a 0/1 tick-box → the group is
+    # ignored (multi-response only makes sense for tick-box variables).
     raw = _raw(tmp_path)
     got = apply_grouping_override(
         raw, {"groups": [{"kind": "multi", "variables": ["q1", "m1"]}], "singles": []}
     )
-    m = [q for q in got.questions if q.kind == "multi" and set(q.variables) == {"q1", "m1"}]
-    assert len(m) == 1
+    assert not any(q.kind == "multi" and "q1" in q.variables for q in got.questions)
+    assert _q(got, "q1").kind == "single"

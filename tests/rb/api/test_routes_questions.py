@@ -298,23 +298,17 @@ def test_regroup_combines_returns_reshaped_questions(tmp_path) -> None:
     assert any(q["kind"] == "multi" and set(q["variables"]) == {"q1_1", "q1_2"} for q in qs)
 
 
-def test_regroup_scale_member_returns_422(tmp_path) -> None:
-    """A scale variable (age) cannot be a multi-group member. (REQ-C-06)"""
+def test_regroup_invalid_groups_are_ignored(tmp_path) -> None:
+    """Regroup is lenient — an invalid group (scale member, or too few variables)
+    is silently skipped, still returning 200. (REQ-C-06)"""
     singles = _make_singles_model()
     tc = TestClient(create_app(client=Mock()))
     with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
-        response = tc.post("/materials/mat-1/regroup",
-                           json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
-    assert response.status_code == 422
-
-
-def test_regroup_too_few_returns_422(tmp_path) -> None:
-    """A multi group needs at least 2 variables. (REQ-C-06)"""
-    singles = _make_singles_model()
-    tc = TestClient(create_app(client=Mock()))
-    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
-        response = tc.post("/materials/mat-1/regroup",
-                           json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
-    assert response.status_code == 422
+        scale = tc.post("/materials/mat-1/regroup",
+                        json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
+        too_few = tc.post("/materials/mat-1/regroup",
+                          json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
+    assert scale.status_code == 200
+    assert too_few.status_code == 200
 
 

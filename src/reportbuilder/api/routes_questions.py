@@ -625,63 +625,27 @@ class GroupingOverride(BaseModel):
     singles: list[str] = []
 
 
-def _validate_override(base: QuestionModel, body: GroupingOverride) -> dict:
-    """Validate + normalise a grouping override → a plain dict for persistence.
-
-    Each `multi` group needs ≥2 known, non-scale variables; a variable may belong
-    to at most one group; a group member is dropped from `singles` (a group wins
-    over a forced-single). `battery` groups are accepted but not validated here
-    (Phase 2). Raises HTTP 422 on violations. (REQ-C-06, M-02)
-    """
-    seen: set[str] = set()
-    for g in body.groups:
-        if g.kind != "multi":
-            continue
-        vs = g.variables
-        if len(vs) < 2:
-            raise HTTPException(422, f"A multi group needs at least 2 variables; got {vs}.")
-        unknown = [v for v in vs if v not in base.variables]
-        if unknown:
-            raise HTTPException(422, f"Unknown variable(s) {unknown} — not in the material.")
-        scale = [v for v in vs if base.variables[v].measurement == "scale"]
-        if scale:
-            raise HTTPException(
-                422,
-                f"Scale variable(s) {scale} cannot be in a multi group — members must "
-                "be binary/categorical tick-box variables.",
-            )
-        non_tick = [v for v in vs if not _is_binary(base.variables[v])]
-        if non_tick:
-            raise HTTPException(
-                422,
-                f"Variable(s) {non_tick} are single-choice questions — multi-response "
-                "grouping only works for tick-box (yes/no, 0/1) variables.",
-            )
-        dup = [v for v in vs if v in seen]
-        if dup:
-            raise HTTPException(422, f"Variable(s) {dup} assigned to more than one group.")
-        seen.update(vs)
-    groups = [
-        {"kind": g.kind, "variables": list(g.variables), **({"label": g.label} if g.label else {})}
-        for g in body.groups
-    ]
-    singles = [v for v in body.singles if v not in seen]
-    return {"groups": groups, "singles": singles}
-
-
 @questions_router.post("/materials/{material_id}/regroup")
 def regroup(
     material_id: str,
     body: GroupingOverride,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
-    """Stateless PREVIEW: validate a grouping override and return the reshaped
-    question list (full browse payload) without persisting. The report wizard
-    calls this live as the user edits a report's grouping; the override itself is
-    saved WITH the report. (REQ-C-06, M-02)"""
+    """Stateless PREVIEW: return the reshaped question list (full browse payload)
+    for a grouping override, WITHOUT persisting. Applied leniently — invalid groups
+    (non-tick-box, stale, <2 members) are silently skipped so a stored-but-now-
+    invalid grouping never breaks the wizard. Authoring is validated in the UI
+    (the pool only offers tick-box variables). (REQ-C-06, M-02)"""
     base = _load_singles(material_id, client)
-    normalised = _validate_override(base, body)
-    model = apply_grouping_override(base, normalised)
+    override = {
+        "groups": [
+            {"kind": g.kind, "variables": list(g.variables),
+             **({"label": g.label} if g.label else {})}
+            for g in body.groups
+        ],
+        "singles": list(body.singles),
+    }
+    model = apply_grouping_override(base, override)
     return {"questions": _questions_payload(model, material_id, client)}
 
 

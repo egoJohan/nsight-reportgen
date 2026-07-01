@@ -26,16 +26,16 @@ def test_regroup_combines(client_memory, synthetic_bytes):
     assert combo and combo[0]["text"] == "Combo"
 
 
-def test_regroup_non_tickbox_member_is_422(client_memory, synthetic_bytes):
-    """A single-choice categorical (q1 = Yes/No coded 1/2) is not a tick-box, so it
-    cannot be a multi-response member. Clear message."""
+def test_regroup_non_tickbox_group_is_ignored(client_memory, synthetic_bytes):
+    """A single-choice categorical (q1 = Yes/No coded 1/2) isn't a tick-box, so the
+    group is skipped and q1 stays a single question — no 422, no empty group."""
     mid = _case_material(client_memory, synthetic_bytes)
     r = client_memory.post(
         f"/materials/{mid}/regroup",
         json={"groups": [{"kind": "multi", "variables": ["q1", "m1"]}]},
     )
-    assert r.status_code == 422
-    assert "tick-box" in r.json()["detail"].lower()
+    assert r.status_code == 200
+    assert any(q["qid"] == "q1" and q["kind"] == "single" for q in r.json()["questions"])
 
 
 def test_variables_expose_tickbox_flag(client_memory, synthetic_bytes):
@@ -62,16 +62,16 @@ def test_regroup_is_stateless(client_memory, synthetic_bytes):
     assert any(q["kind"] == "multi" for q in after)
 
 
-def test_regroup_validation_422s(client_memory, synthetic_bytes):
+def test_regroup_ignores_invalid_groups(client_memory, synthetic_bytes):
+    """Regroup is lenient — invalid groups (too few, unknown var, scale/non-tick)
+    are silently skipped so a stored-but-now-invalid grouping never breaks reads."""
     mid = _case_material(client_memory, synthetic_bytes)
     def post(groups):
         return client_memory.post(f"/materials/{mid}/regroup",
                                   json={"groups": groups, "singles": []})
-    assert post([{"kind": "multi", "variables": ["q1"]}]).status_code == 422           # <2
-    assert post([{"kind": "multi", "variables": ["q1", "ghost"]}]).status_code == 422   # unknown
-    assert post([{"kind": "multi", "variables": ["q1", "age"]}]).status_code == 422     # scale
-    assert post([{"kind": "multi", "variables": ["q1", "m1"]},
-                 {"kind": "multi", "variables": ["m1", "m2"]}]).status_code == 422       # double-assign
+    assert post([{"kind": "multi", "variables": ["q1"]}]).status_code == 200            # <2
+    assert post([{"kind": "multi", "variables": ["q1", "ghost"]}]).status_code == 200    # unknown
+    assert post([{"kind": "multi", "variables": ["q1", "age"]}]).status_code == 200      # scale/non-tick
 
 
 def test_regroup_returns_full_question_payload(client_memory, synthetic_bytes):

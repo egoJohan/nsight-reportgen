@@ -15,7 +15,7 @@ from __future__ import annotations
 import dataclasses
 
 from reportbuilder.model.question import QuestionModel
-from reportbuilder.ingest.multi_group import apply_groups, suggest_multi_groups
+from reportbuilder.ingest.multi_group import _is_binary, apply_groups, suggest_multi_groups
 from reportbuilder.ingest.battery_group import apply_batteries, suggest_batteries
 
 
@@ -28,13 +28,20 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
     override = override or {}
     known = set(model.variables)
 
-    # Manual multi groups — valid & non-stale only (battery kind reserved for Phase 2).
+    # Manual multi groups — applied leniently: only valid ones (≥2 known,
+    # tick-box/binary members) are used; anything else (stale/removed variable,
+    # non-tick-box, battery-kind) is silently skipped so a stored-but-now-invalid
+    # grouping never breaks the model. Authoring is validated in the UI.
     manual_groups: list[tuple[str, ...]] = []
     for g in override.get("groups", []) or []:
         if g.get("kind") != "multi":
             continue
         vs = tuple(g.get("variables", []) or [])
-        if len(vs) >= 2 and set(vs) <= known:
+        if (
+            len(vs) >= 2
+            and set(vs) <= known
+            and all(_is_binary(model.variables[v]) for v in vs)
+        ):
             manual_groups.append(vs)
     manual_members = {v for g in manual_groups for v in g}
     forced = (set(override.get("singles", []) or []) & known) - manual_members
