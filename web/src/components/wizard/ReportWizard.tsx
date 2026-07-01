@@ -198,6 +198,19 @@ export default function ReportWizard({
     []
   );
 
+  // Drop charts whose question no longer exists (e.g. its variable was absorbed
+  // into a group, or a group was split away) so Design never shows a dangling
+  // ref like "var7" that errors on preview.
+  const pruneToValidRefs = useCallback(
+    (valid: Set<string>) => {
+      mutate((d) => {
+        const kept = d.charts.filter((c) => valid.has(c.question_ref));
+        return kept.length === d.charts.length ? d : { ...d, charts: kept };
+      });
+    },
+    [mutate]
+  );
+
   // SAV (questionnaire) order: rank each question by its position in the source
   // file so newly added slides land in questionnaire order, matching how the
   // source decks are sequenced (the user can still drag to reorder).
@@ -863,6 +876,7 @@ export default function ReportWizard({
             onToggle={toggleQuestion}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
+            onPruneRefs={pruneToValidRefs}
           />
         )}
         {step === 1 && (

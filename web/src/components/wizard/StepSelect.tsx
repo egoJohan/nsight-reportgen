@@ -46,12 +46,14 @@ export default function StepSelect({
   onToggle,
   grouping,
   onGroupingChange,
+  onPruneRefs,
 }: {
   materialId: string;
   addedRefs: Set<string>;
   onToggle: (question: Question) => void;
   grouping: GroupingOverride;
   onGroupingChange: (override: GroupingOverride) => void;
+  onPruneRefs: (validQids: Set<string>) => void;
 }) {
   const { data: questions, isLoading, isError } = useRegroupedQuestions(
     materialId,
@@ -76,8 +78,13 @@ export default function StepSelect({
         }
       }
     }
+    // Drop any chart whose question no longer exists (its variable was absorbed
+    // into a group, or a group was split away).
+    if ([...addedRefs].some((ref) => !current.has(ref))) {
+      onPruneRefs(current);
+    }
     prevQids.current = current;
-  }, [questions, addedRefs, onToggle]);
+  }, [questions, addedRefs, onToggle, onPruneRefs]);
 
   const filtered = useMemo(
     () =>
