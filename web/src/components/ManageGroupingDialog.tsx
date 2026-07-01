@@ -109,7 +109,7 @@ export default function ManageGroupingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>Manage grouping</DialogTitle>
           <DialogDescription>
@@ -127,7 +127,7 @@ export default function ManageGroupingDialog({
                 show all
               </label>
             </div>
-            <div className="max-h-72 overflow-y-auto p-1.5">
+            <div className="max-h-[28rem] overflow-y-auto p-1.5">
               {pool.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">No ungrouped variables</p>
               ) : (
@@ -157,7 +157,7 @@ export default function ManageGroupingDialog({
             <div className="border-b px-3 py-2">
               <span className="text-xs font-medium uppercase text-muted-foreground">Groups</span>
             </div>
-            <div className="max-h-[19.5rem] space-y-2 overflow-y-auto p-2">
+            <div className="max-h-[28rem] space-y-2 overflow-y-auto p-2">
               {cards.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">No groups</p>
               ) : (
