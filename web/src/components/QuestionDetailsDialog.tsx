@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { Loader2Icon, AlertCircleIcon } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +9,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { useQuestionSummary } from "@/lib/queries";
+import { Button } from "@/components/ui/button";
+import { useQuestionSummary, useSetQuestionLabel } from "@/lib/queries";
 import type { QuestionSummary } from "@/lib/api";
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
@@ -72,6 +75,26 @@ export default function QuestionDetailsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
+  const setLabel = useSetQuestionLabel(materialId);
+  const [name, setName] = useState("");
+  // Seed the editor from the current (possibly already-renamed) question text.
+  useEffect(() => {
+    setName(s?.text ?? "");
+  }, [s?.text, qid]);
+
+  function saveName() {
+    if (!qid) return;
+    setLabel.mutate(
+      { qid, label: name },
+      {
+        onSuccess: () => toast.success("Question name updated"),
+        onError: (e) =>
+          toast.error(
+            `Rename failed: ${e instanceof Error ? e.message : "unknown error"}`
+          ),
+      }
+    );
+  }
 
   return (
     <Dialog open={!!qid} onOpenChange={onOpenChange}>
@@ -96,6 +119,31 @@ export default function QuestionDetailsDialog({
           </div>
         ) : (
           <div className="space-y-5 py-2">
+            {/* Editable question name — shown above the chart in reports/deck. */}
+            <div>
+              <label className="text-sm font-medium">Question name</label>
+              <p className="mb-1.5 text-xs text-muted-foreground">
+                Shown above the chart in every report. Clear the field to restore
+                the original.
+              </p>
+              <div className="flex items-start gap-2">
+                <textarea
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  rows={2}
+                  className="flex-1 resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  disabled={setLabel.isPending || name === (s.text ?? "")}
+                  onClick={saveName}
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+
             {/* Tags */}
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="font-normal">

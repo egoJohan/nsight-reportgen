@@ -413,6 +413,19 @@ export const api = {
         (r) => json<QuestionSummary>(r)
       ),
 
+    // Rename a question for this material (case-page edit). Blank reverts to the
+    // original SAV label. Applies to every report/chart/deck using the question.
+    setQuestionLabel: (
+      materialId: string,
+      qid: string,
+      label: string
+    ): Promise<{ qid: string; label: string | null }> =>
+      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/label`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label }),
+      }).then((r) => json<{ qid: string; label: string | null }>(r)),
+
     previewChart: (
       materialId: string,
       chart: ChartSpec,

@@ -225,6 +225,22 @@ export function useReport(caseId: string, reportId: string | null) {
   });
 }
 
+// Rename a question for this material (case-page edit). Invalidates every view
+// that renders a question's text so the rename appears immediately.
+export function useSetQuestionLabel(materialId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ qid, label }: { qid: string; label: string }) =>
+      api.materials.setQuestionLabel(materialId, qid, label),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.questions(materialId) });
+      qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
+      qc.invalidateQueries({ queryKey: ["regrouped-questions", materialId] });
+      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+    },
+  });
+}
+
 export function useCreateReport(caseId: string) {
   return useMutation({
     mutationFn: (report: ReportDoc) => api.reports.create(caseId, report),

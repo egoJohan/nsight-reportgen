@@ -184,13 +184,13 @@ function ChartPreview({
                 style={{ left: "4%", top: "2.5%", width: "92%" }}
               >
                 <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <p className="min-w-0 line-clamp-2 text-left text-[15px] leading-tight font-bold text-foreground">
+                <p className="min-w-0 text-left text-[15px] leading-tight font-bold text-foreground">
                   {headline}
                 </p>
               </div>
               {showQuestion && (
                 <p
-                  className="absolute z-10 line-clamp-3 pl-[3.5%] text-left text-[11px] leading-tight font-normal text-muted-foreground"
+                  className="absolute z-10 pl-[3.5%] text-left text-[11px] leading-tight font-normal text-muted-foreground"
                   style={{ left: "4%", width: "92%", bottom: "77%" }}
                 >
                   {questionText}
