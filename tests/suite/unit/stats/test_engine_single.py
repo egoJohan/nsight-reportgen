@@ -1,0 +1,162 @@
+"""Unit tests for engine._single via compute() — single categorical distributions."""
+from __future__ import annotations
+
+import pandas as pd
+
+from reportbuilder.model.question import ValueLabel, Variable, Question, QuestionModel
+from reportbuilder.model.report import (
+    ChartSpec, NumberFormat, SortSpec, ElementToggles,
+)
+from reportbuilder.stats import engine
+
+
+def _spec(**kw):
+    base = dict(question_ref="q", chart_type="vertical_bar", statistic="pct",
+                classifying_var=None, number_format=NumberFormat(),
+                sort=SortSpec(basis="data_order"), template_slot="s",
+                elements=ElementToggles())
+    base.update(kw)
+    return ChartSpec(**base)
+
+
+def _catvar(missing=()):
+    return Variable(name="q", label="Q", measurement="categorical",
+                    value_labels=(ValueLabel(1.0, "Red"), ValueLabel(2.0, "Green"),
+                                  ValueLabel(3.0, "Blue"), ValueLabel(9.0, "NA")),
+                    missing_values=frozenset(missing))
+
+
+def _model_q(var):
+    return (QuestionModel(variables={"q": var}, questions=[]),
+            Question(qid="q", kind="single", variables=("q",), text="Q"))
+
+
+def test_single_column_percentages_and_base():
+    var = _catvar(missing=(9.0,))
+    model, q = _model_q(var)
+    df = pd.DataFrame({"q": [1, 1, 2, 2, 2, 3, 9, 9, None]})
+    r = engine.compute(q, _spec(), df, model)
+    # user-missing (9) and NaN excluded from categories AND base
+    assert r.categories == ("Red", "Green", "Blue")
+    assert r.base_n == {"Total": 6}
+    assert r.cell("Red", "Total").pct == 33.0
+    assert r.cell("Green", "Total").pct == 50.0
+    assert r.cell("Blue", "Total").pct == 17.0
+    assert r.cell("Green", "Total").count == 3.0
+
+
+def test_single_user_missing_label_not_shown_as_category():
+    var = _catvar(missing=(9.0,))
+    model, q = _model_q(var)
+    df = pd.DataFrame({"q": [1, 2, 3, 9]})
+    r = engine.compute(q, _spec(), df, model)
+    assert "NA" not in r.categories
+
+
+def test_rating_scale_reorders_out_of_order_codes():
+    # codes stored out of order but labelled "1".."7"
+    rvar = Variable(name="r", label="R", measurement="scale",
+                    value_labels=(ValueLabel(10.0, "2"), ValueLabel(20.0, "3"),
+                                  ValueLabel(30.0, "4"), ValueLabel(40.0, "5"),
+                                  ValueLabel(50.0, "6"), ValueLabel(5.0, "1"),
+                                  ValueLabel(60.0, "7")),
+                    missing_values=frozenset())
+    model = QuestionModel(variables={"r": rvar}, questions=[])
+    q = Question(qid="r", kind="single", variables=("r",), text="R")
+    df = pd.DataFrame({"r": [5.0, 10, 20, 30, 40, 50, 60, 5, 60]})
+    r = engine.compute(q, _spec(question_ref="r"), df, model)
+    # ordered by scale point parsed from labels, not stored code order
+    assert r.categories == ("1", "2", "3", "4", "5", "6", "7")
+
+
+def test_show_not_answered_appends_bucket_last_and_uses_total_base():
+    var = _catvar(missing=(9.0,))
+    model, q = _model_q(var)
+    df = pd.DataFrame({"q": [1, 1, 2, 2, 2, 3, 9, 9, None]})
+    r = engine.compute(q, _spec(show_not_answered=True), df, model)
+    assert r.categories[-1] == "Not answered"
+    assert r.categories == ("Red", "Green", "Blue", "Not answered")
+    # base = total respondents (valid + missing + sysmis)
+    assert r.base_n == {"Total": 9}
+    # 2 nines + 1 NaN -> 3 not answered
+    assert r.cell("Not answered", "Total").count == 3.0
+    total_pct = sum(r.cell(c, "Total").pct for c in r.categories)
+    assert abs(total_pct - 100.0) <= 2.0
+
+
+def test_show_empty_categories_false_drops_zero_but_keeps_small_nonzero():
+    var = Variable(name="q", label="Q", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "Big"), ValueLabel(2.0, "Tiny"),
+                                 ValueLabel(3.0, "Zero")),
+                   missing_values=frozenset())
+    model = QuestionModel(variables={"q": var}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Q")
+    df = pd.DataFrame({"q": [1.0] * 997 + [2.0] * 4})  # base 1001; Tiny=0.4%, Zero=0%
+    nf = NumberFormat(mode="manual", pct_decimals=1)
+    r = engine.compute(q, _spec(show_empty_categories=False, number_format=nf), df, model)
+    # 0.0% "Zero" dropped; 0.4% "Tiny" kept
+    assert "Zero" not in r.categories
+    assert set(r.categories) == {"Big", "Tiny"}
+    assert r.cell("Tiny", "Total").pct == 0.4
+
+
+def test_show_empty_true_keeps_zero_rows():
+    var = Variable(name="q", label="Q", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "Big"), ValueLabel(2.0, "Tiny"),
+                                 ValueLabel(3.0, "Zero")),
+                   missing_values=frozenset())
+    model = QuestionModel(variables={"q": var}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Q")
+    df = pd.DataFrame({"q": [1.0] * 997 + [2.0] * 4})
+    r = engine.compute(q, _spec(show_empty_categories=True), df, model)
+    assert r.categories == ("Big", "Tiny", "Zero")
+
+
+def test_not_answered_codes_none_vs_empty_vs_value_changes_effective_missing():
+    var = Variable(name="q", label="Q", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "A"), ValueLabel(2.0, "B"),
+                                 ValueLabel(9.0, "NA")),
+                   missing_values=frozenset({9.0}))
+    model = QuestionModel(variables={"q": var}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Q")
+    df = pd.DataFrame({"q": [1, 1, 2, 9, 9]})
+
+    # None -> use var.missing_values ({9}); base excludes the two 9s
+    r_none = engine.compute(q, _spec(not_answered_codes=None), df, model)
+    assert r_none.base_n["Total"] == 3
+    assert r_none.categories == ("A", "B")
+
+    # () -> only NaN is missing; 9 becomes a real category
+    r_empty = engine.compute(q, _spec(not_answered_codes=()), df, model)
+    assert r_empty.base_n["Total"] == 5
+    assert "NA" in r_empty.categories
+
+    # (2,) -> 2 treated as missing, 9 becomes a category
+    r_val = engine.compute(q, _spec(not_answered_codes=(2.0,)), df, model)
+    assert r_val.base_n["Total"] == 4
+    assert "B" not in r_val.categories
+    assert "NA" in r_val.categories
+
+
+def test_label_overrides_change_display_not_order():
+    var = _catvar(missing=(9.0,))
+    model, q = _model_q(var)
+    df = pd.DataFrame({"q": [1, 2, 3]})
+    r = engine.compute(q, _spec(category_label_overrides=(("Red", "R!"),)), df, model)
+    # display swapped for Red -> "R!" but position (data order) unchanged
+    assert r.categories == ("R!", "Green", "Blue")
+
+
+def test_classifier_produces_segments_plus_total():
+    var = Variable(name="q", label="Q", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "A"), ValueLabel(2.0, "B")),
+                   missing_values=frozenset())
+    seg = Variable(name="g", label="g", measurement="categorical",
+                   value_labels=(), missing_values=frozenset())
+    model = QuestionModel(variables={"q": var, "g": seg}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Q")
+    df = pd.DataFrame({"q": [1, 1, 2, 2], "g": [1, 2, 1, 2]})
+    r = engine.compute(q, _spec(classifying_var="g"), df, model)
+    assert r.segments[-1] == "Total"
+    assert set(r.segments) == {"1", "2", "Total"}
+    assert r.base_n["Total"] == 4
