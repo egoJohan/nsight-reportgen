@@ -571,12 +571,12 @@ def list_variables(
     # the classifiers an analyst cross-tabulates by, so keep them when they are a
     # genuine segment (substantive labels, not TRUE/FALSE flags).
     def _keep(v) -> bool:
+        if include_all:
+            # The grouping editor needs EVERY variable — labels for grouped members
+            # (so a split shows titles, not raw ids) and the full tick-box pool.
+            return True
         if v.name in grouped:
             return False
-        if include_all:
-            # Grouping's "show all": reveal otherwise-hidden paradata/helper vars
-            # (still excluding current group members).
-            return True
         if not _is_metadata(v.name, v.label or v.name):
             return True
         return _segmentable(v) and _has_real_category_labels(v)

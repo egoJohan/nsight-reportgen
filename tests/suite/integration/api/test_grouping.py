@@ -44,6 +44,9 @@ def test_variables_expose_tickbox_flag(client_memory, synthetic_bytes):
     # q1 (Yes/No coded 1/2) is single-choice, not a 0/1 tick-box.
     assert "q1" in vs and vs["q1"]["tickbox"] is False
     assert all("tickbox" in v for v in vs.values())
+    # include_all returns grouped members too (m1/m2 are auto-grouped) with labels,
+    # so the grouping editor can title them and offer them after a split.
+    assert "m1" in vs and vs["m1"]["tickbox"] is True
 
 
 def test_regroup_is_stateless(client_memory, synthetic_bytes):

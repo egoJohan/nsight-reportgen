@@ -36,10 +36,11 @@ export default function ManageGroupingDialog({
   grouping: GroupingOverride;
   onSave: (override: GroupingOverride) => void;
 }) {
-  const [showAll, setShowAll] = useState(false);
-  // Cards reflect the report's CURRENT (incoming) grouping.
+  // Cards reflect the report's CURRENT (incoming) grouping. Fetch the FULL
+  // variable list (all=true) so grouped members carry labels — a split shows
+  // titles, not raw ids.
   const { data: reshaped } = useRegroupedQuestions(open ? materialId : null, grouping);
-  const { data: variables } = useVariables(open ? materialId : null, showAll);
+  const { data: variables } = useVariables(open ? materialId : null, true);
 
   const [groups, setGroups] = useState<GroupSpec[]>([]);
   const [singles, setSingles] = useState<string[]>([]);
@@ -62,20 +63,25 @@ export default function ManageGroupingDialog({
     }
     if (seeded || !reshaped || !variables) return;
     const manualKeys = new Set((grouping.groups ?? []).map((g) => setKey(g.variables)));
+    const groupCards = reshaped.filter((q) => q.kind === "multi" || q.kind === "battery");
+    // Variables already in a group are shown as cards, not in the pool.
+    const grouped = new Set(groupCards.flatMap((q) => q.variables));
     setGroups((grouping.groups ?? []).map((g) => ({ ...g })));
     setSingles([...(grouping.singles ?? [])]);
     setCards(
-      reshaped
-        .filter((q) => q.kind === "multi" || q.kind === "battery")
-        .map((q) => ({
-          key: q.qid,
-          label: q.text,
-          variables: q.variables,
-          source: manualKeys.has(setKey(q.variables)) ? "manual" : "auto",
-        }))
+      groupCards.map((q) => ({
+        key: q.qid,
+        label: q.text,
+        variables: q.variables,
+        source: manualKeys.has(setKey(q.variables)) ? "manual" : "auto",
+      }))
     );
-    // Only genuine tick-box (0/1) variables can form a multi-response group.
-    setPool((variables ?? []).filter((v) => v.tickbox).map((v) => v.name));
+    // Pool = ungrouped tick-box (0/1) variables — the only kind groupable into a multi.
+    setPool(
+      (variables ?? [])
+        .filter((v) => v.tickbox && !grouped.has(v.name))
+        .map((v) => v.name)
+    );
     setSelected(new Set());
     setSeeded(true);
   }, [open, seeded, reshaped, variables, grouping]);
@@ -130,12 +136,10 @@ export default function ManageGroupingDialog({
 
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
           <div className="flex min-h-0 flex-col rounded-lg border">
-            <div className="flex items-center justify-between border-b px-3 py-2">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Variables</span>
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <input type="checkbox" checked={showAll} onChange={(e) => { setShowAll(e.target.checked); setSeeded(false); }} />
-                show all
-              </label>
+            <div className="border-b px-3 py-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">
+                Tick-box variables
+              </span>
             </div>
             <div className="flex-1 overflow-y-auto p-1.5">
               {pool.length === 0 ? (
