@@ -109,7 +109,7 @@ export default function ManageGroupingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[85vh] w-[85vw] max-w-[85vw] flex-col">
+      <DialogContent className="flex h-[85vh] w-[85vw] max-w-[85vw] flex-col sm:max-w-[85vw]">
         <DialogHeader>
           <DialogTitle>Manage grouping</DialogTitle>
           <DialogDescription>
