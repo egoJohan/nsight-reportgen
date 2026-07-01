@@ -17,12 +17,33 @@ def _case_material(client, synthetic_bytes) -> str:
 
 def test_regroup_combines(client_memory, synthetic_bytes):
     mid = _case_material(client_memory, synthetic_bytes)
-    body = {"groups": [{"kind": "multi", "variables": ["q1", "m1"], "label": "Combo"}], "singles": []}
+    # m1/m2 are 0/1 tick-boxes — a valid multi group.
+    body = {"groups": [{"kind": "multi", "variables": ["m1", "m2"], "label": "Combo"}], "singles": []}
     r = client_memory.post(f"/materials/{mid}/regroup", json=body)
     assert r.status_code == 200
     combo = [q for q in r.json()["questions"]
-             if q["kind"] == "multi" and set(q["variables"]) == {"q1", "m1"}]
+             if q["kind"] == "multi" and set(q["variables"]) == {"m1", "m2"}]
     assert combo and combo[0]["text"] == "Combo"
+
+
+def test_regroup_non_tickbox_member_is_422(client_memory, synthetic_bytes):
+    """A single-choice categorical (q1 = Yes/No coded 1/2) is not a tick-box, so it
+    cannot be a multi-response member. Clear message."""
+    mid = _case_material(client_memory, synthetic_bytes)
+    r = client_memory.post(
+        f"/materials/{mid}/regroup",
+        json={"groups": [{"kind": "multi", "variables": ["q1", "m1"]}]},
+    )
+    assert r.status_code == 422
+    assert "tick-box" in r.json()["detail"].lower()
+
+
+def test_variables_expose_tickbox_flag(client_memory, synthetic_bytes):
+    mid = _case_material(client_memory, synthetic_bytes)
+    vs = {v["name"]: v for v in client_memory.get(f"/materials/{mid}/variables?include_all=true").json()["variables"]}
+    # q1 (Yes/No coded 1/2) is single-choice, not a 0/1 tick-box.
+    assert "q1" in vs and vs["q1"]["tickbox"] is False
+    assert all("tickbox" in v for v in vs.values())
 
 
 def test_regroup_is_stateless(client_memory, synthetic_bytes):

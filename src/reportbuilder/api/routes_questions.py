@@ -23,6 +23,7 @@ from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.ingest.grouping_override import apply_grouping_override
+from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
@@ -603,6 +604,8 @@ def list_variables(
                 # 0/1 membership the analyst cross-tabs by). Drives the
                 # classifying-variable picker.
                 "segmentable": _segmentable(var) or _is_binary_flag(var, _df_or_none()),
+                # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
+                "tickbox": _is_binary(var),
             }
             for var in all_vars
         ]
@@ -646,6 +649,13 @@ def _validate_override(base: QuestionModel, body: GroupingOverride) -> dict:
                 422,
                 f"Scale variable(s) {scale} cannot be in a multi group — members must "
                 "be binary/categorical tick-box variables.",
+            )
+        non_tick = [v for v in vs if not _is_binary(base.variables[v])]
+        if non_tick:
+            raise HTTPException(
+                422,
+                f"Variable(s) {non_tick} are single-choice questions — multi-response "
+                "grouping only works for tick-box (yes/no, 0/1) variables.",
             )
         dup = [v for v in vs if v in seen]
         if dup:

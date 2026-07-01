@@ -74,7 +74,8 @@ export default function ManageGroupingDialog({
           source: manualKeys.has(setKey(q.variables)) ? "manual" : "auto",
         }))
     );
-    setPool((variables ?? []).map((v) => v.name));
+    // Only genuine tick-box (0/1) variables can form a multi-response group.
+    setPool((variables ?? []).filter((v) => v.tickbox).map((v) => v.name));
     setSelected(new Set());
     setSeeded(true);
   }, [open, seeded, reshaped, variables, grouping]);
@@ -120,8 +121,10 @@ export default function ManageGroupingDialog({
         <DialogHeader>
           <DialogTitle>Manage grouping</DialogTitle>
           <DialogDescription>
-            Combine variables into a multi-response question, or split a group back
-            into single variables — for this report. Auto-detected groups can be split too.
+            Combine tick-box (yes/no) variables into a multi-response question, or
+            split a group back into single variables — for this report. Only
+            tick-box variables can form a multi; single-choice questions (age,
+            gender, …) aren't shown here. Auto-detected groups can be split too.
           </DialogDescription>
         </DialogHeader>
 
