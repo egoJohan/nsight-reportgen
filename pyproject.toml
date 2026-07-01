@@ -41,4 +41,5 @@ markers = [
     "integration: touches the real Attendo files",
     "judge: live Claude-as-judge test, needs ANTHROPIC_API_KEY",
     "live: live egoHive smoke test, skipped when egoHive is unreachable",
+    "demo: local-filesystem demo-mode e2e (NSIGHT_DEMO=1); auto-skips otherwise",
 ]

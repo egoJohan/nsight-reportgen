@@ -5,3 +5,6 @@ __pycache__/
 .pytest_cache/
 
 .superpowers/
+
+# Local-only client SAV copies for demo-group e2e (IPR — never commit)
+tests/rb/e2e/data/
