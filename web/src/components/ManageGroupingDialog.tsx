@@ -24,6 +24,34 @@ type Card = {
 
 const setKey = (vars: string[]) => [...vars].sort().join(" ");
 
+// Mirror of the backend's _group_text/_shared_question so a new group's card shows
+// the SAME title it will get when applied (the shared question stem), not a preview.
+function commonPrefix(strs: string[]): string {
+  if (!strs.length) return "";
+  let p = strs[0];
+  for (const s of strs.slice(1)) {
+    let i = 0;
+    while (i < p.length && i < s.length && p[i] === s[i]) i++;
+    p = p.slice(0, i);
+  }
+  return p;
+}
+
+function deriveGroupTitle(labels: string[]): string {
+  if (!labels.length) return "";
+  if (labels[0].includes(":")) {
+    const rhs = labels.map((l) => l.slice(l.indexOf(":") + 1).trim());
+    if (rhs.every(Boolean)) {
+      // Shared question = the longest right-hand side when every other is its prefix
+      // (tolerant of SPSS truncation; covers the identical case too).
+      const longest = rhs.reduce((a, b) => (b.length > a.length ? b : a));
+      if (rhs.every((r) => longest.startsWith(r))) return longest;
+    }
+  }
+  const stem = commonPrefix(labels).replace(/[\s:-]+$/, "");
+  return stem || labels[0];
+}
+
 /**
  * Controlled grouping editor for a REPORT. Seeded from the report's current
  * `grouping`; on Save it emits the edited override via `onSave` (the report saves
@@ -141,10 +169,9 @@ export default function ManageGroupingDialog({
     // (concatenating member labels made huge, ugly group names). For the in-session
     // card we show a short preview until the reshaped list re-derives the real name.
     const typed = groupName.trim();
-    const preview =
-      typed ||
-      vars.map((v) => labelOf.get(v) ?? v).slice(0, 2).join(" · ") +
-        (vars.length > 2 ? " …" : "");
+    // Show the SAME title the group gets on apply (the shared stem), so the new card
+    // is recognisable and matches the questions list after "Apply to report".
+    const preview = typed || deriveGroupTitle(vars.map((v) => labelOf.get(v) ?? v));
     setGroups((g) => [...g, { kind, variables: vars, label: typed }]);
     setCards((c) => [
       { key: `manual:${setKey(vars)}`, label: preview, variables: vars, source: "manual", kind },
