@@ -32,6 +32,8 @@ from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
     material_config,
+    material_singles,
+    auto_grouped_model,
     value_merges,
 )
 from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
@@ -490,6 +492,9 @@ def question_summary(
         "category_labels": _category_labels(model, q),
         "chartable": chartable,
         "non_chartable_reason": reason,
+        # A single that was SPLIT from an auto-group at the material level — offer to
+        # re-group it (restore the battery/multi) from the case-page details dialog.
+        "regroupable": _is_regroupable(q, material_id, client),
         "respondent_total": int(len(df)),
         "base_n": None,
         "statistic": "pct",
@@ -732,6 +737,55 @@ def split_question(
     cfg["grouping"] = grouping
     client.save_material_config(material_id, json.dumps(cfg))
     return {"qid": qid, "split_variables": members}
+
+
+def _is_regroupable(q, material_id: str, client) -> bool:
+    """True when q is a single variable that was SPLIT from a natural auto-group —
+    i.e. it's forced-single at the material level AND would form a battery/multi again."""
+    if q.kind != "single" or not q.variables:
+        return False
+    var = q.variables[0]
+    if var not in material_singles(material_id, client):
+        return False
+    auto = auto_grouped_model(material_id, client)
+    return any(g.kind in ("battery", "multi") and var in g.variables
+               for g in auto.questions)
+
+
+@questions_router.post("/materials/{material_id}/questions/{qid}/rejoin")
+def rejoin_question(
+    material_id: str,
+    qid: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Undo a material-level split: find the single variable's NATURAL auto-group and
+    remove its members from the material's forced-singles, so the group re-forms on the
+    case page and by default in every report."""
+    model = model_for_material(material_id, client)
+    q = next((x for x in model.questions if x.qid == qid), None)
+    if q is None or q.kind != "single" or not q.variables:
+        raise HTTPException(status_code=400, detail="Not a split single question")
+    var = q.variables[0]
+    auto = auto_grouped_model(material_id, client)
+    group = next((g for g in auto.questions
+                  if g.kind in ("battery", "multi") and var in g.variables), None)
+    if group is None:
+        raise HTTPException(status_code=400, detail="No natural group for this variable")
+    members = set(group.variables)
+    raw = client.load_material_config(material_id)
+    try:
+        cfg = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    grouping = cfg.get("grouping") if isinstance(cfg.get("grouping"), dict) else {}
+    grouping["singles"] = sorted(
+        s for s in (grouping.get("singles") or []) if s not in members
+    )
+    cfg["grouping"] = grouping
+    client.save_material_config(material_id, json.dumps(cfg))
+    return {"qid": qid, "rejoined_group": group.qid, "members": sorted(members)}
 
 
 # ---------------------------------------------------------------------------

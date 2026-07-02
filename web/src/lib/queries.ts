@@ -294,6 +294,20 @@ export function useSplitQuestion(materialId: string) {
   });
 }
 
+// Undo a split: re-form the variable's natural auto-group at the material level.
+export function useRejoinQuestion(materialId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (qid: string) => api.materials.rejoinQuestion(materialId, qid),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.questions(materialId) });
+      qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
+      qc.invalidateQueries({ queryKey: ["regrouped-questions", materialId] });
+      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+    },
+  });
+}
+
 export function useCreateReport(caseId: string) {
   return useMutation({
     mutationFn: (report: ReportDoc) => api.reports.create(caseId, report),
