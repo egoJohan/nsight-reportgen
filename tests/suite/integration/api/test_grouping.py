@@ -90,38 +90,3 @@ def test_variables_include_all_is_superset(client_memory, synthetic_bytes):
     base = client_memory.get(f"/materials/{mid}/variables").json()["variables"]
     allv = client_memory.get(f"/materials/{mid}/variables?include_all=true").json()["variables"]
     assert len(allv) >= len(base)
-
-
-def _case_material(client, synthetic_bytes) -> str:
-    cid = client.post("/cases", json={"name": "S"}).json()["case_id"]
-    return client.post(
-        f"/cases/{cid}/materials",
-        files={"file": ("s.sav", synthetic_bytes, "application/octet-stream")},
-    ).json()["material_id"]
-
-
-def test_split_ungroups_auto_group_at_material_level(client_memory, synthetic_bytes):
-    """POST .../split forces an auto multi/battery's members single at the material
-    level: the group disappears from the questions list and members show as singles."""
-    mid = _case_material(client_memory, synthetic_bytes)
-    qs = client_memory.get(f"/materials/{mid}/questions").json()["questions"]
-    grouped = [q for q in qs if q["kind"] in ("multi", "battery")]
-    assert grouped, "synthetic model should auto-form a multi (m1/m2)"
-    target = grouped[0]
-    members = set(target["variables"])
-
-    r = client_memory.post(f"/materials/{mid}/questions/{target['qid']}/split")
-    assert r.status_code == 200
-    assert set(r.json()["split_variables"]) == members
-
-    qs2 = client_memory.get(f"/materials/{mid}/questions").json()["questions"]
-    # the group is gone; its members now appear as single questions
-    assert not any(q["qid"] == target["qid"] for q in qs2)
-    single_vars = {v for q in qs2 if q["kind"] == "single" for v in q["variables"]}
-    assert members <= single_vars
-
-
-def test_split_rejects_non_grouped_question(client_memory, synthetic_bytes):
-    mid = _case_material(client_memory, synthetic_bytes)
-    r = client_memory.post(f"/materials/{mid}/questions/q1/split")  # q1 is a single
-    assert r.status_code == 400

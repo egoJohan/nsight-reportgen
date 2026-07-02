@@ -701,39 +701,6 @@ def set_question_label(
     return {"qid": qid, "label": text or None}
 
 
-@questions_router.post("/materials/{material_id}/questions/{qid}/split")
-def split_question(
-    material_id: str,
-    qid: str,
-    client: DataHiveClient = Depends(get_client),
-) -> dict:
-    """Ungroup an auto-detected battery/multi at the MATERIAL level: its member
-    variables are forced to stay single (stored in the material config as
-    grouping.singles), so it shows split on the case page AND by default in every
-    report from this material. Reports can still re-group per-report in the wizard."""
-    model = model_for_material(material_id, client)
-    q = next((x for x in model.questions if x.qid == qid), None)
-    if q is None:
-        raise HTTPException(status_code=404, detail=f"No question {qid!r}")
-    if q.kind not in ("battery", "multi"):
-        raise HTTPException(status_code=400, detail="Only grouped questions can be split")
-    members = [str(v) for v in q.variables]
-    raw = client.load_material_config(material_id)
-    try:
-        cfg = json.loads(raw) if raw else {}
-    except (ValueError, TypeError):
-        cfg = {}
-    if not isinstance(cfg, dict):
-        cfg = {}
-    grouping = cfg.get("grouping") if isinstance(cfg.get("grouping"), dict) else {}
-    singles = set(grouping.get("singles") or [])
-    singles.update(members)
-    grouping["singles"] = sorted(singles)
-    cfg["grouping"] = grouping
-    client.save_material_config(material_id, json.dumps(cfg))
-    return {"qid": qid, "split_variables": members}
-
-
 # ---------------------------------------------------------------------------
 # Word-cloud value merges (data cleaning) — per question, material-level.
 # ---------------------------------------------------------------------------

@@ -466,16 +466,6 @@ export const api = {
         body: JSON.stringify({ label }),
       }).then((r) => json<{ qid: string; label: string | null }>(r)),
 
-    // Ungroup an auto battery/multi at the material level (case-page split): its
-    // members are forced single, applied on the case page and as the report default.
-    splitQuestion: (
-      materialId: string,
-      qid: string
-    ): Promise<{ qid: string; split_variables: string[] }> =>
-      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/split`, {
-        method: "POST",
-      }).then((r) => json<{ qid: string; split_variables: string[] }>(r)),
-
     previewChart: (
       materialId: string,
       chart: ChartSpec,

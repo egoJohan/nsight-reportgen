@@ -279,21 +279,6 @@ export function useSetQuestionLabel(materialId: string) {
   });
 }
 
-// Split an auto battery/multi at the material level (case-page ungroup). Invalidates
-// every view that lists questions so the split shows immediately + as the report default.
-export function useSplitQuestion(materialId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (qid: string) => api.materials.splitQuestion(materialId, qid),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: qk.questions(materialId) });
-      qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
-      qc.invalidateQueries({ queryKey: ["regrouped-questions", materialId] });
-      qc.invalidateQueries({ queryKey: ["chart-preview"] });
-    },
-  });
-}
-
 export function useCreateReport(caseId: string) {
   return useMutation({
     mutationFn: (report: ReportDoc) => api.reports.create(caseId, report),

@@ -10,8 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useQuestionSummary, useSetQuestionLabel, useSplitQuestion } from "@/lib/queries";
-import { Undo2Icon } from "lucide-react";
+import { useQuestionSummary, useSetQuestionLabel } from "@/lib/queries";
 import WordMergeEditor from "@/components/WordMergeEditor";
 import type { QuestionSummary } from "@/lib/api";
 
@@ -78,7 +77,6 @@ export default function QuestionDetailsDialog({
 }) {
   const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
   const setLabel = useSetQuestionLabel(materialId);
-  const split = useSplitQuestion(materialId);
   const [name, setName] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Seed the editor from the current (possibly already-renamed) question text.
@@ -285,33 +283,9 @@ export default function QuestionDetailsDialog({
 
             {/* Variables */}
             <div>
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <p className="text-sm font-medium">
-                  {s.variables.length === 1 ? "Variable" : "Variables"}
-                </p>
-                {(s.kind === "battery" || s.kind === "multi") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    disabled={split.isPending}
-                    onClick={() => {
-                      if (!qid) return;
-                      split.mutate(qid, {
-                        onSuccess: () => {
-                          toast.success("Split into individual questions");
-                          onOpenChange(false);
-                        },
-                        onError: (e) =>
-                          toast.error(`Could not split: ${(e as Error).message}`),
-                      });
-                    }}
-                  >
-                    <Undo2Icon className="size-4" />
-                    Split into individual questions
-                  </Button>
-                )}
-              </div>
+              <p className="mb-1.5 text-sm font-medium">
+                {s.variables.length === 1 ? "Variable" : "Variables"}
+              </p>
               <div className="flex flex-wrap gap-1.5">
                 {s.variables.map((v) => (
                   <Badge key={v.name} variant="outline" className="font-mono font-normal" title={v.label}>
@@ -319,12 +293,6 @@ export default function QuestionDetailsDialog({
                   </Badge>
                 ))}
               </div>
-              {(s.kind === "battery" || s.kind === "multi") && (
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  Ungroups these {s.variables.length} variables into separate questions —
-                  for this material and every report built from it.
-                </p>
-              )}
             </div>
           </div>
         )}
