@@ -27,6 +27,7 @@ import math
 import textwrap
 
 import numpy as np
+from matplotlib.colors import to_rgb
 from reportbuilder.render.image._mpl import (
     new_figure, new_tall_figure, render_png, place_picture, place_picture_square,
     series_values, format_value, style_legend, force_break_token, wrap_label,
@@ -255,6 +256,15 @@ def _label_offset(max_val: float) -> float:
     return max(0.5, max_val * 0.01)
 
 
+def _contrast_ink(color) -> str:
+    """Label colour for text placed ON a coloured bar: white on dark fills, INK on
+    light — so a stacked-bar % stays legible even on the darkest teal. Accepts a hex
+    string or an (r,g,b[,a]) tuple."""
+    r, g, b = to_rgb(color)
+    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "#FFFFFF" if lum < 0.55 else INK
+
+
 def _should_orient_horizontal(cats: list[str]) -> bool:
     """Return True if auto-orientation picks horizontal bars.
 
@@ -479,7 +489,8 @@ def build_image_column_stacked(ctx) -> None:
                     bar.get_x() + bar.get_width() / 2, b + h / 2,
                     format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
-                    fontsize=9.0, fontweight="bold", color=INK, zorder=5,
+                    fontsize=9.0, fontweight="bold",
+                    color=_contrast_ink(bar.get_facecolor()), zorder=5,
                 )
         bottoms = bottoms + heights
 
@@ -530,13 +541,14 @@ def build_image_bar_stacked(ctx) -> None:
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
                 edgecolor="none", zorder=3)
-        for yi, ov, l, w in zip(y, orig, lefts, widths):
+        for yi, ov, l, w, bc in zip(y, orig, lefts, widths, bar_clrs):
             if w > 1:
                 ax.text(
                     l + w / 2, yi,
                     format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
                     ha="center", va="center",
-                    fontsize=9.0, fontweight="bold", color=INK, zorder=5,
+                    fontsize=9.0, fontweight="bold",
+                    color=_contrast_ink(bc), zorder=5,
                 )
         lefts = lefts + widths
 
