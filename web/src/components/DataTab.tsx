@@ -53,23 +53,24 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
 // Compact status: one icon — OK, warning (has "Not answered"/missing codes to
 // check), or error (can't be charted at all).
 function StatusIcon({ q }: { q: Question }) {
+  // Filled shape + white symbol so the status colour reads at a glance.
   if (q.chartable === false) {
     return (
       <span className="inline-flex">
-        <CircleXIcon className="size-4 text-red-500" />
+        <CircleXIcon className="size-[18px] fill-red-500 text-white" />
       </span>
     );
   }
   if (q.missing_values && q.missing_values.length > 0) {
     return (
       <span className="inline-flex">
-        <TriangleAlertIcon className="size-4 text-amber-500" />
+        <TriangleAlertIcon className="size-[18px] fill-amber-500 text-white" />
       </span>
     );
   }
   return (
     <span className="inline-flex">
-      <CircleCheckIcon className="size-4 text-emerald-500" />
+      <CircleCheckIcon className="size-[18px] fill-emerald-500 text-white" />
     </span>
   );
 }
@@ -189,7 +190,7 @@ function QuestionTable({
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead className="w-full py-3">Question</TableHead>
                 <TableHead className="whitespace-nowrap py-3">Type</TableHead>
-                <TableHead className="whitespace-nowrap py-3">Status</TableHead>
+                <TableHead className="whitespace-nowrap py-3 text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -210,7 +211,7 @@ function QuestionTable({
                   <TableCell className="py-3 align-top">
                     <KindBadge q={q} />
                   </TableCell>
-                  <TableCell className="py-3 align-top">
+                  <TableCell className="py-3 align-top text-center">
                     <StatusIcon q={q} />
                   </TableCell>
                 </TableRow>
