@@ -14,14 +14,50 @@ from __future__ import annotations
 
 import dataclasses
 
-from reportbuilder.model.question import QuestionModel
+from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.ingest.multi_group import _is_binary, apply_groups, suggest_multi_groups
-from reportbuilder.ingest.battery_group import apply_batteries, suggest_batteries
+from reportbuilder.ingest.battery_group import _slug, apply_batteries, suggest_batteries
 
 
 def _battery_vars(battery) -> set[str]:
     _subject, cells = battery
     return {var for (_cat, var, _stem) in cells}
+
+
+def _scale_sig(var: Variable):
+    """A hashable signature of a variable's rating scale (code→label), or None if the
+    variable isn't a scale. Two variables share a scale when their signatures match."""
+    from reportbuilder.stats.engine import scale_levels
+    lv = scale_levels(var)
+    return tuple((c, l) for c, l, _p in lv) if lv else None
+
+
+def _apply_manual_batteries(model: QuestionModel,
+                            batteries: list[tuple[str, tuple[str, ...]]]) -> QuestionModel:
+    """Replace each battery's member single-questions with one ``kind="battery"``
+    question (members = the statements, text = the group label), at the position of
+    the first member so the deck order is preserved."""
+    if not batteries:
+        return model
+    by_var: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for label, members in batteries:
+        for v in members:
+            by_var[v] = (label, members)
+    emitted: set[tuple[str, ...]] = set()
+    questions: list[Question] = []
+    for q in model.questions:
+        hit = set(q.variables) & set(by_var)
+        if not hit:
+            questions.append(q)
+            continue
+        label, members = by_var[next(iter(hit))]
+        if members in emitted:
+            continue
+        emitted.add(members)
+        qid = f"battery-{_slug(label or '-'.join(members))}"
+        questions.append(Question(qid=qid, kind="battery",
+                                  variables=tuple(members), text=label))
+    return QuestionModel(variables=model.variables, questions=questions)
 
 
 def apply_grouping_override(model: QuestionModel, override: dict | None) -> QuestionModel:
@@ -44,8 +80,24 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
         ):
             manual_groups.append(vs)
     manual_members = {v for g in manual_groups for v in g}
-    forced = (set(override.get("singles", []) or []) & known) - manual_members
-    blocked = manual_members | forced
+
+    # Manual BATTERY groups — ≥2 known members that are rating scales sharing one scale
+    # signature; anything else silently skipped (lenient, like multi). Members are
+    # blocked from auto grouping and dropped from singles.
+    manual_batteries: list[tuple[str, tuple[str, ...]]] = []
+    for g in override.get("groups", []) or []:
+        if g.get("kind") != "battery":
+            continue
+        vs = tuple(g.get("variables", []) or [])
+        if len(vs) < 2 or not (set(vs) <= known):
+            continue
+        sigs = [_scale_sig(model.variables[v]) for v in vs]
+        if all(sigs) and len(set(sigs)) == 1:
+            manual_batteries.append((g.get("label") or "", vs))
+    battery_members = {v for _label, members in manual_batteries for v in members}
+
+    forced = (set(override.get("singles", []) or []) & known) - manual_members - battery_members
+    blocked = manual_members | forced | battery_members
 
     # Auto multi suggestions that don't touch a manual member or a forced single.
     auto_multi = [g for g in suggest_multi_groups(model) if not (set(g) & blocked)]
@@ -57,6 +109,9 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
     bats = [b for b in suggest_batteries(m) if not (_battery_vars(b) & blocked)]
     if bats:
         m = apply_batteries(m, bats)
+
+    # Manual batteries applied last — members are still single here (blocked above).
+    m = _apply_manual_batteries(m, manual_batteries)
     return m
 
 

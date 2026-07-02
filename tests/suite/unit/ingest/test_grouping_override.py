@@ -86,3 +86,43 @@ def test_non_tickbox_group_is_skipped(tmp_path):
     )
     assert not any(q.kind == "multi" and "q1" in q.variables for q in got.questions)
     assert _q(got, "q1").kind == "single"
+
+
+from reportbuilder.model.question import Variable, ValueLabel, Question, QuestionModel
+
+
+def _scalevar(name, label, n=5):
+    return Variable(name=name, label=label, measurement="scale",
+                    value_labels=tuple(ValueLabel(float(i), l) for i, l in
+                                       zip(range(1, n + 1),
+                                           ["Ei lainkaan", "Vähän", "Keski", "Paljon",
+                                            "Erittäin", "F", "G"][:n])),
+                    missing_values=frozenset())
+
+
+def _two_scale_model():
+    s1, s2 = _scalevar("s1", "Stmt A"), _scalevar("s2", "Stmt B")
+    return QuestionModel(variables={"s1": s1, "s2": s2},
+                         questions=[Question(qid="s1", kind="single", variables=("s1",), text="Stmt A"),
+                                    Question(qid="s2", kind="single", variables=("s2",), text="Stmt B")])
+
+
+def test_manual_battery_group_creates_battery():
+    got = apply_grouping_override(
+        _two_scale_model(),
+        {"groups": [{"kind": "battery", "variables": ["s1", "s2"], "label": "Importance"}],
+         "singles": []})
+    bats = [q for q in got.questions if q.kind == "battery"]
+    assert len(bats) == 1
+    assert set(bats[0].variables) == {"s1", "s2"} and bats[0].text == "Importance"
+    assert not any(q.kind == "single" for q in got.questions)  # members absorbed
+
+
+def test_manual_battery_skipped_when_scales_differ():
+    model = QuestionModel(
+        variables={"s1": _scalevar("s1", "A", 5), "s2": _scalevar("s2", "B", 3)},
+        questions=[Question(qid="s1", kind="single", variables=("s1",), text="A"),
+                   Question(qid="s2", kind="single", variables=("s2",), text="B")])
+    got = apply_grouping_override(
+        model, {"groups": [{"kind": "battery", "variables": ["s1", "s2"], "label": "X"}]})
+    assert not any(q.kind == "battery" for q in got.questions)  # mismatched scales → skipped
