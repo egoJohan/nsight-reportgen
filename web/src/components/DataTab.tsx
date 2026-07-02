@@ -198,7 +198,6 @@ function QuestionTable({
                   key={q.qid}
                   className="group cursor-pointer hover:bg-muted/40"
                   onClick={() => setDetailQid(q.qid)}
-                  title="View question details"
                 >
                   <TableCell className="py-3 max-w-0">
                     <p className="text-sm leading-snug line-clamp-2 group-hover:line-clamp-none transition-all">

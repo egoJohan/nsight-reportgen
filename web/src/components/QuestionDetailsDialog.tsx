@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2Icon, AlertCircleIcon } from "lucide-react";
+import { Loader2Icon, AlertCircleIcon, TriangleAlertIcon, CircleXIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -127,6 +127,23 @@ export default function QuestionDetailsDialog({
           </div>
         ) : (
           <div className="space-y-5 py-2">
+            {/* Status flags — only shown when NOT everything-ok. */}
+            {(s.chartable === false ||
+              (s.missing_values && s.missing_values.length > 0)) && (
+              <div className="flex flex-wrap gap-2">
+                {s.chartable === false && (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700">
+                    <CircleXIcon className="size-3.5" /> Not chartable
+                  </span>
+                )}
+                {s.missing_values && s.missing_values.length > 0 && (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    <TriangleAlertIcon className="size-3.5" /> Has "Not answered" values
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Editable question name — shown above the chart in reports/deck. */}
             <div>
               <label className="text-sm font-medium">Question name</label>
