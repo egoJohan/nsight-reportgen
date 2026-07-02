@@ -117,12 +117,28 @@ def test_battery_text_subject_only_when_no_common_theme():
     assert _battery_text("Attendo", ["Alpha", "Beta"]) == "Attendo"
 
 
-def test_battery_text_trims_long_theme_at_word_boundary():
-    theme = "word " * 40  # >90 chars
-    stems = [theme, theme]
-    out = _battery_text("S", stems)
+def test_battery_text_keeps_full_question_and_drops_scale_instructions():
+    # Real shape: the shared stem is the full question followed by scale
+    # instructions. Keep the whole question (cut at its terminal "?"), never
+    # mid-sentence, and drop the trailing "Vastaa asteikolla…" legend.
+    stem = (
+        " Arvioi nyt tarkemmin mielikuvaasi kustakin yksityisestä palveluntarjoajasta, "
+        "jonka kerroit tuntevasi vähintään nimeltä  Kuinka hyvin seuraavat "
+        "ominaisuudet vastaavat mielikuvaasi? Vastaa asteikolla 1-5, jossa 1 = Ei"
+    )
+    out = _battery_text("Attendo", [stem, stem])
+    assert out.startswith("Attendo — Arvioi nyt tarkemmin")
+    assert "jonka kerroit tuntevasi vähintään nimeltä" in out  # NOT cut at "jonka"
+    assert out.rstrip().endswith("mielikuvaasi?")              # ends at the question
+    assert "asteikolla" not in out                             # scale legend dropped
+
+
+def test_battery_text_trims_very_long_theme_without_sentence_end():
+    theme = "word " * 60  # >160 chars, no sentence terminator
+    out = _battery_text("S", [theme, theme])
+    body = out.split(" — ", 1)[1]
     assert out.startswith("S — ")
-    assert len(out.split(" — ", 1)[1]) <= 90
+    assert len(body) <= 165 and body.endswith("…")
 
 
 # ---- apply_batteries -------------------------------------------------------

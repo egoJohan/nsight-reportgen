@@ -179,25 +179,25 @@ function ChartPreview({
             />
           ) : (
             <>
-              {/* Title + question as a top-anchored column so BOTH wrap over as
-                  many lines as needed (grow downward) — the full question is
-                  always visible, never clipped, without shrinking the font. */}
               <div
                 className="absolute z-10 flex items-start gap-2.5"
                 style={{ left: "4%", top: "2.5%", width: "92%" }}
               >
                 <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <div className="min-w-0">
-                  <p className="text-left text-[15px] leading-tight font-bold text-foreground">
-                    {headline}
-                  </p>
-                  {showQuestion && (
-                    <p className="mt-1 text-left text-[11px] leading-snug font-normal text-muted-foreground">
-                      {questionText}
-                    </p>
-                  )}
-                </div>
+                <p className="min-w-0 text-left text-[15px] leading-tight font-bold text-foreground">
+                  {headline}
+                </p>
               </div>
+              {/* Question subtitle in its original spot (just above the chart);
+                  no line-clamp so a long question wraps upward instead of clipping. */}
+              {showQuestion && (
+                <p
+                  className="absolute z-10 pl-[3.5%] text-left text-[11px] leading-tight font-normal text-muted-foreground"
+                  style={{ left: "4%", width: "92%", bottom: "77%" }}
+                >
+                  {questionText}
+                </p>
+              )}
             </>
           ))}
 

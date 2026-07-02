@@ -63,12 +63,23 @@ def suggest_batteries(
 
 
 def _battery_text(subject: str, stems: list[str]) -> str:
-    """`<subject> — <shared question theme>` (theme = common stem prefix)."""
-    theme = os.path.commonprefix(stems).strip(" :-")
-    # Trim to a clean word boundary so the title isn't cut mid-word.
-    if len(theme) > 90:
-        theme = theme[:90].rsplit(" ", 1)[0]
-    return f"{subject} — {theme}" if theme else subject
+    """`<subject> — <shared question>` (the question shared by all cells).
+
+    The theme is the common prefix of the cell stems. Survey stems commonly append
+    scale/answer instructions after the question ("… mielikuvaasi? Vastaa asteikolla
+    1-5 …"), so keep the whole question by cutting at its terminal "?"; drop the
+    trailing legend. With no sentence terminator, trim a very long theme at a word
+    boundary (never mid-sentence at an arbitrary length). (REQ-C-24a)
+    """
+    theme = re.sub(r"\s+", " ", os.path.commonprefix(stems)).strip(" :-")
+    if not theme:
+        return subject
+    q = re.match(r"(.*?\?)(?:\s|$)", theme)  # up to the first sentence-ending "?"
+    if q:
+        theme = q.group(1)
+    elif len(theme) > 160:
+        theme = theme[:160].rsplit(" ", 1)[0] + "…"
+    return f"{subject} — {theme}"
 
 
 def apply_batteries(
