@@ -162,19 +162,34 @@ def _place_series_legend(fig, ax, segs, *, vertical: bool) -> None:
     if n <= _LEGEND_BELOW_MAX:
         _legend_below(ax, n, y=-0.22 if vertical else -0.08)
         return
-    # Right-side vertical legend. Shrink the axes width; the font steps down as the
-    # series count grows so a long list still fits the figure height.
+    # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
+    # so long combo labels (e.g. gender × a long life-situation label) can't balloon
+    # the legend column and shrink the plot. The axes shrink to make room within the
+    # figure; the font steps down as the series count grows so a long list still fits.
+    handles, labels = ax.get_legend_handles_labels()
+    wrapped = [_wrap_legend_label(lbl) for lbl in labels]
     box = ax.get_position()
-    ax.set_position([box.x0, box.y0, box.width * 0.70, box.height])
+    ax.set_position([box.x0, box.y0, box.width * 0.72, box.height])
     fs = 9.0 if n <= 12 else (8.0 if n <= 20 else 7.0)
     leg = ax.legend(
+        handles, wrapped,
         loc="center left", bbox_to_anchor=(1.02, 0.5),
         ncol=1, frameon=False, fontsize=fs,
-        handlelength=1.0, handletextpad=0.5, labelspacing=0.35,
+        handlelength=1.0, handletextpad=0.5, labelspacing=0.4,
     )
     if leg is not None:
         for t in leg.get_texts():
             t.set_color(INK)
+
+
+def _wrap_legend_label(label: str, width: int = 26, max_lines: int = 2) -> str:
+    """Wrap a legend label to at most `max_lines` of ~`width` chars, ellipsising any
+    overflow — bounds the legend column width so long combo labels don't dominate."""
+    lines = textwrap.wrap(label, width=width) or [label]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1][: width - 1].rstrip() + "…"
+    return "\n".join(lines)
 
 
 def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
