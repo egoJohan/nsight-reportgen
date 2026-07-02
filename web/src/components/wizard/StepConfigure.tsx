@@ -1329,7 +1329,7 @@ function StepConfigureInner({
   onEnsureTitles?: (refs: string[]) => void;
   // Add / regenerate special (non-chart) slides. onAddSpecial returns the new
   // slide's question_ref so the caller can select it.
-  onAddSpecial?: (type: string) => string | void;
+  onAddSpecial?: (type: string, afterRef?: string | null) => string | void;
   onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
@@ -1398,7 +1398,8 @@ function StepConfigureInner({
         onOpenChange={setSpecialDialogOpen}
         existingTypes={existingSpecialTypes}
         onPick={(type) => {
-          const ref = onAddSpecial(type);
+          // Insert at the active slide's position (after it); else at the front.
+          const ref = onAddSpecial(type, active);
           if (ref) setActive(ref);
         }}
       />
@@ -1449,23 +1450,29 @@ function StepConfigureInner({
             const dragging = dragIndex === i;
             const dropTarget =
               dragIndex !== null && overIndex === i && dragIndex !== i;
+            const dropBelow = dragIndex !== null && i > dragIndex;
             const isActive = c.question_ref === active;
             return (
               <div
                 key={`${c.question_ref}-${i}`}
                 {...itemProps(i)}
                 className={cn(
-                  "group overflow-hidden rounded-lg border transition-colors",
+                  "group relative overflow-hidden rounded-lg border transition-colors",
                   isActive
                     ? "border-primary/40 bg-primary/5"
                     : "border-border hover:bg-muted/40",
-                  dragging && "opacity-50",
-                  dropTarget &&
-                    (dragIndex !== null && i > dragIndex
-                      ? "border-b-2 border-b-primary"
-                      : "border-t-2 border-t-primary")
+                  dragging && "opacity-40 ring-1 ring-primary/30"
                 )}
               >
+                {/* Clear drop-line showing exactly where the dragged slide will land. */}
+                {dropTarget && (
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute inset-x-0 z-20 h-1 bg-primary shadow-[0_0_4px] shadow-primary/50",
+                      dropBelow ? "bottom-0" : "top-0"
+                    )}
+                  />
+                )}
                 {/* header: drag handle + number + text */}
                 <div className="flex items-start gap-1.5 px-2 pt-2">
                   {onReorder && (

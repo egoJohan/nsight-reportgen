@@ -588,7 +588,7 @@ export default function ReportWizard({
   // can select it) and generate its bullets in the background — spanning pages
   // when the content overflows one slide.
   const addSpecialSlide = useCallback(
-    (type: string): string => {
+    (type: string, afterRef?: string | null): string => {
       const heading = SPECIAL_HEADINGS[type];
       const placeholder = makeSpecialSlide(type, { slide_title: heading });
       const group = placeholder.question_ref;
@@ -596,8 +596,17 @@ export default function ReportWizard({
         ...placeholder,
         options: { ...placeholder.options, group },
       };
-      // Special slides always go to the front of the deck.
-      mutate((d) => ({ ...d, charts: normalizeSlots([anchor, ...d.charts]) }));
+      // Insert right AFTER the active slide (so it lands where you're working);
+      // with no active slide, go to the front of the deck.
+      mutate((d) => {
+        const charts = [...d.charts];
+        const at = afterRef
+          ? charts.findIndex((c) => c.question_ref === afterRef)
+          : -1;
+        if (at >= 0) charts.splice(at + 1, 0, anchor);
+        else charts.unshift(anchor);
+        return { ...d, charts: normalizeSlots(charts) };
+      });
       setBulletsPending(group, true);
       void (async () => {
         try {
