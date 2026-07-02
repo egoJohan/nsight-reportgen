@@ -15,7 +15,9 @@ from __future__ import annotations
 import dataclasses
 
 from reportbuilder.model.question import Question, QuestionModel, Variable
-from reportbuilder.ingest.multi_group import _is_binary, apply_groups, suggest_multi_groups
+from reportbuilder.ingest.multi_group import (
+    _is_binary, _group_text, apply_groups, suggest_multi_groups,
+)
 from reportbuilder.ingest.battery_group import _slug, apply_batteries, suggest_batteries
 
 
@@ -35,14 +37,38 @@ def _scale_sig(var: Variable):
 def _apply_manual_batteries(model: QuestionModel,
                             batteries: list[tuple[str, tuple[str, ...]]]) -> QuestionModel:
     """Replace each battery's member single-questions with one ``kind="battery"``
-    question (members = the statements, text = the group label), at the position of
-    the first member so the deck order is preserved."""
+    question at the position of the first member (deck order preserved). The text is
+    the user's typed name, else the SHARED question stem of the members (not their
+    labels concatenated); members are relabelled to their subject for clean
+    stacked-bar statements; the qid is a short, stable slug."""
     if not batteries:
         return model
-    by_var: dict[str, tuple[str, tuple[str, ...]]] = {}
-    for label, members in batteries:
+    # Text derived from ORIGINAL labels (before the subject relabel below).
+    texts: dict[tuple[str, ...], str] = {
+        members: ((label or "").strip() or _group_text(model, members))
+        for label, members in batteries
+    }
+    variables = dict(model.variables)
+    for _label, members in batteries:
         for v in members:
-            by_var[v] = (label, members)
+            lbl = variables[v].label or ""
+            if ":" in lbl:
+                subj = lbl.split(":", 1)[0].strip()
+                if subj:
+                    variables[v] = dataclasses.replace(variables[v], label=subj)
+
+    by_var = {v: members for _label, members in batteries for v in members}
+    used_qids: set[str] = set()
+
+    def _qid(text: str, members: tuple[str, ...]) -> str:
+        base = _slug(text)[:48].strip("-") or _slug("-".join(members))[:48]
+        qid = f"battery-{base}"
+        cand, i = qid, 2
+        while cand in used_qids:
+            cand, i = f"{qid}-{i}", i + 1
+        used_qids.add(cand)
+        return cand
+
     emitted: set[tuple[str, ...]] = set()
     questions: list[Question] = []
     for q in model.questions:
@@ -50,14 +76,13 @@ def _apply_manual_batteries(model: QuestionModel,
         if not hit:
             questions.append(q)
             continue
-        label, members = by_var[next(iter(hit))]
+        members = by_var[next(iter(hit))]
         if members in emitted:
             continue
         emitted.add(members)
-        qid = f"battery-{_slug(label or '-'.join(members))}"
-        questions.append(Question(qid=qid, kind="battery",
-                                  variables=tuple(members), text=label))
-    return QuestionModel(variables=model.variables, questions=questions)
+        questions.append(Question(qid=_qid(texts[members], members), kind="battery",
+                                  variables=tuple(members), text=texts[members]))
+    return QuestionModel(variables=variables, questions=questions)
 
 
 def apply_grouping_override(model: QuestionModel, override: dict | None) -> QuestionModel:

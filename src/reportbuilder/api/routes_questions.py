@@ -125,6 +125,15 @@ def _is_text_question(model: QuestionModel, q) -> bool:
     return bool(qvars) and all(v.measurement == "text" for v in qvars)
 
 
+def _scale_key(var) -> str | None:
+    """A signature of a variable's rating scale (its code→label map), or None if it
+    isn't a scale. Two variables can only form a battery when their keys match — this
+    lets the grouping UI offer 'Group as battery' ONLY for variables that share a
+    scale (e.g. NOT age + gender + region, which each carry a different scale)."""
+    lv = scale_levels(var)
+    return "|".join(f"{c}:{l}" for c, l, _p in lv) if lv else None
+
+
 def _text_is_short(df, q, *, max_words: float = 2.0) -> bool:
     """True when an open-ended question's answers are SHORT (association lists like
     brand names or "describe in three words") → best shown as a word cloud rather
@@ -614,6 +623,9 @@ def list_variables(
                 "tickbox": _is_binary(var),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
                 "scale": bool(scale_levels(var)),
+                # Signature of the scale (its code→label map). Two variables can only
+                # form a battery when their scale_key matches; None when not a scale.
+                "scale_key": _scale_key(var),
             }
             for var in all_vars
         ]

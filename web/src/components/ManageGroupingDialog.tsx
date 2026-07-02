@@ -62,16 +62,36 @@ export default function ManageGroupingDialog({
     return m;
   }, [variables]);
 
-  // Which grouping each variable is eligible for: tick-boxes → multi, rating
-  // scales → battery. Drives the pool + which group action is enabled.
+  // Scale keys shared by ≥2 variables — only these can form a battery (a battery
+  // needs ≥2 members on ONE scale, so a lone age/gender/region scale is excluded).
+  const sharedScaleKeys = useMemo(() => {
+    const counts = new Map<string, number>();
+    (variables ?? []).forEach((v) => {
+      if (v.scale && v.scale_key)
+        counts.set(v.scale_key, (counts.get(v.scale_key) ?? 0) + 1);
+    });
+    return new Set([...counts].filter(([, n]) => n >= 2).map(([k]) => k));
+  }, [variables]);
+
+  const scaleKeyOf = useMemo(() => {
+    const m = new Map<string, string>();
+    (variables ?? []).forEach((v) => {
+      if (v.scale && v.scale_key) m.set(v.name, v.scale_key);
+    });
+    return m;
+  }, [variables]);
+
+  // Which grouping each variable is eligible for: tick-boxes → multi, SHARED-scale
+  // rating variables → battery. Drives the pool + which group action is enabled.
   const kindOf = useMemo(() => {
     const m = new Map<string, "tickbox" | "scale">();
     (variables ?? []).forEach((v) => {
       if (v.tickbox) m.set(v.name, "tickbox");
-      else if (v.scale) m.set(v.name, "scale");
+      else if (v.scale && v.scale_key && sharedScaleKeys.has(v.scale_key))
+        m.set(v.name, "scale");
     });
     return m;
-  }, [variables]);
+  }, [variables, sharedScaleKeys]);
 
   useEffect(() => {
     if (!open) {
@@ -94,10 +114,12 @@ export default function ManageGroupingDialog({
         kind: q.kind as "multi" | "battery",
       }))
     );
-    // Pool = ungrouped tick-box (multi) OR rating-scale (battery) variables.
+    // Pool = ungrouped, groupable variables: tick-boxes (multi) OR shared-scale
+    // rating variables (battery). Lone-scale demographics (age/gender/region) are
+    // NOT groupable, so they're excluded.
     setPool(
       (variables ?? [])
-        .filter((v) => (v.tickbox || v.scale) && !grouped.has(v.name))
+        .filter((v) => kindOf.has(v.name) && !grouped.has(v.name))
         .map((v) => v.name)
     );
     setSelected(new Set());
@@ -115,13 +137,17 @@ export default function ManageGroupingDialog({
   function groupSelected(kind: "multi" | "battery") {
     const vars = [...selected];
     if (vars.length < 2) return;
-    // Always send a meaningful label: the typed name, else the member labels
-    // joined (so the group is never named by a weak common-prefix like "Mi").
-    const label =
-      groupName.trim() || vars.map((v) => labelOf.get(v) ?? v).join(" · ");
-    setGroups((g) => [...g, { kind, variables: vars, label }]);
+    // Send the typed name, else EMPTY — the backend derives the shared question stem
+    // (concatenating member labels made huge, ugly group names). For the in-session
+    // card we show a short preview until the reshaped list re-derives the real name.
+    const typed = groupName.trim();
+    const preview =
+      typed ||
+      vars.map((v) => labelOf.get(v) ?? v).slice(0, 2).join(" · ") +
+        (vars.length > 2 ? " …" : "");
+    setGroups((g) => [...g, { kind, variables: vars, label: typed }]);
     setCards((c) => [
-      { key: `manual:${setKey(vars)}`, label, variables: vars, source: "manual", kind },
+      { key: `manual:${setKey(vars)}`, label: preview, variables: vars, source: "manual", kind },
       ...c,
     ]);
     setPool((p) => p.filter((n) => !selected.has(n)));
@@ -151,7 +177,11 @@ export default function ManageGroupingDialog({
     return kinds.size === 1 ? [...kinds][0] : null;
   })();
   const canMulti = selected.size >= 2 && selKind === "tickbox";
-  const canBattery = selected.size >= 2 && selKind === "scale";
+  // A battery also requires all selected variables to share ONE scale.
+  const canBattery =
+    selected.size >= 2 &&
+    selKind === "scale" &&
+    new Set([...selected].map((n) => scaleKeyOf.get(n))).size === 1;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

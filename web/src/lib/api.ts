@@ -55,6 +55,8 @@ export interface Variable {
   tickbox?: boolean;
   // A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
   scale?: boolean;
+  // Signature of the scale; two variables can form a battery only if these match.
+  scale_key?: string | null;
 }
 
 // A word-cloud value merge: variant tokens (`words`, lowercased) folded into one

@@ -126,3 +126,27 @@ def test_manual_battery_skipped_when_scales_differ():
     got = apply_grouping_override(
         model, {"groups": [{"kind": "battery", "variables": ["s1", "s2"], "label": "X"}]})
     assert not any(q.kind == "battery" for q in got.questions)  # mismatched scales → skipped
+
+
+def test_manual_battery_uses_shared_stem_and_short_qid():
+    """A manual battery of 'Subject:Question' scale vars is named by the SHARED
+    question (not the labels concatenated), with a short qid; members relabelled."""
+    stem = ("Mikä on yleinen käsityksesi tuntemistasi hoivapalveluita tarjoavista "
+            "yksityisistä yrityksistä ja toisaalta julkisista palveluista?")
+    labs = tuple(ValueLabel(float(i), l) for i, l in
+                 zip(range(1, 6), ["Ei", "Vähän", "Keski", "Paljon", "Erittäin"]))
+    s1 = Variable(name="s1", label=f"Yksityiset palveluntarjoajat:{stem}",
+                  measurement="scale", value_labels=labs, missing_values=frozenset())
+    s2 = Variable(name="s2", label=f"Julkinen palveluntarjoaja:{stem}",
+                  measurement="scale", value_labels=labs, missing_values=frozenset())
+    model = QuestionModel(
+        variables={"s1": s1, "s2": s2},
+        questions=[Question(qid="s1", kind="single", variables=("s1",), text=s1.label),
+                   Question(qid="s2", kind="single", variables=("s2",), text=s2.label)])
+    got = apply_grouping_override(
+        model, {"groups": [{"kind": "battery", "variables": ["s1", "s2"], "label": ""}]})
+    bat = next(q for q in got.questions if q.kind == "battery")
+    assert bat.text == stem                          # shared stem, not concatenation
+    assert bat.qid.startswith("battery-") and len(bat.qid) <= 60   # short, stable
+    assert got.variables["s1"].label == "Yksityiset palveluntarjoajat"   # subject
+    assert got.variables["s2"].label == "Julkinen palveluntarjoaja"
