@@ -43,7 +43,7 @@ from reportbuilder.model.report import (
     SortSpec,
 )
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
-from reportbuilder.stats.engine import compute, _wordcloud
+from reportbuilder.stats.engine import compute, scale_levels, _wordcloud
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -611,6 +611,8 @@ def list_variables(
                 "segmentable": _segmentable(var) or _is_binary_flag(var, _df_or_none()),
                 # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
                 "tickbox": _is_binary(var),
+                # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
+                "scale": bool(scale_levels(var)),
             }
             for var in all_vars
         ]
