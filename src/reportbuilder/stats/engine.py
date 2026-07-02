@@ -682,6 +682,38 @@ def _rating_scale(var: Variable) -> dict[float, float]:
     return scale
 
 
+def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
+    """Ordered ``(code, label, scale_point)`` for a rating scale — for use where a
+    scale is ALREADY asserted (the battery paths / manual battery validation), NOT for
+    reclassifying standalone questions.
+
+    Prefers the leading integer of each value label ("5 - Erittäin tärkeä" → 5). When
+    the labels are word-only, falls back to the value CODES as the points, provided the
+    non-missing codes are a contiguous run of 3..11 integers — so a word-labelled
+    importance scale ("Ei lainkaan tärkeä" … "Erittäin tärkeä", coded 1..5) is a real
+    scale. Returns ``[]`` when it isn't. (REQ-C-24d)
+    """
+    pairs = [(vl.value, vl.label or "") for vl in var.value_labels
+             if vl.value not in var.missing_values]
+    if len(pairs) < 3:
+        return []
+    # Leading-digit labels → the parsed points (keeps out-of-order SAV codes correct).
+    # Uses the digit-labelled points when there are ≥3 (matching _rating_scale, so a
+    # scale with a stray non-digit label doesn't regress).
+    dpts = [(c, lbl, float(m.group(1)))
+            for c, lbl in pairs if (m := re.match(r"\s*(\d+)", lbl))]
+    if len(dpts) >= 3:
+        return sorted(dpts, key=lambda t: t[2])
+    # Word-only labels → the codes ARE the points if they're a contiguous integer run.
+    codes = sorted(c for c, _ in pairs)
+    if all(float(c).is_integer() for c in codes):
+        ints = [int(c) for c in codes]
+        if 3 <= len(ints) <= 11 and ints == list(range(ints[0], ints[0] + len(ints))):
+            by = {vl.value: (vl.label or "") for vl in var.value_labels}
+            return [(float(c), by.get(c, str(int(c))), float(c)) for c in codes]
+    return []
+
+
 def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
              model: QuestionModel) -> SeriesResult:
     """A rating battery: one bar per member (category), value = the MEAN rating
@@ -692,7 +724,7 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     rows = []
     answered_any = pd.Series(False, index=data.index)
     for idx, v in enumerate(vars_):
-        scale = _rating_scale(v)
+        scale = {c: p for c, _lbl, p in scale_levels(v)}
         s = pd.to_numeric(data[v.name], errors="coerce")
         mapped = s.map(scale)
         answered_any = answered_any | mapped.notna()
@@ -760,7 +792,7 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
             if vn is None:
                 cells[(attr, ent)] = Cell(pct=None, count=0.0, mean=None)
                 continue
-            scale = _rating_scale(model.variable(vn))
+            scale = {c: p for c, _lbl, p in scale_levels(model.variable(vn))}
             mapped = pd.to_numeric(data[vn], errors="coerce").map(scale)
             answered = answered | mapped.notna()
             n = int(mapped.notna().sum())
@@ -785,16 +817,15 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     (bars). Mirrors the source decks' agreement-scale slides.
     """
     vars_ = [model.variable(n) for n in question.variables]
-    # Shared scale levels from the first member that has a parseable rating scale.
+    # Shared scale levels from the first member with a parseable scale (digit- OR
+    # word-labelled, via scale_levels).
     level_label: dict[float, str] = {}
     for v in vars_:
-        scale = _rating_scale(v)
-        if scale:
-            by_code = {vl.value: vl.label for vl in v.value_labels}
-            for code, point in scale.items():
-                level_label.setdefault(point, by_code.get(code, str(int(point))))
-            if level_label:
-                break
+        lv = scale_levels(v)
+        if lv:
+            for _code, label, point in lv:
+                level_label.setdefault(point, label)
+            break
     points = sorted(level_label)                       # 1..N ascending
     levels = [level_label[p] for p in points]          # stack-segment labels
     statements = [v.label for v in vars_]              # bar labels (member order)
@@ -803,7 +834,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     base_by_stmt: dict[str, int] = {}
     answered_any = pd.Series(False, index=data.index)
     for v in vars_:
-        scale = _rating_scale(v)
+        scale = {c: p for c, _lbl, p in scale_levels(v)}
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
         n = int(mapped.notna().sum())

@@ -95,3 +95,26 @@ def test_battery_stacked_topbox_sum_orders_statements_by_top2():
     # default (data_order) keeps variable order
     r2 = engine.compute(q, _spec(chart_type="stacked_horizontal_bar"), df, model)
     assert r2.segments == ("Statement A", "Statement B")
+
+
+def _word_rating_var(name, label):
+    return Variable(name=name, label=label, measurement="scale",
+                    value_labels=(ValueLabel(1.0, "Ei lainkaan tärkeä"),
+                                  ValueLabel(2.0, "Vähän tärkeä"),
+                                  ValueLabel(3.0, "Melko tärkeä"),
+                                  ValueLabel(4.0, "Tärkeä"),
+                                  ValueLabel(5.0, "Erittäin tärkeä")),
+                    missing_values=frozenset())
+
+
+def test_battery_stacked_word_labelled_scale_renders_levels():
+    """A word-labelled scale (no leading digits) now builds the stack via scale_levels."""
+    s1 = _word_rating_var("s1", "Statement A")
+    s2 = _word_rating_var("s2", "Statement B")
+    model = QuestionModel(variables={"s1": s1, "s2": s2}, questions=[])
+    q = Question(qid="b", kind="battery", variables=("s1", "s2"), text="Battery")
+    df = pd.DataFrame({"s1": [1, 2, 3, 4, 5], "s2": [5, 5, 4, 4, 3]})
+    r = engine.compute(q, _spec(chart_type="stacked_horizontal_bar"), df, model)
+    assert r.categories == ("Ei lainkaan tärkeä", "Vähän tärkeä", "Melko tärkeä",
+                            "Tärkeä", "Erittäin tärkeä")
+    assert r.segments == ("Statement A", "Statement B")
