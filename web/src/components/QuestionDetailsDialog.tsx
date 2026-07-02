@@ -10,8 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useQuestionSummary, useSetQuestionLabel, useSplitQuestion, useRejoinQuestion } from "@/lib/queries";
-import { Undo2Icon, Layers2Icon } from "lucide-react";
+import { useQuestionSummary, useSetQuestionLabel, useSplitQuestion } from "@/lib/queries";
+import { Undo2Icon } from "lucide-react";
 import WordMergeEditor from "@/components/WordMergeEditor";
 import type { QuestionSummary } from "@/lib/api";
 
@@ -79,7 +79,6 @@ export default function QuestionDetailsDialog({
   const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
   const setLabel = useSetQuestionLabel(materialId);
   const split = useSplitQuestion(materialId);
-  const rejoin = useRejoinQuestion(materialId);
   const [name, setName] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Seed the editor from the current (possibly already-renamed) question text.
@@ -310,28 +309,6 @@ export default function QuestionDetailsDialog({
                   >
                     <Undo2Icon className="size-4" />
                     Split into individual questions
-                  </Button>
-                )}
-                {s.kind === "single" && s.regroupable && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7"
-                    disabled={rejoin.isPending}
-                    onClick={() => {
-                      if (!qid) return;
-                      rejoin.mutate(qid, {
-                        onSuccess: () => {
-                          toast.success("Re-grouped into its battery/multi");
-                          onOpenChange(false);
-                        },
-                        onError: (e) =>
-                          toast.error(`Could not re-group: ${(e as Error).message}`),
-                      });
-                    }}
-                  >
-                    <Layers2Icon className="size-4" />
-                    Re-group into its battery/multi
                   </Button>
                 )}
               </div>

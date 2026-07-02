@@ -83,8 +83,6 @@ export interface QuestionSummary {
   category_labels: string[];
   chartable: boolean;
   non_chartable_reason: string | null;
-  // A single that was split from an auto-group (can be re-grouped from the dialog).
-  regroupable?: boolean;
   respondent_total: number;
   base_n: number | null;
   statistic: string;
@@ -477,15 +475,6 @@ export const api = {
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/split`, {
         method: "POST",
       }).then((r) => json<{ qid: string; split_variables: string[] }>(r)),
-
-    // Undo a split: re-form the variable's natural auto-group at the material level.
-    rejoinQuestion: (
-      materialId: string,
-      qid: string
-    ): Promise<{ qid: string; rejoined_group: string; members: string[] }> =>
-      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/rejoin`, {
-        method: "POST",
-      }).then((r) => json<{ qid: string; rejoined_group: string; members: string[] }>(r)),
 
     previewChart: (
       materialId: string,

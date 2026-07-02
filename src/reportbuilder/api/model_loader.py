@@ -68,21 +68,6 @@ def value_merges(material_id: str, client) -> dict[str, tuple[tuple[str, tuple[s
     return _merges_from_cfg(material_config(material_id, client))
 
 
-def material_singles(material_id: str, client) -> set[str]:
-    """Variables the analyst has SPLIT to stay single at the material level
-    (config `grouping.singles`)."""
-    g = material_config(material_id, client).get("grouping")
-    s = g.get("singles") if isinstance(g, dict) else None
-    return {str(x) for x in s} if isinstance(s, list) else set()
-
-
-def auto_grouped_model(material_id: str, client):
-    """The material's model with ONLY auto-detection applied (no material/report
-    grouping) — used to find a variable's NATURAL group when re-joining a split."""
-    _df, model, _label = _read(material_id, client)
-    return apply_grouping_override(model, {})
-
-
 def _merges_from_cfg(cfg: dict) -> dict[str, tuple[tuple[str, tuple[str, ...]], ...]]:
     """Per-qid value merges: stored as {qid: [[label, member, …], …]} → normalised
     to {qid: ((label, (member, …)), …)}. Groups need a label + ≥1 member."""
