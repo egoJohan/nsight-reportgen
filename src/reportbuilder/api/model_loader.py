@@ -106,12 +106,29 @@ def _apply_merges(model: QuestionModel, merges: dict) -> QuestionModel:
     return QuestionModel(variables=model.variables, questions=questions)
 
 
+def _with_material_singles(override: dict | None, cfg: dict) -> dict | None:
+    """Merge the material-level forced-singles (`grouping.singles` in the config —
+    set when the analyst SPLITS an auto-battery/multi on the case page) into the
+    report override's singles, so the split applies on the case page AND as the
+    default for every report. A report's own manual group still wins (a var in a
+    manual group is dropped from `forced` by apply_grouping_override)."""
+    g = cfg.get("grouping")
+    mat_singles = g.get("singles") if isinstance(g, dict) else None
+    if not isinstance(mat_singles, list) or not mat_singles:
+        return override
+    merged = dict(override or {})
+    merged["singles"] = sorted(
+        {*(merged.get("singles") or []), *(str(s) for s in mat_singles)}
+    )
+    return merged
+
+
 def _finalize(model, material_id: str, client, override: dict | None):
-    """Apply the report's grouping override, then the material's per-question
-    cleaning (name overrides + value merges) — so they show consistently
-    everywhere the model is used. Config is loaded once."""
-    model = apply_grouping_override(model, override or {})
+    """Apply grouping (material forced-singles + the report override), then the
+    material's per-question cleaning (name overrides + value merges) — so they show
+    consistently everywhere the model is used. Config is loaded once."""
     cfg = material_config(material_id, client)
+    model = apply_grouping_override(model, _with_material_singles(override, cfg) or {})
     model = _apply_labels(model, _labels_from_cfg(cfg))
     model = _apply_merges(model, _merges_from_cfg(cfg))
     return model
