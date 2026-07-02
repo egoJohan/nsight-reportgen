@@ -24,6 +24,12 @@ class Question:
     kind: str                              # "single" | "multi" (REQ-C-06, M-01/02)
     variables: tuple[str, ...]             # 1 for single; N for multi group
     text: str                              # question text from the variable label
+    # Per-question value merges (data cleaning). Each entry is (display_label,
+    # (member_value, …)) — members are combined into one, summing their counts.
+    # Word clouds use it to fold text-token variants (Esperi ← esperi, esper);
+    # a generic seam categorical recode can reuse later. Material-level, applied
+    # via model_loader from the material config. (REQ-C-24b)
+    value_merges: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 @dataclass

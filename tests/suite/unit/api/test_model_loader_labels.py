@@ -40,3 +40,18 @@ def test_no_config_is_noop(tmp_path):
     # No material config saved at all — original labels preserved.
     q1 = next(q for q in model_for_material(mid, c).questions if q.qid == "q1")
     assert q1.text and q1.text != "Renamed Q1"
+
+
+def test_applies_value_merges(tmp_path):
+    c, mid = _client_with_material(tmp_path)
+    c.save_material_config(
+        mid, json.dumps({"value_merges": {"q1": [["Esperi", "esperi", "esper"]]}})
+    )
+    q = next(q for q in model_for_material(mid, c).questions if q.qid == "q1")
+    assert q.value_merges == (("Esperi", ("esperi", "esper")),)
+
+
+def test_no_value_merges_is_empty(tmp_path):
+    c, mid = _client_with_material(tmp_path)
+    q = next(q for q in model_for_material(mid, c).questions if q.qid == "q1")
+    assert q.value_merges == ()

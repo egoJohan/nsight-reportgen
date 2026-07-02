@@ -31,9 +31,9 @@ def _read(material_id: str, client):
     return df, model, label
 
 
-def question_labels(material_id: str, client) -> dict[str, str]:
-    """The per-material question-name overrides ({qid: custom label}) stored in
-    the material config. Missing/blank/malformed → no overrides."""
+def material_config(material_id: str, client) -> dict:
+    """Parsed per-material config dict (question_labels, value_merges, …).
+    Missing/malformed → {}."""
     loader = getattr(client, "load_material_config", None)
     if loader is None:
         return {}
@@ -44,13 +44,46 @@ def question_labels(material_id: str, client) -> dict[str, str]:
     if not raw:
         return {}
     try:
-        labels = (json.loads(raw) or {}).get("question_labels")
+        cfg = json.loads(raw)
     except (ValueError, TypeError):
         return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _labels_from_cfg(cfg: dict) -> dict[str, str]:
+    labels = cfg.get("question_labels")
     if not isinstance(labels, dict):
         return {}
     # Only non-blank overrides count (blank = revert to the SAV label).
     return {qid: text for qid, text in labels.items() if isinstance(text, str) and text.strip()}
+
+
+def question_labels(material_id: str, client) -> dict[str, str]:
+    """The per-material question-name overrides ({qid: custom label})."""
+    return _labels_from_cfg(material_config(material_id, client))
+
+
+def value_merges(material_id: str, client) -> dict[str, tuple[tuple[str, tuple[str, ...]], ...]]:
+    """Per-qid value merges, normalised to {qid: ((label, (member, …)), …)}."""
+    return _merges_from_cfg(material_config(material_id, client))
+
+
+def _merges_from_cfg(cfg: dict) -> dict[str, tuple[tuple[str, tuple[str, ...]], ...]]:
+    """Per-qid value merges: stored as {qid: [[label, member, …], …]} → normalised
+    to {qid: ((label, (member, …)), …)}. Groups need a label + ≥1 member."""
+    raw = cfg.get("value_merges")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, tuple] = {}
+    for qid, groups in raw.items():
+        parsed = [
+            (str(g[0]), tuple(str(m) for m in g[1:]))
+            for g in (groups or [])
+            if isinstance(g, list) and len(g) >= 2
+        ]
+        if parsed:
+            out[qid] = tuple(parsed)
+    return out
 
 
 def _apply_labels(model: QuestionModel, labels: dict[str, str]) -> QuestionModel:
@@ -63,11 +96,25 @@ def _apply_labels(model: QuestionModel, labels: dict[str, str]) -> QuestionModel
     return QuestionModel(variables=model.variables, questions=questions)
 
 
+def _apply_merges(model: QuestionModel, merges: dict) -> QuestionModel:
+    if not merges:
+        return model
+    questions = [
+        dataclasses.replace(q, value_merges=merges[q.qid]) if q.qid in merges else q
+        for q in model.questions
+    ]
+    return QuestionModel(variables=model.variables, questions=questions)
+
+
 def _finalize(model, material_id: str, client, override: dict | None):
-    """Apply the report's grouping override, then the material's question-name
-    overrides — so a rename shows consistently everywhere the model is used."""
+    """Apply the report's grouping override, then the material's per-question
+    cleaning (name overrides + value merges) — so they show consistently
+    everywhere the model is used. Config is loaded once."""
     model = apply_grouping_override(model, override or {})
-    return _apply_labels(model, question_labels(material_id, client))
+    cfg = material_config(material_id, client)
+    model = _apply_labels(model, _labels_from_cfg(cfg))
+    model = _apply_merges(model, _merges_from_cfg(cfg))
+    return model
 
 
 def model_for_material(material_id: str, client, override: dict | None = None):

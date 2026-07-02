@@ -113,6 +113,14 @@ def _wordcloud(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if not counts:
         raise ValueError("No text answers to build a word cloud")
 
+    # Fold per-question value merges: combine variant tokens into one word,
+    # summing their counts (data cleaning — "esperi" + "esper" → "Esperi"). The
+    # merged word keeps its display label as the key; its size reflects the sum.
+    for label, members in getattr(question, "value_merges", ()) or ():
+        merged = sum(counts.pop(str(m).lower(), 0) for m in members)
+        if merged:
+            counts[label] = counts.get(label, 0) + merged
+
     respondents = int(answered_mask.sum())
     # Deterministic ordering: count desc, then word asc to break ties stably.
     top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_WORDCLOUD_TOP_N]

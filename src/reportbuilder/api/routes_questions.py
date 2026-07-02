@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
+import dataclasses
 import json
 
 from pydantic import BaseModel
@@ -29,6 +30,8 @@ from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
+    material_config,
+    value_merges,
 )
 from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
 from reportbuilder.model.question import QuestionModel
@@ -40,7 +43,7 @@ from reportbuilder.model.report import (
     SortSpec,
 )
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
-from reportbuilder.stats.engine import compute
+from reportbuilder.stats.engine import compute, _wordcloud
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -684,6 +687,82 @@ def set_question_label(
     cfg["question_labels"] = labels
     client.save_material_config(material_id, json.dumps(cfg))
     return {"qid": qid, "label": text or None}
+
+
+# ---------------------------------------------------------------------------
+# Word-cloud value merges (data cleaning) — per question, material-level.
+# ---------------------------------------------------------------------------
+
+
+class WordMergeGroup(BaseModel):
+    label: str
+    words: list[str] = []
+
+
+class WordMergesBody(BaseModel):
+    merges: list[WordMergeGroup] = []
+
+
+@questions_router.get("/materials/{material_id}/questions/{qid}/words")
+def question_words(
+    material_id: str,
+    qid: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """The question's RAW top words (pre-merge, for the merge editor) + the current
+    saved merges. Empty word list for non-text questions (nothing to merge)."""
+    df, model = df_model_for_material(material_id, client)
+    try:
+        q = model.question(qid)
+    except KeyError:
+        raise HTTPException(404, f"No question {qid} in this material.")
+    words: list[dict] = []
+    try:
+        # Strip merges so the editor sees the underlying variant tokens.
+        raw_q = dataclasses.replace(q, value_merges=())
+        spec = dataclasses.replace(_summary_spec(qid), chart_type="wordcloud", statistic="count")
+        series = _wordcloud(raw_q, spec, df, model)
+        words = [
+            {"word": c, "count": int(series.cell(c, "Total").count or 0)}
+            for c in series.categories
+        ]
+    except Exception:
+        words = []  # non-text question / no answers → nothing to merge
+    merges = value_merges(material_id, client).get(qid, ())
+    return {
+        "words": words,
+        "merges": [{"label": lbl, "words": list(members)} for lbl, members in merges],
+    }
+
+
+@questions_router.put("/materials/{material_id}/questions/{qid}/word-merges")
+def set_word_merges(
+    material_id: str,
+    qid: str,
+    body: WordMergesBody,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Save the question's value merges for THIS material (word-cloud token cleaning).
+    Stored as {value_merges: {qid: [[label, member, …], …]}}; members are lowercased
+    to match tokens. An empty body clears the qid's merges. The merge applies to every
+    word cloud of the question (preview + deck) via the model seam."""
+    cfg = material_config(material_id, client)
+    vm = cfg.get("value_merges")
+    if not isinstance(vm, dict):
+        vm = {}
+    groups: list[list[str]] = []
+    for g in body.merges:
+        label = (g.label or "").strip()
+        members = [w.strip().lower() for w in g.words if w.strip()]
+        if label and members:
+            groups.append([label, *members])
+    if groups:
+        vm[qid] = groups
+    else:
+        vm.pop(qid, None)
+    cfg["value_merges"] = vm
+    client.save_material_config(material_id, json.dumps(cfg))
+    return {"qid": qid, "merges": [{"label": g[0], "words": g[1:]} for g in groups]}
 
 
 # ---------------------------------------------------------------------------

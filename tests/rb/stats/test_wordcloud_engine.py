@@ -154,3 +154,36 @@ def test_var37_wordcloud_top_word_and_descending():
     # Deterministic.
     sr2 = compute(q, _spec(), df, model)
     assert sr2.categories == sr.categories
+
+
+# ---------------------------------------------------------------------------
+# Value merges (data cleaning): fold variant tokens into one word, summing counts
+# ---------------------------------------------------------------------------
+
+
+def test_wordcloud_merges_variant_tokens_and_sums_counts():
+    variables = {"c1": _text_var("c1")}
+    # esperi ×3, esper ×2 → merged display "Esperi" with count 5.
+    q = Question(
+        qid="q", kind="single", variables=("c1",), text="Brand",
+        value_merges=(("Esperi", ("esperi", "esper")),),
+    )
+    model = QuestionModel(variables=variables, questions=[q])
+    df = pd.DataFrame(
+        {"c1": ["esperi", "esperi", "esperi", "esper", "esper", "attendo"]}
+    )
+    sr = compute(q, _spec(), df, model)
+    assert sr.categories[0] == "Esperi"
+    assert sr.cell("Esperi", "Total").count == 5.0
+    # the raw variants are gone as separate words; unmerged word stays
+    assert "esperi" not in sr.categories and "esper" not in sr.categories
+    assert "attendo" in sr.categories
+
+
+def test_wordcloud_no_merges_is_unchanged():
+    variables = {"c1": _text_var("c1")}
+    q = Question(qid="q", kind="single", variables=("c1",), text="Brand")
+    model = QuestionModel(variables=variables, questions=[q])
+    df = pd.DataFrame({"c1": ["esperi", "esper", "attendo"]})
+    sr = compute(q, _spec(), df, model)
+    assert set(sr.categories) == {"esperi", "esper", "attendo"}
