@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Loader2Icon, AlertCircleIcon, TriangleAlertIcon, CircleXIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -82,12 +82,20 @@ export default function QuestionDetailsDialog({
   useEffect(() => {
     setName(s?.text ?? "");
   }, [s?.text, qid]);
-  // Grow the editor to fit the (possibly long/multi-line) question on open + edit.
-  useEffect(() => {
+  // Grow the editor to fit the whole (possibly long/multi-line) question. Runs
+  // in a layout effect (measured after DOM update, before paint) and re-fits on
+  // the next frame so the dialog's open-animation/layout has settled — so the
+  // full question is guaranteed visible the moment the dialog opens.
+  useLayoutEffect(() => {
     const el = taRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    const raf = requestAnimationFrame(fit);
+    return () => cancelAnimationFrame(raf);
   }, [name, s?.text, qid]);
 
   function saveName() {
