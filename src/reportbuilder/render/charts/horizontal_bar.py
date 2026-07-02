@@ -3,7 +3,7 @@ multi-response sets (one bar per tick-box option)."""
 from __future__ import annotations
 
 from reportbuilder.render.plugins import ChartPlugin, register
-from reportbuilder.render.config_schema import standard_schema
+from reportbuilder.render.config_schema import clustered_bar_schema
 from reportbuilder.render.shape import SeriesShape
 from reportbuilder.render.image.bars import build_image_bar
 from reportbuilder.render.native.bar import build_horizontal_bar
@@ -37,5 +37,5 @@ register(ChartPlugin(
     native_build=build_horizontal_bar,
     suitability=suitability,
     suggest=suggest,
-    config_schema=standard_schema(),
+    config_schema=clustered_bar_schema(),
 ))

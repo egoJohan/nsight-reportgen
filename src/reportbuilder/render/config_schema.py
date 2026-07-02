@@ -136,9 +136,27 @@ def _common_tail() -> tuple[ConfigField, ...]:
     )
 
 
+def classifying_var_2_field() -> ConfigField:
+    return ConfigField(
+        "classifying_var_2", "variable", "Second classifying variable",
+        help=(
+            "Optionally split by a SECOND variable too (e.g. gender and age) — the "
+            "chart shows one series per combination. Best kept to a few groups."
+        ),
+        required=False,
+    )
+
+
 def standard_schema() -> tuple[ConfigField, ...]:
     """Multi-series-capable charts: optional classifying variable."""
     return (statistic_field(), classifying_var_field(), *_common_tail())
+
+
+def clustered_bar_schema() -> tuple[ConfigField, ...]:
+    """Clustered bar charts (vertical/horizontal): support a SECOND classifying
+    variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
+    return (statistic_field(), classifying_var_field(), classifying_var_2_field(),
+            *_common_tail())
 
 
 def stacked_schema() -> tuple[ConfigField, ...]:

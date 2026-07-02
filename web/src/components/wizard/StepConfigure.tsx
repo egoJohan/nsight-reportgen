@@ -348,10 +348,16 @@ function isSegmenter(v: Variable): boolean {
 }
 
 function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps) {
+  // Generic over the field key so it drives BOTH the primary classifying_var and
+  // the secondary classifying_var_2 (cross-tab).
+  const key = field.key as "classifying_var" | "classifying_var_2";
+  const current = (chart[key] as string | null | undefined) ?? null;
+  const other =
+    key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
   const required = !!field.required;
-  const missing = required && !chart.classifying_var;
+  const missing = required && !current;
   const candidates = (variables ?? []).filter(
-    (v) => isSegmenter(v) || v.name === chart.classifying_var
+    (v) => (isSegmenter(v) || v.name === current) && v.name !== other
   );
   const items: Record<string, string> = {
     __none__: "None",
@@ -365,9 +371,9 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
     >
       <Select
         items={items}
-        value={chart.classifying_var ?? "__none__"}
+        value={current ?? "__none__"}
         onValueChange={(v) =>
-          onChange({ classifying_var: v === "__none__" ? null : v })
+          onChange({ [key]: v === "__none__" ? null : v } as Partial<ChartSpec>)
         }
       >
         <SelectTrigger className={cn("w-full", missing && "border-destructive")}>
@@ -666,25 +672,32 @@ function ChartControls({
   // A battery is already a single-series chart (one bar per attribute), so a
   // classifying split doesn't apply — drop that field for battery questions.
   const isBattery = question?.kind === "battery";
-  const schema = isBattery
+  let schema = isBattery
     ? rawSchema.filter((f) => f.key !== "classifying_var")
     : rawSchema;
+  // The second classifier only makes sense once the first is chosen — hide it
+  // until then (the engine ignores a lone secondary anyway).
+  if (!chart.classifying_var) {
+    schema = schema.filter((f) => f.key !== "classifying_var_2");
+  }
   const supportsClassifying = (typeId: string) =>
     (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var");
 
   // Switching to a chart type with no classifying variable (e.g. a single-series
   // pie) drops any stale classifying_var, so it can't silently split the data
   // into series the chart can't show.
+  const supportsClassifying2 = (typeId: string) =>
+    (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var_2");
   const handleTypeChange = (patch: Partial<ChartSpec>) => {
-    if (
-      patch.chart_type &&
-      !supportsClassifying(patch.chart_type) &&
-      chart.classifying_var
-    ) {
-      onChange({ ...patch, classifying_var: null });
-    } else {
-      onChange(patch);
+    const extra: Partial<ChartSpec> = {};
+    if (patch.chart_type && !supportsClassifying(patch.chart_type) && chart.classifying_var) {
+      extra.classifying_var = null;
     }
+    // Dropping to a chart type without a 2nd classifier clears the cross-tab.
+    if (patch.chart_type && !supportsClassifying2(patch.chart_type) && chart.classifying_var_2) {
+      extra.classifying_var_2 = null;
+    }
+    onChange({ ...patch, ...extra });
   };
 
   return (

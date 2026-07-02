@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from reportbuilder.render.plugins import ChartPlugin, register
-from reportbuilder.render.config_schema import standard_schema
+from reportbuilder.render.config_schema import clustered_bar_schema
 from reportbuilder.render.shape import SeriesShape
 from reportbuilder.render.image.bars import build_image_column
 from reportbuilder.render.native.column import build_vertical_bar
@@ -29,5 +29,5 @@ register(ChartPlugin(
     native_build=build_vertical_bar,
     suitability=suitability,
     suggest=suggest,
-    config_schema=standard_schema(),
+    config_schema=clustered_bar_schema(),
 ))

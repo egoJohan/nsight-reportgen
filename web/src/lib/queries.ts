@@ -77,6 +77,7 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     chart_type: chart.chart_type,
     statistic: chart.statistic,
     classifying_var: chart.classifying_var,
+    classifying_var_2: chart.classifying_var_2 ?? null,
     number_format: chart.number_format,
     sort: chart.sort,
     elements: chart.elements,

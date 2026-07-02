@@ -127,6 +127,7 @@ export interface ChartSpec {
   chart_type: string;
   statistic: "pct" | "count" | "mean" | "median" | "sum";
   classifying_var: string | null;
+  classifying_var_2?: string | null;  // secondary classifier → cross-tab combos
   number_format: NumberFormat;
   sort: SortSpec;
   template_slot: string;
