@@ -6,6 +6,8 @@ import {
   AlertCircleIcon,
   DatabaseIcon,
   TriangleAlertIcon,
+  CircleCheckIcon,
+  CircleXIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,12 +50,30 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
   return q;
 }
 
-// A question whose only compatible chart type is the word cloud (an open-ended
-// free-text question) — chartable, rendered as a cloud.
-function isWordcloudOnly(q: Question): boolean {
+// Compact status: one icon — OK, warning (has "Not answered"/missing codes to
+// check), or error (can't be charted at all).
+function StatusIcon({ q }: { q: Question }) {
+  if (q.chartable === false) {
+    return (
+      <span className="inline-flex" title={q.non_chartable_reason ?? "Can't be charted"}>
+        <CircleXIcon className="size-4 text-red-500" />
+      </span>
+    );
+  }
+  if (q.missing_values && q.missing_values.length > 0) {
+    return (
+      <span
+        className="inline-flex"
+        title={'Has "Not answered" / missing-value codes — open for details.'}
+      >
+        <TriangleAlertIcon className="size-4 text-amber-500" />
+      </span>
+    );
+  }
   return (
-    q.compatible_chart_types?.length === 1 &&
-    q.compatible_chart_types[0] === "wordcloud"
+    <span className="inline-flex" title="OK — ready to chart">
+      <CircleCheckIcon className="size-4 text-emerald-500" />
+    </span>
   );
 }
 
@@ -195,34 +215,7 @@ function QuestionTable({
                     <KindBadge q={q} />
                   </TableCell>
                   <TableCell className="py-3 align-top">
-                    {q.chartable === false ? (
-                      <Badge
-                        variant="outline"
-                        className="border-muted-foreground/30 bg-muted text-muted-foreground whitespace-nowrap font-normal"
-                        title={q.non_chartable_reason ?? undefined}
-                      >
-                        Text / not chartable
-                      </Badge>
-                    ) : isWordcloudOnly(q) ? (
-                      <Badge
-                        variant="outline"
-                        className="border-teal-300 bg-teal-50 text-teal-700 whitespace-nowrap font-normal"
-                      >
-                        Word cloud
-                      </Badge>
-                    ) : q.missing_values && q.missing_values.length > 0 ? (
-                      <span
-                        className="inline-flex"
-                        aria-label="Has 'Not answered' / missing-value codes"
-                        title={
-                          "Has \"Not answered\" / missing-value codes — open for details."
-                        }
-                      >
-                        <TriangleAlertIcon className="size-4 text-amber-500" />
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground/60">—</span>
-                    )}
+                    <StatusIcon q={q} />
                   </TableCell>
                 </TableRow>
               ))}

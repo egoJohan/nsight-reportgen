@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, AlertCircleIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -77,10 +77,18 @@ export default function QuestionDetailsDialog({
   const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
   const setLabel = useSetQuestionLabel(materialId);
   const [name, setName] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
   // Seed the editor from the current (possibly already-renamed) question text.
   useEffect(() => {
     setName(s?.text ?? "");
   }, [s?.text, qid]);
+  // Grow the editor to fit the (possibly long/multi-line) question on open + edit.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [name, s?.text, qid]);
 
   function saveName() {
     if (!qid) return;
@@ -128,10 +136,11 @@ export default function QuestionDetailsDialog({
               </p>
               <div className="flex items-start gap-2">
                 <textarea
+                  ref={taRef}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  rows={2}
-                  className="flex-1 resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  rows={1}
+                  className="flex-1 resize-y overflow-hidden rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 <Button
                   size="sm"
