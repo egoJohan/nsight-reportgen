@@ -805,6 +805,7 @@ class ChartSpecBody(BaseModel):
     chart_type: str
     statistic: str = "pct"
     classifying_var: str | None = None
+    classifying_var_2: str | None = None  # secondary classifier → cross-tab combos
     number_format: _NumberFormatBody = _NumberFormatBody()
     sort: _SortSpecBody = _SortSpecBody()
     elements: _ElementTogglesBody = _ElementTogglesBody()
@@ -837,6 +838,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         chart_type=body.chart_type,
         statistic=body.statistic,
         classifying_var=body.classifying_var,
+        classifying_var_2=body.classifying_var_2,
         number_format=NumberFormat(
             mode=body.number_format.mode,
             pct_decimals=body.number_format.pct_decimals,
