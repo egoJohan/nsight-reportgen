@@ -106,8 +106,9 @@ def test_multi_grouping_applied_before_battery_grouping():
     assert kinds == ["multi"]
 
 
-def test_enrich_batteries_prepended_before_multi_in_output():
+def test_enrich_groups_keep_deck_position():
     # A model with BOTH an O-pattern multi (distinct stem) and a grid battery.
+    # The multi's members come FIRST in the deck, the battery cells after.
     variables = {
         "var9O1": _var("var9O1", "Apple:Which brands here", codes=[(0, "n"), (1, "y")]),
         "var9O2": _var("var9O2", "Pear:Which brands here", codes=[(0, "n"), (1, "y")]),
@@ -121,5 +122,6 @@ def test_enrich_batteries_prepended_before_multi_in_output():
     enriched = enrich_model(m)
     kinds = [q.kind for q in enriched.questions]
     assert "multi" in kinds and "battery" in kinds
-    # apply_batteries prepends its questions, so batteries precede the multi.
-    assert kinds.index("battery") < kinds.index("multi")
+    # Groups sit at their first member's position, so the multi (members first in the
+    # deck) precedes the batteries (whose cells come after it).
+    assert kinds.index("multi") < kinds.index("battery")

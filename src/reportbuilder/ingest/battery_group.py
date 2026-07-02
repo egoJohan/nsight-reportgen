@@ -114,11 +114,21 @@ def apply_batteries(
             text=_battery_text(subject, [stem for (_c, _v, stem) in members]),
         ))
 
-    kept = [
-        q for q in model.questions
-        if not (q.kind == "single" and q.variables and q.variables[0] in consumed)
-    ]
-    return QuestionModel(variables=variables, questions=battery_qs + kept)
+    # Place each battery at the position of its FIRST member (in deck order) and drop
+    # the other members, so the battery sits where its variables were — and SPLITTING
+    # it later leaves those variables in the same spot instead of jumping to the end.
+    var_to_battery = {v: bq for bq in battery_qs for v in bq.variables}
+    emitted: set[str] = set()
+    questions: list[Question] = []
+    for q in model.questions:
+        if q.kind == "single" and q.variables and q.variables[0] in consumed:
+            bq = var_to_battery[q.variables[0]]
+            if bq.qid not in emitted:
+                emitted.add(bq.qid)
+                questions.append(bq)
+            continue
+        questions.append(q)
+    return QuestionModel(variables=variables, questions=questions)
 
 
 def suggest_scale_batteries(model, *, min_members: int = 3):

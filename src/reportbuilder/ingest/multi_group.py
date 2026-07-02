@@ -149,7 +149,7 @@ def apply_groups(model: QuestionModel, groups: list[tuple[str, ...]]) -> Questio
     unchanged. (REQ-C-06, M-02)"""
     grouped = {name for g in groups for name in g}
     variables = dict(model.variables)
-    questions: list[Question] = []
+    group_by_var: dict[str, Question] = {}
     for g in groups:
         members = tuple(g)
         # Derive the question text from the ORIGINAL labels first, then strip the
@@ -160,12 +160,22 @@ def apply_groups(model: QuestionModel, groups: list[tuple[str, ...]]) -> Questio
             for name, option in opts.items():
                 if option and option != variables[name].label:
                     variables[name] = dataclasses.replace(variables[name], label=option)
-        questions.append(Question(
-            qid=_group_qid(members), kind="multi", variables=members, text=text,
-        ))
+        mq = Question(qid=_group_qid(members), kind="multi", variables=members, text=text)
+        for v in members:
+            group_by_var[v] = mq
+    # Place each multi at the position of its FIRST member (deck order), dropping the
+    # others — so the group sits where its variables were and SPLITTING it leaves them
+    # in the same spot rather than jumping to the end.
+    emitted: set[str] = set()
+    questions: list[Question] = []
     for q in model.questions:
-        if q.kind == "single" and q.variables[0] not in grouped:
-            questions.append(q)
+        if q.kind == "single" and q.variables and q.variables[0] in grouped:
+            mq = group_by_var[q.variables[0]]
+            if mq.qid not in emitted:
+                emitted.add(mq.qid)
+                questions.append(mq)
+            continue
+        questions.append(q)
     return QuestionModel(variables=variables, questions=questions)
 
 
