@@ -146,12 +146,13 @@ def _tick_text(v: float) -> str:
     return str(int(v)) if float(v).is_integer() else f"{v:g}"
 
 
-def _legend_below(ax, n_segs: int) -> None:
-    """Place a stacked chart's scale legend in a single horizontal row BELOW the
-    plot (a stacked bar fills the whole plot width, so an in-axes legend would
-    cover the bars). bbox_inches='tight' expands the figure to include it."""
+def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
+    """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
+    would cover the bars). `y` is the bbox anchor offset — push it lower for charts
+    with rotated x-axis tick labels (clustered vertical bars) so it clears them.
+    bbox_inches='tight' expands the figure to include it."""
     leg = ax.legend(
-        loc="upper center", bbox_to_anchor=(0.5, -0.08),
+        loc="upper center", bbox_to_anchor=(0.5, y),
         ncol=min(n_segs, 5), frameon=False, fontsize=9.5,
         handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
     )
@@ -278,7 +279,9 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     _apply_column_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _legend_below(ax, n_segs)  # off-chart, never overlapping the bars
+        # Vertical bars have rotated x-tick labels below the axis — drop the legend
+        # further so it clears them.
+        _legend_below(ax, n_segs, y=-0.22)
 
     png = render_png(fig)
     place_picture(ctx, png)
