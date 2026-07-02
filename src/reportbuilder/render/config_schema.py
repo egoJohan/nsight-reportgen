@@ -152,11 +152,23 @@ def standard_schema() -> tuple[ConfigField, ...]:
     return (statistic_field(), classifying_var_field(), *_common_tail())
 
 
+def xtab_layout_field() -> ConfigField:
+    return ConfigField(
+        "xtab_layout", "select", "Two-variable layout",
+        options=(("auto", "Automatic"), ("grouped", "Grouped bars"),
+                 ("small_multiples", "Small multiples")),
+        default="auto",
+        help=("With a second classifying variable: 'Grouped bars' pulls the bars apart "
+              "into groups by the first variable; 'Small multiples' draws one panel per "
+              "value of the first variable. 'Automatic' groups when it fits, else panels."),
+    )
+
+
 def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
     return (statistic_field(), classifying_var_field(), classifying_var_2_field(),
-            *_common_tail())
+            xtab_layout_field(), *_common_tail())
 
 
 def stacked_schema() -> tuple[ConfigField, ...]:

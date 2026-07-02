@@ -123,6 +123,21 @@ def new_figure(ctx):
     return fig, ax
 
 
+def new_figure_grid(ctx, n: int, *, tall_in: float | None = None):
+    """Figure with n side-by-side subplots (shared y-axis), house style applied — for
+    cross-tab SMALL MULTIPLES (one panel per primary classifier value)."""
+    register_fonts()
+    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
+    fig = _new_agg_figure(w_in, h_in)
+    axes = fig.subplots(1, max(1, n), sharey=True, sharex=False)
+    axes = [axes] if n <= 1 else list(axes)
+    fig.patch.set_facecolor(CREAM)
+    for ax in axes:
+        ax.set_facecolor(CREAM)
+    return fig, axes
+
+
 def new_tall_figure(ctx, h_in: float):
     """Like new_figure but with a caller-chosen height (>= the slot height).
 

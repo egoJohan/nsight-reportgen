@@ -29,9 +29,9 @@ import textwrap
 import numpy as np
 from matplotlib.colors import to_rgb
 from reportbuilder.render.image._mpl import (
-    new_figure, new_tall_figure, render_png, place_picture, place_picture_square,
-    series_values, format_value, style_legend, force_break_token, wrap_label,
-    wrap_label_capped,
+    new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
+    place_picture_square, series_values, format_value, style_legend,
+    force_break_token, wrap_label, wrap_label_capped,
 )
 from reportbuilder.render.house_style import (
     series_colors, scale_colors, INK, MUTED, GRIDC,
@@ -308,6 +308,94 @@ def _secondary_tick(cat: str) -> str:
     return cat.split(" · ", 1)[1] if " · " in cat else cat
 
 
+def _resolve_xtab_layout(ctx):
+    """For a cross-tab (segment_primary present), resolve the effective layout —
+    'grouped' or 'small_multiples'. Returns None when not a cross-tab. 'auto' groups
+    when the combo count is small enough to stay legible, else uses panels."""
+    sp = getattr(ctx.series, "segment_primary", None)
+    if not sp:
+        return None
+    mode = (getattr(ctx.spec, "options", None) or {}).get("xtab_layout", "auto")
+    if mode in ("grouped", "small_multiples"):
+        return mode
+    n_combos = len(ctx.series.segments)
+    n_primary = len(set(sp.values()))
+    return "small_multiples" if (n_primary >= 2 and n_combos > 8) else "grouped"
+
+
+def _primary_groups(series):
+    """Ordered [(primary_label, [combo_segment, …]), …] from segment_primary."""
+    sp = series.segment_primary or {}
+    order, by_primary = [], {}
+    for s in series.segments:
+        p = sp.get(s, s)
+        if p not in by_primary:
+            order.append(p)
+            by_primary[p] = []
+        by_primary[p].append(s)
+    return [(p, by_primary[p]) for p in order]
+
+
+def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
+    """Cross-tab SMALL MULTIPLES: one subplot per PRIMARY value, each a clustered bar of
+    (answer categories × the SECONDARY classifier). Shared value axis + one legend."""
+    from matplotlib.patches import Patch
+    series = ctx.series
+    groups = _primary_groups(series)
+    _c, _s, data = series_values(series)
+    n_cat = len(cats)
+    n_sec = max((len(segs) for _p, segs in groups), default=1)
+    clrs = series_colors(n_sec)
+    all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
+    max_val = max(all_vals, default=0.0)
+
+    if vertical:
+        fig, axes = new_figure_grid(ctx, len(groups))
+        x = np.arange(n_cat)
+        for ax, (p, segs) in zip(axes, groups):
+            n = len(segs)
+            w = 0.82 / n if n > 1 else 0.6
+            for i, seg in enumerate(segs):
+                vals = data.get(seg, [None] * n_cat)
+                off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
+                ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
+                       edgecolor="none", zorder=3)
+            ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+            ax.set_xticks(x)
+            ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
+                               color=INK, rotation=_XTICK_ROTATION, ha="right",
+                               rotation_mode="anchor")
+            _apply_column_style(ax, max_val, series.statistic)
+    else:
+        fig, axes = new_figure_grid(ctx, len(groups), tall_in=n_cat * 0.42 + 2.0)
+        y = np.arange(n_cat)[::-1]
+        for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
+            n = len(segs)
+            h = 0.82 / n if n > 1 else 0.6
+            for i, seg in enumerate(segs):
+                vals = data.get(seg, [None] * n_cat)
+                off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
+                ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
+                        edgecolor="none", zorder=3)
+            ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+            ax.set_yticks(y)
+            _apply_bar_style(ax, max_val, series.statistic)
+            # y-axis is SHARED (sharey) → set the category labels ONCE, then hide their
+            # DISPLAY on the other panels (clearing them would clear the shared axis).
+            if k == 0:
+                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=INK)
+            ax.tick_params(axis="y", labelleft=(k == 0))
+
+    if ctx.spec.elements.legend:
+        sec = [_secondary_tick(s) for s in groups[0][1]]
+        handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(sec))]
+        fig.legend(handles, sec, loc="lower center", ncol=min(len(sec), 6),
+                   frameon=False, fontsize=10, bbox_to_anchor=(0.5, 0.0))
+    fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
+                        left=0.12 if vertical else 0.2)
+    place_picture(ctx, render_png(fig))
+
+
 def _contrast_ink(color) -> str:
     """Label colour for text placed ON a coloured bar: white on dark fills, INK on
     light — so a stacked-bar % stays legible even on the darkest teal. Accepts a hex
@@ -339,7 +427,10 @@ def build_image_column(ctx) -> None:
     vertical low for many/long labels, so it is never auto-CHOSEN for those.)
     (REQ-C-24b/f, REQ-C-27a)"""
     cats, segs, data = series_values(ctx.series)
-    _render_column_v(ctx, cats, segs, data)
+    if _resolve_xtab_layout(ctx) == "small_multiples":
+        _render_small_multiples(ctx, cats, vertical=True)
+    else:
+        _render_column_v(ctx, cats, segs, data)
 
 
 def _render_column_v(ctx, cats, segs, data) -> None:
@@ -407,7 +498,10 @@ def _render_column_v(ctx, cats, segs, data) -> None:
 def build_image_bar(ctx) -> None:
     """Horizontal grouped bar chart with house style (REQ-C-24b/f, REQ-C-27a)."""
     cats, segs, data = series_values(ctx.series)
-    _render_bar_h(ctx, cats, segs, data)
+    if _resolve_xtab_layout(ctx) == "small_multiples":
+        _render_small_multiples(ctx, cats, vertical=False)
+    else:
+        _render_bar_h(ctx, cats, segs, data)
 
 
 def _render_bar_h(ctx, cats, segs, data) -> None:
