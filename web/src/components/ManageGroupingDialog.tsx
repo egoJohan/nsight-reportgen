@@ -14,7 +14,13 @@ import {
 import type { GroupingOverride, GroupSpec } from "@/lib/api";
 import { useRegroupedQuestions, useVariables } from "@/lib/queries";
 
-type Card = { key: string; label: string; variables: string[]; source: "manual" | "auto" };
+type Card = {
+  key: string;
+  label: string;
+  variables: string[];
+  source: "manual" | "auto";
+  kind: "multi" | "battery";
+};
 
 const setKey = (vars: string[]) => [...vars].sort().join(" ");
 
@@ -85,6 +91,7 @@ export default function ManageGroupingDialog({
         label: q.text,
         variables: q.variables,
         source: manualKeys.has(setKey(q.variables)) ? "manual" : "auto",
+        kind: q.kind as "multi" | "battery",
       }))
     );
     // Pool = ungrouped tick-box (multi) OR rating-scale (battery) variables.
@@ -114,7 +121,7 @@ export default function ManageGroupingDialog({
       groupName.trim() || vars.map((v) => labelOf.get(v) ?? v).join(" · ");
     setGroups((g) => [...g, { kind, variables: vars, label }]);
     setCards((c) => [
-      { key: `manual:${setKey(vars)}`, label, variables: vars, source: "manual" },
+      { key: `manual:${setKey(vars)}`, label, variables: vars, source: "manual", kind },
       ...c,
     ]);
     setPool((p) => p.filter((n) => !selected.has(n)));
@@ -252,6 +259,16 @@ export default function ManageGroupingDialog({
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
+                        <Badge
+                          variant="secondary"
+                          className={`font-normal text-[10px] ${
+                            card.kind === "battery"
+                              ? "bg-violet-100 text-violet-700"
+                              : ""
+                          }`}
+                        >
+                          {card.kind === "battery" ? "battery" : "multi"}
+                        </Badge>
                         <Badge variant="outline" className="font-normal text-[10px]">
                           {card.source === "manual" ? "manual" : "auto"}
                         </Badge>
