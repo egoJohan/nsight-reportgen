@@ -82,3 +82,16 @@ def test_battery_stacked_base_includes_total_and_per_statement():
     assert r.base_n["Total"] == 5
     assert r.base_n["Statement A"] == 5
     assert r.base_n["Statement B"] == 5
+
+
+def test_battery_stacked_topbox_sum_orders_statements_by_top2():
+    """'Top 2 sum' orders the statement bars by their summed two highest scale levels
+    (4+5), descending — the most-'agree' statement leads."""
+    model, q, df = _battery_model()  # s1 top2=40%, s2 top2=80%
+    r = engine.compute(
+        q, _spec(chart_type="stacked_horizontal_bar",
+                 sort=SortSpec(basis="topbox_sum", descending=True)), df, model)
+    assert r.segments == ("Statement B", "Statement A")
+    # default (data_order) keeps variable order
+    r2 = engine.compute(q, _spec(chart_type="stacked_horizontal_bar"), df, model)
+    assert r2.segments == ("Statement A", "Statement B")

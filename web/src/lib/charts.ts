@@ -126,6 +126,9 @@ export const SORT_OPTIONS: SortOption[] = [
   { id: "data_order", label: "Data order" },
   { id: "mean", label: "Mean" },
   { id: "count", label: "Count" },
+  // Scale/battery stacked bars: order statements by the summed two highest levels
+  // (4+5), so the most-"agree" statement leads.
+  { id: "topbox_sum", label: "Top 2 sum" },
 ];
 
 export const SORT_ITEMS: Record<string, string> = Object.fromEntries(
@@ -174,13 +177,21 @@ export function makeChart(
   questionRef: string,
   suggestedChartType: string
 ): ChartSpec {
+  const chartType = suggestedChartType || "vertical_bar";
+  // Stacked bars are the scale/battery distribution — default them to "Top 2 sum"
+  // (most-agree statement on top); everything else keeps the default percentage sort.
+  const isStacked = chartType.startsWith("stacked_");
   return {
     question_ref: questionRef,
-    chart_type: suggestedChartType || "vertical_bar",
+    chart_type: chartType,
     statistic: "pct",
     classifying_var: null,
     number_format: { ...DEFAULT_NUMBER_FORMAT },
-    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    sort: {
+      ...DEFAULT_SORT,
+      basis: isStacked ? "topbox_sum" : DEFAULT_SORT.basis,
+      topbox_codes: [],
+    },
     template_slot: "s1",
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,

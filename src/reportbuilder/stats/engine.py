@@ -815,6 +815,17 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 pct=pct(c, n, spec.number_format), count=float(c), mean=None
             )
 
+    # "Top 2 sum" sort: order the statement bars by their summed two highest scale
+    # levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
+    # derives the top-2 from the scale, so it works for any N. (REQ-S-04)
+    if spec.sort.basis == "topbox_sum" and len(levels) >= 2:
+        top2 = levels[-2:]
+        statements = sorted(
+            statements,
+            key=lambda stmt: sum((cells[(lvl, stmt)].pct or 0.0) for lvl in top2),
+            reverse=spec.sort.descending,
+        )
+
     base_n = {"Total": int(answered_any.sum()), **base_by_stmt}
     return SeriesResult(categories=tuple(levels), segments=tuple(statements),
                         cells=cells, base_n=base_n, statistic="pct")
