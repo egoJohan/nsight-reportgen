@@ -55,23 +55,20 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
 function StatusIcon({ q }: { q: Question }) {
   if (q.chartable === false) {
     return (
-      <span className="inline-flex" title={q.non_chartable_reason ?? "Can't be charted"}>
+      <span className="inline-flex">
         <CircleXIcon className="size-4 text-red-500" />
       </span>
     );
   }
   if (q.missing_values && q.missing_values.length > 0) {
     return (
-      <span
-        className="inline-flex"
-        title={'Has "Not answered" / missing-value codes — open for details.'}
-      >
+      <span className="inline-flex">
         <TriangleAlertIcon className="size-4 text-amber-500" />
       </span>
     );
   }
   return (
-    <span className="inline-flex" title="OK — ready to chart">
+    <span className="inline-flex">
       <CircleCheckIcon className="size-4 text-emerald-500" />
     </span>
   );
