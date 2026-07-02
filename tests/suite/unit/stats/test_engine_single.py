@@ -187,3 +187,32 @@ def test_tiny_base_segment_not_plotted():
     _cats, segs, _data = series_values(r)
     assert "Rare" not in segs                # but it is NOT plotted (tiny base)
     assert "M" in segs and "F" in segs
+
+
+def test_two_classifiers_produce_ordered_cross_product():
+    """Two classifiers (gender × age) → cross-product segments, ordered so the
+    primary (gender) clusters, with per-combo counts and base_n. Labels join both."""
+    q = _catvar()  # Red/Green/Blue (+NA 9)
+    g1 = Variable(name="g1", label="Gender", measurement="categorical",
+                  value_labels=(ValueLabel(1.0, "M"), ValueLabel(2.0, "F")),
+                  missing_values=frozenset())
+    g2 = Variable(name="g2", label="Age", measurement="categorical",
+                  value_labels=(ValueLabel(1.0, "Young"), ValueLabel(2.0, "Old")),
+                  missing_values=frozenset())
+    model = QuestionModel(variables={"q": q, "g1": g1, "g2": g2}, questions=[])
+    qq = Question(qid="q", kind="single", variables=("q",), text="Q")
+    rows_q, rows_g1, rows_g2 = [], [], []
+    for (a, b) in [(1, 1), (1, 2), (2, 1), (2, 2)]:      # each combo: 10 rows, 6 Red/4 Green
+        for i in range(10):
+            rows_q.append(1 if i < 6 else 2)
+            rows_g1.append(a)
+            rows_g2.append(b)
+    df = pd.DataFrame({"q": rows_q, "g1": rows_g1, "g2": rows_g2})
+    r = engine.compute(qq, _spec(classifying_var="g1", classifying_var_2="g2"), df, model)
+    non_total = [s for s in r.segments if s != "Total"]
+    assert non_total == ["M · Young", "M · Old", "F · Young", "F · Old"]  # primary clusters
+    assert r.segments[-1] == "Total"
+    assert r.cell("Red", "M · Young").count == 6.0
+    assert r.cell("Green", "F · Old").count == 4.0
+    assert r.base_n["M · Young"] == 10
+    assert r.base_n["Total"] == 40

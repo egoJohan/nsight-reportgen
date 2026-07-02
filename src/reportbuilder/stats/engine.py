@@ -23,6 +23,33 @@ import reportbuilder.stats.statistics  # noqa: F401
 # Module constant so it can be imported by tests and localised in future.
 NOT_ANSWERED_LABEL: str = "Not answered"
 
+
+def _seg_key(code: float) -> str:
+    """Segment key for a classifier code — matches segment_bases' formatting."""
+    return str(int(code)) if float(code).is_integer() else str(code)
+
+
+def _combo_segmentation(spec: ChartSpec, data: pd.DataFrame):
+    """Cross-tab segmentation for TWO classifiers → (seg_series, ordered_keys).
+
+    Returns (None, None) unless both `classifying_var` and `classifying_var_2` are
+    set. The combo key is "<code1>|<code2>"; a row missing EITHER classifier is
+    excluded (None). `ordered_keys` is numeric primary-major so the first
+    classifier clusters (Male·Young, Male·Old, … Female·…). (REQ-C-14b)
+    """
+    cv1 = spec.classifying_var
+    cv2 = getattr(spec, "classifying_var_2", None)
+    if not (cv1 and cv2):
+        return None, None
+    c1 = pd.to_numeric(data[cv1], errors="coerce")
+    c2 = pd.to_numeric(data[cv2], errors="coerce")
+    both = c1.notna() & c2.notna()
+    keys = pd.Series([None] * len(data), index=data.index, dtype=object)
+    keys.loc[both] = [f"{_seg_key(a)}|{_seg_key(b)}" for a, b in zip(c1[both], c2[both])]
+    pairs = sorted({(float(a), float(b)) for a, b in zip(c1[both], c2[both])})
+    ordered = tuple(f"{_seg_key(a)}|{_seg_key(b)}" for a, b in pairs)
+    return keys, ordered
+
 # Task G.3: actionable message raised when a non-chartable (open-ended text)
 # question reaches the engine, instead of a cryptic "could not convert string
 # to float" further down the render chain.
@@ -162,14 +189,24 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
     var = model.variable(question.variables[0])   # single var; multi: first var
     label = question.text or var.label
     fmt = spec.number_format
-    if spec.classifying_var:
-        bases = segment_bases(data, var, spec.classifying_var)   # {"Total":N, "1":N, ...}
-        seg_codes = pd.to_numeric(data[spec.classifying_var], errors="coerce")
-        segments = tuple(s for s in bases if s != "Total") + ("Total",)
+    seg_series, ordered = _combo_segmentation(spec, data)
+    if seg_series is not None or spec.classifying_var:
+        if seg_series is not None:                   # cross-tab: two classifiers
+            bases = segment_bases(data, var, seg_series=seg_series)
+            segments = (*ordered, "Total")
+        else:
+            bases = segment_bases(data, var, spec.classifying_var)
+            seg_series = pd.to_numeric(data[spec.classifying_var], errors="coerce")
+            segments = tuple(s for s in bases if s != "Total") + ("Total",)
         cells: dict[tuple[str, str], Cell] = {}
         for seg in segments:
-            vals = (data[var.name] if seg == "Total"
-                    else data.loc[seg_codes == float(seg), var.name])
+            # Mask by the segment key (string combo or numeric code); "|" marks a combo.
+            if seg == "Total":
+                vals = data[var.name]
+            elif seg_series.dtype == object or "|" in seg:
+                vals = data.loc[seg_series == seg, var.name]
+            else:
+                vals = data.loc[seg_series == float(seg), var.name]
             v = summary_value(vals, var, fmt, stat)
             if stat.name == "mean":
                 cells[(label, seg)] = Cell(pct=None, count=None, mean=v)
@@ -281,7 +318,8 @@ def _effective_missing(spec: ChartSpec, var: Variable) -> set[float]:
 
 
 def _missing_counts(data: pd.DataFrame, var: Variable, eff: set[float],
-                    classifying_var: str | None = None) -> dict[str, int]:
+                    classifying_var: str | None = None,
+                    *, seg_series: pd.Series | None = None) -> dict[str, int]:
     """Count sysmis + "not answered" rows per segment using the effective set.
 
     Returns a dict of {segment_label: count}. Always includes "Total".
@@ -292,7 +330,10 @@ def _missing_counts(data: pd.DataFrame, var: Variable, eff: set[float],
     s = pd.to_numeric(data[var.name], errors="coerce")
     missing_mask = s.isna() | s.isin(eff)
     result: dict[str, int] = {"Total": int(missing_mask.sum())}
-    if classifying_var is not None:
+    if seg_series is not None:
+        for key in seg_series.dropna().unique():
+            result[str(key)] = int((missing_mask & (seg_series == key)).sum())
+    elif classifying_var is not None:
         seg = pd.to_numeric(data[classifying_var], errors="coerce")
         for code in sorted(seg.dropna().unique()):
             seg_label = str(int(code)) if float(code).is_integer() else str(code)
@@ -308,18 +349,26 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     show_empty: bool = getattr(spec, "show_empty_categories", True)
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
-    if spec.classifying_var:
+    seg_series, ordered = _combo_segmentation(spec, data)
+    if seg_series is not None:                       # cross-tab: two classifiers
+        bases = segment_bases(data, var, missing_override=eff, seg_series=seg_series)
+        counts = aggregate_counts(data, var.name, seg_series=seg_series)
+        segments = (*ordered, "Total")
+    elif spec.classifying_var:
         bases = segment_bases(data, var, spec.classifying_var, missing_override=eff)
+        counts = aggregate_counts(data, var.name, spec.classifying_var)
+        segments = tuple(s for s in bases if s != "Total")
+        segments = (*segments, "Total") if segments else ("Total",)
     else:
         bases = {"Total": single_base(data, var, missing_override=eff)}
-    counts = aggregate_counts(data, var.name, spec.classifying_var)
-    segments = tuple(s for s in bases if s != "Total")
-    segments = (*segments, "Total") if segments else ("Total",)
+        counts = aggregate_counts(data, var.name, spec.classifying_var)
+        segments = ("Total",)
 
     # When show_not_answered is True, recompute over total (valid + missing). (REQ-D-06, MV)
     show_na: bool = getattr(spec, "show_not_answered", False)
     if show_na:
-        missing_n = _missing_counts(data, var, eff, spec.classifying_var)
+        missing_n = _missing_counts(data, var, eff, spec.classifying_var,
+                                    seg_series=seg_series)
         denom = {seg: bases.get(seg, 0) + missing_n.get(seg, 0) for seg in segments}
     else:
         denom = {seg: bases.get(seg, 0) for seg in segments}
@@ -407,6 +456,47 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         base_n={"Total": base}, statistic=spec.statistic)
 
 
+def _code_label_map(var: Variable, seg_codes: set[str]) -> dict[str, str]:
+    """{code_string: value_label} for a classifier variable. Empty labels + a
+    derived binary 0/1 SEGMENT FLAG (label == name) → {"1": name, "0": "Muut"}."""
+    m: dict[str, str] = {}
+    for vl in var.value_labels:
+        key = str(int(vl.value)) if float(vl.value).is_integer() else str(vl.value)
+        m[key] = vl.label
+    if not m and (var.label or "").strip() == var.name and seg_codes and seg_codes <= {"0", "1"}:
+        m = {"1": var.label, "0": "Muut"}
+    return m
+
+
+def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
+                            cv1: str, cv2: str) -> SeriesResult:
+    """Relabel cross-tab combo segments "<c1>|<c2>" → "<label1> · <label2>" using
+    both classifiers' value labels. "Total" is kept; unknown codes pass through."""
+    try:
+        var1, var2 = model.variable(cv1), model.variable(cv2)
+    except Exception:
+        return result
+    parts = [s.split("|", 1) for s in result.segments if s != "Total" and "|" in s]
+    m1 = _code_label_map(var1, {p[0] for p in parts})
+    m2 = _code_label_map(var2, {p[1] for p in parts})
+
+    def rl(seg: str) -> str:
+        if seg == "Total" or "|" not in seg:
+            return seg
+        a, b = seg.split("|", 1)
+        return f"{m1.get(a, a)} · {m2.get(b, b)}"
+
+    new_segs = tuple(rl(s) for s in result.segments)
+    if new_segs == result.segments:
+        return result
+    return dataclasses.replace(
+        result,
+        segments=new_segs,
+        cells={(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()},
+        base_n={rl(s): n for s, n in result.base_n.items()},
+    )
+
+
 def _relabel_segments(result: SeriesResult, model: QuestionModel,
                       classifying_var: str) -> SeriesResult:
     """Map segment codes (e.g. "10002") to the classifying variable's value
@@ -416,20 +506,10 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
         var = model.variable(classifying_var)
     except Exception:
         return result
-    code_to_label: dict[str, str] = {}
-    for vl in var.value_labels:
-        key = str(int(vl.value)) if float(vl.value).is_integer() else str(vl.value)
-        code_to_label[key] = vl.label
+    seg_codes = {s for s in result.segments if s != "Total"}
+    code_to_label = _code_label_map(var, seg_codes)
     if not code_to_label:
-        # A derived binary SEGMENT FLAG (no value labels, label == name, values
-        # 0/1) — e.g. "Suosittelijat", "Kokemusta": label the flagged group by the
-        # flag's own name and the rest as "Muut", so cross-tabbing by it reads
-        # cleanly instead of "0"/"1".
-        seg_codes = {s for s in result.segments if s != "Total"}
-        if (var.label or "").strip() == var.name and seg_codes and seg_codes <= {"0", "1"}:
-            code_to_label = {"1": var.label, "0": "Muut"}
-        else:
-            return result
+        return result
 
     def rl(seg: str) -> str:
         return seg if seg == "Total" else code_to_label.get(seg, seg)
@@ -528,8 +608,12 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             result = _multi(question, spec, data, model)
         else:
             result = _single(question, spec, data, model)
-    # Display segment codes as the classifying variable's value labels.
-    if spec.classifying_var:
+    # Display segment codes as the classifying variable's value labels (a cross-tab
+    # of two classifiers joins both labels: "Male · 25-34 vuotias").
+    if spec.classifying_var and getattr(spec, "classifying_var_2", None):
+        result = _relabel_combo_segments(
+            result, model, spec.classifying_var, spec.classifying_var_2)
+    elif spec.classifying_var:
         result = _relabel_segments(result, model, spec.classifying_var)
     return result
 

@@ -41,17 +41,26 @@ def multi_base(data: pd.DataFrame, vars_: list[Variable]) -> int:
     return int(answered.sum())
 
 
-def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str,
-                  missing_override: set[float] | None = None) -> dict[str, int]:
+def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None = None,
+                  missing_override: set[float] | None = None,
+                  *, seg_series: pd.Series | None = None) -> dict[str, int]:
     """Per-segment base + a "Total", each excluding missing in the reported var and
     the classifier. (REQ-C-14)
 
     When `missing_override` is provided it replaces `var.missing_values` for the
     "is this code missing" test (eff-aware base for ChartSpec.not_answered_codes).
+
+    When `seg_series` is given it IS the segmentation (its values are the segment
+    keys, e.g. cross-tab combo strings) and is used as-is — no numeric coercion.
     """
     valid = _valid_mask(data, var, missing_override)
+    if seg_series is not None:
+        bases: dict[str, int] = {"Total": int((valid & seg_series.notna()).sum())}
+        for key in seg_series.dropna().unique():
+            bases[str(key)] = int((valid & (seg_series == key)).sum())
+        return bases
     seg = pd.to_numeric(data[classifying_var], errors="coerce")
-    bases: dict[str, int] = {"Total": int((valid & seg.notna()).sum())}
+    bases = {"Total": int((valid & seg.notna()).sum())}
     for code in sorted(seg.dropna().unique()):
         label = str(int(code)) if float(code).is_integer() else str(code)
         bases[label] = int((valid & (seg == code)).sum())

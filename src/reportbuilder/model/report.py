@@ -42,6 +42,7 @@ class ChartSpec:
     template_slot: str
     elements: ElementToggles
     scatter_xy: tuple[str, str] | None = None   # scatter only (design §9a)
+    classifying_var_2: str | None = None        # secondary classifier → cross-tab combos (REQ-C-14b)
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
     slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
@@ -150,6 +151,7 @@ def report_from_json(data: dict | str) -> Report:
             template_slot=c["template_slot"],
             elements=ElementToggles(**el),
             scatter_xy=tuple(sx) if sx is not None else None,
+            classifying_var_2=c.get("classifying_var_2"),
             show_not_answered=c.get("show_not_answered", False),
             slide_title=c.get("slide_title"),
             slide_description=c.get("slide_description"),
