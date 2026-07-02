@@ -53,6 +53,8 @@ export interface Variable {
   // A genuine multi-response tick-box (binary 0/1) — the only kind groupable
   // into a multi-response question.
   tickbox?: boolean;
+  // A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
+  scale?: boolean;
 }
 
 // A word-cloud value merge: variant tokens (`words`, lowercased) folded into one
