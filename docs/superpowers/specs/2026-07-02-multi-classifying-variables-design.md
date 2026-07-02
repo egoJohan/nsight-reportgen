@@ -146,6 +146,25 @@ Two minor render touch-points to check (not rewrites):
   clustered bar schemas.
 - **Render smoke:** a 2-classifier clustered bar renders without error (PNG + native).
 
+## Rendering considerations (from visual testing of the current segmented charts)
+Visual QA of today's single-classifier segmented charts surfaced issues the cross-
+product will amplify — v1 must handle them:
+- **Data-label collision** on clustered bars: at ~6 segments the per-bar % labels
+  already overlap (worst on vertical bars). For cross-tab, **suppress per-bar value
+  labels once the segment count is high** (e.g. > 6) — rely on axis + legend + the
+  data table — or show them only for the largest bar per group. Decide during build;
+  default to suppressing when combos > 6.
+- **Tiny-base combos:** a combo with a near-empty base renders a misleading 100%/0%.
+  Add a **minimum-base guard**: combos whose base_n < a threshold (e.g. < 20, tunable)
+  are dropped from the chart (or greyed), and the UI warning already flags large combo
+  counts. Never show a % computed on a base of ~1 as if it were real.
+- **"Total" series:** clustered bars currently draw the "Total" segment as its own
+  bar. For cross-tab that's extra clutter — **drop "Total" from the drawn clustered
+  series** (keep it in `base_n` for the footnote). Confirm single-classifier visual is
+  unchanged (or improved) by this.
+- **Label contrast** (pre-existing, low): darkest stack segment labels are dark-on-dark
+  — out of scope here, tracked separately.
+
 ## Phasing
 - **Phase 1 (this spec):** 2 classifiers, cross-product clustered bars, combo labels,
   UI guard.
