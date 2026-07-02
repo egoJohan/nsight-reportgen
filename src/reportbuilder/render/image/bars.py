@@ -45,6 +45,11 @@ _HBAR_LABEL_WRAP_WIDTH: int = 42  # wider wrap for hbar y-labels → fewer lines
 _HBAR_ROW_IN: float = 0.52        # vertical inches reserved per category row (fits 2 label lines)
 _XLABEL_WRAP_WIDTH: int = 20  # chars per line for (rotated) vertical-bar x-axis labels
 _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
+# Beyond this many segments the per-bar value labels collide, so they are dropped
+# (axis grid + legend carry the read). Vertical columns get narrow sooner than the
+# horizontal layout, so its threshold is lower.
+_MAX_LABELED_SEGMENTS_V: int = 4
+_MAX_LABELED_SEGMENTS_H: int = 6
 
 
 def _hbar_row_pt(n_cats: int, fig_h_in: float) -> float:
@@ -251,8 +256,10 @@ def _render_column_v(ctx, cats, segs, data) -> None:
             label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
+        # Per-bar value labels collide once columns get narrow (many segments) —
+        # suppress them past a threshold and rely on the axis grid + legend.
         for bar, v in zip(bars, vals):
-            if v is not None:
+            if v is not None and n_segs <= _MAX_LABELED_SEGMENTS_V:
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
@@ -271,7 +278,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     _apply_column_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _style_legend(ax)
+        _legend_below(ax, n_segs)  # off-chart, never overlapping the bars
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -334,7 +341,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
         for yi, v in zip(ys, vals):
-            if v is not None:
+            if v is not None and n_segs <= _MAX_LABELED_SEGMENTS_H:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
@@ -352,7 +359,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     _apply_bar_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _style_legend(ax, loc="lower right")
+        _legend_below(ax, n_segs)  # off-chart, never overlapping the bars
 
     png = render_png(fig)
     # Aspect-preserving placement, top-aligned so the chart hugs the question

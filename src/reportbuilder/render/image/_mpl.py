@@ -162,8 +162,18 @@ def place_picture(ctx, png_path: str) -> None:
     place_picture_square(ctx, png_path, valign="top")
 
 
+# A classifier segment (or cross-tab combo) whose base is below this is too small
+# to chart — its percentages would be noise (a "won't say" group of 1 → 100%). The
+# engine still computes it exactly; we just don't PLOT it. Tunable.
+MIN_SEGMENT_BASE = 10
+
+
 def series_values(series):
     """Decompose a SeriesResult into (cats, segs, data) for chart rendering.
+
+    Segments computed on a near-empty base are dropped (see MIN_SEGMENT_BASE) so a
+    tiny classifier group never renders a misleading 100%. "Total" and single-series
+    ("Total"-only) charts are always kept.
 
     Returns:
         cats: list of category labels (x-axis / bar groups)
@@ -171,7 +181,12 @@ def series_values(series):
         data: dict of seg -> list[float] (one value per category)
     """
     cats = list(series.categories)
-    segs = list(series.segments)
+    segs = [
+        s for s in series.segments
+        if s == "Total" or series.base_n.get(s, 0) >= MIN_SEGMENT_BASE
+    ]
+    if not segs:  # everything was tiny — fall back to the overall column
+        segs = [s for s in series.segments if s == "Total"] or list(series.segments)
     data = {
         seg: [
             float(series.cell(c, seg).value(series.statistic) or 0.0)

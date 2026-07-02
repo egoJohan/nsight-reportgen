@@ -160,3 +160,30 @@ def test_classifier_produces_segments_plus_total():
     assert r.segments[-1] == "Total"
     assert set(r.segments) == {"1", "2", "Total"}
     assert r.base_n["Total"] == 4
+
+
+def _model_qg(qvar, gvar):
+    return (QuestionModel(variables={"q": qvar, "g": gvar}, questions=[]),
+            Question(qid="q", kind="single", variables=("q",), text="Q"))
+
+
+def test_tiny_base_segment_not_plotted():
+    """A classifier value with a near-empty base (e.g. 'En halua sanoa', n=1) must
+    not render a misleading 100%. The engine computes it exactly, but the render
+    decompose (series_values) drops it."""
+    from reportbuilder.render.image._mpl import series_values
+    q = _catvar()
+    g = Variable(name="g", label="Gender", measurement="categorical",
+                 value_labels=(ValueLabel(1.0, "M"), ValueLabel(2.0, "F"),
+                               ValueLabel(3.0, "Rare")),
+                 missing_values=frozenset())
+    model, qq = _model_qg(q, g)
+    df = pd.DataFrame({
+        "q": ([1, 2, 3, 1] * 5) + ([1, 2, 3, 2] * 5) + [2],  # 41 valid answers
+        "g": [1] * 20 + [2] * 20 + [3] * 1,                   # M=20, F=20, Rare=1
+    })
+    r = engine.compute(qq, _spec(classifying_var="g"), df, model)
+    assert "Rare" in r.segments              # engine keeps the exact stat
+    _cats, segs, _data = series_values(r)
+    assert "Rare" not in segs                # but it is NOT plotted (tiny base)
+    assert "M" in segs and "F" in segs
