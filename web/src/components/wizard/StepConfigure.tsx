@@ -1501,7 +1501,7 @@ function StepConfigureInner({
         <div className="flex flex-col gap-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold">
+              <h3 className="text-sm font-semibold leading-snug">
                 {activeSpecial
                   ? activeChart.slide_title || chartTypeLabel(activeChart.chart_type)
                   : questionMap.get(activeChart.question_ref)?.text ??
