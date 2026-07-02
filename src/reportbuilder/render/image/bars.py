@@ -146,6 +146,37 @@ def _tick_text(v: float) -> str:
     return str(int(v)) if float(v).is_integer() else f"{v:g}"
 
 
+# Up to this many series, a below-the-plot legend is compact enough; beyond it a
+# right-side vertical legend keeps the plot large (uses the spare horizontal space).
+_LEGEND_BELOW_MAX: int = 5
+
+
+def _place_series_legend(fig, ax, segs, *, vertical: bool) -> None:
+    """Dynamic legend placement to keep the plot as large as possible.
+
+    Few series → a compact row BELOW the plot. Many series (e.g. a cross-tab of two
+    classifiers, which yields long combo labels) → a single-column legend to the
+    RIGHT, with the axes shrunk to make room *within* the figure so the plot keeps
+    its height instead of being squeezed by a wide multi-row legend below."""
+    n = len(segs)
+    if n <= _LEGEND_BELOW_MAX:
+        _legend_below(ax, n, y=-0.22 if vertical else -0.08)
+        return
+    # Right-side vertical legend. Shrink the axes width; the font steps down as the
+    # series count grows so a long list still fits the figure height.
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0, box.width * 0.70, box.height])
+    fs = 9.0 if n <= 12 else (8.0 if n <= 20 else 7.0)
+    leg = ax.legend(
+        loc="center left", bbox_to_anchor=(1.02, 0.5),
+        ncol=1, frameon=False, fontsize=fs,
+        handlelength=1.0, handletextpad=0.5, labelspacing=0.35,
+    )
+    if leg is not None:
+        for t in leg.get_texts():
+            t.set_color(INK)
+
+
 def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
@@ -279,9 +310,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     _apply_column_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        # Vertical bars have rotated x-tick labels below the axis — drop the legend
-        # further so it clears them.
-        _legend_below(ax, n_segs, y=-0.22)
+        _place_series_legend(fig, ax, segs, vertical=True)
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -362,7 +391,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     _apply_bar_style(ax, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _legend_below(ax, n_segs)  # off-chart, never overlapping the bars
+        _place_series_legend(fig, ax, segs, vertical=False)
 
     png = render_png(fig)
     # Aspect-preserving placement, top-aligned so the chart hugs the question
