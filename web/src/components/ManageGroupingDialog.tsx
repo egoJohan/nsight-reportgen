@@ -118,6 +118,9 @@ export default function ManageGroupingDialog({
       ...c,
     ]);
     setPool((p) => p.filter((n) => !selected.has(n)));
+    // Grouping wins over a forced-single: clear any lingering singles for these vars
+    // (e.g. re-grouping right after an ungroup) so they aren't in both lists.
+    setSingles((s) => s.filter((n) => !selected.has(n)));
     setSelected(new Set());
     setGroupName("");
   }
@@ -126,9 +129,11 @@ export default function ManageGroupingDialog({
     setCards((c) => c.filter((x) => x !== card));
     if (card.source === "manual") {
       setGroups((g) => g.filter((x) => setKey(x.variables) !== setKey(card.variables)));
-    } else {
-      setSingles((s) => Array.from(new Set([...s, ...card.variables])));
     }
+    // Force the members single so auto-detection (tick-box multis, ":"-pattern
+    // batteries) doesn't immediately re-group them — otherwise the card reappears
+    // and the group looks un-ungroupable. Applies to manual AND auto groups.
+    setSingles((s) => Array.from(new Set([...s, ...card.variables])));
     setPool((p) => Array.from(new Set([...p, ...card.variables])));
   }
 
