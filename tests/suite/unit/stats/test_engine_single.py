@@ -216,3 +216,21 @@ def test_two_classifiers_produce_ordered_cross_product():
     assert r.cell("Green", "F · Old").count == 4.0
     assert r.base_n["M · Young"] == 10
     assert r.base_n["Total"] == 40
+
+
+def test_endpoint_labelled_scale_shows_all_points_as_numbers_with_caption():
+    """A 1-7 scale labelled only on the endpoints must show ALL points (not just the
+    two labelled ones) as numbers, 7 at top, with the endpoint text in a caption."""
+    v = Variable(name="q", label="Suosittelu", measurement="scale",
+                 value_labels=(ValueLabel(1.0, "täysin eri mieltä"),
+                               ValueLabel(7.0, "täysin samaa mieltä")),
+                 missing_values=frozenset())
+    model = QuestionModel(variables={"q": v}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Suosittelu")
+    df = pd.DataFrame({"q": [1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 7, 7, 7, 7]})
+    r = engine.compute(q, _spec(sort=SortSpec(basis="data_order")), df, model)
+    assert r.categories == ("7", "6", "5", "4", "3", "2", "1")   # all points, 7 at top
+    assert r.caption is not None
+    assert "1 = täysin eri mieltä" in r.caption and "7 = täysin samaa mieltä" in r.caption
+    assert r.cell("3", "Total").count == 3.0
+    assert r.cell("7", "Total").count == 4.0

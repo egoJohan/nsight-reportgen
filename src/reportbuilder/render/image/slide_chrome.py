@@ -168,6 +168,18 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         [(footer_text, 9.5, PX_MUTED, False)],
         align=PP_ALIGN.LEFT,
     )
+    # Scale endpoint legend for a partially-labelled numeric scale (e.g. "1 = täysin
+    # eri mieltä · 7 = täysin samaa mieltä") — a small caption just above the footer,
+    # so the numeric axis (1..7) reads cleanly and the text isn't lost. (REQ-C-24c)
+    caption = getattr(ctx.series, "caption", None)
+    if caption:
+        _textbox(
+            slide,
+            Inches(0.62), sh - Inches(0.80),
+            sw - Inches(1.2), Inches(0.30),
+            [(caption, 9.5, PX_MUTED, False)],
+            align=PP_ALIGN.LEFT,
+        )
     # n is shown once, in the methodology footer above (it already reads
     # "<stat label> · n = N"). The previous separate bottom-right "n = N"
     # annotation was redundant and has been removed.

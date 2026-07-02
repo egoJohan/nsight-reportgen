@@ -24,6 +24,9 @@ class SeriesResult:
     cells: dict[tuple[str, str], Cell]        # (category, segment) -> Cell
     base_n: dict[str, int]                    # segment -> N  (REQ-C-24h)
     statistic: str                            # "pct" | "count" | "mean"
+    # Optional caption rendered under the chart — e.g. the endpoint legend of a
+    # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)
+    caption: str | None = None
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

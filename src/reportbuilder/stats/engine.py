@@ -9,7 +9,7 @@ import dataclasses
 import re
 import pandas as pd
 from reportbuilder.model.question import Question, QuestionModel, Variable
-from reportbuilder.model.report import ChartSpec
+from reportbuilder.model.report import ChartSpec, SortSpec
 from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
 from reportbuilder.stats.registry import statistic as get_statistic
@@ -379,14 +379,25 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # "7=Täysin samaa mieltä") are often stored with large out-of-order codes, so
     # raw storage order yields e.g. 2,3,4,5,6,1,7. A non-numeric label in a scale
     # (e.g. "En osaa sanoa") sorts after the numeric points.
-    rating = _rating_scale(var)
-    is_rating = len(rating) >= max(3, len(labels) - 1)
+    # A numeric scale labelled only on SOME points (e.g. 1..7 with text on the
+    # endpoints) is charted with ALL points as numbers (never dropping the unlabelled
+    # 2..6), ordered high→low, and the text labels moved to a caption. Otherwise the
+    # normal path: categories are the labelled codes, rating scales ordered by point.
+    scale_entries, scale_caption = _partial_scale(var, data, eff)
+    if scale_entries is not None:
+        entries = scale_entries
+    else:
+        rating = _rating_scale(var)
+        is_rating = len(rating) >= max(3, len(labels) - 1)
+        entries = [
+            (code, overrides.get(label, label),
+             float(rating.get(code, 1000 + idx) if is_rating else idx))
+            for idx, (code, label) in enumerate(labels.items())
+        ]
 
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
-    for idx, (code, label) in enumerate(labels.items()):
-        display = overrides.get(label, label)
-        data_index = rating.get(code, 1000 + idx) if is_rating else idx
+    for code, display, data_index in entries:
         for seg in segments:
             c = counts.get((code, seg), 0)
             base = denom.get(seg, 0)
@@ -404,7 +415,11 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             rows, cells, segments, spec.statistic, spec.number_format
         )
 
-    categories: list[str] = list(sort_categories(rows, spec.sort))
+    # A partially-labelled scale is always shown in scale order, high→low (its
+    # data_index carries -point, so 7 sits at the top) regardless of the spec's sort
+    # basis — a frequency sort would scramble the scale. (REQ-C-24c)
+    sort_spec = SortSpec(basis="data_order") if scale_entries is not None else spec.sort
+    categories: list[str] = list(sort_categories(rows, sort_spec))
 
     if show_na:
         # Append "Not answered" last — after all real sorted categories.
@@ -424,7 +439,32 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n={s: denom.get(s, 0) for s in segments},
-                        statistic=spec.statistic)
+                        statistic=spec.statistic, caption=scale_caption)
+
+
+def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
+    """Detect a numeric integer scale labelled on only SOME points (e.g. 1..7 with
+    text on the endpoints). Returns ``(entries, caption)`` where entries is
+    ``[(code, "<n>", -n), …]`` for EVERY data point (shown as its number, ordered
+    high→low so 7 is at the top) and caption is ``"1 = … · 7 = …"``. Returns
+    ``(None, None)`` for fully-labelled or non-scale variables (unchanged path)."""
+    if var.name not in data.columns:
+        return None, None
+    s = pd.to_numeric(data[var.name], errors="coerce")
+    pts = sorted({int(x) for x in s.dropna().unique()
+                  if float(x).is_integer() and x not in eff})
+    # Scale-ish: several integer points spanning a reasonable range.
+    if len(pts) < 3 or (pts[-1] - pts[0]) < 4:
+        return None, None
+    labeled = {int(vl.value): vl.label for vl in var.value_labels
+               if float(vl.value).is_integer() and vl.value not in eff}
+    unlabeled = [p for p in pts if p not in labeled]
+    # Only when it's PARTIALLY labelled — some points have text, some don't.
+    if not labeled or not unlabeled:
+        return None, None
+    entries = [(float(p), str(p), float(-p)) for p in pts]
+    caption = " · ".join(f"{p} = {labeled[p]}" for p in sorted(labeled))
+    return entries, caption
 
 
 def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
