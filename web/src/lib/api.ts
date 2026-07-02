@@ -336,6 +336,13 @@ export interface GroupingOverride {
   singles: string[];
 }
 
+// A confirmable hint: a run of ≥3 contiguous same-scale variables that could be a
+// battery (stacked comparison). Surfaced by /regroup; never applied automatically.
+export interface BatterySuggestion {
+  variables: string[];
+  labels: string[];
+}
+
 export interface CaseMaterial {
   material_id: string;
   name: string;
@@ -411,12 +418,14 @@ export const api = {
     regroup: (
       materialId: string,
       override: GroupingOverride
-    ): Promise<{ questions: Question[] }> =>
+    ): Promise<{ questions: Question[]; battery_suggestions: BatterySuggestion[] }> =>
       fetch(`${API_BASE}/materials/${materialId}/regroup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(override),
-      }).then((r) => json<{ questions: Question[] }>(r)),
+      }).then((r) =>
+        json<{ questions: Question[]; battery_suggestions: BatterySuggestion[] }>(r)
+      ),
 
     questionSummary: (materialId: string, qid: string): Promise<QuestionSummary> =>
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/summary`).then(

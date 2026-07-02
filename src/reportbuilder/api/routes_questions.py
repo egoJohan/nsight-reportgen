@@ -26,6 +26,7 @@ from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.ingest.grouping_override import apply_grouping_override
+from reportbuilder.ingest.battery_group import suggest_scale_batteries
 from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
     model_for_material,
@@ -653,7 +654,16 @@ def regroup(
         "singles": list(body.singles),
     }
     model = apply_grouping_override(base, override)
-    return {"questions": _questions_payload(model, material_id, client)}
+    # Battery suggestions among the questions that are STILL single after this grouping
+    # (runs of ≥3 contiguous same-scale variables). A confirmable hint, never applied.
+    suggestions = [
+        {"variables": list(members), "labels": list(labels)}
+        for members, labels in suggest_scale_batteries(model)
+    ]
+    return {
+        "questions": _questions_payload(model, material_id, client),
+        "battery_suggestions": suggestions,
+    }
 
 
 class QuestionLabelBody(BaseModel):

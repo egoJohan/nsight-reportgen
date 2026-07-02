@@ -149,4 +149,7 @@ def test_regroup_valid_multi_returns_questions(client_mock):
     r = client_mock.post("/materials/mat-x/regroup",
                          json={"groups": [{"kind": "multi", "variables": ["m1", "m2"]}], "singles": []})
     assert r.status_code == 200
-    assert "questions" in r.json()
+    body = r.json()
+    assert "questions" in body
+    # The battery-suggestion hint list is always present (empty when nothing qualifies).
+    assert isinstance(body.get("battery_suggestions"), list)

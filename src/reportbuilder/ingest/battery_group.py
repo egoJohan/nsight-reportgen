@@ -119,3 +119,43 @@ def apply_batteries(
         if not (q.kind == "single" and q.variables and q.variables[0] in consumed)
     ]
     return QuestionModel(variables=variables, questions=battery_qs + kept)
+
+
+def suggest_scale_batteries(model, *, min_members: int = 3):
+    """Runs of >= ``min_members`` CONSECUTIVE single questions that share ONE
+    rating-scale signature (via ``scale_levels``) — candidate batteries the analyst
+    can confirm.
+
+    Heuristic: same scale + adjacency only (survey grids export as a contiguous run of
+    same-scale variables). It OVER-groups any run of same-scale questions, so it is
+    meant as a user-CONFIRMABLE suggestion, never silent creation. Returns
+    ``[(members_tuple, labels_tuple), …]`` in deck order.
+    """
+    from reportbuilder.stats.engine import scale_levels
+
+    def sig(vn):
+        v = model.variables.get(vn)
+        if v is None:
+            return None
+        lv = scale_levels(v)
+        return tuple((c, l) for c, l, _p in lv) if lv else None
+
+    out: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    run: list[str] = []
+    run_sig = None
+
+    def emit():
+        if len(run) >= min_members:
+            labels = tuple((model.variables[vn].label or vn) for vn in run)
+            out.append((tuple(run), labels))
+
+    for q in model.questions:
+        s = sig(q.variables[0]) if (q.kind == "single" and len(q.variables) == 1) else None
+        if s is not None and s == run_sig:
+            run.append(q.variables[0])
+        else:
+            emit()
+            run = [q.variables[0]] if s is not None else []
+            run_sig = s
+    emit()
+    return out

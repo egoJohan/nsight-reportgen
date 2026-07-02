@@ -210,6 +210,20 @@ export function useRegroupedQuestions(
   });
 }
 
+// Battery suggestions for the current grouping — shares the regroup query cache
+// (same key), so no extra fetch. Runs of ≥3 contiguous same-scale variables.
+export function useBatterySuggestions(
+  materialId: string | null,
+  grouping: GroupingOverride
+) {
+  return useQuery({
+    queryKey: ["regrouped-questions", materialId ?? "", JSON.stringify(grouping)],
+    queryFn: () => api.materials.regroup(materialId!, grouping),
+    enabled: !!materialId,
+    select: (d) => d.battery_suggestions ?? [],
+  });
+}
+
 export function useUploadMaterial(caseId: string) {
   return useMutation({
     mutationFn: (file: File) => api.materials.upload(caseId, file),

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon } from "lucide-react";
+import { CheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Question, GroupingOverride } from "@/lib/api";
-import { useRegroupedQuestions } from "@/lib/queries";
+import type { Question, GroupingOverride, BatterySuggestion } from "@/lib/api";
+import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 
 // A question whose only compatible chart type is the word cloud (an open-ended
@@ -59,8 +59,28 @@ export default function StepSelect({
     materialId,
     grouping
   );
+  const { data: suggestions } = useBatterySuggestions(materialId, grouping);
   const [search, setSearch] = useState("");
   const [groupingOpen, setGroupingOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+
+  const sKey = (vars: string[]) => [...vars].sort().join(",");
+  const activeSuggestions = (suggestions ?? []).filter(
+    (s) => !dismissed.has(sKey(s.variables))
+  );
+
+  function groupAsBattery(s: BatterySuggestion) {
+    // Default label from the first few statements; the user can rename in the dialog.
+    const label =
+      s.labels.slice(0, 3).join(" · ") + (s.labels.length > 3 ? " …" : "");
+    onGroupingChange({
+      ...grouping,
+      groups: [
+        ...grouping.groups,
+        { kind: "battery", variables: s.variables, label },
+      ],
+    });
+  }
 
   // Auto-select a newly-created group: when the reshaped list gains a group
   // question that wasn't there before (i.e. the user just grouped some
@@ -145,6 +165,44 @@ export default function StepSelect({
           {selectedCount} selected · {filtered.length} questions
         </span>
       </div>
+
+      {activeSuggestions.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {activeSuggestions.map((s) => (
+            <div
+              key={sKey(s.variables)}
+              className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+            >
+              <BarChart3Icon className="mt-0.5 size-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1 text-sm">
+                <p className="font-medium">
+                  {s.variables.length} consecutive questions share a rating scale —
+                  group them as a battery (stacked comparison)?
+                </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {s.labels.join(" · ")}
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <Button size="sm" className="h-7" onClick={() => groupAsBattery(s)}>
+                  Group as battery
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  title="Dismiss"
+                  onClick={() =>
+                    setDismissed((d) => new Set(d).add(sKey(s.variables)))
+                  }
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <ManageGroupingDialog
         materialId={materialId}
