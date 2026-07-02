@@ -173,12 +173,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # so the numeric axis (1..7) reads cleanly and the text isn't lost. (REQ-C-24c)
     caption = getattr(ctx.series, "caption", None)
     if caption:
+        # Right-aligned on the footer row (below the plot) so it never overlaps the
+        # chart's x-axis; shares the line with the left-aligned methodology footer.
         _textbox(
             slide,
-            Inches(0.62), sh - Inches(0.80),
-            sw - Inches(1.2), Inches(0.30),
+            sw - Inches(6.4), sh - Inches(0.50),
+            Inches(6.0), Inches(0.40),
             [(caption, 9.5, PX_MUTED, False)],
-            align=PP_ALIGN.LEFT,
+            align=PP_ALIGN.RIGHT,
         )
     # n is shown once, in the methodology footer above (it already reads
     # "<stat label> · n = N"). The previous separate bottom-right "n = N"
