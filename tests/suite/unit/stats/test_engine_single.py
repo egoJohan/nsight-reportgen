@@ -234,3 +234,18 @@ def test_endpoint_labelled_scale_shows_all_points_as_numbers_with_caption():
     assert "1 = täysin eri mieltä" in r.caption and "7 = täysin samaa mieltä" in r.caption
     assert r.cell("3", "Total").count == 3.0
     assert r.cell("7", "Total").count == 4.0
+
+
+def test_endpoint_scale_shows_full_range_including_empty_points():
+    """A scale point with ZERO responses still shows (as 0%) so the 1-7 scale has no
+    gaps — the categories are the full contiguous range, not just data-present points."""
+    v = Variable(name="q", label="Q", measurement="scale",
+                 value_labels=(ValueLabel(1.0, "täysin eri"), ValueLabel(7.0, "täysin samaa")),
+                 missing_values=frozenset())
+    model = QuestionModel(variables={"q": v}, questions=[])
+    q = Question(qid="q", kind="single", variables=("q",), text="Q")
+    df = pd.DataFrame({"q": [1, 2, 3, 5, 6, 7, 7, 7]})   # NO 4s
+    r = engine.compute(q, _spec(sort=SortSpec(basis="data_order")), df, model)
+    assert r.categories == ("7", "6", "5", "4", "3", "2", "1")  # 4 present, no gap
+    assert r.cell("4", "Total").count == 0.0
+    assert r.cell("4", "Total").pct == 0.0

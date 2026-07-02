@@ -451,17 +451,28 @@ def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
     if var.name not in data.columns:
         return None, None
     s = pd.to_numeric(data[var.name], errors="coerce")
-    pts = sorted({int(x) for x in s.dropna().unique()
-                  if float(x).is_integer() and x not in eff})
-    # Scale-ish: several integer points spanning a reasonable range.
-    if len(pts) < 3 or (pts[-1] - pts[0]) < 4:
-        return None, None
+    data_pts = {int(x) for x in s.dropna().unique()
+                if float(x).is_integer() and x not in eff}
     labeled = {int(vl.value): vl.label for vl in var.value_labels
                if float(vl.value).is_integer() and vl.value not in eff}
-    unlabeled = [p for p in pts if p not in labeled]
-    # Only when it's PARTIALLY labelled — some points have text, some don't.
-    if not labeled or not unlabeled:
+    if not data_pts or not labeled:
         return None, None
+    # A partial rating scale has UNLABELLED points that actually got responses (the
+    # 2..6 of a 1..7 endpoint-labelled scale). This is what separates it from a normal
+    # categorical that merely has a far-coded labelled category (e.g. NA=9): there the
+    # data points are all labelled, so this is False and we take the normal path.
+    if not any(p not in labeled for p in data_pts):
+        return None, None
+    all_pts = data_pts | set(labeled)
+    lo, hi = min(all_pts), max(all_pts)
+    # Plausible rating-scale span (endpoints define it). Too narrow or too wide → no.
+    if not (4 <= (hi - lo) <= 10):
+        return None, None
+    # Full CONTIGUOUS range so every point shows (an unanswered middle point as a
+    # 0% bar, no gaps).
+    pts = list(range(lo, hi + 1))
+    if not any(p not in labeled for p in pts):
+        return None, None   # fully labelled → normal path
     entries = [(float(p), str(p), float(-p)) for p in pts]
     caption = " · ".join(f"{p} = {labeled[p]}" for p in sorted(labeled))
     return entries, caption
