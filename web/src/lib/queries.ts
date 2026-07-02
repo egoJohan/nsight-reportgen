@@ -207,6 +207,9 @@ export function useRegroupedQuestions(
     queryFn: () => api.materials.regroup(materialId!, grouping),
     enabled: !!materialId,
     select: (d) => d.questions,
+    // Keep the prior reshaping visible while a new grouping reshapes, so the group
+    // list doesn't flash empty between edits.
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -24,34 +24,6 @@ type Card = {
 
 const setKey = (vars: string[]) => [...vars].sort().join(" ");
 
-// Mirror of the backend's _group_text/_shared_question so a new group's card shows
-// the SAME title it will get when applied (the shared question stem), not a preview.
-function commonPrefix(strs: string[]): string {
-  if (!strs.length) return "";
-  let p = strs[0];
-  for (const s of strs.slice(1)) {
-    let i = 0;
-    while (i < p.length && i < s.length && p[i] === s[i]) i++;
-    p = p.slice(0, i);
-  }
-  return p;
-}
-
-function deriveGroupTitle(labels: string[]): string {
-  if (!labels.length) return "";
-  if (labels[0].includes(":")) {
-    const rhs = labels.map((l) => l.slice(l.indexOf(":") + 1).trim());
-    if (rhs.every(Boolean)) {
-      // Shared question = the longest right-hand side when every other is its prefix
-      // (tolerant of SPSS truncation; covers the identical case too).
-      const longest = rhs.reduce((a, b) => (b.length > a.length ? b : a));
-      if (rhs.every((r) => longest.startsWith(r))) return longest;
-    }
-  }
-  const stem = commonPrefix(labels).replace(/[\s:-]+$/, "");
-  return stem || labels[0];
-}
-
 /**
  * Controlled grouping editor for a REPORT. Seeded from the report's current
  * `grouping`; on Save it emits the edited override via `onSave` (the report saves
@@ -70,19 +42,22 @@ export default function ManageGroupingDialog({
   grouping: GroupingOverride;
   onSave: (override: GroupingOverride) => void;
 }) {
-  // Cards reflect the report's CURRENT (incoming) grouping. Fetch the FULL
-  // variable list (all=true) so grouped members carry labels — a split shows
-  // titles, not raw ids.
-  const { data: reshaped } = useRegroupedQuestions(open ? materialId : null, grouping);
   const { data: variables } = useVariables(open ? materialId : null, true);
 
   const [groups, setGroups] = useState<GroupSpec[]>([]);
   const [singles, setSingles] = useState<string[]>([]);
-  const [cards, setCards] = useState<Card[]>([]);
-  const [pool, setPool] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
+
+  // Reshape with the WORKING grouping so each card's title is the REAL title the
+  // backend produces (the frontend can't re-derive it — O-pattern members carry the
+  // OPTION label, not the question). Cards + pool are DERIVED from this, so what you
+  // see always matches the questions list after "Apply to report".
+  const { data: workingReshaped } = useRegroupedQuestions(
+    open ? materialId : null,
+    { groups, singles }
+  );
 
   const labelOf = useMemo(() => {
     const m = new Map<string, string>();
@@ -121,38 +96,48 @@ export default function ManageGroupingDialog({
     return m;
   }, [variables, sharedScaleKeys]);
 
+  // Seed the WORKING grouping from the report's incoming grouping (once per open).
   useEffect(() => {
     if (!open) {
       setSeeded(false);
       return;
     }
-    if (seeded || !reshaped || !variables) return;
-    const manualKeys = new Set((grouping.groups ?? []).map((g) => setKey(g.variables)));
-    const groupCards = reshaped.filter((q) => q.kind === "multi" || q.kind === "battery");
-    // Variables already in a group are shown as cards, not in the pool.
-    const grouped = new Set(groupCards.flatMap((q) => q.variables));
+    if (seeded) return;
     setGroups((grouping.groups ?? []).map((g) => ({ ...g })));
     setSingles([...(grouping.singles ?? [])]);
-    setCards(
-      groupCards.map((q) => ({
+    setSelected(new Set());
+    setSeeded(true);
+  }, [open, seeded, grouping]);
+
+  // Cards = the multi/battery questions the backend forms from the working grouping
+  // (label = the REAL title). Manual = the var-set is in our groups list; else auto.
+  const cards: Card[] = useMemo(() => {
+    const manualKeys = new Set(groups.map((g) => setKey(g.variables)));
+    return (workingReshaped ?? [])
+      .filter((q) => q.kind === "multi" || q.kind === "battery")
+      .map((q) => ({
         key: q.qid,
         label: q.text,
         variables: q.variables,
         source: manualKeys.has(setKey(q.variables)) ? "manual" : "auto",
         kind: q.kind as "multi" | "battery",
-      }))
-    );
-    // Pool = ungrouped, groupable variables: tick-boxes (multi) OR shared-scale
-    // rating variables (battery). Lone-scale demographics (age/gender/region) are
-    // NOT groupable, so they're excluded.
-    setPool(
+      }));
+  }, [workingReshaped, groups]);
+
+  const groupedVars = useMemo(
+    () => new Set(cards.flatMap((c) => c.variables)),
+    [cards]
+  );
+
+  // Pool = groupable variables not currently in a group: tick-boxes (multi) OR
+  // shared-scale rating variables (battery). Lone-scale demographics are excluded.
+  const pool = useMemo(
+    () =>
       (variables ?? [])
-        .filter((v) => kindOf.has(v.name) && !grouped.has(v.name))
-        .map((v) => v.name)
-    );
-    setSelected(new Set());
-    setSeeded(true);
-  }, [open, seeded, reshaped, variables, grouping]);
+        .filter((v) => kindOf.has(v.name) && !groupedVars.has(v.name))
+        .map((v) => v.name),
+    [variables, kindOf, groupedVars]
+  );
 
   function toggle(name: string) {
     setSelected((prev) => {
@@ -165,19 +150,11 @@ export default function ManageGroupingDialog({
   function groupSelected(kind: "multi" | "battery") {
     const vars = [...selected];
     if (vars.length < 2) return;
-    // Send the typed name, else EMPTY — the backend derives the shared question stem
-    // (concatenating member labels made huge, ugly group names). For the in-session
-    // card we show a short preview until the reshaped list re-derives the real name.
-    const typed = groupName.trim();
-    // Show the SAME title the group gets on apply (the shared stem), so the new card
-    // is recognisable and matches the questions list after "Apply to report".
-    const preview = typed || deriveGroupTitle(vars.map((v) => labelOf.get(v) ?? v));
-    setGroups((g) => [...g, { kind, variables: vars, label: typed }]);
-    setCards((c) => [
-      { key: `manual:${setKey(vars)}`, label: preview, variables: vars, source: "manual", kind },
-      ...c,
-    ]);
-    setPool((p) => p.filter((n) => !selected.has(n)));
+    // Send the typed name, else EMPTY — the backend derives the shared question stem.
+    // The card's title comes from the backend reshaping (see `cards`), so it always
+    // matches the applied result.
+    const label = groupName.trim();
+    setGroups((g) => [...g, { kind, variables: vars, label }]);
     // Grouping wins over a forced-single: clear any lingering singles for these vars
     // (e.g. re-grouping right after an ungroup) so they aren't in both lists.
     setSingles((s) => s.filter((n) => !selected.has(n)));
@@ -186,7 +163,6 @@ export default function ManageGroupingDialog({
   }
 
   function ungroup(card: Card) {
-    setCards((c) => c.filter((x) => x !== card));
     if (card.source === "manual") {
       setGroups((g) => g.filter((x) => setKey(x.variables) !== setKey(card.variables)));
     }
@@ -194,7 +170,6 @@ export default function ManageGroupingDialog({
     // batteries) doesn't immediately re-group them — otherwise the card reappears
     // and the group looks un-ungroupable. Applies to manual AND auto groups.
     setSingles((s) => Array.from(new Set([...s, ...card.variables])));
-    setPool((p) => Array.from(new Set([...p, ...card.variables])));
   }
 
   // The selection can be grouped only when it's ≥2 variables all of one kind:
