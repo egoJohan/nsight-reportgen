@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setActivePreviewKey } from "./api";
-import type { ChartSpec, ReportDoc, GroupingOverride } from "./api";
+import type { ChartSpec, ReportDoc, GroupingOverride, WordMerge } from "./api";
 
 // ---- Query keys ----
 export const qk = {
@@ -222,6 +222,29 @@ export function useReport(caseId: string, reportId: string | null) {
     queryKey: qk.report(caseId, reportId ?? ""),
     queryFn: () => api.reports.get(caseId, reportId!),
     enabled: !!reportId,
+  });
+}
+
+// Word-cloud editing for a text question: raw top words + current merges.
+export function useQuestionWords(materialId: string, qid: string | null) {
+  return useQuery({
+    queryKey: ["question-words", materialId, qid ?? ""],
+    queryFn: () => api.materials.questionWords(materialId, qid!),
+    enabled: !!materialId && !!qid,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSetWordMerges(materialId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ qid, merges }: { qid: string; merges: WordMerge[] }) =>
+      api.materials.setWordMerges(materialId, qid, merges),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["question-words", materialId] });
+      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+      qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
+    },
   });
 }
 

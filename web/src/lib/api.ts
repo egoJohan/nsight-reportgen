@@ -55,6 +55,13 @@ export interface Variable {
   tickbox?: boolean;
 }
 
+// A word-cloud value merge: variant tokens (`words`, lowercased) folded into one
+// displayed word (`label`), summing their counts.
+export interface WordMerge {
+  label: string;
+  words: string[];
+}
+
 // ---- Question details (computed summary) ----
 export interface QuestionDistRow {
   category: string;
@@ -412,6 +419,27 @@ export const api = {
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/summary`).then(
         (r) => json<QuestionSummary>(r)
       ),
+
+    // Word-cloud editing: the question's raw top words (+ current merges) and a
+    // setter to persist merges (fold token variants into one word).
+    questionWords: (
+      materialId: string,
+      qid: string
+    ): Promise<{ words: { word: string; count: number }[]; merges: WordMerge[] }> =>
+      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/words`).then((r) =>
+        json<{ words: { word: string; count: number }[]; merges: WordMerge[] }>(r)
+      ),
+
+    setWordMerges: (
+      materialId: string,
+      qid: string,
+      merges: WordMerge[]
+    ): Promise<{ qid: string; merges: WordMerge[] }> =>
+      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/word-merges`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ merges }),
+      }).then((r) => json<{ qid: string; merges: WordMerge[] }>(r)),
 
     // Rename a question for this material (case-page edit). Blank reverts to the
     // original SAV label. Applies to every report/chart/deck using the question.

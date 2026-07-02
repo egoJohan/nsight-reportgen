@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useQuestionSummary, useSetQuestionLabel } from "@/lib/queries";
+import WordMergeEditor from "@/components/WordMergeEditor";
 import type { QuestionSummary } from "@/lib/api";
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
@@ -177,6 +178,18 @@ export default function QuestionDetailsDialog({
                 </Button>
               </div>
             </div>
+
+            {/* Merge words — only for open-ended text (word-cloud) questions. */}
+            {s.measurement === "text" && qid && (
+              <div>
+                <p className="text-sm font-medium">Merge words</p>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Combine variants that mean the same thing (e.g. Esperi + esper)
+                  so the word cloud counts and sizes them as one.
+                </p>
+                <WordMergeEditor materialId={materialId} qid={qid} />
+              </div>
+            )}
 
             {/* Tags */}
             <div className="flex flex-wrap items-center gap-2">
