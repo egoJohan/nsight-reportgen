@@ -24,26 +24,36 @@ yksi muuttuja vaikka tilaa olisi hyvin toiselle muuttujalle."
 ## Design
 
 ### Shared: segment grouping metadata (engine)
-`_combo_segmentation`/`_single` already know each segment's primary code. Add to
-`SeriesResult` an optional `segment_primary: dict[str, str]` (segment label → primary
-group label, e.g. `"Mies · 18-30" → "Mies"`). Renderers use it to group segments without
-parsing the display string. Cross-tab `_single` also DROPS the `Total` segment (a mixed
-total across both classifiers is noise, not signal — the customer wants the split).
+Both distribution (`_single`) and summary/mean (`_summary`) results flow through
+`_relabel_combo_segments` in `compute` (the ONE cross-tab-only seam) — do the work there:
+- Add to `SeriesResult` an optional `segment_primary: dict[str, str] | None = None`
+  (relabelled segment → primary group label, e.g. `"Mies · 18-30" → "Mies"`), built from
+  the `m1` code→label map already computed there. Additive/optional → serde, exports, and
+  every non-cross-tab renderer are untouched.
+- **Drop `"Total"` from `segments`** for cross-tab (a total across both classifiers is
+  noise). Keep `base_n["Total"]` — the footer "n = N" still reads it; only the Total BAR
+  goes away.
+- Segments stay primary-major (Mies·…, then Nainen·…), so a renderer groups by scanning
+  consecutive same-primary runs.
 
 ### Part A — Grouped-with-gaps (Phase 1, the default when it fits)
-In `bars.py`, when `segment_primary` is present:
-- **Positioning:** order segments primary-major (already are); insert an EXTRA gap
-  between segments whose primary group differs, so each primary group is visually
-  separated. (Clustered: within each answer cluster; stacked: along the bar axis.)
-- **Colour (stays in the teal palette):** the PRIMARY grouping is conveyed by the gap +
-  a group label/bracket, NOT a new hue. Colour encodes the SECONDARY value as a shade
-  ramp (age light→dark), used consistently in every primary group, so age reads the same
-  across Mies and Nainen. Stacked bars keep the ANSWER colour (the stack's meaning).
-- **Group labels:** a primary-group label/bracket per group (Mies / Nainen); the
-  secondary value on the per-bar tick or the legend. Both variables stay legible without
-  a second hue. (Exact labelling — bracket vs two-level axis vs legend — decided in impl.)
-- **Fixes:** drop Total; move the stacked legend clear of the x-tick labels (reuse the
-  dynamic legend placement already in `_place_series_legend`).
+In `bars.py`, GATED on `ctx.series.segment_primary` being present (so single-classifier and
+non-classifier charts keep their exact current layout — no regression):
+- **Positioning:** segments are primary-major; insert an EXTRA gap where the primary group
+  changes, separating each group. Clustered: within each answer cluster the sub-bars split
+  into primary groups; stacked: the stacked bars split into primary groups along the axis.
+- **Colour (stays in the teal palette):** colour by POSITION-WITHIN-PRIMARY-GROUP (reset at
+  each group), so the secondary reads as the same light→dark ramp in every group (age 18-30
+  light … 51+ dark under both Mies and Nainen) — no second hue needed. Stacked bars keep the
+  ANSWER colour (the stack's meaning); the grouping is the gap + label only.
+- **Labelling (concrete):**
+  - *Clustered:* the gap separates primary groups; the legend already names each combo
+    (`Mies · 18-30`), so no extra axis label — just the gap.
+  - *Stacked:* x-tick = the SECONDARY value only (`18-30`), and a primary group label
+    centred under each group's bars (`Mies` / `Nainen`) — fixes the current combo-label vs
+    legend overlap and shows both variables.
+- **Fixes:** Total already dropped (engine); reuse the dynamic `_place_series_legend` so the
+  legend clears the x-ticks.
 
 ### Part B — Small multiples (Phase 2, auto-fallback + manual)
 When combos exceed what one panel fits (rule: `n_secondary * n_answer_bars` too wide, or
