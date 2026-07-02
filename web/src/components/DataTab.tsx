@@ -185,12 +185,14 @@ function QuestionTable({
         </div>
       ) : (
         <div className="rounded-xl border overflow-hidden">
-          <Table>
+          {/* table-fixed + real column widths so the question text WRAPS within its
+              column (to 2 clamped lines) instead of collapsing to one clipped line. */}
+          <Table className="table-fixed">
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="w-full py-3">Question</TableHead>
-                <TableHead className="whitespace-nowrap py-3">Type</TableHead>
-                <TableHead className="whitespace-nowrap py-3 text-center">Status</TableHead>
+                <TableHead className="py-3">Question</TableHead>
+                <TableHead className="w-32 whitespace-nowrap py-3">Type</TableHead>
+                <TableHead className="w-24 whitespace-nowrap py-3 text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -200,8 +202,11 @@ function QuestionTable({
                   className="group cursor-pointer hover:bg-muted/40"
                   onClick={() => setDetailQid(q.qid)}
                 >
-                  <TableCell className="py-3 max-w-0">
-                    <p className="text-sm leading-snug line-clamp-2 group-hover:line-clamp-none transition-all">
+                  <TableCell className="py-3 align-top whitespace-normal">
+                    {/* whitespace-normal overrides TableCell's default nowrap so the
+                        question wraps; clamped to 2 lines. Full text is one click away
+                        in the details dialog (no hover-expand → no reflow, no spill). */}
+                    <p className="text-sm leading-snug line-clamp-2 break-words">
                       {q.text}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground font-mono">
