@@ -365,7 +365,11 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     row_pt = _hbar_row_pt(n_cats, fig_h_in)
     max_lines = label_lines
     ylabel_fs = max(8.5, min(11.5, row_pt / (max_lines * 1.3)))
-    value_fs = max(8.0, min(9.5, ylabel_fs))
+    # Scale the value-label font to a SINGLE BAR's height (which shrinks as segments
+    # multiply — a two-classifier cross-tab packs many thin bars per row), so the
+    # label stays a bit smaller than the bar and never touches its neighbours.
+    per_bar_pt = row_pt * (0.7 / n_segs if n_segs > 1 else 0.62)
+    value_fs = max(6.0, min(9.5, per_bar_pt * 0.9))
 
     off = _label_offset(max_val)
     for i, seg in enumerate(segs):
