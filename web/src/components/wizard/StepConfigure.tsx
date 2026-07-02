@@ -388,6 +388,20 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
           ))}
         </SelectContent>
       </Select>
+      {key === "classifying_var_2" && current && chart.classifying_var && (
+        <button
+          type="button"
+          className="mt-1 text-left text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          onClick={() =>
+            onChange({
+              classifying_var: current,
+              classifying_var_2: chart.classifying_var,
+            } as Partial<ChartSpec>)
+          }
+        >
+          ⇄ Swap — make the other variable the primary (outer) grouping
+        </button>
+      )}
       {field.help && (
         <p className="text-xs leading-snug text-muted-foreground">{field.help}</p>
       )}
@@ -679,6 +693,10 @@ function ChartControls({
   // until then (the engine ignores a lone secondary anyway).
   if (!chart.classifying_var) {
     schema = schema.filter((f) => f.key !== "classifying_var_2");
+  }
+  // The two-variable LAYOUT control only applies once there are two classifiers.
+  if (!chart.classifying_var_2) {
+    schema = schema.filter((f) => f.key !== "xtab_layout");
   }
   const supportsClassifying = (typeId: string) =>
     (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var");
