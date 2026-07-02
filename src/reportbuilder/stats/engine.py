@@ -521,13 +521,17 @@ def _code_label_map(var: Variable, seg_codes: set[str]) -> dict[str, str]:
 
 def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
                             cv1: str, cv2: str) -> SeriesResult:
-    """Relabel cross-tab combo segments "<c1>|<c2>" → "<label1> · <label2>" using
-    both classifiers' value labels. "Total" is kept; unknown codes pass through."""
+    """Relabel cross-tab combo segments "<c1>|<c2>" → "<label1> · <label2>" using both
+    classifiers' value labels, and tag each with its PRIMARY group so the renderer can
+    group the bars. The cross-tab Total BAR is DROPPED (a total across both classifiers is
+    noise); base_n["Total"] is kept for the footer. Unknown codes pass through."""
     try:
         var1, var2 = model.variable(cv1), model.variable(cv2)
     except Exception:
         return result
     parts = [s.split("|", 1) for s in result.segments if s != "Total" and "|" in s]
+    if not parts:
+        return result
     m1 = _code_label_map(var1, {p[0] for p in parts})
     m2 = _code_label_map(var2, {p[1] for p in parts})
 
@@ -537,14 +541,19 @@ def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
         a, b = seg.split("|", 1)
         return f"{m1.get(a, a)} · {m2.get(b, b)}"
 
-    new_segs = tuple(rl(s) for s in result.segments)
-    if new_segs == result.segments:
-        return result
+    # Segments WITHOUT the Total bar (kept in base_n via rl("Total") == "Total").
+    new_segs = tuple(rl(s) for s in result.segments if s != "Total")
+    segment_primary = {
+        rl(s): m1.get(s.split("|", 1)[0], s.split("|", 1)[0])
+        for s in result.segments if "|" in s
+    }
     return dataclasses.replace(
         result,
         segments=new_segs,
-        cells={(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()},
+        cells={(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()
+               if seg != "Total"},
         base_n={rl(s): n for s, n in result.base_n.items()},
+        segment_primary=segment_primary or None,
     )
 
 

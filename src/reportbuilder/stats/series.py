@@ -27,6 +27,10 @@ class SeriesResult:
     # Optional caption rendered under the chart — e.g. the endpoint legend of a
     # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)
     caption: str | None = None
+    # Cross-tab only: maps each combo segment ("Mies · 18-30") to its PRIMARY classifier
+    # group ("Mies"), so renderers can group the bars/stacks by primary with gaps. None
+    # for single-classifier / non-classifier charts. (REQ-C-14c)
+    segment_primary: dict[str, str] | None = None
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

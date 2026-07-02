@@ -209,13 +209,16 @@ def test_two_classifiers_produce_ordered_cross_product():
             rows_g2.append(b)
     df = pd.DataFrame({"q": rows_q, "g1": rows_g1, "g2": rows_g2})
     r = engine.compute(qq, _spec(classifying_var="g1", classifying_var_2="g2"), df, model)
-    non_total = [s for s in r.segments if s != "Total"]
-    assert non_total == ["M · Young", "M · Old", "F · Young", "F · Old"]  # primary clusters
-    assert r.segments[-1] == "Total"
+    # Primary (gender) clusters; the Total BAR is dropped for cross-tab.
+    assert list(r.segments) == ["M · Young", "M · Old", "F · Young", "F · Old"]
+    assert "Total" not in r.segments
     assert r.cell("Red", "M · Young").count == 6.0
     assert r.cell("Green", "F · Old").count == 4.0
     assert r.base_n["M · Young"] == 10
-    assert r.base_n["Total"] == 40
+    assert r.base_n["Total"] == 40   # kept for the footer "n = N"
+    # Each combo is tagged with its primary group, for grouped rendering.
+    assert r.segment_primary == {
+        "M · Young": "M", "M · Old": "M", "F · Young": "F", "F · Old": "F"}
 
 
 def test_endpoint_labelled_scale_shows_all_points_as_numbers_with_caption():

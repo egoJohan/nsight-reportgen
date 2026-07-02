@@ -256,6 +256,58 @@ def _label_offset(max_val: float) -> float:
     return max(0.5, max_val * 0.01)
 
 
+def _grouped_offsets(segs, segment_primary, cluster_w: float = 0.82):
+    """Cross-tab (segment_primary set): return (offsets, bar_width, groups) where a bar
+    for each segment is positioned with an EXTRA gap between primary-classifier groups —
+    so the bars are pulled apart by primary (Mies · · · | gap | Nainen · · ·). `offsets`
+    are relative to a category centre; the whole cluster spans ~`cluster_w`. Returns None
+    when not a cross-tab (single-classifier layout is unchanged)."""
+    if not segment_primary or len(segs) < 2:
+        return None
+    groups = [segment_primary.get(s, s) for s in segs]
+    if len(set(groups)) < 2:
+        return None
+    GAP = 0.7                      # extra space (in bar-slot units) between groups
+    centers, pos, prev = [], 0.0, None
+    for g in groups:
+        if prev is not None and g != prev:
+            pos += GAP
+        centers.append(pos + 0.5)
+        pos += 1.0
+        prev = g
+    scale = cluster_w / pos
+    offsets = [(c - pos / 2.0) * scale for c in centers]
+    return offsets, scale * 0.9, groups
+
+
+def _grouped_stacked_positions(cats, segment_primary):
+    """Stacked cross-tab: absolute bar positions for each cat (= a combo) grouped by
+    primary with a gap, plus [(primary_label, group_centre), …] for group labels.
+    None when not a cross-tab (single-classifier stacked layout is unchanged)."""
+    if not segment_primary:
+        return None
+    groups = [segment_primary.get(c, c) for c in cats]
+    if len(set(groups)) < 2:
+        return None
+    GAP = 0.8
+    positions, pos, prev, spans = [], 0.0, None, {}
+    for c, g in zip(cats, groups):
+        if prev is not None and g != prev:
+            pos += GAP
+        positions.append(pos)
+        spans.setdefault(g, []).append(pos)
+        pos += 1.0
+        prev = g
+    labels = [(g, (min(p) + max(p)) / 2.0) for g, p in spans.items()]
+    return positions, labels
+
+
+def _secondary_tick(cat: str) -> str:
+    """From a combo label 'Primary · Secondary' → 'Secondary' (the per-bar tick in a
+    grouped cross-tab, where the primary is shown once as a group label)."""
+    return cat.split(" · ", 1)[1] if " · " in cat else cat
+
+
 def _contrast_ink(color) -> str:
     """Label colour for text placed ON a coloured bar: white on dark fills, INK on
     light — so a stacked-bar % stays legible even on the darkest teal. Accepts a hex
@@ -303,13 +355,20 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
     max_val = max(all_vals, default=0.0)
 
+    # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
+    grouped = _grouped_offsets(segs, ctx.series.segment_primary)
+
     for i, seg in enumerate(segs):
         vals = data[seg]
-        offset = (i - n_segs / 2 + 0.5) * width if n_segs > 1 else 0.0
+        if grouped:
+            offset, bwidth = grouped[0][i], grouped[1]
+        else:
+            offset = (i - n_segs / 2 + 0.5) * width if n_segs > 1 else 0.0
+            bwidth = width
         # R4.2: "Not answered" bar gets MUTED grey; all others get the series colour.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         bars = ax.bar(
-            x + offset, vals, width=width,
+            x + offset, vals, width=bwidth,
             label=seg, color=bar_clrs, edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
@@ -373,9 +432,15 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
     max_val = max(all_vals, default=0.0)
 
+    # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
+    grouped = _grouped_offsets(segs, ctx.series.segment_primary)
+
     for i, seg in enumerate(segs):
         vals = data[seg]
-        offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
+        if grouped:
+            offset, height = grouped[0][i], grouped[1]
+        else:
+            offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
         # R4.2: "Not answered" bar gets MUTED grey; all others get the series colour.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
@@ -466,7 +531,10 @@ def build_image_column_stacked(ctx) -> None:
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
     clrs = scale_colors(len(segs))
 
-    x = np.arange(len(cats))
+    # Cross-tab: group the stacked bars by primary classifier (gap + group label), so the
+    # SECOND classifier is used instead of a flat undifferentiated row.
+    grouped = _grouped_stacked_positions(cats, ctx.series.segment_primary)
+    x = np.array([float(p) for p in grouped[0]]) if grouped else np.arange(len(cats))
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
     # 100%-stacked: every column must reach exactly 100. Normalise each column's
@@ -494,13 +562,20 @@ def build_image_column_stacked(ctx) -> None:
                 )
         bottoms = bottoms + heights
 
-    # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-    display_cats = [_wrap_xtick_label(c) for c in cats]
     ax.set_xticks(x)
-    ax.set_xticklabels(
-        display_cats, fontsize=10.5, color=INK,
-        rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
-    )
+    if grouped:
+        # Per-bar tick = the SECONDARY value; the primary is shown once as a group label
+        # centred under each group, so both classifiers read clearly.
+        ax.set_xticklabels([_secondary_tick(c) for c in cats], fontsize=9.5, color=INK)
+        for glabel, gx in grouped[1]:
+            ax.text(gx, -0.075, glabel, transform=ax.get_xaxis_transform(),
+                    ha="center", va="top", fontsize=11.5, fontweight="bold", color=INK)
+    else:
+        # Wrap + rotate x-axis labels so they are shown in full and never overlap.
+        ax.set_xticklabels(
+            [_wrap_xtick_label(c) for c in cats], fontsize=10.5, color=INK,
+            rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
+        )
     _apply_column_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
 
     if ctx.spec.elements.legend and len(segs) > 1:
@@ -523,7 +598,13 @@ def build_image_bar_stacked(ctx) -> None:
     clrs = scale_colors(len(segs))
 
     n_cats = len(cats)
-    y = np.arange(n_cats)[::-1]
+    # Cross-tab: group the stacked bars by primary classifier (gap + group label).
+    grouped = _grouped_stacked_positions(cats, ctx.series.segment_primary)
+    if grouped:
+        maxp = max(grouped[0])
+        y = np.array([maxp - p for p in grouped[0]])   # first cat at top
+    else:
+        y = np.arange(n_cats)[::-1]
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
     # 100%-stacked: every bar must fill exactly to 100. Rounded category
@@ -552,10 +633,17 @@ def build_image_bar_stacked(ctx) -> None:
                 )
         lefts = lefts + widths
 
-    # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
-    display_cats = [_wrap_label(c) for c in cats]
     ax.set_yticks(y)
-    ax.set_yticklabels(display_cats, fontsize=11.5, color=INK)
+    if grouped:
+        # Per-bar tick = the SECONDARY value; the primary is a group label to the left.
+        ax.set_yticklabels([_secondary_tick(c) for c in cats], fontsize=10.5, color=INK)
+        for glabel, gpos in grouped[1]:
+            ax.text(-0.13, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
+                    ha="center", va="center", rotation=90,
+                    fontsize=11.5, fontweight="bold", color=INK)
+    else:
+        # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
+        ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
 

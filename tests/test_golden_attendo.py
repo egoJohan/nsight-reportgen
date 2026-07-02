@@ -6,6 +6,21 @@ from nsight.store.survey_store import SurveyStore
 from nsight.tabulate import awareness_by_brand
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _isolated_survey_db(tmp_path_factory):
+    """Isolate these goldens' SurveyStore in a FRESH per-module DuckDB. They otherwise
+    share the fixed `work/survey.duckdb`, which another test can leave holding a
+    different dataset (the goldens only ingest `if frame().empty`) — making them fail
+    purely on test-collection order. A private DB makes them order-independent."""
+    db = tmp_path_factory.mktemp("golden_db") / "survey.duckdb"
+    orig = config.SURVEY_DB
+    config.SURVEY_DB = db
+    try:
+        yield
+    finally:
+        config.SURVEY_DB = orig
+
+
 @pytest.mark.integration
 def test_aided_awareness_matches_deck():
     if not config.ATTENDO_SAV.exists():
