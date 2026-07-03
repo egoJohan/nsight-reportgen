@@ -343,6 +343,26 @@ def _missing_counts(data: pd.DataFrame, var: Variable, eff: set[float],
     return result
 
 
+_STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
+
+
+def _top_scale_categories(var: Variable, categories: list[str], n: int) -> list[str]:
+    """The display labels of the `n` HIGHEST rating-scale points of `var` that are
+    present in `categories` (e.g. the top-2 or top-3 agreement levels). Empty when the
+    variable isn't a rating scale."""
+    lv = scale_levels(var)                     # [(code, label, point), …]
+    if not lv:
+        return []
+    ranked = [label for _c, label, _p in sorted(lv, key=lambda t: t[2], reverse=True)]
+    out: list[str] = []
+    for label in ranked:
+        if label in categories and label not in out:
+            out.append(label)
+        if len(out) >= n:
+            break
+    return out
+
+
 def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     var = model.variable(question.variables[0])
@@ -421,7 +441,11 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # A partially-labelled scale is always shown in scale order, high→low (its
     # data_index carries -point, so 7 sits at the top) regardless of the spec's sort
     # basis — a frequency sort would scramble the scale. (REQ-C-24c)
-    sort_spec = SortSpec(basis="data_order") if scale_entries is not None else spec.sort
+    # A STACKED bar split by a classifier likewise keeps its scale stack in order — the
+    # sort there targets the BARS (the classifier segments), reordered further below.
+    _bars_are_segments = spec.chart_type in _STACKED_BAR_TYPES and bool(spec.classifying_var)
+    sort_spec = (SortSpec(basis="data_order")
+                 if (scale_entries is not None or _bars_are_segments) else spec.sort)
     categories: list[str] = list(sort_categories(rows, sort_spec))
 
     if show_na:
@@ -439,6 +463,23 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                     mean=None,
                 )
             categories.append(na_display)
+
+    # Stacked + classifier: reorder the BARS (segments) by the chosen criterion — the
+    # top-2/top-3 summed share of each bar's HIGHEST scale levels — so the most-"agree"
+    # group leads while the scale stack stays 1..N. (customer: sort the categories, not
+    # the values)
+    if _bars_are_segments and spec.sort.basis in ("topbox_sum", "top3_sum"):
+        n_top = 3 if spec.sort.basis == "top3_sum" else 2
+        top_cats = _top_scale_categories(var, categories, n_top)
+        if top_cats:
+            reals = [s for s in segments if s != "Total"]
+            reals.sort(
+                key=lambda seg: sum(
+                    (cells.get((c, seg)) or Cell(pct=None)).pct or 0.0 for c in top_cats
+                ),
+                reverse=spec.sort.descending,
+            )
+            segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n={s: denom.get(s, 0) for s in segments},
@@ -952,14 +993,15 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 pct=pct(c, n, spec.number_format), count=float(c), mean=None
             )
 
-    # "Top 2 sum" sort: order the statement bars by their summed two highest scale
-    # levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
-    # derives the top-2 from the scale, so it works for any N. (REQ-S-04)
-    if spec.sort.basis == "topbox_sum" and len(levels) >= 2:
-        top2 = levels[-2:]
+    # "Top 2/3 sum" sort: order the statement bars by their summed two (or three) highest
+    # scale levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
+    # derives the top-N from the scale, so it works for any N. (REQ-S-04)
+    if spec.sort.basis in ("topbox_sum", "top3_sum") and len(levels) >= 2:
+        n_top = 3 if spec.sort.basis == "top3_sum" else 2
+        top = levels[-n_top:]
         statements = sorted(
             statements,
-            key=lambda stmt: sum((cells[(lvl, stmt)].pct or 0.0) for lvl in top2),
+            key=lambda stmt: sum((cells[(lvl, stmt)].pct or 0.0) for lvl in top),
             reverse=spec.sort.descending,
         )
 

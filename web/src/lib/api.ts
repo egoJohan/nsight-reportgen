@@ -114,7 +114,7 @@ export interface NumberFormat {
 }
 
 export interface SortSpec {
-  basis: "data_order" | "pct" | "topbox_sum" | "mean" | "count";
+  basis: "data_order" | "pct" | "topbox_sum" | "top3_sum" | "mean" | "count";
   topbox_codes: number[];
   descending: boolean;
 }

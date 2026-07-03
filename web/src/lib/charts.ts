@@ -126,9 +126,11 @@ export const SORT_OPTIONS: SortOption[] = [
   { id: "data_order", label: "Survey order" },
   { id: "mean", label: "Mean" },
   { id: "count", label: "Count" },
-  // Scale/battery stacked bars: order statements by the summed two highest levels
-  // (4+5), so the most-"agree" statement leads.
+  // Stacked bars (battery statements OR a classifier's group bars): order the BARS by
+  // the summed highest scale levels, so the most-"agree" bar leads — the scale stack
+  // itself stays 1..N.
   { id: "topbox_sum", label: "Top 2 sum" },
+  { id: "top3_sum", label: "Top 3 sum" },
 ];
 
 export const SORT_ITEMS: Record<string, string> = Object.fromEntries(

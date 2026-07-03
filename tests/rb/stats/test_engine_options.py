@@ -520,3 +520,41 @@ class TestClassifierExcludesUnlabeledCodes:
         df = pd.DataFrame({"q1": [1.0, 2.0, 3.0, 1.0], "region": [1.0, 2.0, 3.0, 99.0]})
         r = compute(model.question("q1"), self._spec_clf(), df, model)
         assert set(r.segments) == {"1", "2", "3", "99", "Total"}
+
+
+class TestStackedClassifierSortsBarsNotScale:
+    """Stacked bar split by a classifier: the sort reorders the BARS (classifier groups)
+    by top-2/top-3 sum, while the scale stack stays 1..N. (customer bug: sort the
+    categories, not the values)"""
+
+    def _model(self):
+        q = Variable(name="q", label="Q", measurement="scale",
+                     value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 8)),
+                     missing_values=frozenset())
+        reg = Variable(name="reg", label="R", measurement="categorical",
+                       value_labels=(ValueLabel(1.0, "Ahi"), ValueLabel(2.0, "Bmid"),
+                                     ValueLabel(3.0, "Clo")), missing_values=frozenset())
+        return QuestionModel(variables={"q": q, "reg": reg},
+                             questions=[Question(qid="q", kind="single", variables=("q",), text="Q")])
+
+    def _data(self):
+        rows = []
+        for r, pts in [(1, [6, 7] * 30), (2, [4, 5] * 30), (3, [1, 2] * 30)]:
+            rows += [{"q": float(v), "reg": float(r)} for v in pts]
+        return pd.DataFrame(rows)
+
+    def _spec(self, basis):
+        return _spec(classifying_var="reg", chart_type="stacked_horizontal_bar",
+                     sort=SortSpec(basis=basis, descending=True))
+
+    def test_scale_stays_in_order_top2_sorts_bars(self):
+        r = compute(self._model().question("q"), self._spec("topbox_sum"),
+                    self._data(), self._model())
+        assert r.categories == ("1", "2", "3", "4", "5", "6", "7")   # scale NOT scrambled
+        assert r.segments == ("Ahi", "Bmid", "Clo", "Total")          # bars by top-2 (6+7)
+
+    def test_top3_sum_orders_bars(self):
+        r = compute(self._model().question("q"), self._spec("top3_sum"),
+                    self._data(), self._model())
+        assert r.categories == ("1", "2", "3", "4", "5", "6", "7")
+        assert r.segments == ("Ahi", "Bmid", "Clo", "Total")
