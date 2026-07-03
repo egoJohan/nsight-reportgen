@@ -238,9 +238,15 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
 
     variables: dict[str, Variable] = {}
     for name in df.columns:
+        # Preserve the SAV's value-label DEFINITION order (what pyreadstat returns) —
+        # it is the survey's intended display order. Sorting by code destroyed it, so a
+        # scale whose codes aren't in scale order (e.g. a 5-point scale later extended
+        # with intermediate points as codes 6–8) rendered semantically jumbled under
+        # "data order". Digit-labelled rating scales are still re-ordered by their parsed
+        # point downstream; this only fixes text-labelled scales.
         vls = tuple(
             ValueLabel(float(code), str(lbl))
-            for code, lbl in sorted(value_labels.get(name, {}).items())
+            for code, lbl in value_labels.get(name, {}).items()
         )
         measurement = _measurement(measures.get(name, ""))
         # Task G.1: classify open-ended free-text variables as measurement "text"

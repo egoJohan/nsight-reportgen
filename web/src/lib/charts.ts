@@ -123,7 +123,7 @@ export interface SortOption {
 
 export const SORT_OPTIONS: SortOption[] = [
   { id: "pct", label: "Percentage" },
-  { id: "data_order", label: "Data order" },
+  { id: "data_order", label: "Survey order" },
   { id: "mean", label: "Mean" },
   { id: "count", label: "Count" },
   // Scale/battery stacked bars: order statements by the summed two highest levels

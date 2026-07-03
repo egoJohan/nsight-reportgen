@@ -193,14 +193,26 @@ def _wrap_legend_label(label: str, width: int = 26, max_lines: int = 2) -> str:
     return "\n".join(lines)
 
 
+def _rowmajor_legend(handles, labels, ncol):
+    """Reorder legend entries so a matplotlib (column-major) legend READS left-to-
+    right, top-to-bottom — i.e. in the SAME order as the bars/stack, not scrambled
+    across columns. (Matplotlib fills columns first; this un-does that.)"""
+    order = [k for i in range(ncol) for k in range(i, len(handles), ncol)]
+    return [handles[k] for k in order], [labels[k] for k in order]
+
+
 def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
     bbox_inches='tight' expands the figure to include it."""
+    ncol = min(n_segs, 5)
+    handles, labels = ax.get_legend_handles_labels()
+    handles, labels = _rowmajor_legend(handles, labels, ncol)
     leg = ax.legend(
+        handles, labels,
         loc="upper center", bbox_to_anchor=(0.5, y),
-        ncol=min(n_segs, 5), frameon=False, fontsize=9.5,
+        ncol=ncol, frameon=False, fontsize=9.5,
         handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
     )
     if leg is not None:
