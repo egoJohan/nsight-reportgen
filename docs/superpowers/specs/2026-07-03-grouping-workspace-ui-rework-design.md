@@ -44,8 +44,9 @@ questions. The UI must make the two tiers legible without making the user think 
 3. **Show where it lands and what it costs.** Each change names its effect on the report — count
    deltas ("18 questions → 12 slides"), highlight + auto-reveal of the affected card, and for a
    comparison, "4 questions → 1 slide".
-4. **Preview the outcome.** A live thumbnail of what a group/comparison renders as (a radar
-   thumbnail sells a comparison far better than a member list).
+4. **Reverse anything, both tiers.** Every grouping is undoable in place: split a comparison and
+   its member questions return; split a question and its variables return. No preview lives here —
+   the chart type is a Design-phase choice, so a thumbnail would presuppose a decision not yet made.
 5. **Non-destructive, reversible session.** Live reshape preview before Apply; Apply commits;
    Cancel reverts the whole session; per-change undo in between.
 6. **Guide, don't gate.** Suggest groupings (parallel-question + battery suggestions) inline;
@@ -93,20 +94,24 @@ keeps global state visible; the segment only swaps the *editing surface*):
   member list, rename, and split. Battery **suggestions** render inline here as accept/dismiss rows.
 - **Comparisons (Tier 2)** — a pool of QUESTIONS eligible to compare (multis/batteries/singles
   that share a category set), grouped by their shared category signature so the user sees "these 6
-  adjectives share the same services". Select ≥2 → "Compare as radar" / "Compare as grouped bars".
-  Comparison cards show members (the adjectives), the render kind (radar/grouped-bar, switchable),
-  a preview, and edit/split. **Parallel-question suggestions** ("6 questions share the same options
-  — compare them?") render inline, accept/dismiss, mirroring battery suggestions.
+  adjectives share the same services". Select ≥2 → ONE action: "Compare". Comparison cards show
+  members (the adjectives) and edit/**split** — but NO render toggle and NO preview: the chart
+  type (radar vs grouped bar) is chosen later in the **Design phase**, like every chart. The
+  Design chart-type picker is filtered for a comparison to just the applicable types — radar +
+  grouped/clustered bars (via `_compatible_chart_types`; pie/scatter/line/etc. excluded).
+  **Parallel-question suggestions** ("6 questions share the same options — compare them?") render
+  inline, accept/dismiss, mirroring battery suggestions.
 
-Copy names the act by effect: "Combine as multi", "Compare as radar" — not "group".
+Copy names the act by effect: "Combine as multi", "Compare" — not "group". The chart type is a
+Design-phase decision, so the group manager stays about STRUCTURE, never presentation.
 
-### Zone C — Changes + Preview (right rail) — principles 2 & 4
+### Zone C — Changes + Reverse (right rail) — principles 2 & 4
 - **Changes** — a reverse-chronological list of this session's edits, each a plain sentence with an
-  **Undo**. "Combined 5 variables into battery *Palvelun laatu*." / "Compared 6 questions as a
-  radar." / "Split *Ikäryhmä* back to a single question." Pending (unsaved) throughout the session;
-  Apply commits them; Cancel discards all.
-- **Preview** — a rendered thumbnail of the selected/hovered group or comparison (reuses the chart
-  preview pipeline). For a comparison, the radar/grouped-bar thumbnail is the payoff.
+  **Undo**. "Combined 5 variables into battery *Palvelun laatu*." / "Compared 6 questions —
+  *Brändimielikuva*." / "Split *Ikäryhmä* back to a single question." Pending (unsaved) throughout
+  the session; Apply commits them; Cancel discards all.
+- **Reverse** — a persistent reminder that both tiers unwind here: comparison → questions →
+  variables, each a **Split** on the card. No chart preview (chart type is chosen in Design).
 
 ### Where-it-lands feedback — principle 3 (woven across zones)
 On any create/split: (a) the new/affected card gets a brief highlight + is auto-revealed in both
@@ -134,9 +139,8 @@ Extend the override with a Tier-2 list; Tier-1 unchanged:
 ```ts
 interface ComparisonSpec {
   members: string[];                 // QIDS (Tier-1 outputs), ≥2
-  render: "radar" | "grouped_bar";   // how the overlay draws
   label?: string | null;             // optional title; else derived stem
-}
+}   // NO render — chart type (radar / grouped bar) is a Design-phase choice on the ChartSpec
 interface GroupingOverride {
   groups: GroupSpec[];               // Tier 1 (unchanged) — variable members
   singles: string[];                 // unchanged
@@ -176,8 +180,8 @@ interface GroupingOverride {
 - **Collisions / dup labels:** disambiguate series labels (`Rohkea (2)`), as Phase 1 already does.
 
 ## Microcopy (active voice, effect-named)
-Buttons: "Combine as multi", "Combine as battery", "Compare as radar", "Compare as grouped bars",
-"Split", "Undo", "Apply", "Cancel". Tojuuri-style status: on Apply → "Grouping applied · 12 slides".
+Buttons: "Combine as multi", "Combine as battery", "Compare", "Split", "Undo", "Apply", "Cancel".
+Toast-style status: on Apply → "Grouping applied · 12 slides".
 Suggestions: "6 questions share the same options — compare them?" Errors explain + fix.
 
 ## Phasing

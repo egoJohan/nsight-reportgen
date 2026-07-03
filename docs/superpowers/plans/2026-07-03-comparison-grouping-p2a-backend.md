@@ -199,6 +199,17 @@ def test_compute_routes_comparison_question():
     r = engine.compute(comp, _spec(chart_type="radar"), df, model)
     assert set(r.segments) == {"Rohkea", "Luotettava"}
     assert r.categories == ("IS", "IL", "HS")
+
+def test_compute_comparison_not_radar_only():
+    # A comparison is a grid; a grouped/vertical bar yields the SAME multi-series result.
+    model, q_rohkea, q_luot, df = _multi_model()
+    comp = Question(qid="compare-brandi", kind="comparison",
+                    variables=q_rohkea.variables + q_luot.variables,
+                    text="Brändimielikuva", members=("rohkea", "luot"))
+    model.questions.append(comp)
+    r = engine.compute(comp, _spec(chart_type="vertical_bar"), df, model)
+    assert set(r.segments) == {"Rohkea", "Luotettava"}   # not radar-only
+    assert r.categories == ("IS", "IL", "HS")
 ```
 (`Question` is already imported in this test module.)
 
@@ -406,9 +417,10 @@ In `src/reportbuilder/api/routes_questions.py`: (a) beside the existing `GroupSp
 ```python
 class ComparisonSpec(BaseModel):
     members: list[str]
-    render: str = "radar"
     label: str | None = None
 ```
+(No `render` — the chart type radar/grouped-bar is chosen in the Design phase like any chart,
+via the suitability picker, not stored on the comparison.)
 and add `comparisons: list[ComparisonSpec] = []` to the `GroupingOverride` request model. (b) In the `regroup` handler, after `suggestions = suggest_scale_batteries(model)`, add:
 ```python
     from reportbuilder.ingest.grouping_override import suggest_parallel_questions
@@ -455,8 +467,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```ts
 export interface ComparisonSpec {
   members: string[];                 // qids of the parallel questions to overlay
-  render: "radar" | "grouped_bar";
-  label?: string | null;
+  label?: string | null;             // chart type is a Design-phase choice, not stored here
 }
 export interface ParallelSuggestion {
   kind: "multi" | "battery";
