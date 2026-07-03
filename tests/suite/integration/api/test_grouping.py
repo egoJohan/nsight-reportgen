@@ -90,3 +90,23 @@ def test_variables_include_all_is_superset(client_memory, synthetic_bytes):
     base = client_memory.get(f"/materials/{mid}/variables").json()["variables"]
     allv = client_memory.get(f"/materials/{mid}/variables?include_all=true").json()["variables"]
     assert len(allv) >= len(base)
+
+
+def test_regroup_returns_parallel_suggestions_key(client_memory, synthetic_bytes):
+    mid = _case_material(client_memory, synthetic_bytes)
+    r = client_memory.post(f"/materials/{mid}/regroup", json={"groups": [], "singles": []})
+    assert r.status_code == 200
+    assert "parallel_suggestions" in r.json()
+
+
+def test_regroup_builds_comparison_from_members(client_memory, synthetic_bytes):
+    mid = _case_material(client_memory, synthetic_bytes)
+    qs = client_memory.post(f"/materials/{mid}/regroup",
+                            json={"groups": [], "singles": []}).json()["questions"]
+    qids = [q["qid"] for q in qs][:2]
+    body = {"groups": [], "singles": [],
+            "comparisons": [{"members": qids, "label": "Vertailu"}]}
+    r = client_memory.post(f"/materials/{mid}/regroup", json=body)
+    assert r.status_code == 200
+    comp = [q for q in r.json()["questions"] if q["kind"] == "comparison"]
+    assert comp and comp[0]["text"] == "Vertailu"

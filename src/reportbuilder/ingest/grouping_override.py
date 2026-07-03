@@ -143,6 +143,25 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
     return m
 
 
+def suggest_parallel_questions(model: QuestionModel) -> list[dict]:
+    """Sets of >=2 questions of the SAME kind sharing an EXACT category label-set — the
+    parallel questions a comparison would overlay (adjectives sharing services). Ordered
+    by first appearance. Seeds the group manager's comparison suggestions."""
+    from collections import OrderedDict
+    buckets: "OrderedDict[tuple, list]" = OrderedDict()
+    for q in model.questions:
+        if q.kind not in ("multi", "battery"):
+            continue
+        sig = (q.kind, frozenset(model.variables[v].label for v in q.variables))
+        buckets.setdefault(sig, []).append(q)
+    out: list[dict] = []
+    for (kind, _sig), qs in buckets.items():
+        if len(qs) >= 2:
+            out.append({"kind": kind, "qids": [q.qid for q in qs],
+                        "labels": [q.text for q in qs]})
+    return out
+
+
 def _comparison_stem(texts: list[str]) -> str:
     """A shared title for a comparison: the common prefix of the member texts, trimmed to
     a separator; falls back to the first text."""

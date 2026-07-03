@@ -202,3 +202,18 @@ def test_comparison_split_is_reversible():
     m2 = apply_grouping_override(model, {"comparisons": []})
     assert not any(q.kind == "comparison" for q in m2.questions)
     assert {q.qid for q in m2.questions if q.kind == "multi"} == {"rohkea", "luot"}
+
+
+def test_suggest_parallel_questions_groups_by_category_set():
+    from reportbuilder.model.question import Question, QuestionModel
+    from reportbuilder.ingest.grouping_override import suggest_parallel_questions
+    vars_ = {"r_is": _binary("r_is", "IS"), "r_il": _binary("r_il", "IL"),
+             "l_is": _binary("l_is", "IS"), "l_il": _binary("l_il", "IL"),
+             "x_a": _binary("x_a", "A"), "x_b": _binary("x_b", "B")}
+    qs = [Question(qid="rohkea", kind="multi", variables=("r_is", "r_il"), text="-Rohkea"),
+          Question(qid="luot", kind="multi", variables=("l_is", "l_il"), text="-Luotettava"),
+          Question(qid="other", kind="multi", variables=("x_a", "x_b"), text="Muu")]
+    model = QuestionModel(variables=vars_, questions=qs)
+    sugg = suggest_parallel_questions(model)
+    assert len(sugg) == 1
+    assert set(sugg[0]["qids"]) == {"rohkea", "luot"}

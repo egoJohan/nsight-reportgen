@@ -25,7 +25,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.grouping_override import apply_grouping_override
+from reportbuilder.ingest.grouping_override import apply_grouping_override, suggest_parallel_questions
 from reportbuilder.ingest.battery_group import suggest_scale_batteries
 from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
@@ -650,10 +650,18 @@ class GroupSpec(BaseModel):
     label: str | None = None
 
 
+class ComparisonSpec(BaseModel):
+    """One Tier-2 comparison: overlay these parallel questions (by qid) as multi-series.
+    No render mode — the chart type (radar / grouped bar) is chosen in the Design phase."""
+    members: list[str]
+    label: str | None = None
+
+
 class GroupingOverride(BaseModel):
     """PUT /materials/{material_id}/grouping body — the persisted grouping override."""
     groups: list[GroupSpec] = []
     singles: list[str] = []
+    comparisons: list[ComparisonSpec] = []
 
 
 @questions_router.post("/materials/{material_id}/regroup")
@@ -675,6 +683,10 @@ def regroup(
             for g in body.groups
         ],
         "singles": list(body.singles),
+        "comparisons": [
+            {"members": list(c.members), **({"label": c.label} if c.label else {})}
+            for c in body.comparisons
+        ],
     }
     model = apply_grouping_override(base, override)
     # Battery suggestions among the questions that are STILL single after this grouping
@@ -686,6 +698,8 @@ def regroup(
     return {
         "questions": _questions_payload(model, material_id, client),
         "battery_suggestions": suggestions,
+        # Parallel-question sets (same category set) — seeds comparison suggestions.
+        "parallel_suggestions": suggest_parallel_questions(model),
     }
 
 
