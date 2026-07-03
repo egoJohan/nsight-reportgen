@@ -3,14 +3,12 @@ import {
   AlertCircleIcon,
   BarChart3Icon,
   FileTextIcon,
-  GripVerticalIcon,
   ImageIcon,
   ListChecksIcon,
   Loader2Icon,
   PlusIcon,
   RotateCcwIcon,
   SparklesIcon,
-  Trash2Icon,
   UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,13 +27,12 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
-import { useDragReorder } from "@/lib/useDragReorder";
+import { SlideNavigator, SlideOverview } from "@/components/wizard/SlideNavigator";
 import {
   CHART_TYPES,
   CHART_TYPE_ITEMS,
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
-  chartTypeLabel,
   isDemographicsGrid,
   isSpecialSlide,
   isWordcloud,
@@ -184,7 +181,7 @@ function ChartPreview({
                 style={{ left: "4%", top: "2.5%", width: "92%" }}
               >
                 <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <p className="min-w-0 text-left text-[15px] leading-tight font-bold text-foreground">
+                <p className="min-w-0 text-left text-[18px] leading-tight font-extrabold text-foreground">
                   {headline}
                 </p>
               </div>
@@ -647,7 +644,7 @@ function ConfigForm({
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+    <div className="flex flex-col gap-4">
       {schema.map((field, i) => (
         <FieldWidget
           key={`${field.key}-${i}`}
@@ -742,7 +739,6 @@ function ChartControls({
 // ── Editable slide title (headline) — editable right here in Design ──────────
 function SlideTitleField({
   chart,
-  materialId,
   questionText,
   onChange,
 }: {
@@ -751,57 +747,16 @@ function SlideTitleField({
   questionText: string;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
-  const [generating, setGenerating] = useState(false);
-
-  const regenerate = async () => {
-    setGenerating(true);
-    try {
-      const { title } = await api.materials.aiSlideTitle(materialId, {
-        question_ref: chart.question_ref,
-        statistic: chart.statistic,
-        classifying_var: chart.classifying_var,
-        show_not_answered: chart.show_not_answered,
-        not_answered_codes: chart.not_answered_codes,
-      });
-      if (title) onChange({ slide_title: title });
-      else toast.warning("AI couldn't generate a title (service may be unavailable)");
-    } catch (e) {
-      toast.error(
-        `Couldn't generate a title: ${e instanceof Error ? e.message : "error"}`
-      );
-    } finally {
-      setGenerating(false);
-    }
-  };
-
   return (
     <Field label="Slide title">
-      <div className="flex gap-2">
-        <Input
-          value={chart.slide_title ?? ""}
-          placeholder={questionText}
-          onChange={(e) => onChange({ slide_title: e.target.value })}
-          className="flex-1"
-        />
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          disabled={generating}
-          onClick={regenerate}
-          title="Regenerate with AI"
-        >
-          {generating ? (
-            <Loader2Icon className="size-4 animate-spin" />
-          ) : (
-            <SparklesIcon className="size-4" />
-          )}
-          {generating ? "Generating…" : "Regenerate"}
-        </Button>
-      </div>
+      <Input
+        value={chart.slide_title ?? ""}
+        placeholder={questionText}
+        onChange={(e) => onChange({ slide_title: e.target.value })}
+      />
       <p className="text-xs text-muted-foreground">
-        The headline shown on the slide. Leave blank to use the question text;
-        edit it freely or regenerate with AI. Updates the preview above live.
+        The headline shown on the slide. Leave blank to use the question text; edit it
+        freely — the preview updates live.
       </p>
     </Field>
   );
@@ -1355,8 +1310,36 @@ function StepConfigureInner({
   // at the front or reordering never silently changes which slide is shown.
   const [active, setActive] = useState<string | null>(null);
   const [specialDialogOpen, setSpecialDialogOpen] = useState(false);
-  const { dragIndex, overIndex, containerRef, itemProps } =
-    useDragReorder(onReorder);
+  const [overviewOpen, setOverviewOpen] = useState(false);
+
+  // ← / → step to the previous / next slide — ignored while typing in a field or
+  // while the Overview is open (so arrow keys behave normally there).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (overviewOpen) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const el = document.activeElement as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      )
+        return;
+      const cur = Math.max(0, charts.findIndex((c) => c.question_ref === active));
+      const next = Math.max(
+        0,
+        Math.min(charts.length - 1, e.key === "ArrowLeft" ? cur - 1 : cur + 1)
+      );
+      if (next !== cur && charts[next]) {
+        e.preventDefault();
+        setActive(charts[next].question_ref);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overviewOpen, active, charts]);
 
   const questionMap = useMemo(() => {
     const m = new Map<string, Question>();
@@ -1401,33 +1384,35 @@ function StepConfigureInner({
 
   // "+ Add special slide" affordance + its dialog (shown in both the empty
   // state and the normal layout). Picking a type adds the slide and selects it.
+  const addSpecialDialog = onAddSpecial ? (
+    <AddSpecialDialog
+      open={specialDialogOpen}
+      onOpenChange={setSpecialDialogOpen}
+      existingTypes={existingSpecialTypes}
+      onPick={(type) => {
+        // Insert at the active slide's position (after it); else at the front.
+        const ref = onAddSpecial(type, active);
+        if (ref) setActive(ref);
+      }}
+    />
+  ) : null;
+
   const addSpecialBar = onAddSpecial ? (
-    <>
-      <button
-        type="button"
-        onClick={() => setSpecialDialogOpen(true)}
-        className="flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-      >
-        <PlusIcon className="size-4" />
-        Add special slide
-      </button>
-      <AddSpecialDialog
-        open={specialDialogOpen}
-        onOpenChange={setSpecialDialogOpen}
-        existingTypes={existingSpecialTypes}
-        onPick={(type) => {
-          // Insert at the active slide's position (after it); else at the front.
-          const ref = onAddSpecial(type, active);
-          if (ref) setActive(ref);
-        }}
-      />
-    </>
+    <button
+      type="button"
+      onClick={() => setSpecialDialogOpen(true)}
+      className="flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+    >
+      <PlusIcon className="size-4" />
+      Add special slide
+    </button>
   ) : null;
 
   if (charts.length === 0) {
     return (
       <div className="space-y-4">
         {addSpecialBar}
+        {addSpecialDialog}
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
           <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
           <p className="text-sm font-medium">No charts yet</p>
@@ -1452,143 +1437,68 @@ function StepConfigureInner({
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 
   return (
-    <div className="grid grid-cols-[280px_minmax(0,1fr)] gap-6">
-      {/* Background: warm every slide's preview so the deck is ready without
-          clicking each slide (renders nothing). */}
+    <div className="space-y-4">
+      {/* Background: warm every slide's preview so the deck (and the Overview
+          thumbnails) are ready without clicking each slide (renders nothing). */}
       <DeckPrefetch materialId={materialId} charts={charts} />
-      {/* Left: chart list */}
-      <div className="space-y-2">
-        {addSpecialBar}
-        <p className="px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Slides ({charts.length})
-        </p>
-        <div className="space-y-1.5" ref={containerRef as React.RefObject<HTMLDivElement>}>
-          {charts.map((c, i) => {
-            const q = questionMap.get(c.question_ref);
-            const dragging = dragIndex === i;
-            const dropTarget =
-              dragIndex !== null && overIndex === i && dragIndex !== i;
-            const dropBelow = dragIndex !== null && i > dragIndex;
-            const isActive = c.question_ref === active;
-            return (
-              <div
-                key={`${c.question_ref}-${i}`}
-                {...itemProps(i)}
-                className={cn(
-                  "group relative overflow-hidden rounded-lg border transition-colors",
-                  isActive
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border hover:bg-muted/40",
-                  dragging && "opacity-40 ring-1 ring-primary/30"
-                )}
-              >
-                {/* Clear drop-line showing exactly where the dragged slide will land. */}
-                {dropTarget && (
-                  <div
-                    className={cn(
-                      "pointer-events-none absolute inset-x-0 z-20 h-1 bg-primary shadow-[0_0_4px] shadow-primary/50",
-                      dropBelow ? "bottom-0" : "top-0"
-                    )}
-                  />
-                )}
-                {/* header: drag handle + number + text */}
-                <div className="flex items-start gap-1.5 px-2 pt-2">
-                  {onReorder && (
-                    <span
-                      className="mt-0.5 shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground active:cursor-grabbing"
-                      title="Drag to reorder"
-                    >
-                      <GripVerticalIcon className="size-4" />
-                    </span>
-                  )}
-                  <button
-                    onClick={() => setActive(c.question_ref)}
-                    className="flex min-w-0 flex-1 items-start gap-2 text-left"
-                  >
-                    <span
-                      className={cn(
-                        "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-xs font-medium tabular-nums",
-                        isActive
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground"
-                      )}
-                    >
-                      {i + 1}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="line-clamp-2 text-sm leading-snug">
-                        {isSpecialSlide(c)
-                          ? c.slide_title || chartTypeLabel(c.chart_type)
-                          : q?.text ?? c.question_ref}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                        {chartTypeLabel(c.chart_type)}
-                      </span>
-                    </span>
-                  </button>
-                </div>
-                <div className="px-2 pb-2" />
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {addSpecialDialog}
+
+      {/* Compact navigator (replaces the tall slide list): step, jump, or open the
+          full-screen Overview. Bulk reordering lives in Select + the Overview. */}
+      <SlideNavigator
+        charts={charts}
+        activeIndex={activeIndex}
+        questionMap={questionMap}
+        onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
+        onOpenOverview={() => setOverviewOpen(true)}
+        onAddSlide={onAddSpecial ? () => setSpecialDialogOpen(true) : undefined}
+        onRemove={() => onRemoveChart(activeIndex)}
+      />
 
       {/* Right: large preview + compact controls */}
       {activeChart && (
-        <div className="flex flex-col gap-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold leading-snug">
-                {activeSpecial
-                  ? activeChart.slide_title || chartTypeLabel(activeChart.chart_type)
-                  : questionMap.get(activeChart.question_ref)?.text ??
-                    activeChart.question_ref}
-              </h3>
-              <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                {activeSpecial
-                  ? chartTypeLabel(activeChart.chart_type)
-                  : activeChart.question_ref}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0 text-muted-foreground hover:text-destructive"
-              onClick={() => onRemoveChart(activeIndex)}
-            >
-              <Trash2Icon className="size-4" />
-              Remove
-            </Button>
+        <div className="grid grid-cols-[360px_minmax(0,1fr)] items-start gap-5">
+          {/* Left: configuration — one option per row */}
+          <div className="rounded-xl border bg-card p-4">
+            {activeSpecial ? (
+              activeGrid ? (
+                <p className="text-sm text-muted-foreground">
+                  A demographics overview — the charts are chosen automatically from the
+                  respondent (age, gender, geography…) questions. Use Remove to delete this
+                  slide, or reorder it in the Overview.
+                </p>
+              ) : activeBullets ? (
+                <SpecialSlideControls
+                  chart={activeChart}
+                  pending={activeBulletsPending}
+                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
+                  onRegenerate={() => onRegenerateSpecial?.(activeChart)}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  This slide has no options — use Remove to delete it.
+                </p>
+              )
+            ) : (
+              <ChartControls
+                chart={activeChart}
+                materialId={materialId}
+                question={questionMap.get(activeChart.question_ref)}
+                onChange={(patch) => onUpdateChart(activeIndex, patch)}
+              />
+            )}
           </div>
 
-          {activeSpecial ? (
-            <>
+          {/* Right: large preview (the slide's title lives in the navigator above). */}
+          <div className="flex min-w-0 flex-col gap-3">
+            {activeSpecial ? (
               <SpecialPreview
                 key={activeChart.question_ref}
                 materialId={materialId}
                 chart={activeChart}
                 bulletsPending={activeBulletsPending}
               />
-              {activeGrid ? (
-                <div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-                  A demographics overview — the charts are chosen automatically
-                  from the respondent (age, gender, geography…) questions. Use
-                  Remove to delete this slide, or drag to reorder it.
-                </div>
-              ) : activeBullets ? (
-                <div className="rounded-xl border bg-card p-4">
-                  <SpecialSlideControls
-                    chart={activeChart}
-                    pending={activeBulletsPending}
-                    onChange={(patch) => onUpdateChart(activeIndex, patch)}
-                    onRegenerate={() => onRegenerateSpecial?.(activeChart)}
-                  />
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <>
+            ) : (
               <ChartPreview
                 key={activeChart.question_ref}
                 materialId={materialId}
@@ -1604,19 +1514,30 @@ function StepConfigureInner({
                   activeChart.question_ref
                 }
               />
-
-              <div className="rounded-xl border bg-card p-4">
-                <ChartControls
-                  chart={activeChart}
-                  materialId={materialId}
-                  question={questionMap.get(activeChart.question_ref)}
-                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
-                />
-              </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
       )}
+
+      <SlideOverview
+        open={overviewOpen}
+        onOpenChange={setOverviewOpen}
+        charts={charts}
+        materialId={materialId}
+        grouping={grouping}
+        questionMap={questionMap}
+        activeRef={active}
+        onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
+        onReorder={onReorder}
+        onAddSlide={
+          onAddSpecial
+            ? () => {
+                setOverviewOpen(false);
+                setSpecialDialogOpen(true);
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
