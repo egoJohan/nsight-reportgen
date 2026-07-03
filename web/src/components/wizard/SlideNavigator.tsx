@@ -5,6 +5,7 @@ import {
   ChevronRightIcon,
   GripVerticalIcon,
   LayoutGridIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
@@ -36,6 +37,7 @@ export function SlideNavigator({
   onOpenOverview,
   onAddSlide,
   onRemove,
+  onEditQuestion,
 }: {
   charts: ChartSpec[];
   activeIndex: number;
@@ -44,10 +46,31 @@ export function SlideNavigator({
   onOpenOverview: () => void;
   onAddSlide?: () => void;
   onRemove?: () => void;
+  onEditQuestion?: (qid: string) => void;
 }) {
   const [jumpOpen, setJumpOpen] = useState(false);
+  const jumpRef = useRef<HTMLDivElement>(null);
   const total = charts.length;
   const cur = charts[activeIndex];
+
+  // Close the jump popover on an outside click / Esc. The trigger button lives INSIDE
+  // jumpRef, so clicking it again just toggles (no close-then-reopen flicker).
+  useEffect(() => {
+    if (!jumpOpen) return;
+    function onDown(e: MouseEvent) {
+      if (jumpRef.current && !jumpRef.current.contains(e.target as Node)) setJumpOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setJumpOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [jumpOpen]);
+
   if (!cur) return null;
 
   return (
@@ -61,10 +84,10 @@ export function SlideNavigator({
         <ChevronLeftIcon className="size-4" /> Prev
       </Button>
 
-      <div className="relative min-w-0 flex-1">
+      <div ref={jumpRef} className="relative flex min-w-0 flex-1 items-center gap-1">
         <button
           onClick={() => setJumpOpen((o) => !o)}
-          className="flex w-full items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-left hover:border-primary/50 hover:bg-accent/40"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-left hover:border-primary/50 hover:bg-accent/40"
         >
           <span className="shrink-0 text-xs font-semibold tabular-nums text-primary">
             {activeIndex + 1} / {total}
@@ -72,11 +95,19 @@ export function SlideNavigator({
           <span className="min-w-0 flex-1 truncate text-sm font-medium">
             {slideTitle(cur, questionMap)}
           </span>
-          <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-            {chartTypeLabel(cur.chart_type)}
-          </span>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
         </button>
+        {onEditQuestion && !isSpecialSlide(cur) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            title="Edit question"
+            onClick={() => onEditQuestion(cur.question_ref)}
+          >
+            <PencilIcon className="size-4" />
+          </Button>
+        )}
         {jumpOpen && (
           <JumpPopover
             charts={charts}
@@ -86,7 +117,6 @@ export function SlideNavigator({
               onSelect(i);
               setJumpOpen(false);
             }}
-            onClose={() => setJumpOpen(false)}
           />
         )}
       </div>
@@ -128,31 +158,13 @@ function JumpPopover({
   questionMap,
   activeIndex,
   onPick,
-  onClose,
 }: {
   charts: ChartSpec[];
   questionMap: Map<string, Question>;
   activeIndex: number;
   onPick: (index: number) => void;
-  onClose: () => void;
 }) {
   const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -167,10 +179,7 @@ function JumpPopover({
   }, [q, charts, questionMap]);
 
   return (
-    <div
-      ref={ref}
-      className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg"
-    >
+    <div className="absolute inset-x-0 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover shadow-lg">
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <SearchIcon className="size-4 text-muted-foreground" />
         <input

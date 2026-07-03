@@ -28,6 +28,7 @@ import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
 import { SlideNavigator, SlideOverview } from "@/components/wizard/SlideNavigator";
+import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import {
   CHART_TYPES,
   CHART_TYPE_ITEMS,
@@ -1311,6 +1312,7 @@ function StepConfigureInner({
   const [active, setActive] = useState<string | null>(null);
   const [specialDialogOpen, setSpecialDialogOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [editQid, setEditQid] = useState<string | null>(null);
 
   // ← / → step to the previous / next slide — ignored while typing in a field or
   // while the Overview is open (so arrow keys behave normally there).
@@ -1453,6 +1455,7 @@ function StepConfigureInner({
         onOpenOverview={() => setOverviewOpen(true)}
         onAddSlide={onAddSpecial ? () => setSpecialDialogOpen(true) : undefined}
         onRemove={() => onRemoveChart(activeIndex)}
+        onEditQuestion={(qid) => setEditQid(qid)}
       />
 
       {/* Right: large preview + compact controls */}
@@ -1537,6 +1540,14 @@ function StepConfigureInner({
               }
             : undefined
         }
+      />
+
+      <QuestionDetailsDialog
+        materialId={materialId}
+        qid={editQid}
+        onOpenChange={(open) => {
+          if (!open) setEditQid(null);
+        }}
       />
     </div>
   );
