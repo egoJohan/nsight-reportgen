@@ -30,9 +30,12 @@ question — this OVERLAYS separate questions as series).
 ## Design
 
 ### Part A — engine: generalise the comparison
-- `_parallel_questions(question, model)`: all questions of the SAME kind whose shared
-  category set matches — battery: member ATTRIBUTE labels (existing `_parallel_batteries`);
-  multi: member OPTION labels. Order-independent set match.
+- `_parallel_questions(question, model)`: all questions of the SAME kind whose category set
+  matches — battery: member ATTRIBUTE labels (existing `_parallel_batteries`); multi: member
+  OPTION labels. Order-independent, EXACT set match (conservative: only auto-overlay
+  questions that truly share the axes). Explicit `series_refs` (Part B) is LENIENT instead —
+  it aligns by label and fills any category a series lacks with 0/None, so a hand-picked
+  series with a near-miss option set still charts.
 - `_comparison(question, spec, data, model, refs=None)`: builds the multi-series grid.
   - `categories` = the shared category set (axes), in `question`'s order.
   - `segments` = one per parallel question, labelled by its DISTINGUISHING text
@@ -40,8 +43,10 @@ question — this OVERLAYS separate questions as series).
     ("Attendo — Arvioi…" → "Attendo", today's `_entity_label`), but the adjective multis put
     it at the TAIL ("…ominaisuuksiin? -Rohkea" → "Rohkea"). So derive it robustly: strip the
     COMMON prefix AND common suffix shared by all the parallel questions' texts, and the
-    remaining differing fragment is the series label (falls back to the full text, or the
-    existing `_entity_label`, when there's no clean common part).
+    remaining differing fragment is the series label. This ONE rule UNIFIES both kinds
+    (battery entity via common SUFFIX; multi adjective via the tail), so it REPLACES the
+    head-only `_entity_label` in the comparison path (keep `_entity_label` for its other
+    callers). Falls back to the full text when there is no clean common part.
   - cell(category, series) = battery → MEAN on the shared scale (existing); multi → the %
     of respondents who ticked that option (as `_multi` computes).
   - `refs` (optional) overrides auto-detection with an explicit series list (see Part B).
@@ -59,6 +64,13 @@ question — this OVERLAYS separate questions as series).
   chart schemas (radar, clustered bar), listing questions that share this question's
   category set. Defaults (in the UI) to the auto-detected set so it's pre-populated and
   trimmable — matching the chosen "auto-detect + manual trim".
+- COST — this is NOT just a schema line. Today's config widgets are `select / switch /
+  variable / numeric_variable`; there is NO multi-select-of-QUESTIONS widget (existing ones
+  pick VARIABLES from `/variables`, not question refs). Part B therefore needs: (a) a new
+  widget type (e.g. `question_multiselect`) in the frontend registry, and (b) a source of
+  COMPATIBLE questions to offer — the backend exposing, per question, the refs that share
+  its category set (a small `/questions` addition or a dedicated endpoint). This is why
+  Part B is Phase 2; Phase 1 (auto-detect, zero config) already gives the customer the radar.
 - Serde: `series_refs` round-trips in `options` (already free-form).
 
 ### Part C — rendering (mostly free)
@@ -92,4 +104,9 @@ question — this OVERLAYS separate questions as series).
   identical option sets (a service missing for one adjective) — align by label, fill missing
   cells as 0/None (as `_battery_comparison` already does).
 - **Auto-detect breadth**: many parallel multis → many polygons (cluttered radar). The manual
-  trim (Part B) is the escape hatch; auto-detect should cap/……warn if it overlays a lot.
+  trim (Part B) is the escape hatch; auto-detect should cap/warn if it overlays a lot.
+- **Battery-radar regression**: switching the comparison's series label from `_entity_label`
+  (head) to the common-strip must leave the EXISTING brand-battery radar unchanged. For
+  "Attendo — Arvioi X" the strip yields "Attendo" (same), but verify against the Attendo
+  golden deck and update it only if the new label is genuinely better; keep `_battery_
+  comparison`'s means/base identical.
