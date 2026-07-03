@@ -456,6 +456,9 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             suggested = suggest_chart_type(q, series)
             # Non-text questions never offer wordcloud (its suitability is None).
             compatible = _compatible_chart_types(q, series)
+            # A comparison defaults to the radar (its signature chart) when available.
+            if q.kind == "comparison" and "radar" in compatible:
+                suggested = "radar"
         questions.append({
             "qid": q.qid,
             "kind": q.kind,
