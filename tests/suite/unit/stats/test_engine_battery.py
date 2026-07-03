@@ -118,3 +118,19 @@ def test_battery_stacked_word_labelled_scale_renders_levels():
     assert r.categories == ("Ei lainkaan tärkeä", "Vähän tärkeä", "Melko tärkeä",
                             "Tärkeä", "Erittäin tärkeä")
     assert r.segments == ("Statement A", "Statement B")
+
+
+def test_battery_comparison_explicit_members():
+    def rv(n, l):
+        return Variable(name=n, label=l, measurement="scale",
+                        value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 6)),
+                        missing_values=frozenset())
+    vars_ = {"a1": rv("a1", "Nopeus"), "a2": rv("a2", "Laatu"),
+             "b1": rv("b1", "Nopeus"), "b2": rv("b2", "Laatu")}
+    qa = Question(qid="qa", kind="battery", variables=("a1", "a2"), text="Attendo — Arvio")
+    qb = Question(qid="qb", kind="battery", variables=("b1", "b2"), text="Esperi — Arvio")
+    model = QuestionModel(variables=vars_, questions=[qa, qb])
+    df = pd.DataFrame({"a1": [5, 4], "a2": [3, 3], "b1": [2, 2], "b2": [4, 4]})
+    r = engine._battery_comparison(qa, _spec(chart_type="radar"), df, model, members=[qa, qb])
+    assert r.categories == ("Nopeus", "Laatu")
+    assert set(r.segments) == {"Attendo", "Esperi"}

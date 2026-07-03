@@ -796,18 +796,19 @@ def _entity_label(question: Question) -> str:
 
 
 def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
-                        model: QuestionModel) -> SeriesResult:
+                        model: QuestionModel, members: list[Question] | None = None) -> SeriesResult:
     """Compare PARALLEL rating batteries (same attributes, one per entity/brand):
     categories = the shared attributes, segments = the entities, each cell the
     MEAN rating of that entity on that attribute (shared 1..N scale). Mirrors the
-    source decks' brand-image radar (attributes × brands)."""
-    sibs = _parallel_batteries(question, model)
+    source decks' brand-image radar (attributes × brands). `members` (explicit series)
+    overrides the `_parallel_batteries` auto-detect when given."""
+    sibs = members if members is not None else _parallel_batteries(question, model)
     attrs = [model.variable(v).label for v in question.variables]   # canonical order
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}
     entities: list[str] = []
     for q in sibs:
-        ent = _entity_label(q)
+        ent = _series_label(q, sibs)
         entities.append(ent)
         by_label = {model.variable(v).label: v for v in q.variables}
         answered = pd.Series(False, index=data.index)
