@@ -183,7 +183,7 @@ function ChartPreview({
                 style={{ left: "4%", top: "2.5%", width: "92%" }}
               >
                 <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <p className="min-w-0 text-left text-[18px] leading-tight font-extrabold whitespace-pre-line text-foreground">
+                <p className="min-w-0 text-left text-[15px] leading-tight font-extrabold whitespace-pre-line text-foreground">
                   {headline}
                 </p>
               </div>

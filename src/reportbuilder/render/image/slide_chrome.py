@@ -128,7 +128,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             secondary = slide_description
         if title:
             # Title font steps down with length so a long key message stays readable.
-            t_size = 21 if len(title) <= 60 else (18 if len(title) <= 110 else 16)
+            t_size = 18 if len(title) <= 60 else (16 if len(title) <= 110 else 14)
             # Tall, TOP-anchored box so the title can span up to ~4 lines (customers'
             # headlines are often 3) and honour manual line breaks ("\n") instead of
             # being clipped at 2. A short title still sits at the top (empty space
