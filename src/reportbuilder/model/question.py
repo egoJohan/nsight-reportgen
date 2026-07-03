@@ -30,6 +30,9 @@ class Question:
     # a generic seam categorical recode can reuse later. Material-level, applied
     # via model_loader from the material config. (REQ-C-24b)
     value_merges: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Comparison groups (Tier 2): the QIDS of the parallel questions this comparison
+    # overlays as series (radar / grouped-bar). Empty for every non-comparison question.
+    members: tuple[str, ...] = ()
 
 
 @dataclass

@@ -99,3 +99,10 @@ def test_lone_multi_radar_is_single_series():
     r = engine.compute(q_rohkea, _spec(chart_type="radar"), df, model)
     assert r.segments == ("Total",)
     assert r.categories == ("IS", "IL", "HS")
+
+
+def test_question_carries_comparison_members():
+    q = Question(qid="compare-x", kind="comparison", variables=("a", "b"),
+                 text="X", members=("adj1", "adj2"))
+    assert q.members == ("adj1", "adj2")
+    assert Question(qid="q", kind="single", variables=("a",), text="Q").members == ()
