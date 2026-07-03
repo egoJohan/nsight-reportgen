@@ -93,6 +93,7 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
   if (renderTitle) {
     key.slide_title = chart.slide_title;
     key.slide_description = chart.slide_description;
+    key.footer_note = chart.footer_note;   // baked into the footer only when render_title on
   }
   return key;
 }

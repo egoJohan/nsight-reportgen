@@ -148,6 +148,9 @@ export interface ChartSpec {
   category_label_overrides: [string, string][];
   slide_title: string | null;
   slide_description: string | null;
+  // Override the methodology footer (e.g. a simpler "N = 950"); null = auto
+  // ("<stat> · n = N"). "{n}" expands to the base count, "{stat}" to the stat label.
+  footer_note: string | null;
   // Free-form per-chart-type options (plugin-declared config keys without a
   // first-class ChartSpec field). Optional for backward compatibility.
   options?: Record<string, unknown>;

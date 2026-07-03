@@ -205,6 +205,7 @@ export function makeChart(
     category_label_overrides: [],
     slide_title: null,
     slide_description: null,
+    footer_note: null,
   };
 }
 
@@ -245,6 +246,7 @@ export function makeSpecialSlide(
     category_label_overrides: [],
     slide_title: opts?.slide_title ?? null,
     slide_description: null,
+    footer_note: null,
     // `group` ties together the pages of one logical special slide (so a regen
     // can replace the whole set); absent for single-page slides.
     options: { bullets: opts?.bullets ?? [], ...(opts?.group ? { group: opts.group } : {}) },
@@ -321,6 +323,7 @@ export function makeDemographicsGrid(
     category_label_overrides: [],
     slide_title: opts?.slide_title ?? "Vastaajat",
     slide_description: null,
+    footer_note: null,
     options: { charts: cells, ...(opts?.group ? { group: opts.group } : {}) },
   };
 }

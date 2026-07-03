@@ -731,6 +731,7 @@ function ChartControls({
         questionText={question?.text ?? chart.question_ref}
         onChange={onChange}
       />
+      <FooterNoteField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
         chart={chart}
@@ -766,6 +767,30 @@ function SlideTitleField({
       <p className="text-xs text-muted-foreground">
         The headline shown on the slide. Leave blank to use the question text; press
         Enter to break it onto up to three lines. The preview updates live.
+      </p>
+    </Field>
+  );
+}
+
+// ── Editable methodology footer (the N notation at the slide's bottom-left) ───
+function FooterNoteField({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <Field label="Footer / N notation">
+      <Input
+        value={chart.footer_note ?? ""}
+        placeholder="e.g. N = {n}"
+        onChange={(e) => onChange({ footer_note: e.target.value || null })}
+      />
+      <p className="text-xs text-muted-foreground">
+        The methodology line at the bottom-left of the slide. Leave blank for the default
+        (e.g. “Osuus vastaajista (%) · n = 950”). Write <code>{"{n}"}</code> where the
+        respondent count goes — e.g. <code>N = {"{n}"}</code> → “N = 950”.
       </p>
     </Field>
   );

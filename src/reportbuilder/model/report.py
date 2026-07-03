@@ -46,6 +46,7 @@ class ChartSpec:
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
     slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
+    footer_note: str | None = None              # override methodology footer; None = auto ("<stat> · n = N"). "{n}" expands to the base.
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
@@ -155,6 +156,7 @@ def report_from_json(data: dict | str) -> Report:
             show_not_answered=c.get("show_not_answered", False),
             slide_title=c.get("slide_title"),
             slide_description=c.get("slide_description"),
+            footer_note=c.get("footer_note"),
             show_empty_categories=c.get("show_empty_categories", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),

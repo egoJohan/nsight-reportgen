@@ -873,6 +873,7 @@ class ChartSpecBody(BaseModel):
     # AI/edited slide title is set, the preview uses it instead of the question text.
     slide_title: str | None = None
     slide_description: str | None = None
+    footer_note: str | None = None  # override methodology footer; "{n}" expands to the base
     # Preview-only: when False the rendered PNG omits the title block (accent bar +
     # title + description) so the frontend can own that region with a progressive
     # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
@@ -929,6 +930,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         slide_title=body.slide_title,
         slide_description=body.slide_description,
+        footer_note=body.footer_note,
         options=dict(body.options or {}),
     )
 
