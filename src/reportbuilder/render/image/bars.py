@@ -50,7 +50,12 @@ _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labe
 # (axis grid + legend carry the read). Vertical columns get narrow sooner than the
 # horizontal layout, so its threshold is lower.
 _MAX_LABELED_SEGMENTS_V: int = 4
-_MAX_LABELED_SEGMENTS_H: int = 6
+# Horizontal clustered bars: label a bar only when it is at least this TALL (points).
+# Density (categories × segments), not a raw segment count, decides collision — a single
+# question split by a background group has tall bars that easily hold a label, whereas a
+# dense two-classifier cross-tab makes thin ones. (Mean/median render clustered, so this
+# is what makes their by-group value labels appear.)
+_MIN_LABEL_BAR_PT: float = 8.0
 
 
 def _hbar_row_pt(n_cats: int, fig_h_in: float) -> float:
@@ -573,7 +578,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
         for yi, v in zip(ys, vals):
-            if v is not None and n_segs <= _MAX_LABELED_SEGMENTS_H:
+            if v is not None and per_bar_pt >= _MIN_LABEL_BAR_PT:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
