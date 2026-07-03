@@ -163,13 +163,26 @@ def suggest_parallel_questions(model: QuestionModel) -> list[dict]:
 
 
 def _comparison_stem(texts: list[str]) -> str:
-    """A shared title for a comparison: the common prefix of the member texts, trimmed to
-    a separator; falls back to the first text."""
+    """A shared title for a comparison: the text the members have in COMMON (the question),
+    which is the differing series' complement. The shared part may be a prefix (adjective
+    multis: 'Q -Rohkea' / 'Q -Luotettava') or a suffix (brand batteries: 'Attendo — Arvioi
+    X' / 'Esperi — Arvioi X'), so take whichever common affix is longer. Falls back to the
+    first text."""
     import os
+    seps = " -–—:·,;/|"
+    texts = [t.strip() for t in texts if t and t.strip()]
     if not texts:
         return "Vertailu"
-    pre = os.path.commonprefix([t.strip() for t in texts]).strip(" -–—:·,;/|")
-    return pre or texts[0].strip()
+    if len(texts) == 1:
+        return texts[0]
+    pre = os.path.commonprefix(texts)
+    suf = os.path.commonprefix([t[::-1] for t in texts])[::-1]
+    while pre and pre[-1] not in seps:   # round to a separator so a word isn't cut
+        pre = pre[:-1]
+    while suf and suf[0] not in seps:
+        suf = suf[1:]
+    cand = max((pre, suf), key=lambda s: len(s.strip(seps)))
+    return cand.strip(seps).strip() or texts[0]
 
 
 def _apply_comparisons(model: QuestionModel, comparisons: list) -> QuestionModel:

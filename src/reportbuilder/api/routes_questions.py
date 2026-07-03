@@ -471,6 +471,9 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             # Respondent-background question (age/gender/region/…) → floated to
             # the front of a new report (demographics-first convention).
             "is_demographic": _is_demographic(model, q),
+            # Member qids for a comparison question (empty otherwise) — lets the group
+            # manager render + split a comparison.
+            "members": list(getattr(q, "members", ()) or ()),
         })
     return questions
 

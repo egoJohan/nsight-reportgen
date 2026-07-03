@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Layers2Icon, BarChart3Icon, Undo2Icon } from "lucide-react";
+import { Layers2Icon, BarChart3Icon, Undo2Icon, GitCompareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { GroupingOverride, GroupSpec } from "@/lib/api";
-import { useRegroupedQuestions, useVariables } from "@/lib/queries";
+import type { GroupingOverride, GroupSpec, ComparisonSpec } from "@/lib/api";
+import {
+  useRegroupedQuestions,
+  useParallelSuggestions,
+  useVariables,
+} from "@/lib/queries";
 
 type Card = {
   key: string;
@@ -46,17 +50,24 @@ export default function ManageGroupingDialog({
 
   const [groups, setGroups] = useState<GroupSpec[]>([]);
   const [singles, setSingles] = useState<string[]>([]);
+  const [comparisons, setComparisons] = useState<ComparisonSpec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
+  const [stage, setStage] = useState<"questions" | "comparisons">("questions");
 
   // Reshape with the WORKING grouping so each card's title is the REAL title the
   // backend produces (the frontend can't re-derive it — O-pattern members carry the
   // OPTION label, not the question). Cards + pool are DERIVED from this, so what you
   // see always matches the questions list after "Apply to report".
+  const working = { groups, singles, comparisons };
   const { data: workingReshaped } = useRegroupedQuestions(
     open ? materialId : null,
-    { groups, singles }
+    working
+  );
+  const { data: parallelSuggestions } = useParallelSuggestions(
+    open ? materialId : null,
+    working
   );
 
   const labelOf = useMemo(() => {
@@ -105,6 +116,7 @@ export default function ManageGroupingDialog({
     if (seeded) return;
     setGroups((grouping.groups ?? []).map((g) => ({ ...g })));
     setSingles([...(grouping.singles ?? [])]);
+    setComparisons((grouping.comparisons ?? []).map((c) => ({ ...c })));
     setSelected(new Set());
     setSeeded(true);
   }, [open, seeded, grouping]);
@@ -172,6 +184,47 @@ export default function ManageGroupingDialog({
     setSingles((s) => Array.from(new Set([...s, ...card.variables])));
   }
 
+  // ---- Tier 2: comparisons (overlay parallel questions as one radar / grouped bar) ----
+  const labelByQid = useMemo(() => {
+    const m = new Map<string, string>();
+    (workingReshaped ?? []).forEach((q) => m.set(q.qid, q.text));
+    return m;
+  }, [workingReshaped]);
+
+  const comparisonCards = useMemo(
+    () => (workingReshaped ?? []).filter((q) => q.kind === "comparison"),
+    [workingReshaped]
+  );
+  const comparedKeys = useMemo(
+    () => new Set(comparisons.map((c) => setKey(c.members))),
+    [comparisons]
+  );
+
+  function compareAll(qids: string[]) {
+    if (qids.length < 2) return;
+    setComparisons((cs) => [...cs, { members: qids, label: null }]);
+    setStage("comparisons");
+  }
+  function splitComparison(members: string[]) {
+    setComparisons((cs) => cs.filter((c) => setKey(c.members) !== setKey(members)));
+  }
+  function removeMember(members: string[], qid: string) {
+    setComparisons((cs) =>
+      cs
+        .map((c) =>
+          setKey(c.members) === setKey(members)
+            ? { ...c, members: c.members.filter((m) => m !== qid) }
+            : c
+        )
+        .filter((c) => c.members.length >= 2)
+    );
+  }
+
+  // Suggestions not yet turned into a comparison (by exact member set).
+  const openSuggestions = (parallelSuggestions ?? []).filter(
+    (s) => !comparedKeys.has(setKey(s.qids))
+  );
+
   // The selection can be grouped only when it's ≥2 variables all of one kind:
   // tick-boxes → multi, rating scales → battery. (The backend re-validates.)
   const selKind = (() => {
@@ -199,6 +252,22 @@ export default function ManageGroupingDialog({
           </DialogDescription>
         </DialogHeader>
 
+        <div className="inline-flex shrink-0 self-start rounded-lg border bg-muted p-0.5 text-sm">
+          <button
+            onClick={() => setStage("questions")}
+            className={`rounded-md px-3 py-1 font-medium ${stage === "questions" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+          >
+            Questions
+          </button>
+          <button
+            onClick={() => setStage("comparisons")}
+            className={`rounded-md px-3 py-1 font-medium ${stage === "comparisons" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+          >
+            Comparisons{comparisonCards.length ? ` (${comparisonCards.length})` : ""}
+          </button>
+        </div>
+
+        {stage === "questions" && (
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
           <div className="flex min-h-0 flex-col rounded-lg border">
             <div className="border-b px-3 py-2">
@@ -315,12 +384,102 @@ export default function ManageGroupingDialog({
             </div>
           </div>
         </div>
+        )}
+
+        {stage === "comparisons" && (
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
+          <div className="flex min-h-0 flex-col rounded-lg border">
+            <div className="border-b px-3 py-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">
+                Questions to compare
+              </span>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-2">
+              {openSuggestions.length === 0 ? (
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                  No questions share a category set yet — combine variables into questions
+                  first, then compare the parallel ones.
+                </p>
+              ) : (
+                openSuggestions.map((s, i) => (
+                  <div key={i} className="rounded-md border border-primary/30 bg-primary/5 p-2.5">
+                    <p className="text-sm font-medium">
+                      {s.qids.length} questions share the same{" "}
+                      {s.kind === "battery" ? "attributes" : "options"}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {s.labels.join(", ")}
+                    </p>
+                    <Button size="sm" className="mt-2" onClick={() => compareAll(s.qids)}>
+                      <GitCompareIcon className="size-4" /> Compare
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-col rounded-lg border">
+            <div className="border-b px-3 py-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">
+                Comparisons
+              </span>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-2">
+              {comparisonCards.length === 0 ? (
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                  No comparisons. Accept a suggestion to overlay parallel questions as one
+                  chart — pick radar or grouped bars later, in Design.
+                </p>
+              ) : (
+                comparisonCards.map((q) => (
+                  <div key={q.qid} className="rounded-md border p-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{q.text}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground">
+                          {(q.members ?? []).length} questions
+                        </p>
+                      </div>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        title="Split back into separate questions"
+                        onClick={() => splitComparison(q.members ?? [])}
+                      >
+                        <Undo2Icon className="size-4" />
+                      </Button>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {(q.members ?? []).map((mq) => (
+                        <span
+                          key={mq}
+                          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
+                        >
+                          {labelByQid.get(mq) ?? mq}
+                          <button
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Remove from comparison"
+                            onClick={() => removeMember(q.members ?? [], mq)}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button
             onClick={() => {
-              onSave({ groups, singles });
+              onSave({ groups, singles, comparisons });
               onOpenChange(false);
             }}
           >

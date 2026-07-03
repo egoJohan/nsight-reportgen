@@ -19,9 +19,11 @@ export interface ValueLabel {
 
 export interface Question {
   qid: string;
-  kind: "single" | "multi" | "battery";
+  kind: "single" | "multi" | "battery" | "comparison";
   variables: string[];
   text: string;
+  // Member qids for a comparison (overlaid parallel questions); [] otherwise.
+  members?: string[];
   // Whether the question can be charted at all (false for open-ended text).
   chartable: boolean;
   // Human-readable reason when chartable === false (e.g. "Open-ended text answers").
@@ -435,13 +437,21 @@ export const api = {
     regroup: (
       materialId: string,
       override: GroupingOverride
-    ): Promise<{ questions: Question[]; battery_suggestions: BatterySuggestion[] }> =>
+    ): Promise<{
+      questions: Question[];
+      battery_suggestions: BatterySuggestion[];
+      parallel_suggestions: ParallelSuggestion[];
+    }> =>
       fetch(`${API_BASE}/materials/${materialId}/regroup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(override),
       }).then((r) =>
-        json<{ questions: Question[]; battery_suggestions: BatterySuggestion[] }>(r)
+        json<{
+          questions: Question[];
+          battery_suggestions: BatterySuggestion[];
+          parallel_suggestions: ParallelSuggestion[];
+        }>(r)
       ),
 
     questionSummary: (materialId: string, qid: string): Promise<QuestionSummary> =>

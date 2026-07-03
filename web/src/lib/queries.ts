@@ -227,6 +227,21 @@ export function useBatterySuggestions(
   });
 }
 
+// Parallel-question suggestions for the current grouping — shares the regroup query
+// cache (same key). Sets of questions that share a category set (adjectives sharing
+// services), seeding the comparison suggestions in the group manager.
+export function useParallelSuggestions(
+  materialId: string | null,
+  grouping: GroupingOverride
+) {
+  return useQuery({
+    queryKey: ["regrouped-questions", materialId ?? "", JSON.stringify(grouping)],
+    queryFn: () => api.materials.regroup(materialId!, grouping),
+    enabled: !!materialId,
+    select: (d) => d.parallel_suggestions ?? [],
+  });
+}
+
 export function useUploadMaterial(caseId: string) {
   return useMutation({
     mutationFn: (file: File) => api.materials.upload(caseId, file),
