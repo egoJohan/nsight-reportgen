@@ -203,6 +203,19 @@ def shorten_labels(
 # Soft cap on how many bullets a special slide shows.
 MAX_BULLETS = 6
 
+# Appended to EVERY bullet-list prompt. The output goes straight onto a slide, so the
+# model must return only the analytical bullets — no preamble, no closing remark, and
+# above all no conversational meta aimed at the reader (e.g. "Oliko tämä yhteenveto
+# hyödyllinen jatkotyöstöäsi varten?", offers of further help). Those are chat
+# pleasantries, never slide content.
+_BULLET_OUTPUT_RULES = (
+    "\n\nTÄRKEÄÄ: Tuloste tulee suoraan diaesitykseen. Palauta VAIN ranskalaiset "
+    "viivat — jokainen rivi itsenäinen analyyttinen havainto. ÄLÄ kirjoita johdantoa, "
+    "otsikkoa, yhteenvetoa etkä loppukommenttia. ÄLÄ puhuttele lukijaa, ÄLÄ esitä "
+    "kysymyksiä lukijalle (esim. oliko yhteenveto hyödyllinen), ÄLÄ tarjoa lisäapua "
+    "etkä kommentoi omaa vastaustasi."
+)
+
 
 def _parse_bullets(reply: str) -> list[str]:
     """Parse an LLM reply into clean bullet strings.
@@ -319,7 +332,7 @@ def generate_overview_bullets(
         "teemoja kartoitettiin. Yksi tiivis havainto per rivi, ei numerointia, ei "
         "lainausmerkkejä. Palauta vain ranskalaiset viivat."
     )
-    return _parse_bullets(chat(prompt))
+    return _parse_bullets(chat(prompt + _BULLET_OUTPUT_RULES))
 
 
 def generate_conclusion_bullets(
@@ -342,7 +355,7 @@ def generate_conclusion_bullets(
         "johtopäätös per rivi, ei numerointia, ei lainausmerkkejä. Palauta vain "
         "ranskalaiset viivat."
     )
-    return _parse_bullets(chat(prompt))
+    return _parse_bullets(chat(prompt + _BULLET_OUTPUT_RULES))
 
 
 # Themes shown for an open-ended question.
@@ -379,7 +392,7 @@ def generate_open_themes(
         "'- **Edulliset hinnat ja tarjoukset** – mainittu noin 40 %:ssa vastauksista'. "
         "Palauta vain ranskalaiset viivat."
     )
-    return _parse_bullets(chat(prompt))[:MAX_THEMES]
+    return _parse_bullets(chat(prompt + _BULLET_OUTPUT_RULES))[:MAX_THEMES]
 
 
 def pick_demographic_questions(
@@ -430,7 +443,7 @@ def generate_demographics_bullets(
         "maantieteellinen jakauma). Käytä lukuja jakaumista. Yksi fakta per rivi, ei "
         "numerointia, ei lainausmerkkejä. Palauta vain ranskalaiset viivat."
     )
-    return _parse_bullets(chat(prompt))
+    return _parse_bullets(chat(prompt + _BULLET_OUTPUT_RULES))
 
 
 __all__ = [

@@ -224,3 +224,23 @@ def test_generate_open_themes_caps_at_max_themes():
                                  chat=RecordingChat(reply))
     assert len(out) <= T.MAX_THEMES
     assert out[0] == "**Teema 1** – 1 %"
+
+
+# --------------------------------------------------------------------------- #
+# Every bullet-list prompt must forbid conversational meta (the "Oliko tämä
+# yhteenveto hyödyllinen?" artifact that leaked onto slides).
+# --------------------------------------------------------------------------- #
+def test_bullet_prompts_forbid_conversational_meta():
+    reply = "- Havainto yksi\n- Havainto kaksi"
+    runs = [
+        lambda c: T.generate_overview_bullets("Tutkimus", ["Kysymys 1"], 100, chat=c),
+        lambda c: T.generate_conclusion_bullets("Tutkimus", [("Q1", [("A", 50.0)])], chat=c),
+        lambda c: T.generate_open_themes("Miksi?", [("hinta", 10)], ["kallis"], chat=c),
+        lambda c: T.generate_demographics_bullets("Tutkimus", [("Ikä", [("18-30", 50.0)])], chat=c),
+    ]
+    for run in runs:
+        chat = RecordingChat(reply)
+        run(chat)
+        prompt = chat.prompts[0].lower()
+        assert "kysymyksiä lukijalle" in prompt   # no reader-directed questions
+        assert "lisäapua" in prompt               # no offers of further help
