@@ -220,9 +220,11 @@ function ChartPreview({
         )}
 
         {loading && (
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm ring-1 ring-border">
-            <div className="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            Updating…
+          <div className="absolute inset-0 z-20 flex items-center justify-center">
+            <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
+              <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              Updating…
+            </div>
           </div>
         )}
 
@@ -1103,9 +1105,11 @@ function SpecialPreview({
           />
         )}
         {loading && (
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm ring-1 ring-border">
-            <div className="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            Updating…
+          <div className="absolute inset-0 z-20 flex items-center justify-center">
+            <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
+              <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              Updating…
+            </div>
           </div>
         )}
         {error && (
