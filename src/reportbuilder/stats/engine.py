@@ -856,12 +856,13 @@ def _series_label(question: Question, group: list[Question]) -> str:
 
 
 def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
-                      model: QuestionModel) -> SeriesResult:
+                      model: QuestionModel, members: list[Question] | None = None) -> SeriesResult:
     """Compare PARALLEL multi-response questions (same option set, one per adjective):
     categories = the shared OPTIONS (services, the axes), segments = the questions
     (adjectives, the polygons), each cell the % of respondents who ticked that option for
-    that adjective. The multi twin of `_battery_comparison`."""
-    sibs = _parallel_questions(question, model)
+    that adjective. The multi twin of `_battery_comparison`. `members` (explicit series)
+    overrides the `_parallel_questions` auto-detect when given."""
+    sibs = members if members is not None else _parallel_questions(question, model)
     options = [model.variable(v).label for v in question.variables]   # this q's axis order
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}

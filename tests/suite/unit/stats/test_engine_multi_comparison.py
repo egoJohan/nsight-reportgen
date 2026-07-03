@@ -106,3 +106,11 @@ def test_question_carries_comparison_members():
                  text="X", members=("adj1", "adj2"))
     assert q.members == ("adj1", "adj2")
     assert Question(qid="q", kind="single", variables=("a",), text="Q").members == ()
+
+
+def test_multi_comparison_explicit_members_subset():
+    model, q_rohkea, q_luot, df = _multi_model()
+    r = engine._multi_comparison(q_rohkea, _spec(chart_type="radar"), df, model,
+                                 members=[q_rohkea])
+    assert set(r.segments) == {"Rohkea"}
+    assert r.categories == ("IS", "IL", "HS")
