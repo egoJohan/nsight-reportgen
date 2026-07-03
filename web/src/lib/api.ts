@@ -333,15 +333,30 @@ export interface GroupSpec {
   label?: string | null;
 }
 
+// A Tier-2 comparison: overlay these parallel questions (by qid) as multi-series.
+// The chart type (radar / grouped bar) is chosen in the Design phase, not stored here.
+export interface ComparisonSpec {
+  members: string[];
+  label?: string | null;
+}
+
 export interface GroupingOverride {
   groups: GroupSpec[];
   singles: string[];
+  comparisons?: ComparisonSpec[];
 }
 
 // A confirmable hint: a run of ≥3 contiguous same-scale variables that could be a
 // battery (stacked comparison). Surfaced by /regroup; never applied automatically.
 export interface BatterySuggestion {
   variables: string[];
+  labels: string[];
+}
+
+// Parallel questions sharing a category set — seeds the comparison suggestions.
+export interface ParallelSuggestion {
+  kind: "multi" | "battery";
+  qids: string[];
   labels: string[];
 }
 
