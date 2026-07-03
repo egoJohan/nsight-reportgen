@@ -302,7 +302,18 @@ def _compatible_chart_types(question, series: SeriesResult) -> list[str]:
         except Exception:
             # A scorer that errors on this shape is simply not offered.
             continue
+    # A comparison overlays several questions as multi-series; only radar (polygons) and
+    # grouped/clustered bars render that meaningfully, so the Design picker offers just
+    # those (the chart type is chosen there, not in the group manager).
+    if getattr(question, "kind", None) == "comparison":
+        out = [c for c in out if c in _COMPARISON_CHART_TYPES]
+        if "radar" not in out:
+            out.insert(0, "radar")
     return out
+
+
+# Chart types that render a comparison's multi-series overlay.
+_COMPARISON_CHART_TYPES = ("radar", "vertical_bar", "horizontal_bar")
 
 
 def _missing_value_list(model: QuestionModel, qid: str) -> list[dict]:
