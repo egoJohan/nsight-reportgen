@@ -266,7 +266,7 @@ export function SlideOverview({
         </div>
         <div
           ref={containerRef as React.RefObject<HTMLDivElement>}
-          className="grid min-h-0 flex-1 grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 lg:grid-cols-4"
+          className="grid min-h-0 flex-1 auto-rows-max grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 lg:grid-cols-4"
         >
           {charts.map((c, i) => (
             <SlideThumb
