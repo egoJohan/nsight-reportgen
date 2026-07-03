@@ -26,6 +26,12 @@ type Card = {
   kind: "multi" | "battery";
 };
 
+type Change = {
+  id: number;
+  text: string;
+  before: { groups: GroupSpec[]; singles: string[]; comparisons: ComparisonSpec[] };
+};
+
 const setKey = (vars: string[]) => [...vars].sort().join(" ");
 
 /**
@@ -55,6 +61,22 @@ export default function ManageGroupingDialog({
   const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
   const [stage, setStage] = useState<"questions" | "comparisons">("questions");
+  const [changes, setChanges] = useState<Change[]>([]);
+
+  // Snapshot the working state BEFORE a mutation, so its Changes entry can revert to it
+  // (undoing that change and everything after it — "revert to this point").
+  function record(text: string) {
+    setChanges((cs) => [
+      { id: (cs[0]?.id ?? 0) + 1, text, before: { groups, singles, comparisons } },
+      ...cs,
+    ]);
+  }
+  function undoTo(change: Change) {
+    setGroups(change.before.groups);
+    setSingles(change.before.singles);
+    setComparisons(change.before.comparisons);
+    setChanges((cs) => cs.filter((c) => c.id < change.id));
+  }
 
   // Reshape with the WORKING grouping so each card's title is the REAL title the
   // backend produces (the frontend can't re-derive it — O-pattern members carry the
@@ -68,6 +90,11 @@ export default function ManageGroupingDialog({
   const { data: parallelSuggestions } = useParallelSuggestions(
     open ? materialId : null,
     working
+  );
+  // Baseline = the report's grouping as it was when the dialog opened, for the impact delta.
+  const { data: seededReshaped } = useRegroupedQuestions(
+    open ? materialId : null,
+    grouping
   );
 
   const labelOf = useMemo(() => {
@@ -118,6 +145,7 @@ export default function ManageGroupingDialog({
     setSingles([...(grouping.singles ?? [])]);
     setComparisons((grouping.comparisons ?? []).map((c) => ({ ...c })));
     setSelected(new Set());
+    setChanges([]);
     setSeeded(true);
   }, [open, seeded, grouping]);
 
@@ -166,6 +194,7 @@ export default function ManageGroupingDialog({
     // The card's title comes from the backend reshaping (see `cards`), so it always
     // matches the applied result.
     const label = groupName.trim();
+    record(`Combined ${vars.length} variables into a ${kind}${label ? ` — ${label}` : ""}`);
     setGroups((g) => [...g, { kind, variables: vars, label }]);
     // Grouping wins over a forced-single: clear any lingering singles for these vars
     // (e.g. re-grouping right after an ungroup) so they aren't in both lists.
@@ -175,6 +204,7 @@ export default function ManageGroupingDialog({
   }
 
   function ungroup(card: Card) {
+    record(`Split ${card.label} into single variables`);
     if (card.source === "manual") {
       setGroups((g) => g.filter((x) => setKey(x.variables) !== setKey(card.variables)));
     }
@@ -202,13 +232,16 @@ export default function ManageGroupingDialog({
 
   function compareAll(qids: string[]) {
     if (qids.length < 2) return;
+    record(`Compared ${qids.length} questions`);
     setComparisons((cs) => [...cs, { members: qids, label: null }]);
     setStage("comparisons");
   }
   function splitComparison(members: string[]) {
+    record(`Split a comparison back into ${members.length} questions`);
     setComparisons((cs) => cs.filter((c) => setKey(c.members) !== setKey(members)));
   }
   function removeMember(members: string[], qid: string) {
+    record(`Removed ${labelByQid.get(qid) ?? "a question"} from a comparison`);
     setComparisons((cs) =>
       cs
         .map((c) =>
@@ -224,6 +257,19 @@ export default function ManageGroupingDialog({
   const openSuggestions = (parallelSuggestions ?? []).filter(
     (s) => !comparedKeys.has(setKey(s.qids))
   );
+
+  // Live structure counts (Structure rail + Report-impact).
+  const counts = useMemo(() => {
+    const qs = workingReshaped ?? [];
+    return {
+      total: qs.length,
+      multi: qs.filter((q) => q.kind === "multi").length,
+      battery: qs.filter((q) => q.kind === "battery").length,
+      comparison: qs.filter((q) => q.kind === "comparison").length,
+    };
+  }, [workingReshaped]);
+  const baseCount = seededReshaped?.length ?? counts.total;
+  const delta = counts.total - baseCount;
 
   // The selection can be grouped only when it's ≥2 variables all of one kind:
   // tick-boxes → multi, rating scales → battery. (The backend re-validates.)
@@ -252,20 +298,61 @@ export default function ManageGroupingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="inline-flex shrink-0 self-start rounded-lg border bg-muted p-0.5 text-sm">
-          <button
-            onClick={() => setStage("questions")}
-            className={`rounded-md px-3 py-1 font-medium ${stage === "questions" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
-          >
-            Questions
-          </button>
-          <button
-            onClick={() => setStage("comparisons")}
-            className={`rounded-md px-3 py-1 font-medium ${stage === "comparisons" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
-          >
-            Comparisons{comparisonCards.length ? ` (${comparisonCards.length})` : ""}
-          </button>
-        </div>
+        <div className="flex min-h-0 flex-1 gap-3">
+          {/* Structure rail — always-on view of the current grouping */}
+          <div className="flex w-48 shrink-0 flex-col rounded-lg border">
+            <div className="border-b px-3 py-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">Structure</span>
+            </div>
+            <div className="flex-1 space-y-0.5 overflow-y-auto p-2 text-sm">
+              <div className="flex items-center rounded px-2 py-1 font-medium text-muted-foreground">
+                <span className="flex-1">Questions</span>
+                <span className="tabular-nums">{counts.total - counts.comparison}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded px-2 py-1 pl-4">
+                <span className="rounded bg-muted px-1 text-[10px] font-medium uppercase">multi</span>
+                <span className="flex-1">Multi</span>
+                <span className="tabular-nums text-muted-foreground">{counts.multi}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded px-2 py-1 pl-4">
+                <span className="rounded bg-violet-100 px-1 text-[10px] font-medium uppercase text-violet-700">battery</span>
+                <span className="flex-1">Battery</span>
+                <span className="tabular-nums text-muted-foreground">{counts.battery}</span>
+              </div>
+              <div className="mt-1 flex items-center rounded px-2 py-1 font-medium text-muted-foreground">
+                <span className="flex-1">Comparisons</span>
+                <span className="tabular-nums">{counts.comparison}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Working area */}
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <div className="inline-flex shrink-0 rounded-lg border bg-muted p-0.5 text-sm">
+                <button
+                  onClick={() => setStage("questions")}
+                  className={`rounded-md px-3 py-1 font-medium ${stage === "questions" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+                >
+                  Questions
+                </button>
+                <button
+                  onClick={() => setStage("comparisons")}
+                  className={`rounded-md px-3 py-1 font-medium ${stage === "comparisons" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
+                >
+                  Comparisons{comparisonCards.length ? ` (${comparisonCards.length})` : ""}
+                </button>
+              </div>
+              <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Report impact</span>
+                <span className="font-semibold tabular-nums text-foreground">{counts.total} items</span>
+                {delta !== 0 && (
+                  <span className={`rounded-full px-2 py-0.5 font-medium tabular-nums ${delta < 0 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    {delta > 0 ? "+" : ""}{delta}
+                  </span>
+                )}
+              </div>
+            </div>
 
         {stage === "questions" && (
         <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
@@ -474,6 +561,40 @@ export default function ManageGroupingDialog({
           </div>
         </div>
         )}
+          </div>
+
+          {/* Changes rail — every edit, reversible */}
+          <div className="flex w-60 shrink-0 flex-col rounded-lg border">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">Changes</span>
+              {changes.length > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                  {changes.length} pending
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {changes.length === 0 ? (
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                  No changes yet. Combine variables or compare questions — each edit is listed
+                  here and can be undone.
+                </p>
+              ) : (
+                changes.map((c) => (
+                  <div key={c.id} className="flex items-start gap-2 border-b py-2 text-xs last:border-0">
+                    <span className="flex-1 leading-snug">{c.text}</span>
+                    <button
+                      className="shrink-0 font-medium text-primary hover:underline"
+                      onClick={() => undoTo(c)}
+                    >
+                      Undo
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
