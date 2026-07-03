@@ -134,6 +134,18 @@ def _scale_key(var) -> str | None:
     return "|".join(f"{c}:{l}" for c, l, _p in lv) if lv else None
 
 
+def _scale_compat_key(var) -> str | None:
+    """A LOOSER scale signature — the set of scale POINTS (1..N), ignoring the value
+    labels. Variables sharing this (e.g. two 1..5 scales worded differently, a grade
+    scale + a satisfaction scale) are battery-COMPATIBLE even when their exact scale_key
+    differs; the stacked battery maps each member by point and labels the stack from the
+    first member. None when the variable isn't a rating scale."""
+    lv = scale_levels(var)
+    if not lv:
+        return None
+    return "|".join(str(p) for p in sorted({p for _c, _l, p in lv}))
+
+
 def _text_is_short(df, q, *, max_words: float = 2.0) -> bool:
     """True when an open-ended question's answers are SHORT (association lists like
     brand names or "describe in three words") → best shown as a word cloud rather
@@ -643,6 +655,9 @@ def list_variables(
                 # Signature of the scale (its code→label map). Two variables can only
                 # form a battery when their scale_key matches; None when not a scale.
                 "scale_key": _scale_key(var),
+                # Looser signature — the scale's POINT set. Variables sharing this are
+                # battery-COMPATIBLE even when worded differently (same 1..N range).
+                "scale_compat_key": _scale_compat_key(var),
             }
             for var in all_vars
         ]

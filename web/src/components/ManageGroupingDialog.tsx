@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Layers2Icon, BarChart3Icon, Undo2Icon, GitCompareIcon } from "lucide-react";
+import { Layers2Icon, BarChart3Icon, Undo2Icon, GitCompareIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { GroupingOverride, GroupSpec, ComparisonSpec } from "@/lib/api";
+import type { GroupingOverride, GroupSpec, ComparisonSpec, Variable } from "@/lib/api";
 import {
   useRegroupedQuestions,
   useParallelSuggestions,
@@ -103,13 +103,18 @@ export default function ManageGroupingDialog({
     return m;
   }, [variables]);
 
-  // Scale keys shared by ≥2 variables — only these can form a battery (a battery
+  // A variable's COMPATIBLE-scale key (its point set, e.g. 1..5) — looser than the exact
+  // scale_key, so two 1..5 scales worded differently still battery together. Falls back
+  // to scale_key if the backend hasn't sent the compat key yet.
+  const compatKeyOf = (v: Variable) => v.scale_compat_key ?? v.scale_key ?? null;
+
+  // Compat keys shared by ≥2 variables — only these can form a battery (a battery
   // needs ≥2 members on ONE scale, so a lone age/gender/region scale is excluded).
   const sharedScaleKeys = useMemo(() => {
     const counts = new Map<string, number>();
     (variables ?? []).forEach((v) => {
-      if (v.scale && v.scale_key)
-        counts.set(v.scale_key, (counts.get(v.scale_key) ?? 0) + 1);
+      const k = v.scale ? compatKeyOf(v) : null;
+      if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
     });
     return new Set([...counts].filter(([, n]) => n >= 2).map(([k]) => k));
   }, [variables]);
@@ -117,7 +122,8 @@ export default function ManageGroupingDialog({
   const scaleKeyOf = useMemo(() => {
     const m = new Map<string, string>();
     (variables ?? []).forEach((v) => {
-      if (v.scale && v.scale_key) m.set(v.name, v.scale_key);
+      const k = v.scale ? compatKeyOf(v) : null;
+      if (k) m.set(v.name, k);
     });
     return m;
   }, [variables]);
@@ -127,9 +133,9 @@ export default function ManageGroupingDialog({
   const kindOf = useMemo(() => {
     const m = new Map<string, "tickbox" | "scale">();
     (variables ?? []).forEach((v) => {
+      const k = v.scale ? compatKeyOf(v) : null;
       if (v.tickbox) m.set(v.name, "tickbox");
-      else if (v.scale && v.scale_key && sharedScaleKeys.has(v.scale_key))
-        m.set(v.name, "scale");
+      else if (k && sharedScaleKeys.has(k)) m.set(v.name, "scale");
     });
     return m;
   }, [variables, sharedScaleKeys]);
@@ -214,6 +220,39 @@ export default function ManageGroupingDialog({
     setSingles((s) => Array.from(new Set([...s, ...card.variables])));
   }
 
+  // The kind + compat key a card requires of anything added to it: a battery takes more
+  // scale variables on its point set; a multi takes more tick-boxes.
+  function cardCompatKey(card: Card): string | null {
+    for (const v of card.variables) {
+      const k = scaleKeyOf.get(v);
+      if (k) return k;
+    }
+    return null;
+  }
+  // Whether the current selection can be appended to this existing group.
+  function canAddTo(card: Card): boolean {
+    const add = [...selected].filter((n) => !card.variables.includes(n));
+    if (add.length === 0) return false;
+    if (card.kind === "multi") return add.every((n) => kindOf.get(n) === "tickbox");
+    const key = cardCompatKey(card);
+    return !!key && add.every((n) => kindOf.get(n) === "scale" && scaleKeyOf.get(n) === key);
+  }
+  // Append the selected pool variables to an existing group (as a manual group, so the
+  // extended member set is what the backend reshapes). Reversible via Split + undo.
+  function addToGroup(card: Card) {
+    const add = [...selected].filter((n) => !card.variables.includes(n));
+    if (add.length === 0) return;
+    record(`Added ${add.length} variable${add.length > 1 ? "s" : ""} to ${card.label}`);
+    const combined = [...card.variables, ...add];
+    setGroups((g) => {
+      const existing = g.find((x) => setKey(x.variables) === setKey(card.variables));
+      const others = g.filter((x) => setKey(x.variables) !== setKey(card.variables));
+      return [...others, { kind: card.kind, variables: combined, label: existing?.label ?? "" }];
+    });
+    setSingles((s) => s.filter((n) => !add.includes(n)));
+    setSelected(new Set());
+  }
+
   // ---- Tier 2: comparisons (overlay parallel questions as one radar / grouped bar) ----
   const labelByQid = useMemo(() => {
     const m = new Map<string, string>();
@@ -292,9 +331,11 @@ export default function ManageGroupingDialog({
           <DialogDescription>
             Combine variables into a group — for this report. Tick-box (yes/no)
             variables form a <strong>multi-response</strong> question; rating-scale
-            variables that share a scale form a <strong>battery</strong> (a stacked
-            comparison chart). Other question types aren't shown here. Auto-detected
-            groups can be split back into single variables too.
+            variables on a <strong>compatible scale</strong> (same 1–N range, even if
+            worded differently) form a <strong>battery</strong> (a stacked comparison
+            chart) — select them, or use <em>Add selected</em> on an existing battery.
+            A mixed-wording battery labels its stack from the first member. Other
+            question types aren't shown here; groups can be split back into singles.
           </DialogDescription>
         </DialogHeader>
 
@@ -437,7 +478,9 @@ export default function ManageGroupingDialog({
               {cards.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">No groups</p>
               ) : (
-                cards.map((card) => (
+                cards.map((card) => {
+                  const addable = canAddTo(card);
+                  return (
                   <div key={card.key} className="rounded-md border p-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -465,8 +508,19 @@ export default function ManageGroupingDialog({
                         </Button>
                       </div>
                     </div>
+                    {addable && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 h-7 w-full text-xs"
+                        onClick={() => addToGroup(card)}
+                      >
+                        <PlusIcon className="size-3.5" /> Add {[...selected].filter((n) => !card.variables.includes(n)).length} selected to this {card.kind}
+                      </Button>
+                    )}
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

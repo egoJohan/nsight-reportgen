@@ -119,7 +119,8 @@ def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
     variables = r.json()["variables"]
     assert variables
     expected_keys = {"name", "label", "measurement", "n_values",
-                     "aggregatable", "segmentable", "tickbox", "scale", "scale_key"}
+                     "aggregatable", "segmentable", "tickbox", "scale", "scale_key",
+                     "scale_compat_key"}
     for v in variables:
         assert set(v.keys()) == expected_keys
     # Categorical variables sort ahead of scale variables (stable tiering).

@@ -59,6 +59,9 @@ export interface Variable {
   scale?: boolean;
   // Signature of the scale; two variables can form a battery only if these match.
   scale_key?: string | null;
+  // Looser signature — the scale's POINT set (1..N). Variables sharing this are
+  // battery-COMPATIBLE even when worded differently (drives 'Group as battery').
+  scale_compat_key?: string | null;
 }
 
 // A word-cloud value merge: variant tokens (`words`, lowercased) folded into one
