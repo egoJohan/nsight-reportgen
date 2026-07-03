@@ -148,7 +148,7 @@ def test_orchestrate_render_wiring() -> None:
     # build_pptx / pptx_to_pdf now write UNIQUE work files that the orchestrator
     # atomically publishes (os.replace) to canonical deck.pptx/deck.pdf, so the
     # mocks must actually create the files they stand in for.
-    def _fake_build(report, model, df, path):
+    def _fake_build(report, model, df, path, cancel_check=None):
         with open(path, "w") as f:
             f.write("pptx")
         return path
@@ -185,6 +185,34 @@ def test_orchestrate_render_wiring() -> None:
     mock_build_pptx.assert_called_once()
     mock_pptx_to_pdf.assert_called_once()
     mock_slide_view.assert_called_once()
+
+
+def test_orchestrate_render_cancels_before_pdf(tmp_path) -> None:
+    """When cancel_check fires, orchestrate_render raises RenderCancelled and SKIPS the
+    expensive LibreOffice PDF conversion — so a cancelled run stops promptly."""
+    import pytest
+    from reportbuilder.api.routes_render import orchestrate_render
+    from reportbuilder.render.deck import RenderCancelled
+
+    mock_client = _make_mock_client()
+    mock_client.load_report.return_value = report_to_json(_make_small_report())
+    mock_client.get_material.return_value = b"x"
+
+    def _fake_build(report, model, df, path, cancel_check=None):
+        open(path, "w").write("pptx")
+        return path
+
+    with (
+        patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
+        patch("reportbuilder.api.routes_render.build_pptx") as mock_build,
+        patch("reportbuilder.api.routes_render.pptx_to_pdf") as mock_pdf,
+    ):
+        mock_load.return_value = (pd.DataFrame({"q1_var": [1.0, 0.0]}), _make_small_model())
+        mock_build.side_effect = _fake_build
+        with pytest.raises(RenderCancelled):
+            orchestrate_render("c", "r", "m", mock_client, view="slides",
+                               out_dir=str(tmp_path), cancel_check=lambda: True)
+        mock_pdf.assert_not_called()   # cancelled before the slow PDF step
 
 
 # ---------------------------------------------------------------------------

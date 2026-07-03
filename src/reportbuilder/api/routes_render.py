@@ -9,12 +9,14 @@ GET /cases/{case_id}/reports/{report_id}/preview.pdf
 """
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import tempfile
 import os
+import threading
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -24,6 +26,7 @@ from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.api.model_loader import df_model_for_material
 from reportbuilder.model.report import report_from_json
+from reportbuilder.render.deck import RenderCancelled
 from reportbuilder.store.datahive_client import DataHiveClient
 
 render_router = APIRouter()
@@ -56,6 +59,7 @@ def orchestrate_render(
     *,
     view: str = "slides",
     out_dir: str | None = None,
+    cancel_check=None,
 ) -> dict:
     """Load the report + the material's data, build the deck, convert to PDF, rasterize a preview.
     Returns {"pptx": <path>, "pdf": <path>, "preview": [<png paths>]}.
@@ -80,11 +84,15 @@ def orchestrate_render(
     uid = uuid.uuid4().hex[:8]
     work_pptx = os.path.join(str(out_dir), f"deck.{uid}.pptx")
     try:
-        build_pptx(report, model, df, work_pptx)
+        build_pptx(report, model, df, work_pptx, cancel_check=cancel_check)
     except ValueError as exc:
         # Surface chart-level errors (e.g. scatter with null scatter_xy) as a
         # clean 422 instead of an unhandled 500. (FIX-3)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Skip the expensive LibreOffice conversion if the client already cancelled.
+    if cancel_check is not None and cancel_check():
+        raise RenderCancelled()
 
     # 4. Convert to PDF (requires LibreOffice soffice) — yields deck.<uid>.pdf
     work_pdf = pptx_to_pdf(work_pptx, str(out_dir))
@@ -124,19 +132,49 @@ class RenderRequest(BaseModel):
 
 
 @render_router.post("/cases/{case_id}/reports/{report_id}/render")
-def render_report(
+async def render_report(
     case_id: str,
     report_id: str,
     body: RenderRequest,
+    request: Request,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Orchestrate PPTX build, PDF conversion, and preview rasterization for a report.
     Writes artifacts to a deterministic per-report dir so the preview PDF is fetchable.
+
+    Cancellable: the heavy build runs in a worker thread while we watch for the client
+    aborting the request; on disconnect a cancel flag is set and the render stops
+    promptly (between slides), so a mistakenly-started 170-slide run doesn't grind on.
     (REQ-C-19, REQ-C-21, REQ-C-22)"""
     out_dir = render_output_dir(case_id, report_id)
-    result = orchestrate_render(
-        case_id, report_id, body.material_id, client, view=body.view, out_dir=str(out_dir)
-    )
+    cancel = threading.Event()
+
+    async def _watch_disconnect():
+        try:
+            while not cancel.is_set():
+                if await request.is_disconnected():
+                    cancel.set()
+                    return
+                await asyncio.sleep(0.4)
+        except asyncio.CancelledError:
+            pass
+
+    watcher = asyncio.create_task(_watch_disconnect())
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: orchestrate_render(
+                case_id, report_id, body.material_id, client,
+                view=body.view, out_dir=str(out_dir), cancel_check=cancel.is_set,
+            ),
+        )
+    except RenderCancelled:
+        # 499 = client closed request (the browser already aborted; body is moot).
+        raise HTTPException(status_code=499, detail="Render cancelled")
+    finally:
+        cancel.set()
+        watcher.cancel()
+
     result["pdf_url"] = f"/cases/{case_id}/reports/{report_id}/preview.pdf"
     return result
 

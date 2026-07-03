@@ -86,11 +86,18 @@ def assert_no_pictures_in_chart_slots(prs: Presentation, report: Report, style=N
         )
 
 
+class RenderCancelled(Exception):
+    """Raised to abort a deck render mid-way when the caller signals cancellation
+    (e.g. the client aborted the request). Checked between slides so a long run
+    (hundreds of slides) stops promptly instead of grinding to the end."""
+
+
 def render_report(
     report: Report,
     series_by_ref: dict,
     style,
     titles: dict | None = None,
+    cancel_check=None,
 ) -> Presentation:
     """Open the template, render each ChartSpec into its slot.
 
@@ -125,6 +132,9 @@ def render_report(
     _titles = titles or {}
 
     for spec in report.charts:
+        # Cooperative cancellation: bail out promptly between slides when signalled.
+        if cancel_check is not None and cancel_check():
+            raise RenderCancelled()
         # --- Resolve slot and slide ---
         slot = _resolve_slot(prs, style, spec.template_slot, report.render_mode)
         # slide_index may reference an existing slide or was just appended
@@ -198,9 +208,10 @@ def render_to_file(
     style,
     out_path: str,
     titles: dict | None = None,
+    cancel_check=None,
 ) -> str:
     """Render report to *out_path* and return the path (REQ-C-29a)."""
-    prs = render_report(report, series_by_ref, style, titles)
+    prs = render_report(report, series_by_ref, style, titles, cancel_check=cancel_check)
     prs.save(out_path)
     return out_path
 

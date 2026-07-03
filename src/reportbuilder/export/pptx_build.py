@@ -10,7 +10,7 @@ from reportbuilder.model.report import (
 )
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
-from reportbuilder.render.deck import render_to_file
+from reportbuilder.render.deck import render_to_file, RenderCancelled
 from reportbuilder.stats.engine import compute
 from reportbuilder.stats.series import SeriesResult
 
@@ -30,13 +30,16 @@ def _cell_spec(ref: str, chart_type: str) -> ChartSpec:
 
 
 def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
-               style: StyleSpec | None = None) -> str:
-    """Compute each chart's SeriesResult, then render the Report to a .pptx (REQ-C-22/18)."""
+               style: StyleSpec | None = None, cancel_check=None) -> str:
+    """Compute each chart's SeriesResult, then render the Report to a .pptx (REQ-C-22/18).
+    `cancel_check` (optional) is polled between charts so a long build aborts promptly."""
     if style is None:
         style = StyleSpec()   # generic base style (no template); deck synthesizes slides
     series_by_ref: dict = {}
     titles: dict = {}
     for spec in report.charts:
+        if cancel_check is not None and cancel_check():
+            raise RenderCancelled()
         # Demographics grid: compute a series per cell chart (by question_ref).
         if is_demographics_grid(spec):
             for c in (spec.options.get("charts") or []):
@@ -67,4 +70,5 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
         except Exception:
             series_by_ref[spec.question_ref] = _empty_series(spec.statistic)
         titles[spec.question_ref] = q.text
-    return render_to_file(report, series_by_ref, style, out_path, titles=titles)
+    return render_to_file(report, series_by_ref, style, out_path, titles=titles,
+                          cancel_check=cancel_check)

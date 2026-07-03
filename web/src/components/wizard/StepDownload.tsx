@@ -5,6 +5,7 @@ import {
   Loader2Icon,
   PresentationIcon,
   SparklesIcon,
+  XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -29,8 +30,10 @@ export default function StepDownload({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rendered, setRendered] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [downloading, setDownloading] = useState<"pdf" | "pptx" | null>(null);
   const pdfUrlRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fileBase = safeFileName(draft.name);
   const noCharts = draft.charts.length === 0;
@@ -48,21 +51,33 @@ export default function StepDownload({
     setPdfUrl(url);
   }
 
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
+
   async function handleGenerate() {
     setError(null);
+    setCancelled(false);
     setPreview(null);
     setRendered(false);
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const ok = await save();
       if (!ok) {
         setError("Could not save the report before rendering. Try again.");
         return;
       }
-      await render.mutateAsync({ reportId, materialId });
+      await render.mutateAsync({ reportId, materialId, signal: controller.signal });
       const blob = await api.reports.previewPdf(caseId, reportId);
       setPreview(URL.createObjectURL(blob));
       setRendered(true);
     } catch (e) {
+      // The user cancelled — the request was aborted; treat as a clean stop.
+      if (controller.signal.aborted || (e instanceof Error && e.name === "AbortError")) {
+        setCancelled(true);
+        return;
+      }
       const msg = e instanceof Error ? e.message : "Render failed";
       // 503 → LibreOffice missing
       if (/503/.test(msg) || /libreoffice/i.test(msg)) {
@@ -70,6 +85,8 @@ export default function StepDownload({
       } else {
         setError(msg);
       }
+    } finally {
+      abortRef.current = null;
     }
   }
 
@@ -88,16 +105,9 @@ export default function StepDownload({
     }
   }
 
-  // Auto-generate the deck on entering Download (no manual "Generate" click).
-  // Reuses the per-slide renders the backend already warmed; runs once on mount.
-  const autoStarted = useRef(false);
-  useEffect(() => {
-    if (autoStarted.current || noCharts) return;
-    autoStarted.current = true;
-    void handleGenerate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  // Deck generation is DELIBERATE (a "Generate deck" click), not automatic on entering
+  // this step — a full render can be very resource-heavy (a large deck of slides), so it
+  // must never run just because the user navigated here.
   const pending = render.isPending;
 
   return (
@@ -137,14 +147,16 @@ export default function StepDownload({
             )}
             Download PowerPoint
           </Button>
-          <Button onClick={handleGenerate} disabled={pending || noCharts}>
-            {pending ? (
-              <Loader2Icon className="size-4 animate-spin" />
-            ) : (
+          {pending ? (
+            <Button variant="outline" className="min-w-[150px]" onClick={handleCancel}>
+              <XIcon className="size-4" /> Cancel
+            </Button>
+          ) : (
+            <Button className="min-w-[150px]" onClick={handleGenerate} disabled={noCharts}>
               <SparklesIcon className="size-4" />
-            )}
-            {rendered ? "Regenerate deck" : "Generate deck"}
-          </Button>
+              {rendered ? "Regenerate deck" : "Generate deck"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -153,6 +165,16 @@ export default function StepDownload({
         <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
           <span className="leading-snug">{error}</span>
+        </div>
+      )}
+
+      {/* Cancelled */}
+      {cancelled && !pending && (
+        <div className="flex items-start gap-2 rounded-xl border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <XIcon className="mt-0.5 size-4 shrink-0" />
+          <span className="leading-snug">
+            Generation cancelled. Press “Generate deck” to run it again.
+          </span>
         </div>
       )}
 
@@ -166,6 +188,9 @@ export default function StepDownload({
               Rendering charts and assembling slides — this can take a moment.
             </p>
           </div>
+          <Button variant="outline" size="sm" onClick={handleCancel}>
+            <XIcon className="size-4" /> Cancel
+          </Button>
         </div>
       ) : pdfUrl ? (
         <iframe

@@ -605,7 +605,8 @@ export const api = {
       caseId: string,
       reportId: string,
       materialId: string,
-      view: "slides" = "slides"
+      view: "slides" = "slides",
+      signal?: AbortSignal
     ): Promise<{ pdf_url: string }> => {
       const res = await fetch(
         `${API_BASE}/cases/${caseId}/reports/${reportId}/render`,
@@ -613,6 +614,7 @@ export const api = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ material_id: materialId, view }),
+          signal,
         }
       );
       if (!res.ok) {

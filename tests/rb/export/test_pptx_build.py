@@ -59,3 +59,19 @@ def test_build_pptx_two_charts(tmp_path):
     prs = Presentation(out)                            # reopens without exception (REQ-C-29a)
     chart_slides = [s for s in prs.slides if any(getattr(sh, "has_chart", False) for sh in s.shapes)]
     assert len(chart_slides) == len(report.charts)    # 2 chart slides (REQ-C-18)
+
+
+def test_build_pptx_cancels_when_signalled(tmp_path):
+    """A cancel_check that returns True aborts the build with RenderCancelled — so a
+    mistakenly-started long run stops promptly instead of grinding to the end."""
+    import pytest
+    from reportbuilder.render.deck import RenderCancelled
+    model, data = tiny_model_and_data()
+    report = one_chart_report()
+    with pytest.raises(RenderCancelled):
+        build_pptx(report, model, data, str(tmp_path / "x.pptx"),
+                   cancel_check=lambda: True)
+    # A falsey cancel_check builds normally.
+    out = build_pptx(report, model, data, str(tmp_path / "ok.pptx"),
+                     cancel_check=lambda: False)
+    assert out.endswith("ok.pptx")

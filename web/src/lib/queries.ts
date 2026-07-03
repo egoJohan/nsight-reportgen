@@ -315,10 +315,12 @@ export function useRenderReport(caseId: string) {
       reportId,
       materialId,
       view = "slides",
+      signal,
     }: {
       reportId: string;
       materialId: string;
       view?: "slides";
-    }) => api.reports.render(caseId, reportId, materialId, view),
+      signal?: AbortSignal;
+    }) => api.reports.render(caseId, reportId, materialId, view, signal),
   });
 }
