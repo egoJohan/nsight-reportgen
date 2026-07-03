@@ -189,12 +189,17 @@ function ChartPreview({
               {/* Question subtitle in its original spot (just above the chart);
                   no line-clamp so a long question wraps upward instead of clipping. */}
               {showQuestion && (
-                <p
-                  className="absolute z-10 pl-[3.5%] text-left text-[11px] leading-tight font-normal text-muted-foreground"
+                // Same flex + spacer as the headline above, so the question's left
+                // edge lands at exactly the same X as the title text (not the accent bar).
+                <div
+                  className="absolute z-10 flex items-start gap-2.5"
                   style={{ left: "4%", width: "92%", bottom: "77%" }}
                 >
-                  {questionText}
-                </p>
+                  <div className="w-1 shrink-0" aria-hidden />
+                  <p className="min-w-0 text-left text-[13px] leading-tight font-semibold text-muted-foreground">
+                    {questionText}
+                  </p>
+                </div>
               )}
             </>
           ))}

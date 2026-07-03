@@ -77,17 +77,18 @@ export function SlideNavigator({
     <div className="flex items-center gap-2 rounded-lg border bg-card p-1.5">
       <Button
         variant="outline"
-        size="sm"
+        size="icon-lg"
         disabled={activeIndex <= 0}
+        title="Previous slide (←)"
         onClick={() => onSelect(activeIndex - 1)}
       >
-        <ChevronLeftIcon className="size-4" /> Prev
+        <ChevronLeftIcon className="size-4" />
       </Button>
 
-      <div ref={jumpRef} className="relative flex min-w-0 flex-1 items-center gap-1">
+      <div ref={jumpRef} className="relative min-w-0 flex-1">
         <button
           onClick={() => setJumpOpen((o) => !o)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-left hover:border-primary/50 hover:bg-accent/40"
+          className="flex h-9 w-full items-center gap-2 rounded-md border bg-background px-3 text-left hover:border-primary/50 hover:bg-accent/40"
         >
           <span className="shrink-0 text-xs font-semibold tabular-nums text-primary">
             {activeIndex + 1} / {total}
@@ -97,17 +98,6 @@ export function SlideNavigator({
           </span>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
         </button>
-        {onEditQuestion && !isSpecialSlide(cur) && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            title="Edit question"
-            onClick={() => onEditQuestion(cur.question_ref)}
-          >
-            <PencilIcon className="size-4" />
-          </Button>
-        )}
         {jumpOpen && (
           <JumpPopover
             charts={charts}
@@ -123,24 +113,40 @@ export function SlideNavigator({
 
       <Button
         variant="outline"
-        size="sm"
+        size="icon-lg"
         disabled={activeIndex >= total - 1}
+        title="Next slide (→)"
         onClick={() => onSelect(activeIndex + 1)}
       >
-        Next <ChevronRightIcon className="size-4" />
+        <ChevronRightIcon className="size-4" />
       </Button>
-      <Button variant="outline" size="sm" onClick={onOpenOverview}>
-        <LayoutGridIcon className="size-4" /> Overview
+      {onEditQuestion && !isSpecialSlide(cur) && (
+        <Button
+          variant="outline"
+          size="icon-lg"
+          title="Edit question"
+          onClick={() => onEditQuestion(cur.question_ref)}
+        >
+          <PencilIcon className="size-4" />
+        </Button>
+      )}
+      <Button
+        variant="outline"
+        size="icon-lg"
+        title="Overview — all slides"
+        onClick={onOpenOverview}
+      >
+        <LayoutGridIcon className="size-4" />
       </Button>
       {onAddSlide && (
-        <Button variant="outline" size="sm" onClick={onAddSlide}>
-          <PlusIcon className="size-4" /> Add slide
+        <Button variant="outline" size="icon-lg" title="Add slide" onClick={onAddSlide}>
+          <PlusIcon className="size-4" />
         </Button>
       )}
       {onRemove && (
         <Button
           variant="outline"
-          size="sm"
+          size="icon-lg"
           className="text-muted-foreground hover:text-destructive"
           title="Remove this slide"
           onClick={onRemove}
