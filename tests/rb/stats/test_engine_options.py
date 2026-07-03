@@ -487,3 +487,36 @@ class TestNotAnsweredCodesDriveSegmentBase:
         assert result.base_n["Total"] == 14
         assert result.cell(NOT_ANSWERED_LABEL, "1").pct == round(3 / 8 * 100, 1)  # 37.5
         assert result.cell(NOT_ANSWERED_LABEL, "2").pct == round(3 / 6 * 100, 1)  # 50.0
+
+
+class TestClassifierExcludesUnlabeledCodes:
+    """A classifying variable drops undeclared sentinel codes (e.g. 99) that carry no
+    value label, so a bare 99 never appears as a segment. (customer bug UusiRaportti-0307)"""
+
+    def _model(self, region_labels):
+        q = Variable(name="q1", label="Q", measurement="scale",
+                     value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 4)),
+                     missing_values=frozenset())
+        region = Variable(name="region", label="maakuntaluokka", measurement="categorical",
+                          value_labels=region_labels, missing_values=frozenset())
+        return QuestionModel(
+            variables={"q1": q, "region": region},
+            questions=[Question(qid="q1", kind="single", variables=("q1",), text="Q")])
+
+    def _spec_clf(self, ct="vertical_bar"):
+        return _spec(classifying_var="region", chart_type=ct)
+
+    def test_unlabeled_99_excluded_when_classifier_has_labels(self):
+        model = self._model((ValueLabel(1.0, "Uusimaa"), ValueLabel(2.0, "Länsi-Suomi")))
+        df = pd.DataFrame({"q1": [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+                           "region": [1.0, 1.0, 2.0, 2.0, 99.0, 99.0]})
+        r = compute(model.question("q1"), self._spec_clf(), df, model)
+        assert "99" not in r.segments
+        assert set(r.segments) == {"Uusimaa", "Länsi-Suomi", "Total"}
+
+    def test_labelless_classifier_keeps_all_codes(self):
+        # No value labels → every present code is a real segment (unchanged behaviour).
+        model = self._model(())
+        df = pd.DataFrame({"q1": [1.0, 2.0, 3.0, 1.0], "region": [1.0, 2.0, 3.0, 99.0]})
+        r = compute(model.question("q1"), self._spec_clf(), df, model)
+        assert set(r.segments) == {"1", "2", "3", "99", "Total"}

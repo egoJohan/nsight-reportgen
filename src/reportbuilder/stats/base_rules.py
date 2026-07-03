@@ -41,9 +41,24 @@ def multi_base(data: pd.DataFrame, vars_: list[Variable]) -> int:
     return int(answered.sum())
 
 
+def _classifier_keep(seg: pd.Series, classifier_var: Variable | None) -> set[float] | None:
+    """The classifier codes to KEEP as segments. Excludes the classifier's declared
+    missing values and — when it carries any value labels — any present code that has
+    NO label (an undeclared "no answer" sentinel like 99). Returns None (keep every
+    present code) when there's no classifier Variable to judge by."""
+    if classifier_var is None:
+        return None
+    present = {float(c) for c in seg.dropna().unique()}
+    missing = {float(m) for m in (classifier_var.missing_values or ())}
+    labeled = {float(vl.value) for vl in classifier_var.value_labels}
+    keep = (present & labeled) if labeled else present
+    return keep - missing
+
+
 def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None = None,
                   missing_override: set[float] | None = None,
-                  *, seg_series: pd.Series | None = None) -> dict[str, int]:
+                  *, seg_series: pd.Series | None = None,
+                  classifier_var: Variable | None = None) -> dict[str, int]:
     """Per-segment base + a "Total", each excluding missing in the reported var and
     the classifier. (REQ-C-14)
 
@@ -52,6 +67,10 @@ def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None
 
     When `seg_series` is given it IS the segmentation (its values are the segment
     keys, e.g. cross-tab combo strings) and is used as-is — no numeric coercion.
+
+    When `classifier_var` (the classifying variable's Variable) is given, classifier
+    codes that are its missing values — or that carry no value label when it has any —
+    are dropped, so a bare unlabelled sentinel (e.g. 99) never appears as a group.
     """
     valid = _valid_mask(data, var, missing_override)
     if seg_series is not None:
@@ -60,8 +79,12 @@ def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None
             bases[str(key)] = int((valid & (seg_series == key)).sum())
         return bases
     seg = pd.to_numeric(data[classifying_var], errors="coerce")
-    bases = {"Total": int((valid & seg.notna()).sum())}
+    keep = _classifier_keep(seg, classifier_var)
+    seg_valid = seg.isin(keep) if keep is not None else seg.notna()
+    bases = {"Total": int((valid & seg_valid).sum())}
     for code in sorted(seg.dropna().unique()):
+        if keep is not None and float(code) not in keep:
+            continue
         label = str(int(code)) if float(code).is_integer() else str(code)
         bases[label] = int((valid & (seg == code)).sum())
     return bases

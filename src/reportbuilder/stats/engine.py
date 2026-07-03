@@ -196,7 +196,8 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
             bases = segment_bases(data, var, seg_series=seg_series)
             segments = (*ordered, "Total")
         else:
-            bases = segment_bases(data, var, spec.classifying_var)
+            bases = segment_bases(data, var, spec.classifying_var,
+                                  classifier_var=model.variables.get(spec.classifying_var))
             seg_series = pd.to_numeric(data[spec.classifying_var], errors="coerce")
             segments = tuple(s for s in bases if s != "Total") + ("Total",)
         cells: dict[tuple[str, str], Cell] = {}
@@ -356,7 +357,8 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         counts = aggregate_counts(data, var.name, seg_series=seg_series)
         segments = (*ordered, "Total")
     elif spec.classifying_var:
-        bases = segment_bases(data, var, spec.classifying_var, missing_override=eff)
+        bases = segment_bases(data, var, spec.classifying_var, missing_override=eff,
+                              classifier_var=model.variables.get(spec.classifying_var))
         counts = aggregate_counts(data, var.name, spec.classifying_var)
         segments = tuple(s for s in bases if s != "Total")
         segments = (*segments, "Total") if segments else ("Total",)
