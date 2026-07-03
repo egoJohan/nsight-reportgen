@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -182,7 +183,7 @@ function ChartPreview({
                 style={{ left: "4%", top: "2.5%", width: "92%" }}
               >
                 <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <p className="min-w-0 text-left text-[18px] leading-tight font-extrabold text-foreground">
+                <p className="min-w-0 text-left text-[18px] leading-tight font-extrabold whitespace-pre-line text-foreground">
                   {headline}
                 </p>
               </div>
@@ -755,14 +756,16 @@ function SlideTitleField({
 }) {
   return (
     <Field label="Slide title">
-      <Input
+      <Textarea
         value={chart.slide_title ?? ""}
         placeholder={questionText}
+        rows={3}
+        className="resize-y"
         onChange={(e) => onChange({ slide_title: e.target.value })}
       />
       <p className="text-xs text-muted-foreground">
-        The headline shown on the slide. Leave blank to use the question text; edit it
-        freely — the preview updates live.
+        The headline shown on the slide. Leave blank to use the question text; press
+        Enter to break it onto up to three lines. The preview updates live.
       </p>
     </Field>
   );
