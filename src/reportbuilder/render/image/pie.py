@@ -76,11 +76,10 @@ def _make_square_fig_ax(ctx):
 
 
 def _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt) -> None:
-    """Add a house-style category legend to the right of the pie (no overlap, full text)."""
-    leg_labels = [
-        f"{_wrap_legend_label(c)}   {format_value(f, statistic, fmt, fracs)}"
-        for c, f in zip(cats, fracs)
-    ]
+    """Add a house-style category legend to the right of the pie (no overlap, full text).
+    Category names ONLY — the percentages live on the slices, so repeating them in the
+    legend is redundant."""
+    leg_labels = [_wrap_legend_label(c) for c in cats]
     leg = ax.legend(
         wedges, leg_labels,
         loc="center left", bbox_to_anchor=(1.02, 0.5),
