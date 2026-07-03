@@ -137,7 +137,44 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
 
     # Manual batteries applied last — members are still single here (blocked above).
     m = _apply_manual_batteries(m, manual_batteries)
+
+    # Tier 2: comparisons overlay several parallel questions (resolved above) as series.
+    m = _apply_comparisons(m, override.get("comparisons", []) or [])
     return m
+
+
+def _comparison_stem(texts: list[str]) -> str:
+    """A shared title for a comparison: the common prefix of the member texts, trimmed to
+    a separator; falls back to the first text."""
+    import os
+    if not texts:
+        return "Vertailu"
+    pre = os.path.commonprefix([t.strip() for t in texts]).strip(" -–—:·,;/|")
+    return pre or texts[0].strip()
+
+
+def _apply_comparisons(model: QuestionModel, comparisons: list) -> QuestionModel:
+    """Resolve Tier-2 comparison specs into kind=='comparison' questions. Members are qids
+    that must exist in the (already Tier-1-resolved) model; a spec with <2 valid members is
+    dropped (lenient). The chart type (radar / grouped bar) is chosen in the design phase
+    like any chart, so no render mode is stored here."""
+    if not comparisons:
+        return model
+    have = {q.qid: q for q in model.questions}
+    extra: list[Question] = []
+    for c in comparisons:
+        member_qids = [q for q in (c.get("members") or []) if q in have]
+        if len(member_qids) < 2:
+            continue
+        member_qs = [have[q] for q in member_qids]
+        title = (c.get("label") or "").strip() or _comparison_stem([q.text for q in member_qs])
+        variables = tuple(v for mq in member_qs for v in mq.variables)
+        qid = "compare-" + (_slug(title)[:48].strip("-") or _slug("-".join(member_qids))[:48])
+        extra.append(Question(qid=qid, kind="comparison", variables=variables,
+                              text=title, members=tuple(member_qids)))
+    if not extra:
+        return model
+    return QuestionModel(variables=model.variables, questions=list(model.questions) + extra)
 
 
 def _inject_labels(model: QuestionModel, groups: list) -> QuestionModel:

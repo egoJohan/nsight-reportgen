@@ -150,3 +150,42 @@ def test_manual_battery_uses_shared_stem_and_short_qid():
     assert bat.qid.startswith("battery-") and len(bat.qid) <= 60   # short, stable
     assert got.variables["s1"].label == "Yksityiset palveluntarjoajat"   # subject
     assert got.variables["s2"].label == "Julkinen palveluntarjoaja"
+
+
+# --- Tier-2 comparison groups (parallel questions overlaid as series) ------------
+def _binary(n, l):
+    from reportbuilder.model.question import ValueLabel, Variable
+    return Variable(name=n, label=l, measurement="categorical",
+                    value_labels=(ValueLabel(0.0, "Ei"), ValueLabel(1.0, "Kyllä")),
+                    missing_values=frozenset())
+
+
+def _parallel_multi_model():
+    from reportbuilder.model.question import Question, QuestionModel
+    vars_ = {"r_is": _binary("r_is", "IS"), "r_il": _binary("r_il", "IL"),
+             "l_is": _binary("l_is", "IS"), "l_il": _binary("l_il", "IL")}
+    qs = [Question(qid="rohkea", kind="multi", variables=("r_is", "r_il"), text="-Rohkea"),
+          Question(qid="luot", kind="multi", variables=("l_is", "l_il"), text="-Luotettava")]
+    return QuestionModel(variables=vars_, questions=qs)
+
+
+def test_apply_comparisons_builds_comparison_question():
+    model = _parallel_multi_model()
+    override = {"groups": [], "singles": [],
+                "comparisons": [{"members": ["rohkea", "luot"], "render": "radar",
+                                 "label": "Brändimielikuva"}]}
+    m = apply_grouping_override(model, override)
+    comp = [q for q in m.questions if q.kind == "comparison"]
+    assert len(comp) == 1
+    assert comp[0].members == ("rohkea", "luot")
+    assert comp[0].text == "Brändimielikuva"
+
+
+def test_apply_comparisons_drops_when_under_two_valid_members():
+    from reportbuilder.model.question import Question, QuestionModel
+    model = QuestionModel(variables={"r_is": _binary("r_is", "IS")},
+                          questions=[Question(qid="rohkea", kind="multi",
+                                              variables=("r_is",), text="-Rohkea")])
+    override = {"comparisons": [{"members": ["rohkea", "ghost"], "render": "radar"}]}
+    m = apply_grouping_override(model, override)
+    assert not [q for q in m.questions if q.kind == "comparison"]
