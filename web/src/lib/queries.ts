@@ -87,13 +87,15 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     not_answered_codes: chart.not_answered_codes,
     category_label_overrides: chart.category_label_overrides,
     options: chart.options ?? null,
+    // The methodology footer is baked into the PNG regardless of render_title (it lives
+    // outside the title block), so a footer edit must always re-render the preview.
+    footer_note: chart.footer_note,
   };
   // The title/description only affect the PNG when baked (render_title on); when
   // the frontend owns the title region, editing it must NOT re-render the chart.
   if (renderTitle) {
     key.slide_title = chart.slide_title;
     key.slide_description = chart.slide_description;
-    key.footer_note = chart.footer_note;   // baked into the footer only when render_title on
   }
   return key;
 }

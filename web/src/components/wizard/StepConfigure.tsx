@@ -789,8 +789,9 @@ function FooterNoteField({
       />
       <p className="text-xs text-muted-foreground">
         The methodology line at the bottom-left of the slide. Leave blank for the default
-        (e.g. “Osuus vastaajista (%) · n = 950”). Write <code>{"{n}"}</code> where the
-        respondent count goes — e.g. <code>N = {"{n}"}</code> → “N = 950”.
+        “N = 950”. Write <code>{"{n}"}</code> for the respondent count and{" "}
+        <code>{"{stat}"}</code> for the statistic label — e.g.{" "}
+        <code>{"{stat} · n = {n}"}</code> → “Osuus vastaajista (%) · n = 950”.
       </p>
     </Field>
   );

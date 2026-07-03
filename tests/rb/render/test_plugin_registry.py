@@ -462,12 +462,10 @@ def test_slide_chrome_has_methodology_footer():
 
     textboxes = [s for s in slide.shapes if s.has_text_frame]
     all_text = " ".join(s.text_frame.text for s in textboxes)
-    # Should contain the stat label
-    assert "vastaajista" in all_text or "Osuus" in all_text, (
-        f"Methodology footer not found. Textbox texts: {all_text!r}"
+    # Default methodology footer is the simple "N = <base>" (base_n=5 from known_series).
+    assert "N = 5" in all_text, (
+        f"Methodology footer 'N = 5' not found. Textbox texts: {all_text!r}"
     )
-    # Should contain n=5 from known_series
-    assert "5" in all_text, "Base N should appear in chrome text"
 
 
 # ---------------------------------------------------------------------------

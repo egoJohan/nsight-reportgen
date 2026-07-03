@@ -158,9 +158,10 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)
-    #     Auto format: "<stat label> · n = <base_n>". An author can override it per slide
-    #     via spec.footer_note (e.g. a simpler "N = 950"); "{n}" expands to the base and
-    #     "{stat}" to the statistic label, so "N = {n}" keeps the count live.
+    #     Auto format: a simple "N = <base_n>". An author can override it per slide via
+    #     spec.footer_note; "{n}" expands to the base and "{stat}" to the statistic label
+    #     (e.g. "{stat} · n = {n}" restores the verbose form), so "N = {n}" keeps the
+    #     count live.
     base_n = ctx.series.base_n.get("Total")
     stat_label = _STAT_FOOTER.get(ctx.series.statistic, ctx.series.statistic)
     override = (getattr(ctx.spec, "footer_note", None) or "").strip()
@@ -168,7 +169,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         footer_text = override.replace("{n}", str(base_n if base_n is not None else "")) \
                               .replace("{stat}", stat_label)
     elif base_n is not None:
-        footer_text = f"{stat_label} · n = {base_n}"
+        footer_text = f"N = {base_n}"
     else:
         footer_text = stat_label
     _textbox(
