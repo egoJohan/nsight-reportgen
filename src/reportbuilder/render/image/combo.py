@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
-    format_value, style_legend,
+    format_value,
 )
 from reportbuilder.render.house_style import TEAL, TEAL_LT, INK, MUTED, GRIDC, CREAM
 
@@ -32,9 +32,12 @@ def build_image_combo(ctx) -> None:
     x = list(range(len(cats)))
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
 
-    # Primary bars (segment 0 → TEAL)
+    # Primary bars (segment 0 → TEAL). NOT labelled for the legend: the bar series is
+    # the question itself, whose text already sits in the slide's subtitle — a legend
+    # entry just repeats it. The legend keeps only the LINE (the secondary variable),
+    # which the reader can't otherwise identify.
     bars = ax.bar(x, data[segs[0]], color=TEAL, edgecolor=CREAM,
-                  linewidth=0.8, label=segs[0], zorder=3)
+                  linewidth=0.8, zorder=3)
 
     # Data labels on bars
     for bar, v in zip(bars, data[segs[0]]):
@@ -78,14 +81,19 @@ def build_image_combo(ctx) -> None:
         ax2.yaxis.set_tick_params(labelcolor=MUTED, labelsize=9.5)
 
         if ctx.spec.elements.legend:
-            lines1, labels1 = ax.get_legend_handles_labels()
+            # Legend shows ONLY the line (the secondary variable) — the bars are the
+            # question itself, already named in the slide subtitle, so a bar entry just
+            # repeats it. Style the frame in place; style_legend() would rebuild the
+            # legend from the bar axis and lose the line.
             lines2, labels2 = ax2.get_legend_handles_labels()
-            ax.legend(lines1 + lines2, labels1 + labels2,
-                      fontsize=9.5, frameon=True, loc="best")
-            style_legend(ax, loc="best")
-    else:
-        if ctx.spec.elements.legend:
-            style_legend(ax, loc="best")
+            if labels2:
+                leg = ax.legend(lines2, labels2, fontsize=9.5, frameon=True, loc="best")
+                leg.get_frame().set_facecolor("#FFFFFF")
+                leg.get_frame().set_edgecolor(GRIDC)
+                leg.get_frame().set_linewidth(0.8)
+                for t in leg.get_texts():
+                    t.set_color(INK)
+    # Bars-only combo (no secondary line) → no legend: the question is in the subtitle.
 
     png = render_png(fig)
     place_picture(ctx, png)
