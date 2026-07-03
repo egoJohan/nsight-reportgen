@@ -6,6 +6,7 @@ SeriesResult — the spine output (R1). REQ-C-14/15/16, M-03.
 from __future__ import annotations
 import collections
 import dataclasses
+import os
 import re
 import pandas as pd
 from reportbuilder.model.question import Question, QuestionModel, Variable
@@ -665,7 +666,13 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
         if stat.family == "summary":
             result = _summary(question, spec, data, model, stat)
         elif question.kind == "multi":
-            result = _multi(question, spec, data, model)
+            # A multi on a radar with PARALLEL siblings (same option set, one per
+            # adjective) overlays them as series (the brand-image radar). A lone multi
+            # stays a single-series distribution.
+            if spec.chart_type == "radar" and len(_parallel_questions(question, model)) > 1:
+                result = _multi_comparison(question, spec, data, model)
+            else:
+                result = _multi(question, spec, data, model)
         else:
             result = _single(question, spec, data, model)
     # Display segment codes as the classifying variable's value labels (a cross-tab
@@ -750,22 +757,30 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         base_n={"Total": base}, statistic="mean")
 
 
-def _parallel_batteries(question: Question, model: QuestionModel) -> list[Question]:
-    """All batteries (including *question*) whose member ATTRIBUTE LABEL-SET is
-    identical — i.e. the same rating grid asked for several entities/brands.
-
-    These are exactly what a brand-image radar compares across entities. Matching
-    is by the SET of member labels (order-independent), so the batteries don't
-    need their attributes in the same column order."""
-    if question.kind != "battery":
+def _parallel_questions(question: Question, model: QuestionModel) -> list[Question]:
+    """All questions of the SAME kind (including *question*) whose member CATEGORY
+    label-set is identical — the parallel series a comparison overlays:
+      - batteries sharing the same ATTRIBUTE set (a rating grid across entities/brands);
+      - multis sharing the same OPTION set (an adjective grid across services).
+    EXACT, order-independent set match (conservative — only auto-overlay questions that
+    truly share the axes)."""
+    if question.kind not in ("battery", "multi"):
         return [question]
-    target = frozenset(model.variable(v).label for v in question.variables)
+
+    def catset(q: Question) -> frozenset:
+        return frozenset(model.variable(v).label for v in q.variables)
+
+    target = catset(question)
     sibs = [
         q for q in model.questions
-        if q.kind == "battery"
-        and frozenset(model.variable(v).label for v in q.variables) == target
+        if q.kind == question.kind and catset(q) == target
     ]
     return sibs or [question]
+
+
+def _parallel_batteries(question: Question, model: QuestionModel) -> list[Question]:
+    """Backward-compatible alias — parallel questions for a battery (brand-image radar)."""
+    return _parallel_questions(question, model)
 
 
 def _entity_label(question: Question) -> str:
@@ -813,6 +828,69 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
     base_n["Total"] = max(base_n.values(), default=0)
     return SeriesResult(categories=tuple(attrs), segments=tuple(entities),
                         cells=cells, base_n=base_n, statistic="mean")
+
+
+_AFFIX_SEPS = " -–—:·,;/|"   # space, hyphen, en/em dash, colon, middot, …
+
+
+def _series_label(question: Question, group: list[Question]) -> str:
+    """The DISTINGUISHING part of a parallel question's text vs its siblings: strip the
+    COMMON prefix AND suffix shared by the whole group, each rounded to a separator so a
+    word is never cut. This ONE rule unifies both kinds — battery (entity at the HEAD,
+    "Attendo — Arvioi X" → "Attendo") and multi (adjective at the TAIL,
+    "… -Rohkea" → "Rohkea"). Falls back to `_entity_label` / full text when there
+    is no clean common part."""
+    me = (question.text or "").strip()
+    texts = [(q.text or "").strip() for q in group]
+    if len(texts) < 2:
+        return _entity_label(question)
+    pre = os.path.commonprefix(texts)
+    suf = os.path.commonprefix([t[::-1] for t in texts])[::-1]
+    while pre and pre[-1] not in _AFFIX_SEPS:   # round prefix back to a separator
+        pre = pre[:-1]
+    while suf and suf[0] not in _AFFIX_SEPS:     # round suffix forward to a separator
+        suf = suf[1:]
+    core = me[len(pre): len(me) - len(suf)] if len(pre) + len(suf) < len(me) else ""
+    core = core.strip(_AFFIX_SEPS).strip()
+    return core or _entity_label(question)
+
+
+def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
+                      model: QuestionModel) -> SeriesResult:
+    """Compare PARALLEL multi-response questions (same option set, one per adjective):
+    categories = the shared OPTIONS (services, the axes), segments = the questions
+    (adjectives, the polygons), each cell the % of respondents who ticked that option for
+    that adjective. The multi twin of `_battery_comparison`."""
+    sibs = _parallel_questions(question, model)
+    options = [model.variable(v).label for v in question.variables]   # this q's axis order
+    cells: dict[tuple[str, str], Cell] = {}
+    base_n: dict[str, int] = {}
+    segments: list[str] = []
+    seen: dict[str, int] = {}
+    for q in sibs:
+        label = _series_label(q, sibs)
+        if label in seen:                     # disambiguate a repeated series label
+            seen[label] += 1
+            label = f"{label} ({seen[label]})"
+        else:
+            seen[label] = 1
+        segments.append(label)
+        by_label = {model.variable(v).label: v for v in q.variables}
+        base = multi_base(data, [model.variable(v) for v in q.variables])
+        for opt in options:
+            vn = by_label.get(opt)
+            if vn is None:                    # this adjective lacks this option → empty cell
+                cells[(opt, label)] = Cell(pct=None, count=0.0, mean=None)
+                continue
+            v = model.variable(vn)
+            s = pd.to_numeric(data[vn], errors="coerce")
+            c = int(((s == 1.0) & ~s.isin(v.missing_values)).sum())
+            cells[(opt, label)] = Cell(pct=pct(c, base, spec.number_format),
+                                       count=count_value(c, spec.number_format), mean=None)
+        base_n[label] = base
+    base_n["Total"] = max(base_n.values(), default=0)
+    return SeriesResult(categories=tuple(options), segments=tuple(segments),
+                        cells=cells, base_n=base_n, statistic="pct")
 
 
 def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
