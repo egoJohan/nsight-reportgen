@@ -648,6 +648,17 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     qvars = [model.variable(n) for n in question.variables]
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
+    if question.kind == "comparison":
+        # An explicit comparison overlays its member questions as series — chart-type
+        # agnostic (radar draws polygons, a grouped bar draws clusters). Members not in
+        # the model are dropped; a lone survivor falls back to its own normal chart.
+        members = [model.question(q) for q in question.members if _has_question(model, q)]
+        if len(members) >= 2:
+            builder = _battery_comparison if members[0].kind == "battery" else _multi_comparison
+            return builder(members[0], spec, data, model, members=members)
+        if members:
+            return compute(members[0], spec, data, model)
+        raise ValueError("comparison has no resolvable members")
     if question.kind == "battery":
         # A battery shown as a stacked bar is a 100% DISTRIBUTION: each statement
         # is a bar split by the shared rating-scale levels (the source decks'
@@ -755,6 +766,10 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     categories = tuple(sort_categories(rows, spec.sort))
     return SeriesResult(categories=categories, segments=("Total",), cells=cells,
                         base_n={"Total": base}, statistic="mean")
+
+
+def _has_question(model: QuestionModel, qid: str) -> bool:
+    return any(q.qid == qid for q in model.questions)
 
 
 def _parallel_questions(question: Question, model: QuestionModel) -> list[Question]:

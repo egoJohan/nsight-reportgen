@@ -114,3 +114,25 @@ def test_multi_comparison_explicit_members_subset():
                                  members=[q_rohkea])
     assert set(r.segments) == {"Rohkea"}
     assert r.categories == ("IS", "IL", "HS")
+
+
+def test_compute_routes_comparison_question():
+    model, q_rohkea, q_luot, df = _multi_model()
+    comp = Question(qid="compare-brandi", kind="comparison",
+                    variables=q_rohkea.variables + q_luot.variables,
+                    text="Brändimielikuva", members=("rohkea", "luot"))
+    model.questions.append(comp)
+    r = engine.compute(comp, _spec(chart_type="radar"), df, model)
+    assert set(r.segments) == {"Rohkea", "Luotettava"}
+    assert r.categories == ("IS", "IL", "HS")
+
+
+def test_compute_comparison_not_radar_only():
+    model, q_rohkea, q_luot, df = _multi_model()
+    comp = Question(qid="compare-brandi", kind="comparison",
+                    variables=q_rohkea.variables + q_luot.variables,
+                    text="Brändimielikuva", members=("rohkea", "luot"))
+    model.questions.append(comp)
+    r = engine.compute(comp, _spec(chart_type="vertical_bar"), df, model)
+    assert set(r.segments) == {"Rohkea", "Luotettava"}
+    assert r.categories == ("IS", "IL", "HS")
