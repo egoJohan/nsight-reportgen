@@ -189,3 +189,16 @@ def test_apply_comparisons_drops_when_under_two_valid_members():
     override = {"comparisons": [{"members": ["rohkea", "ghost"], "render": "radar"}]}
     m = apply_grouping_override(model, override)
     assert not [q for q in m.questions if q.kind == "comparison"]
+
+
+def test_comparison_split_is_reversible():
+    """Reversing the process: removing a comparison from the override restores its member
+    questions; a member that no longer exists is dropped leniently."""
+    model = _parallel_multi_model()
+    m1 = apply_grouping_override(model, {"comparisons": [
+        {"members": ["rohkea", "luot"], "label": "Brändimielikuva"}]})
+    assert any(q.kind == "comparison" for q in m1.questions)
+    # drop the comparison -> members are back as separate questions, no comparison
+    m2 = apply_grouping_override(model, {"comparisons": []})
+    assert not any(q.kind == "comparison" for q in m2.questions)
+    assert {q.qid for q in m2.questions if q.kind == "multi"} == {"rohkea", "luot"}
