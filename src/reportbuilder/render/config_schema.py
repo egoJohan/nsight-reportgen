@@ -56,7 +56,7 @@ STATISTIC_OPTIONS = (
 
 SORT_BASIS_OPTIONS = (
     ("pct", "Percentage"),
-    ("data_order", "Data order"),
+    ("data_order", "Survey order"),
     ("mean", "Mean"),
     ("count", "Count"),
 )
@@ -82,10 +82,15 @@ def classifying_var_field(*, required: bool = False) -> ConfigField:
     )
 
 
-def sort_field() -> ConfigField:
+def sort_field(*, stacked: bool = False) -> ConfigField:
     # The 'sort' widget renders both the basis (these options) and a separate
-    # ascending/descending direction (descending is the default).
-    return ConfigField("sort", "sort", "Sort", options=SORT_BASIS_OPTIONS, default="pct")
+    # ascending/descending direction (descending is the default). Stacked bars add
+    # "Top 2/3 sum": these reorder the BARS (classifier groups / battery statements) by
+    # their summed two/three highest scale levels, while the scale stack stays 1..N.
+    opts = SORT_BASIS_OPTIONS
+    if stacked:
+        opts = opts + (("topbox_sum", "Top 2 sum"), ("top3_sum", "Top 3 sum"))
+    return ConfigField("sort", "sort", "Sort", options=opts, default="pct")
 
 
 def number_format_field() -> ConfigField:
@@ -124,10 +129,10 @@ def combo_secondary_field() -> ConfigField:
 # --------------------------------------------------------------------------- #
 # Composed schemas shared by families of chart types.
 # --------------------------------------------------------------------------- #
-def _common_tail() -> tuple[ConfigField, ...]:
+def _common_tail(*, sort_stacked: bool = False) -> tuple[ConfigField, ...]:
     """Knobs every data chart shares (after the classifying variable)."""
     return (
-        sort_field(),
+        sort_field(stacked=sort_stacked),
         number_format_field(),
         show_not_answered_field(),
         empty_categories_field(),
@@ -176,7 +181,7 @@ def stacked_schema() -> tuple[ConfigField, ...]:
     a classifier group split by the shared answer categories; without one, the
     chart is a single 100%-stacked bar of the question's answer distribution
     (the 'total')."""
-    return (statistic_field(), classifying_var_field(), *_common_tail())
+    return (statistic_field(), classifying_var_field(), *_common_tail(sort_stacked=True))
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:
