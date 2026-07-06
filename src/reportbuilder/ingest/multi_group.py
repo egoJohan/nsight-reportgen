@@ -66,9 +66,13 @@ def _group_text(model: QuestionModel, members: tuple[str, ...]) -> str:
             if shared:
                 return shared
 
-    # Fallback: common string prefix
+    # Fallback: the common string prefix — but only when it's a meaningful multi-word
+    # phrase. A prefix that's just a shared question word ("Kuinka", "Miten", "Mitä") is a
+    # useless title, so fall back to the first member's full label instead. (customer)
     stem = os.path.commonprefix(labels).rstrip(" :-")
-    return stem or labels[0]
+    if stem and " " in stem.strip():
+        return stem
+    return labels[0]
 
 
 def _group_qid(members: tuple[str, ...]) -> str:
