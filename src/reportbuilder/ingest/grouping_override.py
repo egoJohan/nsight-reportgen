@@ -27,11 +27,14 @@ def _battery_vars(battery) -> set[str]:
 
 
 def _scale_sig(var: Variable):
-    """A hashable signature of a variable's rating scale (code→label), or None if the
-    variable isn't a scale. Two variables share a scale when their signatures match."""
+    """A hashable signature of a variable's rating scale — its POINT set (1..N), or None
+    when the variable isn't a scale. Two variables are battery-COMPATIBLE when these
+    match, even if their labels differ (e.g. '1- Ei lainkaan' vs '1 - Ei lainkaan', or a
+    grade scale + a satisfaction scale). Mirrors the UI's scale_compat_key so a battery
+    the user is allowed to form in the dialog actually forms here. (customer)"""
     from reportbuilder.stats.engine import scale_levels
     lv = scale_levels(var)
-    return tuple((c, l) for c, l, _p in lv) if lv else None
+    return tuple(sorted({p for _c, _l, p in lv})) if lv else None
 
 
 def _apply_manual_batteries(model: QuestionModel,
