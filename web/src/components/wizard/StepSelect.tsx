@@ -65,6 +65,9 @@ export default function StepSelect({
   const { data: suggestions } = useBatterySuggestions(materialId, grouping);
   const [search, setSearch] = useState("");
   const [groupingOpen, setGroupingOpen] = useState(false);
+  // When the dialog is opened from a suggestion, seed it with that suggested grouping so
+  // the user reviews it before applying (null = open with the report's current grouping).
+  const [dialogSeed, setDialogSeed] = useState<GroupingOverride | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   // Per-row "⋮" menu: which row's menu is open, and which question's details dialog to show.
   const [menuQid, setMenuQid] = useState<string | null>(null);
@@ -90,13 +93,16 @@ export default function StepSelect({
     // Default label from the first few statements; the user can rename in the dialog.
     const label =
       s.labels.slice(0, 3).join(" · ") + (s.labels.length > 3 ? " …" : "");
-    onGroupingChange({
+    // Open the grouping dialog PRE-FILLED with the suggested battery, so the user can
+    // review/adjust it before applying — rather than applying it silently.
+    setDialogSeed({
       ...grouping,
       groups: [
         ...grouping.groups,
         { kind: "battery", variables: s.variables, label },
       ],
     });
+    setGroupingOpen(true);
   }
 
   // Auto-select a newly-created group: when the reshaped list gains a group
@@ -181,7 +187,10 @@ export default function StepSelect({
           variant="outline"
           size="sm"
           className="shrink-0"
-          onClick={() => setGroupingOpen(true)}
+          onClick={() => {
+            setDialogSeed(null);
+            setGroupingOpen(true);
+          }}
         >
           <Layers2Icon className="size-4" />
           Manage grouping
@@ -253,7 +262,7 @@ export default function StepSelect({
         materialId={materialId}
         open={groupingOpen}
         onOpenChange={setGroupingOpen}
-        grouping={grouping}
+        grouping={dialogSeed ?? grouping}
         onSave={onGroupingChange}
       />
 
