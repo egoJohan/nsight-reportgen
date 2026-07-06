@@ -230,8 +230,14 @@ def ai_slide_title(
         qvars = [model.variables[v] for v in question.variables if v in model.variables]
         is_text = bool(qvars) and all(v.measurement == "text" for v in qvars)
         spec = _kind_spec(question, model) if is_text else _spec_from_title_body(body)
-        series = compute(question, spec, df, model)
-        findings = _findings_from_series(series, body.top_n)
+        try:
+            series = compute(question, spec, df, model)
+            findings = _findings_from_series(series, body.top_n)
+        except ValueError:
+            # An open-ended question with NO answers can't build a word cloud (compute
+            # raises). There's nothing to headline → degrade to the question text rather
+            # than 503ing (which the frontend can't retry — one attempt per session).
+            findings = []
         # No computable findings (e.g. an empty/degenerate variable) → the LLM
         # would have nothing to summarise and tends to reply with a meta-question.
         # Fall back to the question text instead of generating a bogus headline.
