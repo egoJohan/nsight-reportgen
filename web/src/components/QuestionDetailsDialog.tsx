@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useQuestionSummary, useSetQuestionLabel } from "@/lib/queries";
 import WordMergeEditor from "@/components/WordMergeEditor";
-import type { QuestionSummary } from "@/lib/api";
+import type { QuestionSummary, GroupingOverride } from "@/lib/api";
 
 function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -71,15 +71,18 @@ export default function QuestionDetailsDialog({
   qid,
   onOpenChange,
   readOnly = false,
+  grouping,
 }: {
   materialId: string;
   qid: string | null;
   onOpenChange: (open: boolean) => void;
+  // The report's grouping, so details for a grouped question (battery/multi) resolve.
+  grouping?: GroupingOverride;
   // View-only: hide the material-wide edits (rename, merge words) — used when opened
   // from within a report (Select / Design), where those changes would hit every report.
   readOnly?: boolean;
 }) {
-  const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
+  const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid, grouping);
   const setLabel = useSetQuestionLabel(materialId);
   const [name, setName] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);

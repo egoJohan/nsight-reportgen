@@ -462,10 +462,19 @@ export const api = {
         }>(r)
       ),
 
-    questionSummary: (materialId: string, qid: string): Promise<QuestionSummary> =>
-      fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/summary`).then(
-        (r) => json<QuestionSummary>(r)
-      ),
+    questionSummary: (
+      materialId: string,
+      qid: string,
+      grouping?: GroupingOverride
+    ): Promise<QuestionSummary> => {
+      // Pass the report grouping so a battery/multi qid resolves (else the summary 404s).
+      const qs = grouping
+        ? `?grouping=${encodeURIComponent(JSON.stringify(grouping))}`
+        : "";
+      return fetch(
+        `${API_BASE}/materials/${materialId}/questions/${qid}/summary${qs}`
+      ).then((r) => json<QuestionSummary>(r));
+    },
 
     // Word-cloud editing: the question's raw top words (+ current merges) and a
     // setter to persist merges (fold token variants into one word).

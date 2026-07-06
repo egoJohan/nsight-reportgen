@@ -1584,6 +1584,7 @@ function StepConfigureInner({
         materialId={materialId}
         qid={editQid}
         readOnly
+        grouping={grouping}
         onOpenChange={(open) => {
           if (!open) setEditQid(null);
         }}

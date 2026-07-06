@@ -182,10 +182,14 @@ export function useQuestions(materialId: string | null) {
   });
 }
 
-export function useQuestionSummary(materialId: string, qid: string | null) {
+export function useQuestionSummary(
+  materialId: string,
+  qid: string | null,
+  grouping?: GroupingOverride
+) {
   return useQuery({
-    queryKey: ["question-summary", materialId, qid ?? ""],
-    queryFn: () => api.materials.questionSummary(materialId, qid!),
+    queryKey: ["question-summary", materialId, qid ?? "", grouping ?? null],
+    queryFn: () => api.materials.questionSummary(materialId, qid!, grouping),
     enabled: !!materialId && !!qid,
     staleTime: 5 * 60_000,
   });

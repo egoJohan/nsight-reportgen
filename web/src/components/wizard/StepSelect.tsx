@@ -261,6 +261,7 @@ export default function StepSelect({
         materialId={materialId}
         qid={detailQid}
         readOnly
+        grouping={grouping}
         onOpenChange={(open) => !open && setDetailQid(null)}
       />
 

@@ -497,12 +497,22 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
 def question_summary(
     material_id: str,
     qid: str,
+    grouping: str | None = None,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
     """Rich detail for one question: full metadata + the computed response
     distribution (counts, %, base N) and mean for scale questions. Stats failures
-    degrade to nulls (never a 500); a genuinely unknown qid is a 404."""
+    degrade to nulls (never a 500); a genuinely unknown qid is a 404.
+
+    `grouping` is a JSON-encoded GroupingOverride so a GROUPED qid (battery/multi) —
+    which exists only after the report's grouping is applied — resolves instead of 404ing.
+    """
     df, model = _load_df_model(material_id, client)
+    if grouping:
+        try:
+            model = apply_grouping_override(model, json.loads(grouping))
+        except (ValueError, TypeError):
+            pass  # malformed grouping → fall back to the base model
     try:
         q = model.question(qid)
     except KeyError as exc:
