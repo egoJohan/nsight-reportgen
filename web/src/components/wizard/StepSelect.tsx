@@ -101,16 +101,22 @@ export default function StepSelect({
   // variables), add it to the report by default. Skips the first load so
   // opening a report doesn't add everything.
   const prevQids = useRef<Set<string> | null>(null);
+  // Newly-created group qids — briefly highlighted in the list so the user sees what the
+  // grouping produced when they return from the dialog.
+  const [highlightQids, setHighlightQids] = useState<Set<string>>(new Set());
   useEffect(() => {
     if (!questions) return;
     const current = new Set(questions.map((q) => q.qid));
     if (prevQids.current) {
+      const newGroups: string[] = [];
       for (const q of questions) {
         const isGroup = q.kind === "multi" || q.kind === "battery";
-        if (isGroup && !prevQids.current.has(q.qid) && !addedRefs.has(q.qid)) {
-          onToggle(q);
+        if (isGroup && !prevQids.current.has(q.qid)) {
+          newGroups.push(q.qid);
+          if (!addedRefs.has(q.qid)) onToggle(q);
         }
       }
+      if (newGroups.length) setHighlightQids(new Set(newGroups));
     }
     // Drop any chart whose question no longer exists (its variable was absorbed
     // into a group, or a group was split away).
@@ -119,6 +125,13 @@ export default function StepSelect({
     }
     prevQids.current = current;
   }, [questions, addedRefs, onToggle, onPruneRefs]);
+
+  // Fade the new-group highlight after a few seconds.
+  useEffect(() => {
+    if (highlightQids.size === 0) return;
+    const h = setTimeout(() => setHighlightQids(new Set()), 4500);
+    return () => clearTimeout(h);
+  }, [highlightQids]);
 
   const filtered = useMemo(
     () =>
@@ -267,6 +280,7 @@ export default function StepSelect({
         {filtered.map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
+          const justCreated = highlightQids.has(q.qid);
           return (
             <div key={q.qid} className="relative">
               <button
@@ -275,11 +289,13 @@ export default function StepSelect({
                 title={!isChartable ? q.non_chartable_reason ?? undefined : undefined}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg border py-2.5 pr-11 pl-3 text-left transition-colors",
-                  !isChartable
-                    ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
-                    : isAdded
-                      ? "border-primary/40 bg-primary/5"
-                      : "border-border hover:bg-muted/50"
+                  justCreated
+                    ? "border-primary bg-primary/10 ring-2 ring-primary"
+                    : !isChartable
+                      ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
+                      : isAdded
+                        ? "border-primary/40 bg-primary/5"
+                        : "border-border hover:bg-muted/50"
                 )}
               >
                 <span
