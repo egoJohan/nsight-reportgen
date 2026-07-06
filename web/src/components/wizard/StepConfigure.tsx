@@ -219,8 +219,8 @@ function ChartPreview({
           />
         )}
 
-        {loading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center">
+        {loading && url && (
+          <div className="absolute inset-0 z-20 flex items-start justify-center pt-6">
             <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
               <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               Updating…
@@ -1104,8 +1104,8 @@ function SpecialPreview({
             label="Generating…"
           />
         )}
-        {loading && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center">
+        {loading && url && (
+          <div className="absolute inset-0 z-20 flex items-start justify-center pt-6">
             <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
               <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
               Updating…
