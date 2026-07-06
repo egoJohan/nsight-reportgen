@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layers2Icon, BarChart3Icon, Undo2Icon, GitCompareIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,16 +45,17 @@ export default function ManageGroupingDialog({
   onOpenChange,
   grouping,
   onSave,
-  suggestion,
+  initialSelection,
 }: {
   materialId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   grouping: GroupingOverride;
   onSave: (override: GroupingOverride) => void;
-  // When opened from a suggestion: applied as a reviewable Change on top of the current
-  // grouping, so the user reviews it in the Changes rail and Applies (or undoes) it.
-  suggestion?: GroupSpec | null;
+  // When opened from a suggestion: these variables are PRE-SELECTED in the pool so the
+  // user sees them highlighted and clicks "Group as battery" themselves — nothing is
+  // grouped automatically.
+  initialSelection?: readonly string[];
 }) {
   const { data: variables } = useVariables(open ? materialId : null, true);
 
@@ -154,26 +155,12 @@ export default function ManageGroupingDialog({
     setGroups((grouping.groups ?? []).map((g) => ({ ...g })));
     setSingles([...(grouping.singles ?? [])]);
     setComparisons((grouping.comparisons ?? []).map((c) => ({ ...c })));
-    setSelected(new Set());
+    // Pre-select the suggested variables (if any) — the user reviews the selection and
+    // clicks "Group as battery" to create it; nothing is grouped automatically.
+    setSelected(new Set(initialSelection ?? []));
     setChanges([]);
     setSeeded(true);
-  }, [open, seeded, grouping]);
-
-  // When opened FROM a suggestion, apply it as a reviewable Change on top of the seeded
-  // grouping — so it appears in the Changes rail (revertible) and the user Applies it.
-  const suggestionApplied = useRef(false);
-  useEffect(() => {
-    if (!open) {
-      suggestionApplied.current = false;
-      return;
-    }
-    if (!seeded || suggestionApplied.current || !suggestion) return;
-    suggestionApplied.current = true;
-    const n = suggestion.variables.length;
-    record(`Suggested battery — review these ${n} statements, then Apply`);
-    setGroups((g) => [...g, { ...suggestion }]);
-    setSingles((s) => s.filter((v) => !suggestion.variables.includes(v)));
-  }, [open, seeded, suggestion]);
+  }, [open, seeded, grouping, initialSelection]);
 
   // Cards = the multi/battery questions the backend forms from the working grouping
   // (label = the REAL title). Manual = the var-set is in our groups list; else auto.
