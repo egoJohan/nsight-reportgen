@@ -21,6 +21,14 @@ import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
 import { slideTitle } from "@/components/wizard/SlideNavigator";
 
+// Human labels for a question's kind, shown in the deck-row subtitle.
+const KIND_LABELS: Record<string, string> = {
+  single: "Single",
+  multi: "Multi",
+  battery: "Battery",
+  comparison: "Comparison",
+};
+
 // ── The report's deck: its slides in order, drag-reorderable + removable ──────
 // This is the report's OWN ordering (the charts array). Reordering/removing here
 // touches only this report — never the material's canonical question order.
@@ -30,24 +38,42 @@ function DeckList({
   onReorder,
   onRemove,
   onInfo,
+  highlightQids,
+  highlightRef,
 }: {
   charts: ChartSpec[];
   questionMap: Map<string, Question>;
   onReorder: (from: number, to: number) => void;
   onRemove: (index: number) => void;
   onInfo: (chart: ChartSpec) => void;
+  // Newly-created group (battery/multi) qids to flash after grouping, and a ref on
+  // the flashed row so it scrolls into view.
+  highlightQids: Set<string>;
+  highlightRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(onReorder);
   return (
     <div ref={containerRef as React.RefObject<HTMLDivElement>} className="space-y-1.5">
       {charts.map((c, i) => {
         const special = isSpecialSlide(c);
+        const justCreated = highlightQids.has(c.question_ref);
+        const q = questionMap.get(c.question_ref);
+        const kindLabel = q ? KIND_LABELS[q.kind] ?? q.kind : null;
+        // Subtitle: "<Chart Type>, <Question Type>" (e.g. "Pie Chart, Battery");
+        // special slides read "Bullets, Special".
+        const subtitle = special
+          ? "Bullets, Special"
+          : kindLabel
+            ? `${chartTypeLabel(c.chart_type)}, ${kindLabel}`
+            : chartTypeLabel(c.chart_type);
         return (
           <div
             key={`${c.question_ref}-${i}`}
+            ref={justCreated ? highlightRef : undefined}
             {...itemProps(i)}
             className={cn(
               "group flex items-center gap-2 rounded-lg border bg-card py-2 pr-2 pl-1.5 transition-colors",
+              justCreated && "border-primary bg-primary/10 ring-2 ring-primary",
               dragIndex === i && "opacity-40",
               dragIndex !== null && overIndex === i && dragIndex !== i && "ring-2 ring-primary"
             )}
@@ -64,7 +90,7 @@ function DeckList({
             <span className="min-w-0 flex-1">
               <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
-                {special ? "Special slide" : chartTypeLabel(c.chart_type)}
+                {subtitle}
               </span>
             </span>
             {/* Special slides also get an explicit delete (bin) as the leftmost
@@ -574,6 +600,8 @@ export default function StepSelect({
               ? setSpecialInfoChart(c)
               : setDetailQid(c.question_ref)
           }
+          highlightQids={highlightQids}
+          highlightRef={highlightRef}
         />
       ) : (
         <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
