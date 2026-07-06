@@ -552,7 +552,7 @@ export const api = {
     aiSlideTitle: (
       materialId: string,
       body: AiSlideTitleBody
-    ): Promise<{ title: string }> =>
+    ): Promise<{ title: string; subtitle?: string }> =>
       aiPost(`/materials/${materialId}/ai/slide-title`, body),
 
     // AI: shorten category labels into [full, short] pairs. Through the shared

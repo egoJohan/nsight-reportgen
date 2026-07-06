@@ -24,6 +24,7 @@ from reportbuilder.ai.text import (
     generate_conclusion_bullets,
     generate_data_chat,
     generate_demographics_bullets,
+    generate_group_subtitle,
     generate_open_themes,
     generate_overview_bullets,
     generate_slide_title,
@@ -244,6 +245,17 @@ def ai_slide_title(
         if not findings:
             return {"title": question.text}
         title = generate_slide_title(question.text, findings, chat=egohive_chat)
+        # For a GROUPED question (battery/multi/comparison) also return a neutral
+        # subtitle describing what the combined question covers — its default subtitle
+        # (the first member's statement) is misleading. Optional: failure just omits it.
+        subtitle = ""
+        if question.kind in ("battery", "multi", "comparison"):
+            members = [model.variables[v].label for v in question.variables
+                       if v in model.variables]
+            try:
+                subtitle = generate_group_subtitle(members, chat=egohive_chat)
+            except EgoHiveError:
+                subtitle = ""
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except HTTPException:
@@ -251,7 +263,7 @@ def ai_slide_title(
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Could not generate title: {exc}") from exc
 
-    return {"title": title}
+    return {"title": title, "subtitle": subtitle} if subtitle else {"title": title}
 
 
 @ai_router.post("/materials/{material_id}/ai/short-labels")

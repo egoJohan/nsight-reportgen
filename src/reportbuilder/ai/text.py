@@ -88,6 +88,31 @@ def generate_slide_title(
     return title
 
 
+def _group_subtitle_prompt(member_labels: list[str]) -> str:
+    """Compose the prompt for a battery/multi SUBTITLE — a neutral topic description
+    (not a key message), shown just above the chart."""
+    items = "\n".join(f"- {m}" for m in member_labels)
+    return (
+        "Olet markkinatutkimuksen analyytikko. Alla on joukko osioita/väittämiä, jotka "
+        "kuuluvat samaan kysymyskokonaisuuteen ja on esitetty vastaajille yhdessä.\n\n"
+        f"Osiot:\n{items}\n\n"
+        "Kirjoita YKSI lyhyt suomenkielinen KUVAUS siitä, mitä tämä kokonaisuus mittaa "
+        "(esimerkiksi \"Väittämiä työstä ja teknologiasta\"). Kuvaus on neutraali "
+        "otsikkorivi kaavion yläpuolelle — EI avainviesti, EI johtopäätös, EIKÄ toisto "
+        "yhdestä osiosta. Enintään noin 90 merkkiä, yksi rivi, ei lainausmerkkejä, ei "
+        "loppupistettä."
+    )
+
+
+def generate_group_subtitle(member_labels, *, chat=egohive_chat) -> str:
+    """A short neutral Finnish description of what a battery/multi covers, from its
+    member labels. Empty string on an empty reply (caller falls back)."""
+    labels = [str(m).strip() for m in member_labels if str(m).strip()]
+    if not labels:
+        return ""
+    return _clean(chat(_group_subtitle_prompt(labels)))
+
+
 # --------------------------------------------------------------------------- #
 # Label shortening
 # --------------------------------------------------------------------------- #
