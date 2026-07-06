@@ -49,6 +49,12 @@ class ChartSpec:
     footer_note: str | None = None              # override methodology footer; None = auto ("<stat> · n = N"). "{n}" expands to the base.
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
+    # Cross-tab percentage DIRECTION for a classified chart:
+    #   "auto"       — resolve deterministically from variable roles (default)
+    #   "classifier" — distribute the base var within each classifier segment (legacy)
+    #   "question"   — distribute the classifier within each base category
+    #   "total"      — every cell over the grand total
+    percent_base: str = "auto"
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
     options: dict[str, Any] = field(default_factory=dict)  # free-form per-chart-type options (plugin-declared config keys)
 
@@ -160,6 +166,7 @@ def report_from_json(data: dict | str) -> Report:
             show_empty_categories=c.get("show_empty_categories", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
+            percent_base=c.get("percent_base", "auto"),
             options=dict(c.get("options") or {}),
         )
 

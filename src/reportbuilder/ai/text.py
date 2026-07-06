@@ -225,8 +225,9 @@ def shorten_labels(
 # --------------------------------------------------------------------------- #
 # Special slides — Overview / Conclusion / Demographics (bullet lists)
 # --------------------------------------------------------------------------- #
-# Soft cap on how many bullets a special slide shows.
-MAX_BULLETS = 6
+# Soft cap on how many bullets a special slide shows (paginated across slides when
+# they don't all fit). The wider 16:9 slide holds more, so allow a richer list.
+MAX_BULLETS = 8
 
 # Appended to EVERY bullet-list prompt. The output goes straight onto a slide, so the
 # model must return only the analytical bullets — no preamble, no closing remark, and
@@ -234,11 +235,16 @@ MAX_BULLETS = 6
 # hyödyllinen jatkotyöstöäsi varten?", offers of further help). Those are chat
 # pleasantries, never slide content.
 _BULLET_OUTPUT_RULES = (
-    "\n\nTÄRKEÄÄ: Tuloste tulee suoraan diaesitykseen. Palauta VAIN ranskalaiset "
-    "viivat — jokainen rivi itsenäinen analyyttinen havainto. ÄLÄ kirjoita johdantoa, "
-    "otsikkoa, yhteenvetoa etkä loppukommenttia. ÄLÄ puhuttele lukijaa, ÄLÄ esitä "
-    "kysymyksiä lukijalle (esim. oliko yhteenveto hyödyllinen), ÄLÄ tarjoa lisäapua "
-    "etkä kommentoi omaa vastaustasi."
+    "\n\nTULOSTEEN MUOTO — EHDOTON:\n"
+    "Vastaus menee sellaisenaan koneellisesti PowerPoint-dialle. Palauta VAIN "
+    "ranskalaiset viivat, yksi itsenäinen analyyttinen havainto per rivi. Vastauksen "
+    "VIIMEINEN rivi on viimeinen havainto — ÄLÄ kirjoita yhtäkään riviä sen jälkeen.\n"
+    "EHDOTTOMASTI KIELLETTY (ei koskaan, ei edes viimeisellä rivillä): johdanto, "
+    "otsikko, yhteenveto tai loppukommentti; lukijan puhuttelu; MIKÄ TAHANSA kysymys "
+    "lukijalle; tarjous jatkaa, syventyä, tehdä seuraava raportti tai auttaa lisää "
+    "(esim. 'Haluatko, että syvennyn…', 'Haluatko siirtyä seuraavaan…', 'Oliko tämä "
+    "hyödyllinen…', 'Voin auttaa…'); oman vastauksesi kommentointi. Nämä ovat "
+    "chat-kohteliaisuuksia, EIVÄT diasisältöä."
 )
 
 

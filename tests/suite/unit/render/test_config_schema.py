@@ -148,7 +148,7 @@ def test_classifying_var_field_required_variant():
 def test_standard_schema_field_set():
     keys = _keys(standard_schema())
     assert keys == [
-        "statistic", "classifying_var", "sort", "number_format",
+        "statistic", "classifying_var", "percent_base", "sort", "number_format",
         "show_not_answered", "show_empty_categories",
         "not_answered_codes", "category_label_overrides",
     ]

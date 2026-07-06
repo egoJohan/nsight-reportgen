@@ -242,5 +242,5 @@ def test_bullet_prompts_forbid_conversational_meta():
         chat = RecordingChat(reply)
         run(chat)
         prompt = chat.prompts[0].lower()
-        assert "kysymyksiä lukijalle" in prompt   # no reader-directed questions
-        assert "lisäapua" in prompt               # no offers of further help
+        assert "kysymys lukijalle" in prompt      # no reader-directed questions
+        assert "auttaa lisää" in prompt           # no offers of further help

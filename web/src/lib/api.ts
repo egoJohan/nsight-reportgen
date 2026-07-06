@@ -154,6 +154,10 @@ export interface ChartSpec {
   // Override the methodology footer (e.g. a simpler "N = 950"); null = auto
   // ("<stat> · n = N"). "{n}" expands to the base count, "{stat}" to the stat label.
   footer_note: string | null;
+  // Cross-tab percentage direction: "auto" (resolve from variable roles),
+  // "classifier" (within each segment), "question" (within each base category),
+  // "total" (over the grand total).
+  percent_base?: "auto" | "classifier" | "question" | "total";
   // Free-form per-chart-type options (plugin-declared config keys without a
   // first-class ChartSpec field). Optional for backward compatibility.
   options?: Record<string, unknown>;

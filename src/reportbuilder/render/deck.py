@@ -127,7 +127,11 @@ def render_report(
         except (FileNotFoundError, PackageNotFoundError):
             prs = None
     if prs is None:
+        # Wizard/generic reports render on a blank deck at 16:9 (13.333"×7.5"), the
+        # modern presentation standard. Template-based decks keep their own size.
         prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
 
     _titles = titles or {}
 
@@ -241,21 +245,24 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
     slide = prs.slides.add_slide(layout)
     slide_index = len(prs.slides) - 1
 
+    # Slots scale to the slide so they fill it at any aspect (4:3 or 16:9): fixed
+    # side margins + top chrome, the rest of the width/height is the content area.
+    sw, sh = int(prs.slide_width), int(prs.slide_height)
     if render_mode == "image":
         # Leave ~1.9" at top for house-style title chrome (REQ-C-24a, REQ-D-04)
         return Slot(
             slide_index=slide_index,
             left=int(Inches(0.62)),
             top=int(Inches(1.9)),
-            width=int(Inches(8.8)),
-            height=int(Inches(4.9)),
+            width=sw - int(Inches(1.24)),
+            height=sh - int(Inches(2.6)),
             name=slot_name,
         )
     return Slot(
         slide_index=slide_index,
         left=int(Inches(0.8)),
         top=int(Inches(1.0)),
-        width=int(Inches(8.5)),
-        height=int(Inches(5.0)),
+        width=sw - int(Inches(1.6)),
+        height=sh - int(Inches(2.5)),
         name=slot_name,
     )

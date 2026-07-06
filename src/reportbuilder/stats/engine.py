@@ -13,6 +13,7 @@ from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec, SortSpec
 from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
+from reportbuilder.stats.percent_base import resolve_percent_base
 from reportbuilder.stats.registry import statistic as get_statistic
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.stats.sorting import sort_categories
@@ -418,12 +419,38 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             for idx, (code, label) in enumerate(labels.items())
         ]
 
+    # Cross-tab percentage DIRECTION (percent_base). Only meaningful with a real
+    # classifier: "question" distributes the classifier within each base category
+    # (each base-category row sums to 100%); "total" is over the grand total;
+    # "classifier" (legacy) distributes the base var within each segment. "auto" is
+    # resolved to a concrete direction upstream; anything else → "classifier".
+    grand_total = denom.get("Total", 0)
+    real_segs = [s for s in segments if s != "Total"]
+    pb = getattr(spec, "percent_base", "auto")
+    if not (spec.classifying_var and real_segs):
+        pb = "classifier"
+    elif pb == "auto":
+        pb = resolve_percent_base(question, spec, model)
+    elif pb not in ("classifier", "question", "total"):
+        pb = "classifier"
+    denom_q: dict[str, int] = {}
+    if pb == "question":
+        for _code, _display, _di in entries:
+            denom_q[_display] = sum(counts.get((_code, s), 0) for s in real_segs)
+
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     for code, display, data_index in entries:
         for seg in segments:
             c = counts.get((code, seg), 0)
-            base = denom.get(seg, 0)
+            if pb == "total":
+                base = grand_total
+            elif pb == "question":
+                # Real segments distribute within the base category; the "Total"
+                # reference column stays the overall (grand-total) marginal.
+                base = grand_total if seg == "Total" else denom_q.get(display, 0)
+            else:
+                base = denom.get(seg, 0)
             cells[(display, seg)] = Cell(pct=pct(c, base, spec.number_format),
                                          count=count_value(c, spec.number_format),
                                          mean=None)

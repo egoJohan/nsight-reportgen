@@ -27,6 +27,9 @@ from reportbuilder.render.base import RenderContext
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
 
 _FONT = "Liberation Sans"
+# One fixed title size for EVERY slide (chart + special) so titles never vary in
+# size between slides. (Shared by special_slide's heading.)
+TITLE_PT = 18
 _IN = Inches(1)
 
 _STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
@@ -63,11 +66,25 @@ _STAT_FOOTER: dict[str, str] = {
 def _slide_dims(slide) -> tuple[int, int]:
     """Return (slide_width_emu, slide_height_emu) from the slide's parent presentation."""
     try:
-        prs = slide.part.presentation
+        prs = slide.part.package.presentation_part.presentation
         return int(prs.slide_width), int(prs.slide_height)
     except Exception:
-        # fallback: 10" × 7.5" (standard python-pptx default)
-        return int(Inches(10)), int(Inches(7.5))
+        # fallback: 13.333" × 7.5" (the deck default — 16:9 widescreen)
+        return int(Inches(13.333)), int(Inches(7.5))
+
+
+def wrapped_line_count(text: str, box_width_emu: int, size_pt: int) -> int:
+    """Approximate how many lines *text* wraps to in a box *box_width_emu* wide at
+    font *size_pt* (honours explicit '\\n'). Used to size the accent bar to the
+    title/heading's actual height instead of a fixed box."""
+    if not text:
+        return 1
+    box_pt = box_width_emu / 914400 * 72
+    chars_per_line = max(1, int(box_pt / (size_pt * 0.55)))  # ~0.55·size pt per avg char
+    lines = 0
+    for seg in text.split("\n"):
+        lines += max(1, -(-len(seg) // chars_per_line))       # ceil-divide
+    return max(1, lines)
 
 
 def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP):
@@ -123,18 +140,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     show_title = getattr(getattr(ctx.spec, "elements", None), "title", True)
 
     if show_title:
-        # 2 — Teal accent bar (thin vertical stripe, top-left)
-        acc = slide.shapes.add_shape(
-            1,
-            Inches(0.55), Inches(0.42),
-            Inches(0.10), Inches(0.92),
-        )
-        acc.fill.solid()
-        acc.fill.fore_color.rgb = PX_TEAL
-        acc.line.fill.background()
-        acc.shadow.inherit = False
-
-        # 3 — Title (top) + question subtitle (just above the chart)
+        # 2 — Title (top) + question subtitle (just above the chart)
         #     The top area is dedicated to the TITLE (AI key message when set,
         #     else the question). When a distinct headline is set, the actual
         #     QUESTION is a separate subtitle anchored to the BOTTOM of the header
@@ -156,9 +162,27 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             gloss = _scale_endpoint_gloss(ctx.series.categories)
             if gloss:
                 secondary = f"{secondary}   {gloss}" if secondary else gloss
+        # One fixed title size for every slide (no length-based stepping).
+        t_size = TITLE_PT
+
+        # 3 — Teal accent bar (thin vertical stripe, top-left), sized to the TITLE's
+        #     actual height (its wrapped line count) so it doesn't tower over a short
+        #     one-line headline. Capped at the title box height.
         if title:
-            # Title font steps down with length so a long key message stays readable.
-            t_size = 18 if len(title) <= 60 else (16 if len(title) <= 110 else 14)
+            _n = wrapped_line_count(title, sw - Inches(1.0), t_size)
+            bar_h = min(int(Inches(1.30)), _n * int(Pt(t_size * 1.25)) + int(Inches(0.06)))
+        else:
+            bar_h = int(Inches(0.30))
+        acc = slide.shapes.add_shape(
+            1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
+        )
+        acc.fill.solid()
+        acc.fill.fore_color.rgb = PX_TEAL
+        acc.line.fill.background()
+        acc.shadow.inherit = False
+
+        # 4 — Title box
+        if title:
             # Tall, TOP-anchored box so the title can span up to ~4 lines (customers'
             # headlines are often 3) and honour manual line breaks ("\n") instead of
             # being clipped at 2. A short title still sits at the top (empty space
@@ -166,7 +190,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # the question subtitle the author shortens the text.
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.34),
+                Inches(0.80), Inches(0.42),
                 sw - Inches(1.0), Inches(1.30),
                 [(title, t_size, PX_INK, True)],
             )

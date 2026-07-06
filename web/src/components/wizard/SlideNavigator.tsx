@@ -3,12 +3,9 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  GripVerticalIcon,
   LayoutGridIcon,
   InfoIcon,
-  PlusIcon,
   SearchIcon,
-  Trash2Icon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { chartTypeLabel, isSpecialSlide, rendersFullSlide } from "@/lib/charts";
+import { chartTypeLabel, isSpecialSlide, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
-import { useDragReorder } from "@/lib/useDragReorder";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";
 
 /** The display title for a slide: a question's text, or a special slide's heading. */
@@ -35,8 +31,6 @@ export function SlideNavigator({
   questionMap,
   onSelect,
   onOpenOverview,
-  onAddSlide,
-  onRemove,
   onEditQuestion,
 }: {
   charts: ChartSpec[];
@@ -44,8 +38,6 @@ export function SlideNavigator({
   questionMap: Map<string, Question>;
   onSelect: (index: number) => void;
   onOpenOverview: () => void;
-  onAddSlide?: () => void;
-  onRemove?: () => void;
   onEditQuestion?: (qid: string) => void;
 }) {
   const [jumpOpen, setJumpOpen] = useState(false);
@@ -138,22 +130,6 @@ export function SlideNavigator({
       >
         <LayoutGridIcon className="size-4" />
       </Button>
-      {onAddSlide && (
-        <Button variant="outline" size="icon-lg" title="Add slide" onClick={onAddSlide}>
-          <PlusIcon className="size-4" />
-        </Button>
-      )}
-      {onRemove && (
-        <Button
-          variant="outline"
-          size="icon-lg"
-          className="text-muted-foreground hover:text-destructive"
-          title="Remove this slide"
-          onClick={onRemove}
-        >
-          <Trash2Icon className="size-4" />
-        </Button>
-      )}
     </div>
   );
 }
@@ -237,8 +213,6 @@ export function SlideOverview({
   questionMap,
   activeRef,
   onSelect,
-  onReorder,
-  onAddSlide,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -248,26 +222,16 @@ export function SlideOverview({
   questionMap: Map<string, Question>;
   activeRef: string | null;
   onSelect: (index: number) => void;
-  onReorder?: (from: number, to: number) => void;
-  onAddSlide?: () => void;
 }) {
-  const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(onReorder);
-
+  // Navigate-only: reordering + adding slides live in the Select step (this deck
+  // grid just jumps to a slide). See StepSelect's DeckList.
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[88vh] w-[92vw] max-w-[92vw] flex-col gap-3 sm:max-w-[92vw]">
         <div className="flex items-center justify-between">
           <DialogTitle>All slides ({charts.length})</DialogTitle>
-          {onAddSlide && (
-            <Button variant="outline" size="sm" onClick={onAddSlide}>
-              <PlusIcon className="size-4" /> Add slide
-            </Button>
-          )}
         </div>
-        <div
-          ref={containerRef as React.RefObject<HTMLDivElement>}
-          className="grid min-h-0 flex-1 auto-rows-max grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 lg:grid-cols-4"
-        >
+        <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 lg:grid-cols-4">
           {charts.map((c, i) => (
             <SlideThumb
               key={`${c.question_ref}-${i}`}
@@ -277,9 +241,6 @@ export function SlideOverview({
               isActive={c.question_ref === activeRef}
               grouping={grouping}
               questionMap={questionMap}
-              dragging={dragIndex === i}
-              dropTarget={dragIndex !== null && overIndex === i && dragIndex !== i}
-              itemProps={itemProps(i)}
               onClick={() => {
                 onSelect(i);
                 onOpenChange(false);
@@ -300,9 +261,6 @@ function SlideThumb({
   isActive,
   grouping,
   questionMap,
-  dragging,
-  dropTarget,
-  itemProps,
   onClick,
 }: {
   materialId: string;
@@ -311,47 +269,39 @@ function SlideThumb({
   isActive: boolean;
   grouping: GroupingOverride;
   questionMap: Map<string, Question>;
-  dragging: boolean;
-  dropTarget: boolean;
-  itemProps: Record<string, unknown>;
   onClick: () => void;
 }) {
-  // renderTitle MUST match DeckPrefetch (rendersFullSlide) so this reuses the warmed cache.
+  // renderTitle:true shows the FULL slide (title baked in), so the grid faithfully
+  // reflects the deck. MUST match DeckPrefetch's renderTitle to reuse its warm cache.
   const { data: url } = useChartPreview(materialId, chart, {
-    renderTitle: rendersFullSlide(chart),
+    renderTitle: true,
     grouping,
   });
 
   return (
     <div
-      {...itemProps}
       className={cn(
         "group relative flex flex-col overflow-hidden rounded-lg border bg-card transition-colors",
         isActive
           ? "border-primary ring-1 ring-primary"
-          : "border-border hover:border-primary/40",
-        dragging && "opacity-40",
-        dropTarget && "ring-2 ring-primary"
+          : "border-border hover:border-primary/40"
       )}
     >
-      <span className="absolute left-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded bg-background/85 text-xs tabular-nums shadow-sm">
-        {index + 1}
-      </span>
-      <span
-        className="absolute right-1.5 top-1.5 z-10 cursor-grab text-muted-foreground/50 opacity-0 transition-opacity group-hover:opacity-100"
-        title="Drag to reorder"
-      >
-        <GripVerticalIcon className="size-4" />
-      </span>
       <button onClick={onClick} className="flex flex-1 flex-col text-left">
-        <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted/30">
+        {/* Same box as the Design preview (relative aspect box + absolutely
+            positioned filling image) so the slide keeps its exact proportions and
+            charts aren't stretched. */}
+        <div className={`relative w-full overflow-hidden bg-muted/30 ${SLIDE_ASPECT}`}>
           {url ? (
-            <img src={url} alt="" className="h-full w-full object-contain" />
+            <img src={url} alt="" className="absolute inset-0 size-full object-contain" />
           ) : (
-            <span className="text-xs text-muted-foreground">
+            <span className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
               {chartTypeLabel(chart.chart_type)}
             </span>
           )}
+          <span className="absolute bottom-1.5 right-1.5 z-10 flex size-5 items-center justify-center rounded bg-background/85 text-xs tabular-nums shadow-sm">
+            {index + 1}
+          </span>
         </div>
         <div className="border-t p-2">
           <p className="line-clamp-2 text-xs leading-snug">{slideTitle(chart, questionMap)}</p>

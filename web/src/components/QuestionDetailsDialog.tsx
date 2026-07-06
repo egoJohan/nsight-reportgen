@@ -292,18 +292,41 @@ export default function QuestionDetailsDialog({
               </div>
             )}
 
-            {/* Variables */}
+            {/* Variables. A single question shows a compact name badge; a grouped
+                question (battery/multi/comparison) lists every included question so
+                it's clear what the group covers — question title on top, the
+                underlying variable name as a subtitle below. */}
             <div>
               <p className="mb-1.5 text-sm font-medium">
-                {s.variables.length === 1 ? "Variable" : "Variables"}
+                {s.variables.length === 1
+                  ? "Variable"
+                  : `Variables · ${s.variables.length}`}
               </p>
-              <div className="flex flex-wrap gap-1.5">
-                {s.variables.map((v) => (
-                  <Badge key={v.name} variant="outline" className="font-mono font-normal" title={v.label}>
-                    {v.name}
-                  </Badge>
-                ))}
-              </div>
+              {s.variables.length === 1 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {s.variables.map((v) => (
+                    <Badge key={v.name} variant="outline" className="font-mono font-normal" title={v.label}>
+                      {v.name}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <ol className="space-y-0.5 rounded-lg border bg-muted/20 p-2">
+                  {s.variables.map((v, i) => (
+                    <li key={v.name} className="flex gap-2.5 px-1.5 py-1">
+                      <span className="w-5 shrink-0 pt-0.5 text-right text-xs tabular-nums text-muted-foreground">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-snug">{v.label || v.name}</p>
+                        <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                          {v.name}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         )}

@@ -82,6 +82,24 @@ def classifying_var_field(*, required: bool = False) -> ConfigField:
     )
 
 
+def percent_base_field() -> ConfigField:
+    # The cross-tab percentage DIRECTION. Only meaningful with a classifying
+    # variable (the frontend self-hides it otherwise). "Automatic" resolves the
+    # natural direction from the variables' roles; the others force it.
+    return ConfigField(
+        "percent_base", "select", "Percentages of",
+        options=(("auto", "Automatic"),
+                 ("classifier", "Each segment (the classifying variable)"),
+                 ("question", "Each category (this question)"),
+                 ("total", "Total")),
+        default="auto",
+        help=("Which sub-population each percentage is OF. 'Automatic' picks the "
+              "natural direction (usually within each segment). 'Each category' "
+              "instead distributes the segments within each of this question's "
+              "categories — e.g. '% of men who fall in each group'."),
+    )
+
+
 def sort_field(*, stacked: bool = False) -> ConfigField:
     # The 'sort' widget renders both the basis (these options) and a separate
     # ascending/descending direction (descending is the default). Stacked bars add
@@ -154,7 +172,8 @@ def classifying_var_2_field() -> ConfigField:
 
 def standard_schema() -> tuple[ConfigField, ...]:
     """Multi-series-capable charts: optional classifying variable."""
-    return (statistic_field(), classifying_var_field(), *_common_tail())
+    return (statistic_field(), classifying_var_field(), percent_base_field(),
+            *_common_tail())
 
 
 def xtab_layout_field() -> ConfigField:
@@ -173,7 +192,7 @@ def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
     return (statistic_field(), classifying_var_field(), classifying_var_2_field(),
-            xtab_layout_field(), *_common_tail())
+            xtab_layout_field(), percent_base_field(), *_common_tail())
 
 
 def stacked_schema() -> tuple[ConfigField, ...]:
@@ -181,7 +200,8 @@ def stacked_schema() -> tuple[ConfigField, ...]:
     a classifier group split by the shared answer categories; without one, the
     chart is a single 100%-stacked bar of the question's answer distribution
     (the 'total')."""
-    return (statistic_field(), classifying_var_field(), *_common_tail(sort_stacked=True))
+    return (statistic_field(), classifying_var_field(), percent_base_field(),
+            *_common_tail(sort_stacked=True))
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:
@@ -193,4 +213,4 @@ def combo_schema() -> tuple[ConfigField, ...]:
     """Combo: this question is the x-axis (bars); pick a numeric secondary
     variable for the mean-per-category line, or split by a classifying variable."""
     return (statistic_field(), combo_secondary_field(),
-            classifying_var_field(), *_common_tail())
+            classifying_var_field(), percent_base_field(), *_common_tail())

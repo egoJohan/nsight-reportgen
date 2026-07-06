@@ -2,14 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import {
   AlertCircleIcon,
   BarChart3Icon,
-  FileTextIcon,
   ImageIcon,
-  ListChecksIcon,
   Loader2Icon,
-  PlusIcon,
   RotateCcwIcon,
   SparklesIcon,
-  UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -36,18 +32,11 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   isDemographicsGrid,
-  isSpecialSlide,
   isWordcloud,
   rendersAsBullets,
   rendersFullSlide,
+  SLIDE_ASPECT,
 } from "@/lib/charts";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 // The report's grouping override, shared with the leaf preview components so a
 // chart on a manually-grouped question previews the way it renders.
@@ -129,37 +118,30 @@ function ChartPreview({
     return () => clearTimeout(h);
   }, [editKey]);
 
-  // render_title:false — the PNG omits the title block; the frontend owns the
-  // title region (progressive overlay). Cached by content via useChartPreview.
+  // render_title:true — the PNG is the FULL slide (title baked in), so the Design
+  // preview is IDENTICAL to the Overview grid and the exported deck (WYSIWYG).
+  void questionText;
   const grouping = useContext(GroupingCtx);
   const { data: url, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: false, priority: true, grouping }
+    { renderTitle: true, priority: true, grouping }
   );
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
 
-  const headline = chart.slide_title?.trim() || questionText;
-  // The subtitle (just above the chart) is the editable slide_description; when blank it
-  // defaults to the QUESTION, but only when the headline is a distinct AI key-message
-  // (otherwise the headline already IS the question). Mirrors slide_chrome.
-  const hasDistinctTitle =
-    !!chart.slide_title?.trim() && chart.slide_title.trim() !== questionText;
-  const subtitle =
-    chart.slide_description?.trim() || (hasDistinctTitle ? questionText : "");
-  const showQuestion = !!subtitle;
   const region = labelRegion(chart.chart_type);
 
   return (
-    <div className="rounded-xl border bg-muted/30 p-4">
-      {/* 4:3 container so percentage-based region overlays map onto the image. */}
-      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl overflow-hidden rounded-lg">
+    // Full-width preview: no padding — the border frames the slide itself. The
+    // box matches the slide's aspect ratio, so the height follows the available
+    // width and there's no white space around the slide. (SLIDE_ASPECT)
+    <div className={`relative w-full overflow-hidden rounded-lg border bg-muted/30 ${SLIDE_ASPECT}`}>
         {url ? (
           <img
             src={url}
             alt="Chart preview"
-            className="absolute inset-0 size-full rounded-md object-fill shadow-sm"
+            className="absolute inset-0 size-full object-contain"
           />
         ) : (
           !error && (
@@ -170,44 +152,14 @@ function ChartPreview({
           )
         )}
 
-        {/* Title region (top band) — frontend-owned since render_title:false.
-            The title sits at the top; the question is a separate subtitle
-            anchored to the BOTTOM of the header band (just above the chart) so
-            its gap to the chart stays constant regardless of line count. */}
-        {url &&
-          (titlePending ? (
-            <PendingRegion
-              style={{ left: "4%", top: "2.5%", width: "92%", height: "13%" }}
-              label="Generating title…"
-            />
-          ) : (
-            <>
-              <div
-                className="absolute z-10 flex items-start gap-2.5"
-                style={{ left: "4%", top: "2.5%", width: "92%" }}
-              >
-                <div className="mt-0.5 w-1 shrink-0 self-stretch rounded-full bg-teal-600" />
-                <p className="min-w-0 text-left text-[15px] leading-tight font-extrabold whitespace-pre-line text-foreground">
-                  {headline}
-                </p>
-              </div>
-              {/* Question subtitle in its original spot (just above the chart);
-                  no line-clamp so a long question wraps upward instead of clipping. */}
-              {showQuestion && (
-                // Same flex + spacer as the headline above, so the question's left
-                // edge lands at exactly the same X as the title text (not the accent bar).
-                <div
-                  className="absolute z-10 flex items-start gap-2.5"
-                  style={{ left: "4%", width: "92%", bottom: "77%" }}
-                >
-                  <div className="w-1 shrink-0" aria-hidden />
-                  <p className="min-w-0 text-left text-[13px] leading-tight font-semibold whitespace-pre-line text-muted-foreground">
-                    {subtitle}
-                  </p>
-                </div>
-              )}
-            </>
-          ))}
+        {/* The title is baked into the PNG (renderTitle:true). While the AI title
+            is (re)generating, cover its region with a pending placeholder. */}
+        {url && titlePending && (
+          <PendingRegion
+            style={{ left: "4%", top: "2.5%", width: "92%", height: "13%" }}
+            label="Generating title…"
+          />
+        )}
 
         {/* Label region — placed per chart type; clears when labels land. A
             word cloud has no category labels, so it never shows this overlay. */}
@@ -238,7 +190,6 @@ function ChartPreview({
             <span className="leading-snug">{error}</span>
           </div>
         )}
-      </div>
     </div>
   );
 }
@@ -289,12 +240,17 @@ function readField(chart: ChartSpec, key: string): unknown {
   if (key in chart) return (chart as unknown as Record<string, unknown>)[key];
   return chart.options?.[key];
 }
+// First-class ChartSpec fields that may be ABSENT on a chart loaded from an older
+// saved report (added after that report was written). They must still patch the
+// top-level field, not the free-form options bag.
+const FIRST_CLASS_KEYS = new Set(["percent_base"]);
+
 function patchField(
   chart: ChartSpec,
   key: string,
   value: unknown
 ): Partial<ChartSpec> {
-  if (key in chart && key !== "options") {
+  if ((key in chart || FIRST_CLASS_KEYS.has(key)) && key !== "options") {
     return { [key]: value } as Partial<ChartSpec>;
   }
   return { options: { ...(chart.options ?? {}), [key]: value } };
@@ -699,10 +655,12 @@ function ChartControls({
   let schema = isBattery
     ? rawSchema.filter((f) => f.key !== "classifying_var")
     : rawSchema;
-  // The second classifier only makes sense once the first is chosen — hide it
-  // until then (the engine ignores a lone secondary anyway).
+  // The second classifier and the percentage-direction control only make sense
+  // once a classifying variable is chosen — hide them until then.
   if (!chart.classifying_var) {
-    schema = schema.filter((f) => f.key !== "classifying_var_2");
+    schema = schema.filter(
+      (f) => f.key !== "classifying_var_2" && f.key !== "percent_base"
+    );
   }
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {
@@ -1108,13 +1066,14 @@ function SpecialPreview({
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   return (
-    <div className="rounded-xl border bg-muted/30 p-4">
-      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl overflow-hidden rounded-lg">
+    // Full-width, no padding — the border frames the slide; height follows the
+    // slide's aspect ratio. (SLIDE_ASPECT)
+    <div className={`relative w-full overflow-hidden rounded-lg border bg-muted/30 ${SLIDE_ASPECT}`}>
         {url ? (
           <img
             src={url}
             alt="Slide preview"
-            className="absolute inset-0 size-full rounded-md object-fill shadow-sm"
+            className="absolute inset-0 size-full object-contain"
           />
         ) : (
           !error && (
@@ -1144,12 +1103,27 @@ function SpecialPreview({
             <span className="leading-snug">{error}</span>
           </div>
         )}
-      </div>
     </div>
   );
 }
 
 // ── Special-slide controls: editable heading + bullets + Regenerate ──────────
+// Present stored bullets as editable Markdown: ensure every line shows a "*"
+// marker (legacy AI bullets are plain), preserving any existing indent/marker so
+// nesting round-trips. The renderer parses the same "*"/indent convention.
+function bulletsToMarkdown(bullets: string[]): string {
+  return bullets
+    .map((b) => {
+      const m = /^(\s*)([-*+]\s+)?(.*)$/.exec(b);
+      const indent = m?.[1] ?? "";
+      const marker = m?.[2] ?? "* ";
+      const rest = m?.[3] ?? b;
+      return rest.trim() ? `${indent}${marker}${rest}` : "";
+    })
+    .filter((l) => l !== "")
+    .join("\n");
+}
+
 function SpecialSlideControls({
   chart,
   pending,
@@ -1161,7 +1135,9 @@ function SpecialSlideControls({
   onChange: (patch: Partial<ChartSpec>) => void;
   onRegenerate: () => void;
 }) {
-  const bullets = ((chart.options?.bullets as string[] | undefined) ?? []).join("\n");
+  const bullets = bulletsToMarkdown(
+    (chart.options?.bullets as string[] | undefined) ?? []
+  );
   const [draft, setDraft] = useState(bullets);
   const focused = useRef(false);
   // Resync when the generated bullets land (or when switching slides) — but NOT
@@ -1173,10 +1149,12 @@ function SpecialSlideControls({
 
   const commit = () => {
     focused.current = false;
+    // Preserve leading whitespace (nesting) and the "*" marker; only trailing
+    // spaces and blank lines are dropped. The renderer parses "*"/indent per line.
     const next = draft
       .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+      .map((l) => l.replace(/\s+$/, ""))
+      .filter((l) => l.trim().length > 0);
     onChange({ options: { ...(chart.options ?? {}), bullets: next } });
   };
 
@@ -1189,13 +1167,20 @@ function SpecialSlideControls({
           onCommit={(v) => onChange({ slide_title: v || null })}
         />
       </Field>
-      <Field label="Bullets" hint="One bullet per line.">
+      <Field
+        label="Bullets"
+        hint="Markdown: one bullet per line starting with *. Indent two spaces to nest."
+      >
         <textarea
-          className="min-h-40 w-full rounded-md border bg-background px-3 py-2 text-sm leading-relaxed shadow-sm focus:ring-2 focus:ring-primary/30 focus:outline-none"
+          className="min-h-72 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm leading-relaxed shadow-sm focus:ring-2 focus:ring-primary/30 focus:outline-none"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
-          placeholder={pending ? "Generating…" : "One bullet per line"}
+          placeholder={
+            pending
+              ? "Generating…"
+              : "* First point\n* Second point\n  * A nested detail"
+          }
         />
       </Field>
       <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
@@ -1210,90 +1195,6 @@ function SpecialSlideControls({
   );
 }
 
-// ── Add-special-slide dialog ─────────────────────────────────────────────────
-const SPECIAL_SLIDE_CHOICES: {
-  type: string;
-  label: string;
-  description: string;
-  Icon: typeof FileTextIcon;
-}[] = [
-  {
-    type: "special_overview",
-    label: "Overview",
-    description: "Background about the research, generated from the available information.",
-    Icon: FileTextIcon,
-  },
-  {
-    type: "special_conclusion",
-    label: "Conclusion",
-    description: "The major conclusions drawn across the report's questions.",
-    Icon: ListChecksIcon,
-  },
-  {
-    type: "special_demographics",
-    label: "Demographics",
-    description: "Facts about the respondents plus a chart per demographic question.",
-    Icon: UsersIcon,
-  },
-];
-
-function AddSpecialDialog({
-  open,
-  onOpenChange,
-  existingTypes,
-  onPick,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  existingTypes: Set<string>;
-  onPick: (type: string) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add a special slide</DialogTitle>
-          <DialogDescription>
-            Special slides are written by AI from the report's data.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-2">
-          {SPECIAL_SLIDE_CHOICES.map(({ type, label, description, Icon }) => {
-            const added = existingTypes.has(type);
-            return (
-              <button
-                key={type}
-                type="button"
-                disabled={added}
-                onClick={() => {
-                  onPick(type);
-                  onOpenChange(false);
-                }}
-                className="flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50 disabled:pointer-events-none disabled:opacity-50"
-              >
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {label}
-                    {added && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        Added
-                      </span>
-                    )}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Main Configure step ─────────────────────────────────────────────────────
 // Warm ONE slide's preview into the shared cache (renders nothing).
 function PrefetchOne({
@@ -1304,11 +1205,9 @@ function PrefetchOne({
   chart: ChartSpec;
 }) {
   const grouping = useContext(GroupingCtx);
-  useChartPreview(materialId, chart, {
-    renderTitle: rendersFullSlide(chart),
-    enabled: true,
-    grouping,
-  });
+  // Warm the full-slide preview (renderTitle:true) — used by BOTH the Design
+  // preview and the Overview grid — so nothing waits on focus.
+  useChartPreview(materialId, chart, { renderTitle: true, enabled: true, grouping });
   return null;
 }
 
@@ -1349,10 +1248,7 @@ function StepConfigureInner({
   grouping,
   aiPending,
   onUpdateChart,
-  onRemoveChart,
-  onReorder,
   onEnsureTitles,
-  onAddSpecial,
   onRegenerateSpecial,
 }: {
   materialId: string;
@@ -1360,21 +1256,17 @@ function StepConfigureInner({
   grouping: GroupingOverride;
   aiPending?: AiPendingMap;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
-  onRemoveChart: (index: number) => void;
-  onReorder?: (from: number, to: number) => void;
   // Called with every chart's ref when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
   onEnsureTitles?: (refs: string[]) => void;
-  // Add / regenerate special (non-chart) slides. onAddSpecial returns the new
-  // slide's question_ref so the caller can select it.
-  onAddSpecial?: (type: string, afterRef?: string | null) => string | void;
+  // Regenerate a special (non-chart) slide's AI content. Adding/removing/reordering
+  // slides lives in the Select step now — Design only edits slide CONTENT.
   onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
   // The active slide is tracked by question_ref (not index) so inserting a slide
   // at the front or reordering never silently changes which slide is shown.
   const [active, setActive] = useState<string | null>(null);
-  const [specialDialogOpen, setSpecialDialogOpen] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [editQid, setEditQid] = useState<string | null>(null);
 
@@ -1442,51 +1334,15 @@ function StepConfigureInner({
     );
   }
 
-  // Special-slide types already in the report — disabled in the dialog so a
-  // double-click can't create duplicate Overview/Conclusion/Demographics slides.
-  const existingSpecialTypes = new Set(
-    charts.filter((c) => isSpecialSlide(c)).map((c) => c.chart_type)
-  );
-
-  // "+ Add special slide" affordance + its dialog (shown in both the empty
-  // state and the normal layout). Picking a type adds the slide and selects it.
-  const addSpecialDialog = onAddSpecial ? (
-    <AddSpecialDialog
-      open={specialDialogOpen}
-      onOpenChange={setSpecialDialogOpen}
-      existingTypes={existingSpecialTypes}
-      onPick={(type) => {
-        // Insert at the active slide's position (after it); else at the front.
-        const ref = onAddSpecial(type, active);
-        if (ref) setActive(ref);
-      }}
-    />
-  ) : null;
-
-  const addSpecialBar = onAddSpecial ? (
-    <button
-      type="button"
-      onClick={() => setSpecialDialogOpen(true)}
-      className="flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-    >
-      <PlusIcon className="size-4" />
-      Add special slide
-    </button>
-  ) : null;
-
   if (charts.length === 0) {
     return (
-      <div className="space-y-4">
-        {addSpecialBar}
-        {addSpecialDialog}
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
-          <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
-          <p className="text-sm font-medium">No charts yet</p>
-          <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-            Go back to <span className="font-medium">Select</span> and add
-            questions, or add a special slide above.
-          </p>
-        </div>
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
+        <BarChart3Icon className="mb-3 size-8 text-muted-foreground/50" />
+        <p className="text-sm font-medium">No slides yet</p>
+        <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+          Go back to <span className="font-medium">Select</span> to add questions
+          or a special slide. Design is where you shape each slide's content.
+        </p>
       </div>
     );
   }
@@ -1507,18 +1363,15 @@ function StepConfigureInner({
       {/* Background: warm every slide's preview so the deck (and the Overview
           thumbnails) are ready without clicking each slide (renders nothing). */}
       <DeckPrefetch materialId={materialId} charts={charts} />
-      {addSpecialDialog}
 
-      {/* Compact navigator (replaces the tall slide list): step, jump, or open the
-          full-screen Overview. Bulk reordering lives in Select + the Overview. */}
+      {/* Compact navigator: step, jump, or open the full-screen Overview.
+          Adding / removing / reordering slides lives in the Select step. */}
       <SlideNavigator
         charts={charts}
         activeIndex={activeIndex}
         questionMap={questionMap}
         onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
         onOpenOverview={() => setOverviewOpen(true)}
-        onAddSlide={onAddSpecial ? () => setSpecialDialogOpen(true) : undefined}
-        onRemove={() => onRemoveChart(activeIndex)}
         onEditQuestion={(qid) => setEditQid(qid)}
       />
 
@@ -1531,8 +1384,8 @@ function StepConfigureInner({
               activeGrid ? (
                 <p className="text-sm text-muted-foreground">
                   A demographics overview — the charts are chosen automatically from the
-                  respondent (age, gender, geography…) questions. Use Remove to delete this
-                  slide, or reorder it in the Overview.
+                  respondent (age, gender, geography…) questions. Remove or reorder this
+                  slide in the Select step.
                 </p>
               ) : activeBullets ? (
                 <SpecialSlideControls
@@ -1543,7 +1396,7 @@ function StepConfigureInner({
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  This slide has no options — use Remove to delete it.
+                  This slide has no options — remove it in the Select step.
                 </p>
               )
             ) : (
@@ -1595,15 +1448,6 @@ function StepConfigureInner({
         questionMap={questionMap}
         activeRef={active}
         onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
-        onReorder={onReorder}
-        onAddSlide={
-          onAddSpecial
-            ? () => {
-                setOverviewOpen(false);
-                setSpecialDialogOpen(true);
-              }
-            : undefined
-        }
       />
 
       <QuestionDetailsDialog

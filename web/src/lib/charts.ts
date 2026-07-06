@@ -34,6 +34,11 @@ export const STACKED = new Set<string>([
 
 export const SCATTER = "scatter";
 
+// The deck's slide aspect ratio as a Tailwind class — the single knob that keeps
+// every preview (Design + Overview grid) matched to the rendered slide. The deck
+// renders 16:9 widescreen (13.333"×7.5"); use "aspect-[4/3]" for 4:3.
+export const SLIDE_ASPECT = "aspect-video";
+
 export function isStacked(chartType: string): boolean {
   return STACKED.has(chartType);
 }
@@ -206,6 +211,8 @@ export function makeChart(
     slide_title: null,
     slide_description: null,
     footer_note: null,
+    // Auto-detect the cross-tab percentage direction from the variables' roles.
+    percent_base: "auto",
   };
 }
 
@@ -253,22 +260,26 @@ export function makeSpecialSlide(
   };
 }
 
-// Heuristic capacity of one special slide's body, in wrapped text lines.
-const SPECIAL_LINES_PER_SLIDE = 12;
-const SPECIAL_CHARS_PER_LINE = 64;
+// Coarse capacity of one special slide's body, in "line units" (one 16pt line ≈
+// one unit; a bullet costs its wrapped lines + 1 for the gap). Calibrated to the
+// 16:9 bullet box (~5.4" tall ⇒ ~24 units, ~90 chars per ~11.4" line), so a full
+// MAX_BULLETS list fits ONE slide and only genuinely long/overflowing content
+// spills to a second. This is an INTERIM estimate — precise, font-aware fit
+// (measuring against the *template's* font and box) is deferred to the
+// configurable-template/productization phase, so nothing here should be relied on
+// once fonts/sizes vary per template.
+const SPECIAL_LINES_PER_SLIDE = 24;
+const SPECIAL_CHARS_PER_LINE = 90;
 
-/** Pack bullets into slide-sized pages by estimated wrapped-line count, so long
- *  content spans multiple slides instead of overflowing one. */
-export function paginateBullets(
-  bullets: string[],
-  linesPerSlide = SPECIAL_LINES_PER_SLIDE
-): string[][] {
+/** Pack bullets into slide-sized pages by an estimated wrapped-line count, so long
+ *  content spans multiple slides instead of overflowing one. Approximate by design. */
+export function paginateBullets(bullets: string[]): string[][] {
   const pages: string[][] = [];
   let cur: string[] = [];
   let lines = 0;
   for (const b of bullets) {
     const cost = Math.max(1, Math.ceil(b.length / SPECIAL_CHARS_PER_LINE)) + 1; // +1 spacing
-    if (cur.length && lines + cost > linesPerSlide) {
+    if (cur.length && lines + cost > SPECIAL_LINES_PER_SLIDE) {
       pages.push(cur);
       cur = [];
       lines = 0;

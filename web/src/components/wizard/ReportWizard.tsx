@@ -200,11 +200,14 @@ export default function ReportWizard({
 
   // Drop charts whose question no longer exists (e.g. its variable was absorbed
   // into a group, or a group was split away) so Design never shows a dangling
-  // ref like "var7" that errors on preview.
+  // ref like "var7" that errors on preview. Special slides (Overview/Conclusion/
+  // Demographics) have no backing question ref, so they're always kept.
   const pruneToValidRefs = useCallback(
     (valid: Set<string>) => {
       mutate((d) => {
-        const kept = d.charts.filter((c) => valid.has(c.question_ref));
+        const kept = d.charts.filter(
+          (c) => isSpecialSlide(c) || valid.has(c.question_ref)
+        );
         return kept.length === d.charts.length ? d : { ...d, charts: kept };
       });
     },
@@ -930,9 +933,13 @@ export default function ReportWizard({
         {step === 0 && (
           <StepSelect
             materialId={materialId}
+            charts={draft.charts}
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
             onSelectMany={selectMany}
+            onReorder={reorderCharts}
+            onRemoveChart={removeChart}
+            onAddSpecial={addSpecialSlide}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}
@@ -945,10 +952,7 @@ export default function ReportWizard({
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
             onUpdateChart={updateChart}
-            onRemoveChart={removeChart}
-            onReorder={reorderCharts}
             onEnsureTitles={ensureTitles}
-            onAddSpecial={addSpecialSlide}
             onRegenerateSpecial={regenerateSpecial}
           />
         )}

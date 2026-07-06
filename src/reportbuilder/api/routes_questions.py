@@ -893,6 +893,7 @@ class ChartSpecBody(BaseModel):
     show_not_answered: bool = False
     show_empty_categories: bool = True
     not_answered_codes: list[float] | None = None
+    percent_base: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
     # The live preview must show the same headline as the rendered deck: when an
     # AI/edited slide title is set, the preview uses it instead of the question text.
@@ -953,6 +954,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         category_label_overrides=tuple(
             (str(full), str(short)) for full, short in body.category_label_overrides
         ),
+        percent_base=body.percent_base,
         slide_title=body.slide_title,
         slide_description=body.slide_description,
         footer_note=body.footer_note,
