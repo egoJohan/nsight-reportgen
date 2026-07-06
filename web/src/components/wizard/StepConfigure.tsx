@@ -1583,6 +1583,7 @@ function StepConfigureInner({
       <QuestionDetailsDialog
         materialId={materialId}
         qid={editQid}
+        readOnly
         onOpenChange={(open) => {
           if (!open) setEditQid(null);
         }}

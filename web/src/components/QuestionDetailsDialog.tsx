@@ -70,10 +70,14 @@ export default function QuestionDetailsDialog({
   materialId,
   qid,
   onOpenChange,
+  readOnly = false,
 }: {
   materialId: string;
   qid: string | null;
   onOpenChange: (open: boolean) => void;
+  // View-only: hide the material-wide edits (rename, merge words) — used when opened
+  // from within a report (Select / Design), where those changes would hit every report.
+  readOnly?: boolean;
 }) {
   const { data: s, isLoading, isError } = useQuestionSummary(materialId, qid);
   const setLabel = useSetQuestionLabel(materialId);
@@ -153,7 +157,9 @@ export default function QuestionDetailsDialog({
               </div>
             )}
 
-            {/* Editable question name — shown above the chart in reports/deck. */}
+            {/* Editable question name — shown above the chart in reports/deck.
+                Hidden in read-only mode (rename is material-wide → case page only). */}
+            {!readOnly && (
             <div>
               <label className="text-sm font-medium">Question name</label>
               <p className="mb-1.5 text-xs text-muted-foreground">
@@ -178,9 +184,11 @@ export default function QuestionDetailsDialog({
                 </Button>
               </div>
             </div>
+            )}
 
-            {/* Merge words — only for open-ended text (word-cloud) questions. */}
-            {s.measurement === "text" && qid && (
+            {/* Merge words — only for open-ended text (word-cloud) questions.
+                Also a material-wide edit → hidden in read-only mode. */}
+            {!readOnly && s.measurement === "text" && qid && (
               <div>
                 <p className="text-sm font-medium">Merge words</p>
                 <p className="mb-2 text-xs text-muted-foreground">

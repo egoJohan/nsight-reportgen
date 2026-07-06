@@ -5,7 +5,7 @@ import {
   ChevronRightIcon,
   GripVerticalIcon,
   LayoutGridIcon,
-  PencilIcon,
+  InfoIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
@@ -124,10 +124,10 @@ export function SlideNavigator({
         <Button
           variant="outline"
           size="icon-lg"
-          title="Edit question"
+          title="View question details"
           onClick={() => onEditQuestion(cur.question_ref)}
         >
-          <PencilIcon className="size-4" />
+          <InfoIcon className="size-4" />
         </Button>
       )}
       <Button

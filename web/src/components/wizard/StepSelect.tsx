@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CheckCheckIcon, SquareIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon } from "lucide-react";
+import { CheckIcon, CheckCheckIcon, SquareIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { Question, GroupingOverride, BatterySuggestion } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
+import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 
 // A question whose only compatible chart type is the word cloud (an open-ended
 // free-text question). It's chartable — just rendered as a cloud, not a bar.
@@ -65,6 +66,20 @@ export default function StepSelect({
   const [search, setSearch] = useState("");
   const [groupingOpen, setGroupingOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  // Per-row "⋮" menu: which row's menu is open, and which question's details dialog to show.
+  const [menuQid, setMenuQid] = useState<string | null>(null);
+  const [detailQid, setDetailQid] = useState<string | null>(null);
+
+  // Close the open row menu on any click outside a menu (the trigger + menu carry
+  // data-rowmenu, so clicking the trigger just toggles — no close-then-reopen flicker).
+  useEffect(() => {
+    if (!menuQid) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as Element).closest("[data-rowmenu]")) setMenuQid(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuQid]);
 
   const sKey = (vars: string[]) => [...vars].sort().join(",");
   const activeSuggestions = (suggestions ?? []).filter(
@@ -242,64 +257,97 @@ export default function StepSelect({
         onSave={onGroupingChange}
       />
 
+      <QuestionDetailsDialog
+        materialId={materialId}
+        qid={detailQid}
+        readOnly
+        onOpenChange={(open) => !open && setDetailQid(null)}
+      />
+
       <div className="space-y-1.5">
         {filtered.map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
           return (
-            <button
-              key={q.qid}
-              disabled={!isChartable}
-              onClick={() => isChartable && onToggle(q)}
-              title={!isChartable ? q.non_chartable_reason ?? undefined : undefined}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                !isChartable
-                  ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
-                  : isAdded
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border hover:bg-muted/50"
-              )}
-            >
-              <span
+            <div key={q.qid} className="relative">
+              <button
+                disabled={!isChartable}
+                onClick={() => isChartable && onToggle(q)}
+                title={!isChartable ? q.non_chartable_reason ?? undefined : undefined}
                 className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                  "flex w-full items-center gap-3 rounded-lg border py-2.5 pr-11 pl-3 text-left transition-colors",
                   !isChartable
-                    ? "border-dashed border-muted-foreground/30"
+                    ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
                     : isAdded
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-input"
+                      ? "border-primary/40 bg-primary/5"
+                      : "border-border hover:bg-muted/50"
                 )}
               >
-                {isAdded && <CheckIcon className="size-3.5" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="line-clamp-2 text-sm leading-snug">
-                  {q.text}
-                </span>
-                <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
-                  {q.qid}
-                </span>
-              </span>
-              <KindBadge q={q} />
-              {isChartable && isWordcloudOnly(q) && (
-                <Badge
-                  variant="outline"
-                  className="shrink-0 whitespace-nowrap border-teal-300 bg-teal-50 font-normal text-teal-700"
+                <span
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                    !isChartable
+                      ? "border-dashed border-muted-foreground/30"
+                      : isAdded
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-input"
+                  )}
                 >
-                  Word cloud
-                </Badge>
-              )}
-              {!isChartable && (
-                <Badge
-                  variant="outline"
-                  className="shrink-0 whitespace-nowrap border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
-                  title={q.non_chartable_reason ?? undefined}
+                  {isAdded && <CheckIcon className="size-3.5" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-sm leading-snug">
+                    {q.text}
+                  </span>
+                  <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
+                    {q.qid}
+                  </span>
+                </span>
+                <KindBadge q={q} />
+                {isChartable && isWordcloudOnly(q) && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 whitespace-nowrap border-teal-300 bg-teal-50 font-normal text-teal-700"
+                  >
+                    Word cloud
+                  </Badge>
+                )}
+                {!isChartable && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 whitespace-nowrap border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
+                    title={q.non_chartable_reason ?? undefined}
+                  >
+                    Not chartable
+                  </Badge>
+                )}
+              </button>
+              {/* ⋮ row menu — sits outside the toggle button so it never toggles the row */}
+              <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
+                <button
+                  type="button"
+                  title="More…"
+                  onClick={() => setMenuQid(menuQid === q.qid ? null : q.qid)}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  Not chartable
-                </Badge>
-              )}
-            </button>
+                  <MoreVerticalIcon className="size-4" />
+                </button>
+                {menuQid === q.qid && (
+                  <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailQid(q.qid);
+                        setMenuQid(null);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
+                    >
+                      <InfoIcon className="size-4 text-muted-foreground" /> View details
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           );
         })}
         {filtered.length === 0 && (
