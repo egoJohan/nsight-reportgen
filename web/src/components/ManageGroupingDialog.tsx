@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers2Icon, BarChart3Icon, Undo2Icon, GitCompareIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,12 +45,16 @@ export default function ManageGroupingDialog({
   onOpenChange,
   grouping,
   onSave,
+  suggestion,
 }: {
   materialId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   grouping: GroupingOverride;
   onSave: (override: GroupingOverride) => void;
+  // When opened from a suggestion: applied as a reviewable Change on top of the current
+  // grouping, so the user reviews it in the Changes rail and Applies (or undoes) it.
+  suggestion?: GroupSpec | null;
 }) {
   const { data: variables } = useVariables(open ? materialId : null, true);
 
@@ -154,6 +158,22 @@ export default function ManageGroupingDialog({
     setChanges([]);
     setSeeded(true);
   }, [open, seeded, grouping]);
+
+  // When opened FROM a suggestion, apply it as a reviewable Change on top of the seeded
+  // grouping — so it appears in the Changes rail (revertible) and the user Applies it.
+  const suggestionApplied = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      suggestionApplied.current = false;
+      return;
+    }
+    if (!seeded || suggestionApplied.current || !suggestion) return;
+    suggestionApplied.current = true;
+    const n = suggestion.variables.length;
+    record(`Suggested battery — review these ${n} statements, then Apply`);
+    setGroups((g) => [...g, { ...suggestion }]);
+    setSingles((s) => s.filter((v) => !suggestion.variables.includes(v)));
+  }, [open, seeded, suggestion]);
 
   // Cards = the multi/battery questions the backend forms from the working grouping
   // (label = the REAL title). Manual = the var-set is in our groups list; else auto.
@@ -340,33 +360,6 @@ export default function ManageGroupingDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 gap-3">
-          {/* Structure rail — always-on view of the current grouping */}
-          <div className="flex w-48 shrink-0 flex-col rounded-lg border">
-            <div className="border-b px-3 py-2">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Structure</span>
-            </div>
-            <div className="flex-1 space-y-0.5 overflow-y-auto p-2 text-sm">
-              <div className="flex items-center rounded px-2 py-1 font-medium text-muted-foreground">
-                <span className="flex-1">Questions</span>
-                <span className="tabular-nums">{counts.total - counts.comparison}</span>
-              </div>
-              <div className="flex items-center gap-2 rounded px-2 py-1 pl-4">
-                <span className="rounded bg-muted px-1 text-[10px] font-medium uppercase">multi</span>
-                <span className="flex-1">Multi</span>
-                <span className="tabular-nums text-muted-foreground">{counts.multi}</span>
-              </div>
-              <div className="flex items-center gap-2 rounded px-2 py-1 pl-4">
-                <span className="rounded bg-violet-100 px-1 text-[10px] font-medium uppercase text-violet-700">battery</span>
-                <span className="flex-1">Battery</span>
-                <span className="tabular-nums text-muted-foreground">{counts.battery}</span>
-              </div>
-              <div className="mt-1 flex items-center rounded px-2 py-1 font-medium text-muted-foreground">
-                <span className="flex-1">Comparisons</span>
-                <span className="tabular-nums">{counts.comparison}</span>
-              </div>
-            </div>
-          </div>
-
           {/* Working area */}
           <div className="flex min-h-0 flex-1 flex-col gap-2">
             <div className="flex items-center gap-3">

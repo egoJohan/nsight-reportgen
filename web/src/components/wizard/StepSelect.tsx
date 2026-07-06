@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Question, GroupingOverride, BatterySuggestion } from "@/lib/api";
+import type { Question, GroupingOverride, GroupSpec, BatterySuggestion } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -65,9 +65,9 @@ export default function StepSelect({
   const { data: suggestions } = useBatterySuggestions(materialId, grouping);
   const [search, setSearch] = useState("");
   const [groupingOpen, setGroupingOpen] = useState(false);
-  // When the dialog is opened from a suggestion, seed it with that suggested grouping so
-  // the user reviews it before applying (null = open with the report's current grouping).
-  const [dialogSeed, setDialogSeed] = useState<GroupingOverride | null>(null);
+  // When the dialog is opened from a suggestion, pass it so the dialog applies it as a
+  // reviewable Change (null = open the dialog on the report's current grouping).
+  const [dialogSuggestion, setDialogSuggestion] = useState<GroupSpec | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   // Per-row "⋮" menu: which row's menu is open, and which question's details dialog to show.
   const [menuQid, setMenuQid] = useState<string | null>(null);
@@ -93,15 +93,9 @@ export default function StepSelect({
     // Default label from the first few statements; the user can rename in the dialog.
     const label =
       s.labels.slice(0, 3).join(" · ") + (s.labels.length > 3 ? " …" : "");
-    // Open the grouping dialog PRE-FILLED with the suggested battery, so the user can
-    // review/adjust it before applying — rather than applying it silently.
-    setDialogSeed({
-      ...grouping,
-      groups: [
-        ...grouping.groups,
-        { kind: "battery", variables: s.variables, label },
-      ],
-    });
+    // Open the grouping dialog with the suggestion as a reviewable Change (the user
+    // reviews it in the Changes rail, then Applies or undoes it).
+    setDialogSuggestion({ kind: "battery", variables: s.variables, label });
     setGroupingOpen(true);
   }
 
@@ -188,7 +182,7 @@ export default function StepSelect({
           size="sm"
           className="shrink-0"
           onClick={() => {
-            setDialogSeed(null);
+            setDialogSuggestion(null);
             setGroupingOpen(true);
           }}
         >
@@ -233,13 +227,10 @@ export default function StepSelect({
                   {s.variables.length} consecutive questions share a rating scale —
                   group them as a battery (stacked comparison)?
                 </p>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {s.labels.join(" · ")}
-                </p>
               </div>
               <div className="flex shrink-0 gap-1">
                 <Button size="sm" className="h-7" onClick={() => groupAsBattery(s)}>
-                  Group as battery
+                  View suggestion
                 </Button>
                 <Button
                   size="sm"
@@ -262,7 +253,8 @@ export default function StepSelect({
         materialId={materialId}
         open={groupingOpen}
         onOpenChange={setGroupingOpen}
-        grouping={dialogSeed ?? grouping}
+        grouping={grouping}
+        suggestion={dialogSuggestion}
         onSave={onGroupingChange}
       />
 
