@@ -122,10 +122,11 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         slide_title = (getattr(ctx.spec, "slide_title", None) or "").strip()
         slide_description = (getattr(ctx.spec, "slide_description", None) or "").strip()
         title = slide_title or question
-        if slide_title and question and slide_title != question:
-            secondary = question
-        else:
-            secondary = slide_description
+        # Subtitle (the line just above the chart) is the editable slide_description; when
+        # blank it defaults to the QUESTION — but only when the title is a DISTINCT headline
+        # (otherwise the title already IS the question, so no redundant subtitle).
+        has_distinct_title = bool(slide_title) and slide_title != question
+        secondary = slide_description or (question if has_distinct_title else "")
         if title:
             # Title font steps down with length so a long key message stays readable.
             t_size = 18 if len(title) <= 60 else (16 if len(title) <= 110 else 14)

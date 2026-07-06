@@ -141,10 +141,14 @@ function ChartPreview({
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
 
   const headline = chart.slide_title?.trim() || questionText;
-  // Show the actual question text under the headline when the headline is a
-  // distinct AI key-message (so the question is always visible at the top).
-  const showQuestion =
+  // The subtitle (just above the chart) is the editable slide_description; when blank it
+  // defaults to the QUESTION, but only when the headline is a distinct AI key-message
+  // (otherwise the headline already IS the question). Mirrors slide_chrome.
+  const hasDistinctTitle =
     !!chart.slide_title?.trim() && chart.slide_title.trim() !== questionText;
+  const subtitle =
+    chart.slide_description?.trim() || (hasDistinctTitle ? questionText : "");
+  const showQuestion = !!subtitle;
   const region = labelRegion(chart.chart_type);
 
   return (
@@ -197,8 +201,8 @@ function ChartPreview({
                   style={{ left: "4%", width: "92%", bottom: "77%" }}
                 >
                   <div className="w-1 shrink-0" aria-hidden />
-                  <p className="min-w-0 text-left text-[13px] leading-tight font-semibold text-muted-foreground">
-                    {questionText}
+                  <p className="min-w-0 text-left text-[13px] leading-tight font-semibold whitespace-pre-line text-muted-foreground">
+                    {subtitle}
                   </p>
                 </div>
               )}
@@ -733,6 +737,11 @@ function ChartControls({
         questionText={question?.text ?? chart.question_ref}
         onChange={onChange}
       />
+      <SubtitleField
+        chart={chart}
+        questionText={question?.text ?? chart.question_ref}
+        onChange={onChange}
+      />
       <FooterNoteField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
@@ -774,6 +783,32 @@ function SlideTitleField({
   );
 }
 
+// ── Editable subtitle (the question line shown just above the chart) ──────────
+function SubtitleField({
+  chart,
+  questionText,
+  onChange,
+}: {
+  chart: ChartSpec;
+  questionText: string;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <Field label="Subtitle">
+      <Textarea
+        value={chart.slide_description ?? questionText}
+        rows={2}
+        className="resize-y"
+        onChange={(e) => onChange({ slide_description: e.target.value || null })}
+      />
+      <p className="text-xs text-muted-foreground">
+        The question line shown just above the chart. Defaults to the question text; edits
+        are saved to this report only — they don’t rename the question.
+      </p>
+    </Field>
+  );
+}
+
 // ── Editable methodology footer (the N notation at the slide's bottom-left) ───
 function FooterNoteField({
   chart,
@@ -785,14 +820,12 @@ function FooterNoteField({
   return (
     <Field label="Footer / N notation">
       <Input
-        value={chart.footer_note ?? ""}
-        placeholder="e.g. N = {n}"
+        value={chart.footer_note ?? "N = {n}"}
         onChange={(e) => onChange({ footer_note: e.target.value || null })}
       />
       <p className="text-xs text-muted-foreground">
-        The methodology line at the bottom-left of the slide. Leave blank for the default
-        “N = 950”. Write <code>{"{n}"}</code> for the respondent count and{" "}
-        <code>{"{stat}"}</code> for the statistic label — e.g.{" "}
+        The methodology line at the bottom-left of the slide. <code>{"{n}"}</code> = the
+        respondent count, <code>{"{stat}"}</code> = the statistic label — e.g.{" "}
         <code>{"{stat} · n = {n}"}</code> → “Osuus vastaajista (%) · n = 950”.
       </p>
     </Field>
@@ -991,24 +1024,17 @@ function CategoryLabelEditor({
       </div>
       <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
         {(question.category_labels ?? []).map((full, i) => (
-          <div
+          <LabelOverrideInput
             key={`${full}-${i}`}
-            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
-          >
-            <span className="text-sm leading-snug text-muted-foreground break-words">
-              {full}
-            </span>
-            <LabelOverrideInput
-              full={full}
-              value={overrideMap.get(full) ?? ""}
-              onCommit={(v) => setOverride(full, v)}
-            />
-          </div>
+            full={full}
+            value={overrideMap.get(full) ?? full}
+            onCommit={(v) => setOverride(full, v)}
+          />
         ))}
       </div>
       <p className="text-xs text-muted-foreground">
-        Edit the short label shown in the chart, or let AI shorten them all.
-        Leave blank to use the full label.
+        The label shown in the chart for each category — edit to shorten, or let AI shorten
+        them all. Restoring the full label removes the override.
       </p>
     </div>
   );
