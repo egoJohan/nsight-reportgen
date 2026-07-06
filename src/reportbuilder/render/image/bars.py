@@ -24,6 +24,7 @@ House style applied:
 from __future__ import annotations
 
 import math
+import re
 import textwrap
 
 import numpy as np
@@ -206,19 +207,37 @@ def _rowmajor_legend(handles, labels, ncol):
     return [handles[k] for k in order], [labels[k] for k in order]
 
 
+def _leading_number(label: str) -> int | None:
+    """The integer a legend label starts with ('1 - Täysin eri mieltä' → 1, '2' → 2), or
+    None when it doesn't begin with a number (a categorical group like 'Uusimaa')."""
+    m = re.match(r"\s*(\d+)", str(label))
+    return int(m.group(1)) if m else None
+
+
 def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
     bbox_inches='tight' expands the figure to include it."""
-    ncol = min(n_segs, 5)
     handles, labels = ax.get_legend_handles_labels()
-    handles, labels = _rowmajor_legend(handles, labels, ncol)
+    # A numeric rating scale (every level starts with its point number, e.g. "1 - Täysin
+    # eri mieltä", "2", … "7 - …") shows JUST the numbers in the legend — the endpoint
+    # wording moves to the subtitle. Keeps the legend short and even (no ragged gaps from
+    # long endpoint labels stacking under bare numbers).
+    nums = [_leading_number(l) for l in labels]
+    numeric_scale = len(nums) >= 3 and all(n is not None for n in nums)
+    if numeric_scale:
+        labels = [str(n) for n in nums]
+    # ≤7 short items go on ONE row; larger sets wrap into ≤5 columns (row-major).
+    one_row = n_segs <= 7 and (numeric_scale or n_segs <= 5)
+    ncol = n_segs if one_row else min(n_segs, 5)
+    if not one_row:
+        handles, labels = _rowmajor_legend(handles, labels, ncol)
     leg = ax.legend(
         handles, labels,
         loc="upper center", bbox_to_anchor=(0.5, y),
         ncol=ncol, frameon=False, fontsize=9.5,
-        handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
+        handlelength=1.1, columnspacing=1.2, handletextpad=0.5,
     )
     if leg is not None:
         for t in leg.get_texts():

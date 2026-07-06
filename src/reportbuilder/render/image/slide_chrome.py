@@ -18,6 +18,8 @@ Slide-text polish (R2):
 """
 from __future__ import annotations
 
+import re
+
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
@@ -26,6 +28,27 @@ from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
 
 _FONT = "Liberation Sans"
 _IN = Inches(1)
+
+_STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
+
+
+def _scale_endpoint_gloss(categories) -> str:
+    """For a numeric rating scale whose levels read '1 - Täysin eri mieltä' … '7 - Täysin
+    samaa mieltä' (bare numbers in the middle), return the endpoint gloss
+    '1 = Täysin eri mieltä · 7 = Täysin samaa mieltä' — the wording that moves off the
+    (numbers-only) legend into the subtitle. Empty when the categories aren't such a
+    scale, or neither endpoint carries a description."""
+    cats = [str(c) for c in categories]
+    if len(cats) < 3:
+        return ""
+    parsed = []
+    for c in cats:
+        m = re.match(r"\s*(\d+)\s*[-–:.)]?\s*(.*)", c)
+        if not m:
+            return ""  # a non-numeric level → not a numeric scale
+        parsed.append((m.group(1), m.group(2).strip()))
+    ends = [f"{n} = {desc}" for n, desc in (parsed[0], parsed[-1]) if desc]
+    return " · ".join(ends)
 
 # Statistic → Finnish methodology label (generic; no question-specific text)
 _STAT_FOOTER: dict[str, str] = {
@@ -127,6 +150,12 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # (otherwise the title already IS the question, so no redundant subtitle).
         has_distinct_title = bool(slide_title) and slide_title != question
         secondary = slide_description or (question if has_distinct_title else "")
+        # On a STACKED bar the scale sits in the legend as bare numbers; move the endpoint
+        # wording (1 = … · 7 = …) into the subtitle so the meaning isn't lost. (customer)
+        if getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES:
+            gloss = _scale_endpoint_gloss(ctx.series.categories)
+            if gloss:
+                secondary = f"{secondary}   {gloss}" if secondary else gloss
         if title:
             # Title font steps down with length so a long key message stays readable.
             t_size = 18 if len(title) <= 60 else (16 if len(title) <= 110 else 14)
