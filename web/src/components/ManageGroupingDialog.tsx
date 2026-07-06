@@ -181,23 +181,27 @@ export default function ManageGroupingDialog({
       }));
   }, [workingReshaped, groups]);
 
-  const groupedVars = useMemo(
-    () => new Set(cards.flatMap((c) => c.variables)),
-    [cards]
-  );
+  // How many groups each variable is already in — a variable may belong to several
+  // (the same statement can be compared in more than one battery/multi).
+  const groupCountOf = useMemo(() => {
+    const m = new Map<string, number>();
+    cards.forEach((c) => c.variables.forEach((v) => m.set(v, (m.get(v) ?? 0) + 1)));
+    return m;
+  }, [cards]);
 
-  // Pool = groupable variables not currently in a group: tick-boxes (multi) OR
-  // shared-scale rating variables (battery). Lone-scale demographics are excluded.
+  // Pool = every groupable variable (tick-boxes → multi, shared-scale ratings → battery).
+  // Already-grouped variables STAY available so they can be reused in another group; the
+  // row shows an "in a group" tag. Lone-scale demographics are excluded.
   const pool = useMemo(() => {
     const names = (variables ?? [])
-      .filter((v) => kindOf.has(v.name) && !groupedVars.has(v.name))
+      .filter((v) => kindOf.has(v.name))
       .map((v) => v.name);
     // Float the frozen initial selection to the top (so the suggestion is visible on
     // open); based on the FROZEN set, so items don't reorder as the user toggles.
     const topSet = new Set(initialTop);
     const top = initialTop.filter((n) => names.includes(n));
     return [...top, ...names.filter((n) => !topSet.has(n))];
-  }, [variables, kindOf, groupedVars, initialTop]);
+  }, [variables, kindOf, initialTop]);
 
   function toggle(name: string) {
     setSelected((prev) => {
@@ -404,6 +408,12 @@ export default function ManageGroupingDialog({
                       {selected.has(name) ? "✓" : ""}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{labelOf.get(name) ?? name}</span>
+                    {groupCountOf.get(name) ? (
+                      <span className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-medium text-amber-700">
+                        in {groupCountOf.get(name)} group
+                        {(groupCountOf.get(name) ?? 0) > 1 ? "s" : ""}
+                      </span>
+                    ) : null}
                     <span
                       className={`shrink-0 rounded px-1 text-[9px] font-medium uppercase ${
                         kindOf.get(name) === "scale"
