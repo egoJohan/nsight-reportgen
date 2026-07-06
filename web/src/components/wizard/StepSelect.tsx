@@ -104,6 +104,16 @@ export default function StepSelect({
   // Newly-created group qids — briefly highlighted in the list so the user sees what the
   // grouping produced when they return from the dialog.
   const [highlightQids, setHighlightQids] = useState<Set<string>>(new Set());
+  const highlightRef = useRef<HTMLDivElement | null>(null);
+  // Scroll the highlighted new group into view so the flash is actually visible.
+  useEffect(() => {
+    if (highlightQids.size === 0) return;
+    const h = setTimeout(
+      () => highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      120
+    );
+    return () => clearTimeout(h);
+  }, [highlightQids]);
   useEffect(() => {
     if (!questions) return;
     const current = new Set(questions.map((q) => q.qid));
@@ -282,7 +292,11 @@ export default function StepSelect({
           const isChartable = q.chartable !== false;
           const justCreated = highlightQids.has(q.qid);
           return (
-            <div key={q.qid} className="relative">
+            <div
+              key={q.qid}
+              ref={justCreated ? highlightRef : undefined}
+              className="relative"
+            >
               <button
                 disabled={!isChartable}
                 onClick={() => isChartable && onToggle(q)}
