@@ -62,6 +62,9 @@ export default function ManageGroupingDialog({
   const [groups, setGroups] = useState<GroupSpec[]>([]);
   const [singles, setSingles] = useState<string[]>([]);
   const [comparisons, setComparisons] = useState<ComparisonSpec[]>([]);
+  // The pre-selected variables FROZEN at open — floats them to the top of the pool once,
+  // so the suggested set is visible without the list re-sorting as the user toggles.
+  const [initialTop, setInitialTop] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
@@ -158,6 +161,7 @@ export default function ManageGroupingDialog({
     // Pre-select the suggested variables (if any) — the user reviews the selection and
     // clicks "Group as battery" to create it; nothing is grouped automatically.
     setSelected(new Set(initialSelection ?? []));
+    setInitialTop([...(initialSelection ?? [])]);
     setChanges([]);
     setSeeded(true);
   }, [open, seeded, grouping, initialSelection]);
@@ -184,13 +188,16 @@ export default function ManageGroupingDialog({
 
   // Pool = groupable variables not currently in a group: tick-boxes (multi) OR
   // shared-scale rating variables (battery). Lone-scale demographics are excluded.
-  const pool = useMemo(
-    () =>
-      (variables ?? [])
-        .filter((v) => kindOf.has(v.name) && !groupedVars.has(v.name))
-        .map((v) => v.name),
-    [variables, kindOf, groupedVars]
-  );
+  const pool = useMemo(() => {
+    const names = (variables ?? [])
+      .filter((v) => kindOf.has(v.name) && !groupedVars.has(v.name))
+      .map((v) => v.name);
+    // Float the frozen initial selection to the top (so the suggestion is visible on
+    // open); based on the FROZEN set, so items don't reorder as the user toggles.
+    const topSet = new Set(initialTop);
+    const top = initialTop.filter((n) => names.includes(n));
+    return [...top, ...names.filter((n) => !topSet.has(n))];
+  }, [variables, kindOf, groupedVars, initialTop]);
 
   function toggle(name: string) {
     setSelected((prev) => {
