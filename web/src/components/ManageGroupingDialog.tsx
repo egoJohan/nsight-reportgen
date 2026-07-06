@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { GroupingOverride, GroupSpec, ComparisonSpec, Variable } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   useRegroupedQuestions,
   useParallelSuggestions,
@@ -65,6 +66,9 @@ export default function ManageGroupingDialog({
   // The pre-selected variables FROZEN at open — floats them to the top of the pool once,
   // so the suggested set is visible without the list re-sorting as the user toggles.
   const [initialTop, setInitialTop] = useState<string[]>([]);
+  // The var-set key of the group just created/extended — highlights that card so the user
+  // sees what they made. Cleared on open.
+  const [justCreatedKey, setJustCreatedKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
   const [seeded, setSeeded] = useState(false);
@@ -162,6 +166,7 @@ export default function ManageGroupingDialog({
     // clicks "Group as battery" to create it; nothing is grouped automatically.
     setSelected(new Set(initialSelection ?? []));
     setInitialTop([...(initialSelection ?? [])]);
+    setJustCreatedKey(null);
     setChanges([]);
     setSeeded(true);
   }, [open, seeded, grouping, initialSelection]);
@@ -223,6 +228,7 @@ export default function ManageGroupingDialog({
     // Grouping wins over a forced-single: clear any lingering singles for these vars
     // (e.g. re-grouping right after an ungroup) so they aren't in both lists.
     setSingles((s) => s.filter((n) => !selected.has(n)));
+    setJustCreatedKey(setKey(vars));
     setSelected(new Set());
     setGroupName("");
   }
@@ -268,6 +274,7 @@ export default function ManageGroupingDialog({
       return [...others, { kind: card.kind, variables: combined, label: existing?.label ?? "" }];
     });
     setSingles((s) => s.filter((n) => !add.includes(n)));
+    setJustCreatedKey(setKey(combined));
     setSelected(new Set());
   }
 
@@ -477,8 +484,15 @@ export default function ManageGroupingDialog({
               ) : (
                 cards.map((card) => {
                   const addable = canAddTo(card);
+                  const justCreated = setKey(card.variables) === justCreatedKey;
                   return (
-                  <div key={card.key} className="rounded-md border p-2">
+                  <div
+                    key={card.key}
+                    className={cn(
+                      "rounded-md border p-2 transition-colors",
+                      justCreated && "border-primary bg-primary/5 ring-1 ring-primary"
+                    )}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{card.label}</p>
