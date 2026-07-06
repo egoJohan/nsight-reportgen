@@ -191,6 +191,8 @@ export interface AiSlideTitleBody {
   number_format?: NumberFormat;
   show_not_answered?: boolean;
   not_answered_codes?: number[] | null;
+  // The report's grouping, so a title for a grouped question (battery/multi) resolves.
+  grouping?: GroupingOverride;
 }
 
 export interface AiShortLabelsBody {

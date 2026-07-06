@@ -32,6 +32,7 @@ from reportbuilder.ai.text import (
 )
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_questions import _category_labels
+from reportbuilder.ingest.grouping_override import apply_grouping_override
 from reportbuilder.api.model_loader import (
     df_model_for_material,
     df_model_label_for_material,
@@ -155,6 +156,10 @@ class SlideTitleBody(BaseModel):
     not_answered_codes: list[float] | None = None
     show_empty_categories: bool = True
     top_n: int = 3
+    # The report's grouping override, so a title for a GROUPED question (battery/multi)
+    # resolves the same qid the report uses; without it the base model has no
+    # "battery-…"/"multi-…" qid and the request 404s → the slide keeps its raw question.
+    grouping: dict | None = None
 
 
 class ShortLabelsBody(BaseModel):
@@ -201,6 +206,10 @@ def ai_slide_title(
     """
     try:
         df, model = _load_df_model(material_id, client)
+        # Apply the report's grouping so battery/multi qids resolve (REQ: AI titles for
+        # combined questions). No-op when the caller sends no grouping.
+        if body.grouping:
+            model = apply_grouping_override(model, body.grouping)
     except HTTPException:
         raise
     except Exception as exc:  # data load is part of the AI flow — degrade to 503

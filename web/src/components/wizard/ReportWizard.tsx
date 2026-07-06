@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatReportDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
-import { useReport, useUpdateReport, useQuestions } from "@/lib/queries";
+import { useReport, useUpdateReport, useRegroupedQuestions } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import {
   buildDemographicsGrids,
@@ -211,15 +211,17 @@ export default function ReportWizard({
     [mutate]
   );
 
-  // SAV (questionnaire) order: rank each question by its position in the source
-  // file so newly added slides land in questionnaire order, matching how the
-  // source decks are sequenced (the user can still drag to reorder).
-  const { data: orderedQuestions } = useQuestions(materialId);
+  // Rank each question by its position in the REGROUPED list — the exact order Select
+  // shows — so a newly added slide lands where Select has it. Using the regrouped list
+  // (not the base questions) means GROUPED questions (battery/multi/comparison) get a
+  // rank too; keyed only by the base qids, their "battery-…" qid was undefined → Infinity
+  // → the slide sorted to the BOTTOM in Design. (The user can still drag to reorder.)
+  const { data: orderedQuestions } = useRegroupedQuestions(
+    materialId,
+    draft?.grouping ?? { groups: [], singles: [] }
+  );
   const qRank = useMemo(() => {
     const m = new Map<string, number>();
-    // Questionnaire (SAV) order — the SAME order Select shows, so Design's initial
-    // slide sequence matches Select. Demographics are NOT floated to the front (that
-    // made Design disagree with Select); the user can still drag any slide up in Design.
     (orderedQuestions ?? []).forEach((q, i) => m.set(q.qid, i));
     return m;
   }, [orderedQuestions]);
@@ -439,6 +441,7 @@ export default function ReportWizard({
               .aiSlideTitle(materialId, {
                 question_ref: ref,
                 statistic: chart.statistic,
+                grouping: draftRef.current?.grouping,
               })
               .then(({ title }) => {
                 if (title) updateChartByRef(ref, { slide_title: title });
@@ -462,6 +465,7 @@ export default function ReportWizard({
           classifying_var: chart.classifying_var,
           show_not_answered: chart.show_not_answered,
           not_answered_codes: chart.not_answered_codes,
+          grouping: draftRef.current?.grouping,
         });
         if (title) updateChartByRef(ref, { slide_title: title });
       } catch {
