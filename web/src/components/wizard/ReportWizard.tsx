@@ -268,6 +268,47 @@ export default function ReportWizard({
     [mutate, qRank]
   );
 
+  // Batch add/remove charts for many questions at once (Select-phase "Select all /
+  // Deselect all"). One mutate so it's a single undo step and never toggles each ref.
+  const selectMany = useCallback(
+    (questions: Question[], select: boolean) => {
+      const qids = new Set(questions.map((q) => q.qid));
+      mutate((d) => {
+        if (!select) {
+          // Drop these questions' charts; special slides (overview/conclusion) stay.
+          return {
+            ...d,
+            charts: normalizeSlots(
+              d.charts.filter((c) => isSpecialSlide(c) || !qids.has(c.question_ref))
+            ),
+          };
+        }
+        const present = new Set(
+          d.charts.filter((c) => !isSpecialSlide(c)).map((c) => c.question_ref)
+        );
+        const additions = questions
+          .filter((q) => !present.has(q.qid))
+          .map((q) => makeChart(q.qid, q.suggested_chart_type));
+        if (additions.length === 0) return d;
+        // Rebuild: front special slides, then all question charts in SAV rank order,
+        // then a trailing conclusion slide — matching single-toggle insertion.
+        const front: ChartSpec[] = [];
+        const conclusion: ChartSpec[] = [];
+        const qCharts: ChartSpec[] = [];
+        for (const c of d.charts) {
+          if (isSpecialSlide(c)) {
+            (c.chart_type === "special_conclusion" ? conclusion : front).push(c);
+          } else qCharts.push(c);
+        }
+        const rank = (c: ChartSpec) =>
+          qRank.get(c.question_ref) ?? Number.POSITIVE_INFINITY;
+        const ordered = [...qCharts, ...additions].sort((a, b) => rank(a) - rank(b));
+        return { ...d, charts: normalizeSlots([...front, ...ordered, ...conclusion]) };
+      });
+    },
+    [mutate, qRank]
+  );
+
   const updateChart = useCallback(
     (index: number, patch: Partial<ChartSpec>) => {
       mutate((d) => ({
@@ -883,6 +924,7 @@ export default function ReportWizard({
             materialId={materialId}
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
+            onSelectMany={selectMany}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}

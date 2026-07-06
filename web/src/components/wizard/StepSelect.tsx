@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon } from "lucide-react";
+import { CheckIcon, CheckCheckIcon, SquareIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ export default function StepSelect({
   materialId,
   addedRefs,
   onToggle,
+  onSelectMany,
   grouping,
   onGroupingChange,
   onPruneRefs,
@@ -51,6 +52,7 @@ export default function StepSelect({
   materialId: string;
   addedRefs: Set<string>;
   onToggle: (question: Question) => void;
+  onSelectMany: (questions: Question[], select: boolean) => void;
   grouping: GroupingOverride;
   onGroupingChange: (override: GroupingOverride) => void;
   onPruneRefs: (validQids: Set<string>) => void;
@@ -140,6 +142,14 @@ export default function StepSelect({
     addedRefs.has(q.qid)
   ).length;
 
+  // "Select all / Deselect all" acts on the currently-VISIBLE chartable questions
+  // (so a search scopes it) — turning a big deck into a small one, or vice-versa, in
+  // one click instead of toggling every row.
+  const chartableFiltered = filtered.filter((q) => q.chartable !== false);
+  const allSelected =
+    chartableFiltered.length > 0 &&
+    chartableFiltered.every((q) => addedRefs.has(q.qid));
+
   return (
     <div>
       <div className="mb-4 flex items-center gap-3">
@@ -161,6 +171,26 @@ export default function StepSelect({
           <Layers2Icon className="size-4" />
           Manage grouping
         </Button>
+        {chartableFiltered.length > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0 text-muted-foreground"
+            onClick={() => onSelectMany(chartableFiltered, !allSelected)}
+            title={
+              allSelected
+                ? "Deselect every question shown below"
+                : "Select every question shown below"
+            }
+          >
+            {allSelected ? (
+              <SquareIcon className="size-4" />
+            ) : (
+              <CheckCheckIcon className="size-4" />
+            )}
+            {allSelected ? "Deselect all" : "Select all"}
+          </Button>
+        )}
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {selectedCount} selected · {filtered.length} questions
         </span>
