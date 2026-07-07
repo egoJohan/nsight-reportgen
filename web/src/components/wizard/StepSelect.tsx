@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon, Trash2Icon, PlusIcon } from "lucide-react";
+import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,8 +109,6 @@ export default function StepSelect({
   addedRefs: Set<string>;
   onToggle: (question: Question) => void;
   onSelectMany: (questions: Question[], select: boolean) => void;
-  // Deck operations — all affect only this report, never the material.
-  onReorder: (from: number, to: number) => void;
   onRemoveChart: (index: number) => void;
   onAddSpecial: (type: string, afterRef?: string | null) => string | void;
   grouping: GroupingOverride;
@@ -418,37 +416,61 @@ export default function StepSelect({
         </div>
       </div>
 
-      {/* Special slides (added via the button) — kept at the top so nothing is hidden. */}
+      {/* Special slides (added via the button) — same row style as the questions:
+          a (checked) box, title + type line, a badge and a ⋮ menu. Kept at the top
+          so nothing is hidden. Clicking the box removes the slide. */}
       {charts.some((c) => isSpecialSlide(c)) && (
         <div className="mb-1.5 space-y-1.5">
           {charts.map((c, i) =>
             isSpecialSlide(c) ? (
-              <div
-                key={`special-${c.question_ref}-${i}`}
-                className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 py-2.5 pr-2 pl-3"
-              >
-                <span className="min-w-0 flex-1 line-clamp-1 text-sm">
-                  {slideTitle(c, questionMap)}
-                </span>
-                <Badge variant="outline" className="shrink-0 whitespace-nowrap font-normal">
-                  Special slide
-                </Badge>
+              <div key={`special-${c.question_ref}-${i}`} className="relative">
                 <button
                   type="button"
-                  title="Details"
-                  onClick={() => setSpecialInfoChart(c)}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <InfoIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  title="Remove slide"
                   onClick={() => onRemoveChart(i)}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                  title="Selected — click to remove from this report"
+                  className="flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 py-2.5 pr-11 pl-3 text-left transition-colors"
                 >
-                  <Trash2Icon className="size-4" />
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
+                    <CheckIcon className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-2 text-sm leading-snug">
+                      {slideTitle(c, questionMap)}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      Bullets, Special
+                    </span>
+                  </span>
+                  <Badge variant="secondary" className="shrink-0 whitespace-nowrap font-normal">
+                    Special
+                  </Badge>
                 </button>
+                <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
+                  <button
+                    type="button"
+                    title="More…"
+                    onClick={() =>
+                      setMenuQid(menuQid === c.question_ref ? null : c.question_ref)
+                    }
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <MoreVerticalIcon className="size-4" />
+                  </button>
+                  {menuQid === c.question_ref && (
+                    <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpecialInfoChart(c);
+                          setMenuQid(null);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
+                      >
+                        <InfoIcon className="size-4 text-muted-foreground" /> View details
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : null
           )}

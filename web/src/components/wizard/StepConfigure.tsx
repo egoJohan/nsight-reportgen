@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import {
   AlertCircleIcon,
   BarChart3Icon,
+  GripVerticalIcon,
   ImageIcon,
   InfoIcon,
   Loader2Icon,
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
+import { useDragReorder } from "@/lib/useDragReorder";
 import { slideTitle } from "@/components/wizard/SlideGrid";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import {
@@ -1255,6 +1257,7 @@ function StepConfigureInner({
   aiPending,
   active,
   setActive,
+  onReorder,
   onUpdateChart,
   onEnsureTitles,
   onRegenerateSpecial,
@@ -1267,6 +1270,8 @@ function StepConfigureInner({
   // select a slide and jump here to edit it.
   active: string | null;
   setActive: (ref: string | null) => void;
+  // Drag-reorder the report's slides in the left list (affects this report only).
+  onReorder: (from: number, to: number) => void;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   // Called with every chart's ref when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
@@ -1277,7 +1282,9 @@ function StepConfigureInner({
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
   const [editQid, setEditQid] = useState<string | null>(null);
-  const activeRowRef = useRef<HTMLButtonElement>(null);
+  const activeRowRef = useRef<HTMLDivElement>(null);
+  // Drag-reorder the slide list.
+  const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(onReorder);
   // Scroll the active row into view when the selection changes (← / → or a jump
   // back from the Preview grid) so the highlighted slide is always visible.
   useEffect(() => {
@@ -1395,31 +1402,48 @@ function StepConfigureInner({
           Navigation only: add / remove / reorder live in the Select step. */}
       <div className="grid grid-cols-[300px_minmax(0,1fr)] items-stretch gap-4">
         <div className="relative min-h-[16rem]">
-          <div className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1">
+          <div
+            ref={containerRef as React.RefObject<HTMLDivElement>}
+            className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1"
+          >
             {charts.map((c, i) => {
               const isActive = c.question_ref === active;
               return (
-                <button
+                <div
                   key={`${c.question_ref}-${i}`}
+                  {...itemProps(i)}
                   ref={isActive ? activeRowRef : undefined}
-                  onClick={() => setActive(c.question_ref)}
                   className={cn(
-                    // Selection is shown by the background tint only — suppress the
-                    // browser/focus-visible outline so the row never gets a border.
-                    "flex w-full items-center gap-2 px-3 py-2 text-left outline-none transition-colors focus:outline-none focus-visible:outline-none focus-visible:ring-0",
-                    isActive ? "bg-primary/10" : "hover:bg-muted/50"
+                    "flex items-center gap-1 rounded-md transition-colors",
+                    isActive ? "bg-primary/10" : "hover:bg-muted/50",
+                    dragIndex === i && "opacity-40",
+                    dragIndex !== null &&
+                      overIndex === i &&
+                      dragIndex !== i &&
+                      "ring-2 ring-primary"
                   )}
                 >
-                  <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {i + 1}
+                  <span
+                    className="shrink-0 cursor-grab pl-1 text-muted-foreground/40 hover:text-muted-foreground"
+                    title="Drag to reorder — affects this report only"
+                  >
+                    <GripVerticalIcon className="size-4" />
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {slideSubtitle(c, questionMap)}
+                  <button
+                    onClick={() => setActive(c.question_ref)}
+                    className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
+                  >
+                    <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                      {i + 1}
                     </span>
-                  </span>
-                </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {slideSubtitle(c, questionMap)}
+                      </span>
+                    </span>
+                  </button>
+                </div>
               );
             })}
           </div>

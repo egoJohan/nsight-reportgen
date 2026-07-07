@@ -121,15 +121,11 @@ export default function ReportsSection({
 
   function handleCreate() {
     const name = `Report ${orderedReports.length + 1}`;
-    // Pre-select every question by default: seed the report with a chart per
-    // question. Demographics (age/gender/region/…) are floated to the FRONT
-    // (a stable sort keeps questionnaire/SAV order within each group); the user
-    // removes the ones they don't want in the Select step.
-    const ordered = [...(questions ?? [])].sort(
-      (a, b) => (a.is_demographic ? 0 : 1) - (b.is_demographic ? 0 : 1)
-    );
+    // Pre-select every question by default, in the material's own SAV/SPSS order
+    // (the same order the survey uses) so the user doesn't have to hunt for the
+    // right sequence. They remove the ones they don't want in the Select step.
     const charts = normalizeSlots(
-      ordered.map((q) => makeChart(q.qid, q.suggested_chart_type))
+      (questions ?? []).map((q) => makeChart(q.qid, q.suggested_chart_type))
     );
     createReport.mutate(
       { name, render_mode: "image", template_ref: "", charts },

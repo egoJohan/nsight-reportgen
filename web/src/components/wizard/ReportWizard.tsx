@@ -951,7 +951,6 @@ export default function ReportWizard({
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
             onSelectMany={selectMany}
-            onReorder={reorderCharts}
             onRemoveChart={removeChart}
             onAddSpecial={addSpecialSlide}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
@@ -967,6 +966,7 @@ export default function ReportWizard({
             aiPending={aiPending}
             active={active}
             setActive={setActive}
+            onReorder={reorderCharts}
             onUpdateChart={updateChart}
             onEnsureTitles={ensureTitles}
             onRegenerateSpecial={regenerateSpecial}
