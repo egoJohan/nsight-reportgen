@@ -474,6 +474,10 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
         questions.append({
             "qid": q.qid,
             "kind": q.kind,
+            # Overall measurement label ('text' / 'multi' / 'rating battery' /
+            # categorical / scale …) — mirrors question_summary so the browse list
+            # and the details dialog show the same tag.
+            "measurement": "text" if _is_text_question(model, q) else _question_measurement(model, q),
             "variables": list(q.variables),
             "text": q.text,
             "chartable": chartable,

@@ -75,26 +75,38 @@ function StatusIcon({ q }: { q: Question }) {
   );
 }
 
-// ---- Kind badge ----
-function KindBadge({ q }: { q: Question }) {
-  if (q.kind === "battery") {
-    return (
-      <Badge variant="secondary" className="whitespace-nowrap border-violet-200 bg-violet-50 font-normal text-violet-700">
-        Battery · {q.variables.length}
-      </Badge>
-    );
-  }
-  if (q.kind === "multi") {
-    return (
-      <Badge variant="secondary" className="whitespace-nowrap font-normal">
-        Multi · {q.variables.length}
-      </Badge>
-    );
-  }
+// ---- Type tags (under the question title) — mirrors the details dialog: a kind
+// label plus the measurement, e.g. "Multi-response · 10" or "Single" + "text". ----
+function QuestionTags({ q }: { q: Question }) {
+  const kindLabel =
+    q.kind === "battery"
+      ? `rating battery · ${q.variables.length}`
+      : q.kind === "multi"
+        ? `multi-response · ${q.variables.length}`
+        : q.kind === "comparison"
+          ? `comparison · ${q.variables.length}`
+          : "single";
+  // The measurement adds info only for single/comparison questions — for multi and
+  // battery it just repeats the kind label.
+  const showMeasurement =
+    !!q.measurement && q.measurement !== "multi" && q.measurement !== "rating battery";
   return (
-    <Badge variant="outline" className="whitespace-nowrap font-normal">
-      Single
-    </Badge>
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      <Badge
+        variant="outline"
+        className="border-violet-200 bg-violet-50 font-normal lowercase text-violet-700"
+      >
+        {kindLabel}
+      </Badge>
+      {showMeasurement && (
+        <Badge
+          variant="outline"
+          className="border-teal-200 bg-teal-50 font-normal lowercase text-teal-700"
+        >
+          {q.measurement}
+        </Badge>
+      )}
+    </div>
   );
 }
 
@@ -191,7 +203,6 @@ function QuestionTable({
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead className="py-3">Question</TableHead>
-                <TableHead className="w-32 whitespace-nowrap py-3">Type</TableHead>
                 <TableHead className="w-24 whitespace-nowrap py-3 text-center">Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -209,12 +220,7 @@ function QuestionTable({
                     <p className="text-sm leading-snug line-clamp-2 break-words">
                       {q.text}
                     </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground font-mono">
-                      {q.qid}
-                    </p>
-                  </TableCell>
-                  <TableCell className="py-3 align-top">
-                    <KindBadge q={q} />
+                    <QuestionTags q={q} />
                   </TableCell>
                   <TableCell className="py-3 align-top text-center">
                     <StatusIcon q={q} />

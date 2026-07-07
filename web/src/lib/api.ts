@@ -20,6 +20,9 @@ export interface ValueLabel {
 export interface Question {
   qid: string;
   kind: "single" | "multi" | "battery" | "comparison";
+  // Overall measurement label: "text" / "multi" / "rating battery" / "categorical" /
+  // "scale" … — shown as a tag in the browse list + details dialog.
+  measurement: string;
   variables: string[];
   text: string;
   // Member qids for a comparison (overlaid parallel questions); [] otherwise.
