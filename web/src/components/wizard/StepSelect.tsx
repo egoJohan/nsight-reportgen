@@ -15,19 +15,11 @@ import { cn } from "@/lib/utils";
 import type { Question, GroupingOverride, BatterySuggestion, ChartSpec } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
 import { useDragReorder } from "@/lib/useDragReorder";
-import { chartTypeLabel, isSpecialSlide } from "@/lib/charts";
+import { isSpecialSlide, slideSubtitle } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
 import { slideTitle } from "@/components/wizard/SlideNavigator";
-
-// Human labels for a question's kind, shown in the deck-row subtitle.
-const KIND_LABELS: Record<string, string> = {
-  single: "Single",
-  multi: "Multi",
-  battery: "Battery",
-  comparison: "Comparison",
-};
 
 // ── The report's deck: its slides in order, drag-reorderable + removable ──────
 // This is the report's OWN ordering (the charts array). Reordering/removing here
@@ -57,15 +49,7 @@ function DeckList({
       {charts.map((c, i) => {
         const special = isSpecialSlide(c);
         const justCreated = highlightQids.has(c.question_ref);
-        const q = questionMap.get(c.question_ref);
-        const kindLabel = q ? KIND_LABELS[q.kind] ?? q.kind : null;
-        // Subtitle: "<Chart Type>, <Question Type>" (e.g. "Pie Chart, Battery");
-        // special slides read "Bullets, Special".
-        const subtitle = special
-          ? "Bullets, Special"
-          : kindLabel
-            ? `${chartTypeLabel(c.chart_type)}, ${kindLabel}`
-            : chartTypeLabel(c.chart_type);
+        const subtitle = slideSubtitle(c, questionMap);
         return (
           <div
             key={`${c.question_ref}-${i}`}

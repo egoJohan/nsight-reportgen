@@ -2,6 +2,7 @@ import type {
   ChartElements,
   ChartSpec,
   NumberFormat,
+  Question,
   SortSpec,
 } from "./api";
 
@@ -91,6 +92,29 @@ export function chartTypeLabel(id: string): string {
     SPECIAL_SLIDE_LABELS[id] ??
     id
   );
+}
+
+// Human labels for a question's kind, shown in deck/list row subtitles.
+const KIND_LABELS: Record<string, string> = {
+  single: "Single",
+  multi: "Multi",
+  battery: "Battery",
+  comparison: "Comparison",
+};
+
+/** Deck/list row subtitle: "<Chart Type>, <Question Type>" (e.g. "Pie Chart,
+ * Battery"), or "Bullets, Special" for a special slide. Shared by the Select deck
+ * and the Design slide list so both read identically. */
+export function slideSubtitle(
+  chart: ChartSpec,
+  questionMap: Map<string, Question>
+): string {
+  if (isSpecialSlide(chart)) return "Bullets, Special";
+  const q = questionMap.get(chart.question_ref);
+  const kind = q ? KIND_LABELS[q.kind] ?? q.kind : null;
+  return kind
+    ? `${chartTypeLabel(chart.chart_type)}, ${kind}`
+    : chartTypeLabel(chart.chart_type);
 }
 
 /** base-ui Select renders the raw value unless given an items map; these resolve labels. */
