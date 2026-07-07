@@ -386,19 +386,20 @@ export default function StepSelect({
             placeholder="Search questions…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 pr-9"
+            className="pl-9"
           />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              title="Clear search"
-              className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <XIcon className="size-4" />
-            </button>
-          )}
         </div>
+        {search && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0"
+            onClick={() => setSearch("")}
+            title="Clear search"
+          >
+            <XIcon className="size-4" />
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -491,7 +492,10 @@ export default function StepSelect({
         onPick={(type) => onAddSpecial(type, null)}
       />
 
-      <div className="space-y-1.5">
+      {/* Cap the pool's height + scroll internally so a full pool (e.g. right after
+          Unselect all) never pushes the "Slides in this report" row past the fold —
+          that row and its Select all / Unselect all buttons stay put. */}
+      <div className="max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
         {pool.map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
