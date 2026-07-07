@@ -235,25 +235,7 @@ export default function StepDownload({
           title="Report PDF preview"
           className="h-[640px] w-full rounded-xl border"
         />
-      ) : (
-        !error && (
-          <div className="flex h-[640px] w-full flex-col items-center justify-center gap-4 rounded-xl border border-dashed bg-muted/20 text-center">
-            <div className="flex size-12 items-center justify-center rounded-xl bg-muted">
-              <PresentationIcon className="size-6 text-muted-foreground" />
-            </div>
-            <div className="max-w-sm">
-              <p className="text-sm font-medium">
-                {noCharts ? "No slides to render" : "Ready to generate"}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {noCharts
-                  ? "Add and configure charts first — each becomes a slide."
-                  : "Press Generate deck to render the slides into a PDF preview here, then download the PDF or PowerPoint."}
-              </p>
-            </div>
-          </div>
-        )
-      )}
+      ) : null}
     </div>
   );
 }

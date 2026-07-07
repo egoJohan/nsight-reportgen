@@ -219,6 +219,13 @@ export default function StepSelect({
   );
   const { data: suggestions } = useBatterySuggestions(materialId, grouping);
   const [search, setSearch] = useState("");
+  // Debounce the search so filtering the (large) question list doesn't recompute on
+  // every keystroke — the input stays responsive; the pool filters shortly after.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const h = setTimeout(() => setDebouncedSearch(search), 180);
+    return () => clearTimeout(h);
+  }, [search]);
   const [groupingOpen, setGroupingOpen] = useState(false);
   // When the dialog is opened from a suggestion, these variables are pre-selected in it so
   // the user reviews the selection and groups it themselves ([] = open on current grouping).
@@ -303,9 +310,9 @@ export default function StepSelect({
   const filtered = useMemo(
     () =>
       (questions ?? []).filter((q) =>
-        q.text.toLowerCase().includes(search.toLowerCase())
+        q.text.toLowerCase().includes(debouncedSearch.toLowerCase())
       ),
-    [questions, search]
+    [questions, debouncedSearch]
   );
 
   // Titles for the deck rows (a question's text, or a special slide's heading).
@@ -350,6 +357,11 @@ export default function StepSelect({
   // "Add all shown" adds every chartable question currently visible in the pool
   // (a search scopes it) in one click.
   const addablePool = pool.filter((q) => q.chartable !== false);
+  // Deck-level select / unselect all (customer): clear every question from the
+  // report, or add them all — a big time-saver when building a small report from a
+  // material with many variables. Special slides are unaffected.
+  const allChartable = (questions ?? []).filter((q) => q.chartable !== false);
+  const addedQuestions = (questions ?? []).filter((q) => addedRefs.has(q.qid));
 
   return (
     <div>
@@ -564,14 +576,37 @@ export default function StepSelect({
         <p className="text-sm font-medium">
           Slides in this report{charts.length > 0 ? ` · ${charts.length}` : ""}
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={() => setAddSpecialOpen(true)}
-        >
-          <PlusIcon className="size-4" /> Add special slide
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {addedQuestions.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => onSelectMany(addedQuestions, false)}
+              title="Remove every question from this report (special slides stay)"
+            >
+              <XIcon className="size-4" /> Unselect all
+            </Button>
+          )}
+          {allChartable.length > addedQuestions.length && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => onSelectMany(allChartable, true)}
+              title="Add every question in the material to this report"
+            >
+              <CheckCheckIcon className="size-4" /> Select all
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAddSpecialOpen(true)}
+          >
+            <PlusIcon className="size-4" /> Add special slide
+          </Button>
+        </div>
       </div>
       {charts.length > 0 ? (
         <DeckList
