@@ -222,8 +222,10 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
     (the 'total'). `with_row_summary` appends the right-hand summary column fields
     (stacked HORIZONTAL bar only)."""
     return (statistic_field(), classifying_var_field(), percent_base_field(),
-            *_common_tail(sort_stacked=True),
-            *(row_summary_fields() if with_row_summary else ()))
+            # Row-summary column up front (right after the data options) so it's easy
+            # to find — it's the headline feature of a stacked Likert battery.
+            *(row_summary_fields() if with_row_summary else ()),
+            *_common_tail(sort_stacked=True))
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:
