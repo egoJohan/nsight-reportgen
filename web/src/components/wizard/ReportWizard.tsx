@@ -477,7 +477,9 @@ export default function ReportWizard({
         return;
       }
       try {
-        const { title, subtitle } = await api.materials.aiSlideTitle(materialId, {
+        // Only the headline (slide_title) is AI-generated. The subtitle is left to
+        // default to the MATERIAL question text (deterministic), not an AI line.
+        const { title } = await api.materials.aiSlideTitle(materialId, {
           question_ref: ref,
           statistic: chart.statistic,
           classifying_var: chart.classifying_var,
@@ -487,9 +489,6 @@ export default function ReportWizard({
         });
         const patch: Partial<ChartSpec> = {};
         if (title) patch.slide_title = title;
-        // A grouped question (battery/multi) gets an AI subtitle describing the whole
-        // set — only apply it when the author hasn't set their own subtitle.
-        if (subtitle && !chart.slide_description) patch.slide_description = subtitle;
         if (Object.keys(patch).length) updateChartByRef(ref, patch);
       } catch {
         /* graceful: fall back to the question text */
