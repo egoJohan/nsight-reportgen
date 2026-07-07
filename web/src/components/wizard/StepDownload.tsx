@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import type { Question, ReportDoc } from "@/lib/api";
 import { useRegroupedQuestions, useRenderReport } from "@/lib/queries";
 import { downloadBlob, safeFileName } from "@/lib/download";
-import { SlideGrid } from "@/components/wizard/SlideNavigator";
+import { SlideGrid } from "@/components/wizard/SlideGrid";
 
 export default function StepDownload({
   caseId,

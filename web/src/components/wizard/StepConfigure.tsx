@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
-import { slideTitle } from "@/components/wizard/SlideNavigator";
+import { slideTitle } from "@/components/wizard/SlideGrid";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import {
   CHART_TYPES,

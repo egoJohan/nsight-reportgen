@@ -19,7 +19,7 @@ import { isSpecialSlide, slideSubtitle } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
-import { slideTitle } from "@/components/wizard/SlideNavigator";
+import { slideTitle } from "@/components/wizard/SlideGrid";
 
 // ── The report's deck: its slides in order, drag-reorderable + removable ──────
 // This is the report's OWN ordering (the charts array). Reordering/removing here
