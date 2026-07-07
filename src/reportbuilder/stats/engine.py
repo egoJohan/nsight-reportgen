@@ -980,6 +980,46 @@ def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         cells=cells, base_n=base_n, statistic="pct")
 
 
+def _compute_row_summaries(spec, statements, levels, points, cells):
+    """One summary value per statement (bar) for the right-hand row-summary column,
+    or None when the feature is off. `levels` are the stack labels in ascending
+    `points` order; `points[i]` is the numeric scale value of `levels[i]`;
+    `cells[(level, stmt)].pct` is the % of that level for that statement. Aligned to
+    `statements` (the bars). (spec 2026-07-07-row-summary-column)"""
+    fn = getattr(spec, "row_summary_fn", "none")
+    if fn == "none" or not levels or not statements:
+        return None
+    label_by_point = {p: lbl for p, lbl in zip(points, levels)}
+
+    def cell_pct(lvl, stmt):
+        c = cells.get((lvl, stmt))
+        return (c.pct or 0.0) if c else 0.0
+
+    def picked(codes):
+        return [label_by_point[p] for p in codes if p in label_by_point]
+
+    nf = spec.number_format
+    decimals = nf.mean_decimals if fn == "mean" else nf.pct_decimals
+    out = []
+    for stmt in statements:
+        if fn in ("top2_sum", "top3_sum"):
+            n_top = 3 if fn == "top3_sum" else 2
+            val = sum(cell_pct(l, stmt) for l in levels[-n_top:])
+        elif fn == "sum":
+            val = sum(cell_pct(l, stmt) for l in picked(spec.row_summary_codes))
+        elif fn == "net":
+            val = (sum(cell_pct(l, stmt) for l in picked(spec.row_summary_pos_codes))
+                   - sum(cell_pct(l, stmt) for l in picked(spec.row_summary_neg_codes)))
+        elif fn == "mean":
+            num = sum(p * cell_pct(lbl, stmt) for p, lbl in zip(points, levels))
+            den = sum(cell_pct(lbl, stmt) for lbl in levels)
+            val = (num / den) if den else 0.0
+        else:
+            val = 0.0
+        out.append(round(val, decimals))
+    return tuple(out)
+
+
 def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
                      model: QuestionModel) -> SeriesResult:
     """A rating battery rendered as a 100%-STACKED distribution.
@@ -1033,5 +1073,8 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         )
 
     base_n = {"Total": int(answered_any.sum()), **base_by_stmt}
-    return SeriesResult(categories=tuple(levels), segments=tuple(statements),
-                        cells=cells, base_n=base_n, statistic="pct")
+    return SeriesResult(
+        categories=tuple(levels), segments=tuple(statements),
+        cells=cells, base_n=base_n, statistic="pct",
+        row_summaries=_compute_row_summaries(spec, statements, levels, points, cells),
+    )
