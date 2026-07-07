@@ -33,6 +33,7 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   isDemographicsGrid,
+  isThemes,
   isWordcloud,
   rendersAsBullets,
   rendersFullSlide,
@@ -1362,9 +1363,25 @@ function StepConfigureInner({
     : -1;
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
+  // A "themes" chart is an open-ended question rendered as bullets — unlike a true
+  // special slide it HAS an alternative chart type (word cloud), so it keeps a
+  // chart-type picker AND the bullet editor.
+  const activeThemes = activeChart ? isThemes(activeChart) : false;
   const activeGrid = activeChart ? isDemographicsGrid(activeChart) : false;
   const activeBulletsPending =
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
+
+  // Update the active chart; when the type switches TO themes with no bullets yet,
+  // kick off theme-bullet generation so the slide isn't empty (a plain updateChart
+  // only patches the type — nothing would generate the bullets otherwise).
+  const handleChange = (patch: Partial<ChartSpec>) => {
+    if (!activeChart) return;
+    onUpdateChart(activeIndex, patch);
+    const hasBullets = !!(activeChart.options?.bullets as string[] | undefined)?.length;
+    if (patch.chart_type === "themes" && !hasBullets) {
+      onRegenerateSpecial?.({ ...activeChart, ...patch });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -1459,6 +1476,22 @@ function StepConfigureInner({
                 respondent (age, gender, geography…) questions. Remove or reorder this
                 slide in the Select step.
               </p>
+            ) : activeThemes ? (
+              // Open-ended themes: keep the chart-type picker (themes ↔ word cloud)
+              // AND the bullet editor + regenerate.
+              <div className="space-y-4">
+                <ChartTypeField
+                  chart={activeChart}
+                  question={questionMap.get(activeChart.question_ref)}
+                  onChange={handleChange}
+                />
+                <SpecialSlideControls
+                  chart={activeChart}
+                  pending={activeBulletsPending}
+                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
+                  onRegenerate={() => onRegenerateSpecial?.(activeChart)}
+                />
+              </div>
             ) : activeBullets ? (
               <SpecialSlideControls
                 chart={activeChart}
@@ -1476,7 +1509,7 @@ function StepConfigureInner({
               chart={activeChart}
               materialId={materialId}
               question={questionMap.get(activeChart.question_ref)}
-              onChange={(patch) => onUpdateChart(activeIndex, patch)}
+              onChange={handleChange}
             />
           )}
         </div>
