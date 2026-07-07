@@ -307,13 +307,27 @@ export default function StepSelect({
     return () => clearTimeout(h);
   }, [highlightQids]);
 
-  const filtered = useMemo(
-    () =>
-      (questions ?? []).filter((q) =>
-        q.text.toLowerCase().includes(debouncedSearch.toLowerCase())
-      ),
-    [questions, debouncedSearch]
-  );
+  const filtered = useMemo(() => {
+    const needle = debouncedSearch.trim().toLowerCase();
+    if (!needle) return questions ?? [];
+    // Match ANY of a question's data — text, name/id, kind, measurement, variable
+    // names, and category / value labels — so the search finds a question however
+    // the user remembers it.
+    return (questions ?? []).filter((q) => {
+      const hay = [
+        q.text,
+        q.qid,
+        q.kind,
+        q.measurement,
+        ...(q.variables ?? []),
+        ...(q.category_labels ?? []),
+        ...((q.values ?? []).map((v) => v.label)),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [questions, debouncedSearch]);
 
   // Titles for the deck rows (a question's text, or a special slide's heading).
   const questionMap = useMemo(() => {
@@ -354,9 +368,6 @@ export default function StepSelect({
   // The pool lists only questions NOT already in the report — added questions
   // live in the deck above (with a deselect checkbox), so one never appears twice.
   const pool = filtered.filter((q) => !addedRefs.has(q.qid));
-  // "Add all shown" adds every chartable question currently visible in the pool
-  // (a search scopes it) in one click.
-  const addablePool = pool.filter((q) => q.chartable !== false);
   // Deck-level select / unselect all (customer): clear every question from the
   // report, or add them all — a big time-saver when building a small report from a
   // material with many variables. Special slides are unaffected.
@@ -367,6 +378,7 @@ export default function StepSelect({
     <div>
       {/* ── Add questions: browse the material's questions and add each as a
           slide. The report's deck (order / removal) is below. ── */}
+      <p className="mb-2 text-sm font-medium">Add questions</p>
       <div className="mb-4 flex items-center gap-3">
         <div className="relative max-w-sm flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -374,8 +386,18 @@ export default function StepSelect({
             placeholder="Search questions…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+            className="pl-9 pr-9"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              title="Clear search"
+              className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <XIcon className="size-4" />
+            </button>
+          )}
         </div>
         <Button
           variant="outline"
@@ -389,18 +411,14 @@ export default function StepSelect({
           <Layers2Icon className="size-4" />
           Manage grouping
         </Button>
-        {addablePool.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0 text-muted-foreground"
-            onClick={() => onSelectMany(addablePool, true)}
-            title="Add every question shown below to the report"
-          >
-            <CheckCheckIcon className="size-4" />
-            Add all shown
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => setAddSpecialOpen(true)}
+        >
+          <PlusIcon className="size-4" /> Add special slide
+        </Button>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {charts.length} in report · {pool.length} to add
         </span>
@@ -580,7 +598,6 @@ export default function StepSelect({
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground"
             disabled={allChartable.length <= addedQuestions.length}
             onClick={() => onSelectMany(allChartable, true)}
             title="Add every question in the material to this report"
@@ -590,19 +607,11 @@ export default function StepSelect({
           <Button
             variant="ghost"
             size="sm"
-            className="text-muted-foreground"
             disabled={addedQuestions.length === 0}
             onClick={() => onSelectMany(addedQuestions, false)}
             title="Remove every question from this report (special slides stay)"
           >
             <XIcon className="size-4" /> Unselect all
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAddSpecialOpen(true)}
-          >
-            <PlusIcon className="size-4" /> Add special slide
           </Button>
         </div>
       </div>
