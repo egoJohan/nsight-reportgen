@@ -1362,49 +1362,46 @@ function StepConfigureInner({
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 
   return (
-    <div className="grid grid-cols-[300px_minmax(0,1fr)] items-stretch gap-4">
+    <div className="space-y-4">
       {/* Background: warm every slide's preview so the deck (and the Preview grid)
           are ready without clicking each slide (renders nothing). */}
       <DeckPrefetch materialId={materialId} charts={charts} />
 
-      {/* LEFT: the slide list. Height-bound to the right column via an absolutely
-          positioned scroll area — the list never grows the row; the preview + config
-          on the right set the height and the list scrolls inside it. Navigation only:
-          add / remove / reorder live in the Select step. */}
-      <div className="relative min-h-[24rem]">
-        <div className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1">
-          {charts.map((c, i) => {
-            const isActive = c.question_ref === active;
-            return (
-              <button
-                key={`${c.question_ref}-${i}`}
-                ref={isActive ? activeRowRef : undefined}
-                onClick={() => setActive(c.question_ref)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg border bg-card py-2 pr-2 pl-2 text-left transition-colors",
-                  isActive
-                    ? "border-primary bg-primary/5 ring-1 ring-primary"
-                    : "hover:border-primary/40"
-                )}
-              >
-                <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                  {i + 1}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {slideSubtitle(c, questionMap)}
+      {/* Top: slide list (left) + preview (right), EQUAL HEIGHT. The list is an
+          absolutely-positioned scroll area so it never grows the row — the PREVIEW
+          sets the row height and the list scrolls inside it to match exactly.
+          Navigation only: add / remove / reorder live in the Select step. */}
+      <div className="grid grid-cols-[300px_minmax(0,1fr)] items-stretch gap-4">
+        <div className="relative min-h-[16rem]">
+          <div className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1">
+            {charts.map((c, i) => {
+              const isActive = c.question_ref === active;
+              return (
+                <button
+                  key={`${c.question_ref}-${i}`}
+                  ref={isActive ? activeRowRef : undefined}
+                  onClick={() => setActive(c.question_ref)}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
+                    isActive ? "bg-primary/10" : "hover:bg-muted/50"
+                  )}
+                >
+                  <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                    {i + 1}
                   </span>
-                </span>
-              </button>
-            );
-          })}
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {slideSubtitle(c, questionMap)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      {/* RIGHT: preview on top, configuration below. */}
-      {activeChart && (
-        <div className="space-y-4">
+        {activeChart && (
           <div className="relative">
             {activeSpecial ? (
               <SpecialPreview
@@ -1442,38 +1439,39 @@ function StepConfigureInner({
               </button>
             )}
           </div>
+        )}
+      </div>
 
-          {/* Configuration — 2-column at this wider width (ConfigForm honours the
-              existing col-span-2 widgets); capped to a readable max width. */}
-          <div className="max-w-4xl rounded-xl border bg-card p-4">
-            {activeSpecial ? (
-              activeGrid ? (
-                <p className="text-sm text-muted-foreground">
-                  A demographics overview — the charts are chosen automatically from the
-                  respondent (age, gender, geography…) questions. Remove or reorder this
-                  slide in the Select step.
-                </p>
-              ) : activeBullets ? (
-                <SpecialSlideControls
-                  chart={activeChart}
-                  pending={activeBulletsPending}
-                  onChange={(patch) => onUpdateChart(activeIndex, patch)}
-                  onRegenerate={() => onRegenerateSpecial?.(activeChart)}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  This slide has no options — remove it in the Select step.
-                </p>
-              )
-            ) : (
-              <ChartControls
+      {/* Configuration — full width below the list + preview. */}
+      {activeChart && (
+        <div className="rounded-xl border bg-card p-4">
+          {activeSpecial ? (
+            activeGrid ? (
+              <p className="text-sm text-muted-foreground">
+                A demographics overview — the charts are chosen automatically from the
+                respondent (age, gender, geography…) questions. Remove or reorder this
+                slide in the Select step.
+              </p>
+            ) : activeBullets ? (
+              <SpecialSlideControls
                 chart={activeChart}
-                materialId={materialId}
-                question={questionMap.get(activeChart.question_ref)}
+                pending={activeBulletsPending}
                 onChange={(patch) => onUpdateChart(activeIndex, patch)}
+                onRegenerate={() => onRegenerateSpecial?.(activeChart)}
               />
-            )}
-          </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                This slide has no options — remove it in the Select step.
+              </p>
+            )
+          ) : (
+            <ChartControls
+              chart={activeChart}
+              materialId={materialId}
+              question={questionMap.get(activeChart.question_ref)}
+              onChange={(patch) => onUpdateChart(activeIndex, patch)}
+            />
+          )}
         </div>
       )}
 
