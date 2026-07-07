@@ -38,6 +38,38 @@ from reportbuilder.render.house_style import (
     series_colors, scale_colors, INK, MUTED, GRIDC,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
+from reportbuilder.model.report import default_label
+
+
+def _format_summary(val: float, fn: str, nf) -> str:
+    """Format one row-summary value: mean → decimal (3.8); net → signed points
+    (+51); sums/top → percent (65 %)."""
+    if fn == "mean":
+        return f"{val:.{nf.mean_decimals}f}"
+    if fn == "net":
+        return f"{val:+.{nf.pct_decimals}f}"
+    s = f"{val:.{nf.pct_decimals}f}"
+    return f"{s} %" if nf.show_pct_sign else s
+
+
+def _draw_row_summary(ctx, ax, y) -> None:
+    """Right-hand per-row summary column (row_summary feature): a header above the
+    top bar and one value per bar, aligned to `y`. No-op when the series carries no
+    row_summaries. (spec 2026-07-07-row-summary-column)"""
+    rs = ctx.series.row_summaries
+    if not rs:
+        return
+    fn = ctx.spec.row_summary_fn
+    nf = ctx.spec.number_format
+    header = ctx.spec.row_summary_label or default_label(fn)
+    ax.set_xlim(0, 118)                                   # reserve ~15% strip on the right
+    ax.set_ylim(min(y) - 0.7, max(y) + 1.2)               # room for the header row
+    col_x = 109.0
+    ax.text(col_x, max(y) + 0.9, header, ha="center", va="center",
+            fontsize=9.0, fontweight="bold", color=MUTED, zorder=6)
+    for yi, val in zip(y, rs):
+        ax.text(col_x, yi, _format_summary(val, fn, nf), ha="center", va="center",
+                fontsize=11.0, fontweight="bold", color=INK, zorder=6)
 
 # ---------------------------------------------------------------------------
 # Label-wrap constants — labels are wrapped, never truncated/ellipsis-cut.
@@ -776,6 +808,7 @@ def build_image_bar_stacked(ctx) -> None:
         ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
+    _draw_row_summary(ctx, ax, y)  # right-hand per-row summary column (if configured)
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))
