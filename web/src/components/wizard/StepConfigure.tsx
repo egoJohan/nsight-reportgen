@@ -1283,10 +1283,14 @@ function StepConfigureInner({
     activeRowRef.current?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  // ← / → step to the previous / next slide — ignored while typing in a field.
+  // ↑ / ↓ (and ← / →) step to the previous / next slide instead of scrolling —
+  // ignored while typing in a field. The active row auto-scrolls into view, so the
+  // list never needs manual scrolling.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const prev = e.key === "ArrowUp" || e.key === "ArrowLeft";
+      const next = e.key === "ArrowDown" || e.key === "ArrowRight";
+      if (!prev && !next) return;
       const el = document.activeElement as HTMLElement | null;
       if (
         el &&
@@ -1296,14 +1300,15 @@ function StepConfigureInner({
           el.isContentEditable)
       )
         return;
+      // Handle the key here (stop the page/list from scrolling) even at the ends.
+      e.preventDefault();
       const cur = Math.max(0, charts.findIndex((c) => c.question_ref === active));
-      const next = Math.max(
+      const target = Math.max(
         0,
-        Math.min(charts.length - 1, e.key === "ArrowLeft" ? cur - 1 : cur + 1)
+        Math.min(charts.length - 1, prev ? cur - 1 : cur + 1)
       );
-      if (next !== cur && charts[next]) {
-        e.preventDefault();
-        setActive(charts[next].question_ref);
+      if (target !== cur && charts[target]) {
+        setActive(charts[target].question_ref);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -1382,7 +1387,9 @@ function StepConfigureInner({
                   ref={isActive ? activeRowRef : undefined}
                   onClick={() => setActive(c.question_ref)}
                   className={cn(
-                    "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
+                    // Selection is shown by the background tint only — suppress the
+                    // browser/focus-visible outline so the row never gets a border.
+                    "flex w-full items-center gap-2 px-3 py-2 text-left outline-none transition-colors focus:outline-none focus-visible:outline-none focus-visible:ring-0",
                     isActive ? "bg-primary/10" : "hover:bg-muted/50"
                   )}
                 >
