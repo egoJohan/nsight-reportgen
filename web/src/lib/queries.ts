@@ -168,7 +168,11 @@ export function useChartTypes() {
   return useQuery({
     queryKey: qk.chartTypes(),
     queryFn: api.chartTypes,
-    staleTime: Infinity, // the catalog is static for the app's lifetime
+    // The catalog is nearly static, but it DOES change when the backend gains a new
+    // plugin/config field — cache it for 5 min (and refetch on window focus) so new
+    // config options appear without a hard reload, instead of staleTime: Infinity.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
     select: (d) => d.chart_types,
   });
 }
