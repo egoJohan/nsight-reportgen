@@ -521,8 +521,9 @@ export const api = {
       materialId: string,
       chart: ChartSpec,
       opts?: { renderTitle?: boolean; key?: string; grouping?: GroupingOverride }
-    ): Promise<Blob> =>
-      serializePreview(async () => {
+    ): Promise<Blob> => {
+      const key = opts?.key ?? "";
+      return serializePreview(async () => {
         // When renderTitle is false the PNG omits the baked title block, so the
         // frontend owns the title region (progressive preview overlay). The
         // report's grouping is included so a chart on a manually-grouped question
@@ -532,8 +533,12 @@ export const api = {
           ...(opts?.renderTitle === undefined ? {} : { render_title: opts.renderTitle }),
           ...(opts?.grouping ? { grouping: opts.grouping } : {}),
         };
+        // If this render IS the slide the user is currently viewing (its key is the
+        // active one when it starts), ask the backend to use its RESERVED soffice
+        // slot so it never waits behind background deck-prefetch renders.
+        const priority = key !== "" && key === activePreviewKey;
         const res = await fetch(
-          `${API_BASE}/materials/${materialId}/preview-chart`,
+          `${API_BASE}/materials/${materialId}/preview-chart${priority ? "?priority=1" : ""}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -552,7 +557,8 @@ export const api = {
           throw new Error(detail);
         }
         return res.blob();
-      }, opts?.key ?? ""),
+      }, key);
+    },
 
     // AI: generate a descriptive slide title. Goes through the shared AI gate
     // (bounded concurrency + 503 retry); surfaces the backend {detail} message.

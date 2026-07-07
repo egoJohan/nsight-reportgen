@@ -46,15 +46,37 @@ for _i in range(_MAX_CONCURRENT):
     _profile_slots.put(_p)
 del _i, _p
 
+# ONE extra profile dir reserved for PRIORITY renders — the slide the user just
+# selected in the wizard. Background deck-prefetch renders only ever take the
+# _profile_slots pool, so a freshly-selected slide always has a free worker and
+# never waits for the currently-rendering background previews to finish.
+_priority_slots: "queue.Queue[Path]" = queue.Queue()
+_pp = _PROFILE_ROOT / "slot-priority"
+_pp.mkdir(parents=True, exist_ok=True)
+_priority_slots.put(_pp)
+del _pp
 
-def pptx_to_pdf(pptx_path: str, out_dir: str) -> str:
+
+def pptx_to_pdf(pptx_path: str, out_dir: str, priority: bool = False) -> str:
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if soffice is None:
         raise RuntimeError("LibreOffice (soffice) not found on PATH")
     os.makedirs(out_dir, exist_ok=True)
 
     # Acquire an isolated profile slot — blocks (bounding concurrency) until free.
-    profile = _profile_slots.get()
+    # A priority render takes the reserved slot first (so it never queues behind
+    # background previews); if that reserved slot is momentarily busy (another
+    # priority render in flight) it falls back to the shared pool.
+    if priority:
+        try:
+            profile = _priority_slots.get_nowait()
+            pool = _priority_slots
+        except queue.Empty:
+            profile = _profile_slots.get()
+            pool = _profile_slots
+    else:
+        profile = _profile_slots.get()
+        pool = _profile_slots
     try:
         proc = subprocess.run(
             [
@@ -72,7 +94,7 @@ def pptx_to_pdf(pptx_path: str, out_dir: str) -> str:
             timeout=120,
         )
     finally:
-        _profile_slots.put(profile)
+        pool.put(profile)
 
     if proc.returncode != 0:
         raise RuntimeError(f"soffice failed ({proc.returncode}): {proc.stderr}")

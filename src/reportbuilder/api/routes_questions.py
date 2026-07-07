@@ -987,6 +987,7 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
 def preview_chart(
     material_id: str,
     body: ChartSpecBody,
+    priority: bool = False,
     client: DataHiveClient = Depends(get_client),
 ) -> Response:
     """Render a single ChartSpec as a PNG thumbnail for the wizard's live preview.
@@ -1058,7 +1059,9 @@ def preview_chart(
     pptx_path = str(out_dir / f"preview.{uid}.pptx")
     try:
         build_pptx(report, model, df, pptx_path)
-        pdf_path = pptx_to_pdf(pptx_path, str(out_dir))
+        # The selected slide (priority) takes the reserved soffice slot so it never
+        # waits behind background deck-prefetch renders.
+        pdf_path = pptx_to_pdf(pptx_path, str(out_dir), priority=priority)
         # Previews are shown at ~640px (big pane) / smaller (thumbs), so 110 DPI
         # is ample and ~40% lighter than deck DPI — smaller PNGs decode faster
         # and use less memory across 100+ cached previews.
