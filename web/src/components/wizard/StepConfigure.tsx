@@ -41,6 +41,7 @@ import {
   rendersFullSlide,
   slideSubtitle,
   SLIDE_ASPECT,
+  defaultRowSummaryLabel,
 } from "@/lib/charts";
 
 // The report's grouping override, shared with the leaf preview components so a
@@ -577,9 +578,20 @@ function FieldWidget(props: WidgetProps) {
       return <NumberFormatWidget {...props} />;
     case "note":
       return <NoteWidget {...props} />;
+    case "text":
+      return <TextWidget {...props} />;
     case "not_answered":
       // Single categorical only — self-hides otherwise.
       if (!(question && (question.values?.length ?? 0) > 0)) return null;
+      // The row-summary "sum"/"net" pickers reuse this widget type but bind to
+      // their OWN ChartSpec field (row_summary_codes/pos/neg), not not_answered_codes.
+      if (field.key.startsWith("row_summary_")) {
+        return (
+          <div className="col-span-2">
+            <CodeMultiPicker field={field} chart={chart} question={question} onChange={onChange} />
+          </div>
+        );
+      }
       return (
         <div className="col-span-2">
           <NotAnsweredPicker chart={chart} question={question} onChange={onChange} />
@@ -674,6 +686,17 @@ function ChartControls({
   if (!chart.classifying_var_2) {
     schema = schema.filter((f) => f.key !== "xtab_layout");
   }
+  // Row-summary sub-fields depend on the chosen function (the whole group is only
+  // present in the stacked_horizontal_bar schema, so it never shows on other types):
+  // the header once a function is picked; each code picker only for its function.
+  const rsFn = chart.row_summary_fn ?? "none";
+  schema = schema.filter((f) => {
+    if (f.key === "row_summary_label") return rsFn !== "none";
+    if (f.key === "row_summary_codes") return rsFn === "sum";
+    if (f.key === "row_summary_pos_codes" || f.key === "row_summary_neg_codes")
+      return rsFn === "net";
+    return true;
+  });
   const supportsClassifying = (typeId: string) =>
     (catalog.get(typeId)?.config ?? []).some((f) => f.key === "classifying_var");
 
@@ -871,6 +894,74 @@ function NotAnsweredPicker({
         Choose which answers count as "Not answered". Defaults to the values
         flagged missing in the data.
       </p>
+    </div>
+  );
+}
+
+// ── Generic text field (schema widget "text") ───────────────────────────────
+// Binds to field.key. For the row-summary header the placeholder shows the
+// function's default label so an empty field still previews sensibly.
+function TextWidget({ field, chart, onChange }: WidgetProps) {
+  const value = (chart as unknown as Record<string, unknown>)[field.key];
+  const placeholder =
+    field.key === "row_summary_label" ? defaultRowSummaryLabel(chart.row_summary_fn) : "";
+  return (
+    <Field label={field.label}>
+      <Input
+        value={(value as string) ?? ""}
+        placeholder={placeholder}
+        onChange={(e) => onChange({ [field.key]: e.target.value } as Partial<ChartSpec>)}
+      />
+    </Field>
+  );
+}
+
+// ── Multi-select of the scale's value codes, bound to field.key ─────────────
+// Used by the row-summary "Summed codes" / "Positive codes" / "Negative codes"
+// pickers. Same look as NotAnsweredPicker but writes its own field (no detected
+// fallback — the default is an empty selection).
+function CodeMultiPicker({
+  field,
+  chart,
+  question,
+  onChange,
+}: {
+  field: ConfigField;
+  chart: ChartSpec;
+  question: Question;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const values = question.values ?? [];
+  const current =
+    ((chart as unknown as Record<string, unknown>)[field.key] as number[] | undefined) ?? [];
+  const checked = useMemo(() => new Set(current), [current]);
+  const toggle = (code: number) => {
+    const next = new Set(checked);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    onChange({ [field.key]: Array.from(next) } as Partial<ChartSpec>);
+  };
+  if (values.length === 0) return null;
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+      <Label className="text-xs font-medium text-muted-foreground">{field.label}</Label>
+      <div className="max-h-36 space-y-0.5 overflow-y-auto">
+        {values.map((v) => (
+          <label
+            key={v.code}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/60"
+          >
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={checked.has(v.code)}
+              onChange={() => toggle(v.code)}
+            />
+            <span className="tabular-nums text-muted-foreground">{v.code}</span>
+            <span className="min-w-0 flex-1 truncate">{v.label}</span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

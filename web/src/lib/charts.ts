@@ -201,6 +201,22 @@ export const DEFAULT_SORT: SortSpec = {
 };
 
 /**
+ * Default header for a row-summary function (mirrors the backend `default_label`
+ * in reportbuilder/model/report.py). Used as the placeholder for the editable
+ * "Summary header" field.
+ */
+export function defaultRowSummaryLabel(fn?: string): string {
+  switch (fn) {
+    case "top2_sum": return "Top 2";
+    case "top3_sum": return "Top 3";
+    case "sum": return "Sum";
+    case "mean": return "Keskiarvo";
+    case "net": return "Net";
+    default: return "";
+  }
+}
+
+/**
  * Build a fresh ChartSpec for a question with sensible defaults.
  * template_slot is assigned by position later via normalizeSlots().
  */

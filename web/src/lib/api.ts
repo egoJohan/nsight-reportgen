@@ -161,6 +161,13 @@ export interface ChartSpec {
   // "classifier" (within each segment), "question" (within each base category),
   // "total" (over the grand total).
   percent_base?: "auto" | "classifier" | "question" | "total";
+  // Right-hand per-row summary column (stacked_horizontal_bar only). Off when
+  // row_summary_fn is "none"/absent.
+  row_summary_fn?: "none" | "top2_sum" | "top3_sum" | "sum" | "mean" | "net";
+  row_summary_codes?: number[];
+  row_summary_pos_codes?: number[];
+  row_summary_neg_codes?: number[];
+  row_summary_label?: string;
   // Free-form per-chart-type options (plugin-declared config keys without a
   // first-class ChartSpec field). Optional for backward compatibility.
   options?: Record<string, unknown>;
