@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon, GripVerticalIcon, Trash2Icon, PlusIcon } from "lucide-react";
+import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon, Trash2Icon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,107 +14,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { Question, GroupingOverride, BatterySuggestion, ChartSpec } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
-import { useDragReorder } from "@/lib/useDragReorder";
-import { isSpecialSlide, slideSubtitle } from "@/lib/charts";
+import { isSpecialSlide } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
 import { slideTitle } from "@/components/wizard/SlideGrid";
 
-// ── The report's deck: its slides in order, drag-reorderable + removable ──────
-// This is the report's OWN ordering (the charts array). Reordering/removing here
-// touches only this report — never the material's canonical question order.
-function DeckList({
-  charts,
-  questionMap,
-  onReorder,
-  onRemove,
-  onInfo,
-  highlightQids,
-  highlightRef,
-}: {
-  charts: ChartSpec[];
-  questionMap: Map<string, Question>;
-  onReorder: (from: number, to: number) => void;
-  onRemove: (index: number) => void;
-  onInfo: (chart: ChartSpec) => void;
-  // Newly-created group (battery/multi) qids to flash after grouping, and a ref on
-  // the flashed row so it scrolls into view.
-  highlightQids: Set<string>;
-  highlightRef: React.RefObject<HTMLDivElement | null>;
-}) {
-  const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(onReorder);
-  return (
-    <div ref={containerRef as React.RefObject<HTMLDivElement>} className="space-y-1.5">
-      {charts.map((c, i) => {
-        const special = isSpecialSlide(c);
-        const justCreated = highlightQids.has(c.question_ref);
-        const subtitle = slideSubtitle(c, questionMap);
-        return (
-          <div
-            key={`${c.question_ref}-${i}`}
-            ref={justCreated ? highlightRef : undefined}
-            {...itemProps(i)}
-            className={cn(
-              "group flex items-center gap-2 rounded-lg border bg-card py-2 pr-2 pl-1.5 transition-colors",
-              justCreated && "border-primary bg-primary/10 ring-2 ring-primary",
-              dragIndex === i && "opacity-40",
-              dragIndex !== null && overIndex === i && dragIndex !== i && "ring-2 ring-primary"
-            )}
-          >
-            <span
-              className="shrink-0 cursor-grab text-muted-foreground/50 hover:text-muted-foreground"
-              title="Drag to reorder — affects this report only"
-            >
-              <GripVerticalIcon className="size-4" />
-            </span>
-            <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-              {i + 1}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {subtitle}
-              </span>
-            </span>
-            {/* Special slides also get an explicit delete (bin) as the leftmost
-                action — they aren't re-addable from the pool below like questions. */}
-            {special && (
-              <button
-                type="button"
-                title="Delete this special slide"
-                onClick={() => onRemove(i)}
-                className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
-              >
-                <Trash2Icon className="size-4" />
-              </button>
-            )}
-            {/* Every deck row — question OR special — carries the same controls:
-                details (info) and a selected-checkbox that deselects/removes it. */}
-            <button
-              type="button"
-              title={special ? "Slide details" : "Question details"}
-              onClick={() => onInfo(c)}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <InfoIcon className="size-4" />
-            </button>
-            <button
-              type="button"
-              title="Selected — click to remove from this report"
-              onClick={() => onRemove(i)}
-              className="flex size-7 shrink-0 items-center justify-center"
-            >
-              <span className="flex size-5 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
-                <CheckIcon className="size-3.5" />
-              </span>
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // Human labels for the special-slide types (for the deck-row info dialog).
 const SPECIAL_KIND: Record<string, string> = {
@@ -192,7 +97,6 @@ export default function StepSelect({
   addedRefs,
   onToggle,
   onSelectMany,
-  onReorder,
   onRemoveChart,
   onAddSpecial,
   grouping,
@@ -307,13 +211,15 @@ export default function StepSelect({
     return () => clearTimeout(h);
   }, [highlightQids]);
 
-  const filtered = useMemo(() => {
+  // Search FADES non-matching questions (they stay in place — nothing is removed or
+  // reordered). This set holds the matching qids; null means "no search → all match".
+  // Matches ANY of a question's data: text, name/id, kind, measurement, variable
+  // names, category / value labels.
+  const matchingQids = useMemo(() => {
     const needle = debouncedSearch.trim().toLowerCase();
-    if (!needle) return questions ?? [];
-    // Match ANY of a question's data — text, name/id, kind, measurement, variable
-    // names, and category / value labels — so the search finds a question however
-    // the user remembers it.
-    return (questions ?? []).filter((q) => {
+    if (!needle) return null;
+    const s = new Set<string>();
+    (questions ?? []).forEach((q) => {
       const hay = [
         q.text,
         q.qid,
@@ -325,8 +231,9 @@ export default function StepSelect({
       ]
         .join(" ")
         .toLowerCase();
-      return hay.includes(needle);
+      if (hay.includes(needle)) s.add(q.qid);
     });
+    return s;
   }, [questions, debouncedSearch]);
 
   // Titles for the deck rows (a question's text, or a special slide's heading).
@@ -365,70 +272,14 @@ export default function StepSelect({
     );
   }
 
-  // The pool lists only questions NOT already in the report — added questions
-  // live in the deck above (with a deselect checkbox), so one never appears twice.
-  const pool = filtered.filter((q) => !addedRefs.has(q.qid));
-  // Deck-level select / unselect all (customer): clear every question from the
-  // report, or add them all — a big time-saver when building a small report from a
-  // material with many variables. Special slides are unaffected.
+  // Select all / Unselect all check/uncheck every question. Special slides stay.
   const allChartable = (questions ?? []).filter((q) => q.chartable !== false);
   const addedQuestions = (questions ?? []).filter((q) => addedRefs.has(q.qid));
 
   return (
     <div>
-      {/* ── The report's deck: title + Select all/Unselect all, then the slides.
-          Kept at the TOP so its header + buttons never get pushed below the (long)
-          question pool. Everything here changes only THIS report. ── */}
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium">
-          Slides in this report{charts.length > 0 ? ` · ${charts.length}` : ""}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={allChartable.length <= addedQuestions.length}
-            onClick={() => onSelectMany(allChartable, true)}
-            title="Add every question in the material to this report"
-          >
-            <CheckCheckIcon className="size-4" /> Select all
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={addedQuestions.length === 0}
-            onClick={() => onSelectMany(addedQuestions, false)}
-            title="Remove every question from this report (special slides stay)"
-          >
-            <XIcon className="size-4" /> Unselect all
-          </Button>
-        </div>
-      </div>
-      {charts.length > 0 ? (
-        <DeckList
-          charts={charts}
-          questionMap={questionMap}
-          onReorder={onReorder}
-          onRemove={onRemoveChart}
-          onInfo={(c) =>
-            isSpecialSlide(c)
-              ? setSpecialInfoChart(c)
-              : setDetailQid(c.question_ref)
-          }
-          highlightQids={highlightQids}
-          highlightRef={highlightRef}
-        />
-      ) : (
-        <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-          No slides yet — add questions below, or a special slide here.
-        </div>
-      )}
-
-      <div className="my-5 border-t" />
-
-      {/* ── Add questions: browse the material's questions and add each as a
-          slide. The report's deck (order / removal) is above. ── */}
-      <p className="mb-2 text-sm font-medium">Add questions</p>
+      {/* Toolbar — search + Clear + Manage grouping + Add special slide. Always
+          shown, directly below the stepper; nothing here hides or changes place. */}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative max-w-sm flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -471,7 +322,7 @@ export default function StepSelect({
           <PlusIcon className="size-4" /> Add special slide
         </Button>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-          {charts.length} in report · {pool.length} to add
+          {addedQuestions.length} in report
         </span>
       </div>
 
@@ -542,16 +393,81 @@ export default function StepSelect({
         onPick={(type) => onAddSpecial(type, null)}
       />
 
+      {/* Title + Select all / Unselect all (right-aligned). Always shown. */}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">Questions</p>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={allChartable.length <= addedQuestions.length}
+            onClick={() => onSelectMany(allChartable, true)}
+            title="Select every question"
+          >
+            <CheckCheckIcon className="size-4" /> Select all
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={addedQuestions.length === 0}
+            onClick={() => onSelectMany(addedQuestions, false)}
+            title="Unselect every question (special slides stay)"
+          >
+            <XIcon className="size-4" /> Unselect all
+          </Button>
+        </div>
+      </div>
+
+      {/* Special slides (added via the button) — kept at the top so nothing is hidden. */}
+      {charts.some((c) => isSpecialSlide(c)) && (
+        <div className="mb-1.5 space-y-1.5">
+          {charts.map((c, i) =>
+            isSpecialSlide(c) ? (
+              <div
+                key={`special-${c.question_ref}-${i}`}
+                className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 py-2.5 pr-2 pl-3"
+              >
+                <span className="min-w-0 flex-1 line-clamp-1 text-sm">
+                  {slideTitle(c, questionMap)}
+                </span>
+                <Badge variant="outline" className="shrink-0 whitespace-nowrap font-normal">
+                  Special slide
+                </Badge>
+                <button
+                  type="button"
+                  title="Details"
+                  onClick={() => setSpecialInfoChart(c)}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <InfoIcon className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  title="Remove slide"
+                  onClick={() => onRemoveChart(i)}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                >
+                  <Trash2Icon className="size-4" />
+                </button>
+              </div>
+            ) : null
+          )}
+        </div>
+      )}
+
+      {/* All questions — a checkbox each; checked = in the report. Search FADES the
+          non-matching ones (they stay in place). Nothing is removed or reordered. */}
       <div className="space-y-1.5">
-        {pool.map((q) => {
+        {(questions ?? []).map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
           const justCreated = highlightQids.has(q.qid);
+          const faded = matchingQids !== null && !matchingQids.has(q.qid);
           return (
             <div
               key={q.qid}
               ref={justCreated ? highlightRef : undefined}
-              className="relative"
+              className={cn("relative transition-opacity", faded && "opacity-40")}
             >
               <button
                 disabled={!isChartable}
