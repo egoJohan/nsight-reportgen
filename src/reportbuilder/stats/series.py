@@ -31,6 +31,9 @@ class SeriesResult:
     # group ("Mies"), so renderers can group the bars/stacks by primary with gaps. None
     # for single-classifier / non-classifier charts. (REQ-C-14c)
     segment_primary: dict[str, str] | None = None
+    # Optional right-hand summary value per bar (row_summary feature), aligned to the
+    # bars the stacked-horizontal-bar renderer draws. None when off. (spec 2026-07-07)
+    row_summaries: tuple[float, ...] | None = None
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]
