@@ -1417,10 +1417,12 @@ function StepConfigureInner({
                     "flex items-center gap-1 rounded-md transition-colors",
                     isActive ? "bg-primary/10" : "hover:bg-muted/50",
                     dragIndex === i && "opacity-40",
+                    // Inset ring so the drop indicator is never clipped by the
+                    // scroll container's (horizontal) overflow.
                     dragIndex !== null &&
                       overIndex === i &&
                       dragIndex !== i &&
-                      "ring-2 ring-primary"
+                      "ring-2 ring-inset ring-primary"
                   )}
                 >
                   <span
