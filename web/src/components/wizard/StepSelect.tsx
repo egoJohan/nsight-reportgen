@@ -376,8 +376,58 @@ export default function StepSelect({
 
   return (
     <div>
+      {/* ── The report's deck: title + Select all/Unselect all, then the slides.
+          Kept at the TOP so its header + buttons never get pushed below the (long)
+          question pool. Everything here changes only THIS report. ── */}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">
+          Slides in this report{charts.length > 0 ? ` · ${charts.length}` : ""}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={allChartable.length <= addedQuestions.length}
+            onClick={() => onSelectMany(allChartable, true)}
+            title="Add every question in the material to this report"
+          >
+            <CheckCheckIcon className="size-4" /> Select all
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={addedQuestions.length === 0}
+            onClick={() => onSelectMany(addedQuestions, false)}
+            title="Remove every question from this report (special slides stay)"
+          >
+            <XIcon className="size-4" /> Unselect all
+          </Button>
+        </div>
+      </div>
+      {charts.length > 0 ? (
+        <DeckList
+          charts={charts}
+          questionMap={questionMap}
+          onReorder={onReorder}
+          onRemove={onRemoveChart}
+          onInfo={(c) =>
+            isSpecialSlide(c)
+              ? setSpecialInfoChart(c)
+              : setDetailQid(c.question_ref)
+          }
+          highlightQids={highlightQids}
+          highlightRef={highlightRef}
+        />
+      ) : (
+        <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+          No slides yet — add questions below, or a special slide here.
+        </div>
+      )}
+
+      <div className="my-5 border-t" />
+
       {/* ── Add questions: browse the material's questions and add each as a
-          slide. The report's deck (order / removal) is below. ── */}
+          slide. The report's deck (order / removal) is above. ── */}
       <p className="mb-2 text-sm font-medium">Add questions</p>
       <div className="mb-4 flex items-center gap-3">
         <div className="relative max-w-sm flex-1">
@@ -587,54 +637,6 @@ export default function StepSelect({
         })}
       </div>
 
-      <div className="my-5 border-t" />
-
-      {/* ── The report's deck: arrange slide order, remove slides, add special
-          slides. Everything here changes only THIS report, never the material. ── */}
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium">
-          Slides in this report{charts.length > 0 ? ` · ${charts.length}` : ""}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={allChartable.length <= addedQuestions.length}
-            onClick={() => onSelectMany(allChartable, true)}
-            title="Add every question in the material to this report"
-          >
-            <CheckCheckIcon className="size-4" /> Select all
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={addedQuestions.length === 0}
-            onClick={() => onSelectMany(addedQuestions, false)}
-            title="Remove every question from this report (special slides stay)"
-          >
-            <XIcon className="size-4" /> Unselect all
-          </Button>
-        </div>
-      </div>
-      {charts.length > 0 ? (
-        <DeckList
-          charts={charts}
-          questionMap={questionMap}
-          onReorder={onReorder}
-          onRemove={onRemoveChart}
-          onInfo={(c) =>
-            isSpecialSlide(c)
-              ? setSpecialInfoChart(c)
-              : setDetailQid(c.question_ref)
-          }
-          highlightQids={highlightQids}
-          highlightRef={highlightRef}
-        />
-      ) : (
-        <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-          No slides yet — add questions above, or a special slide here.
-        </div>
-      )}
     </div>
   );
 }
