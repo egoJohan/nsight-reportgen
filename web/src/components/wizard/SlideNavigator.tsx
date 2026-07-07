@@ -231,25 +231,57 @@ export function SlideOverview({
         <div className="flex items-center justify-between">
           <DialogTitle>All slides ({charts.length})</DialogTitle>
         </div>
-        <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3 lg:grid-cols-4">
-          {charts.map((c, i) => (
-            <SlideThumb
-              key={`${c.question_ref}-${i}`}
-              materialId={materialId}
-              chart={c}
-              index={i}
-              isActive={c.question_ref === activeRef}
-              grouping={grouping}
-              questionMap={questionMap}
-              onClick={() => {
-                onSelect(i);
-                onOpenChange(false);
-              }}
-            />
-          ))}
+        <div className="min-h-0 flex-1 overflow-y-auto p-1">
+          <SlideGrid
+            charts={charts}
+            materialId={materialId}
+            grouping={grouping}
+            questionMap={questionMap}
+            activeRef={activeRef}
+            onSelect={(i) => {
+              onSelect(i);
+              onOpenChange(false);
+            }}
+          />
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ── All-slides grid (reused by the Preview step; also wrapped by SlideOverview) ─
+// Navigate-only: reordering + adding slides live in the Select step; clicking a
+// thumbnail just selects that slide (index).
+export function SlideGrid({
+  charts,
+  materialId,
+  grouping,
+  questionMap,
+  activeRef,
+  onSelect,
+}: {
+  charts: ChartSpec[];
+  materialId: string;
+  grouping: GroupingOverride;
+  questionMap: Map<string, Question>;
+  activeRef: string | null;
+  onSelect: (index: number) => void;
+}) {
+  return (
+    <div className="grid auto-rows-max grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      {charts.map((c, i) => (
+        <SlideThumb
+          key={`${c.question_ref}-${i}`}
+          materialId={materialId}
+          chart={c}
+          index={i}
+          isActive={c.question_ref === activeRef}
+          grouping={grouping}
+          questionMap={questionMap}
+          onClick={() => onSelect(i)}
+        />
+      ))}
+    </div>
   );
 }
 
