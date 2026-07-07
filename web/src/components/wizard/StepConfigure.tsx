@@ -614,8 +614,11 @@ function ConfigForm({
   variables: Variable[] | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
+  // Two columns at the Design page's wider config width: simple fields sit
+  // two-across; complex widgets (number format, not-answered, category labels)
+  // already declare `col-span-2` so they span the full width.
   return (
-    <div className="flex flex-col gap-4">
+    <div className="grid grid-cols-2 items-start gap-4">
       {schema.map((field, i) => (
         <FieldWidget
           key={`${field.key}-${i}`}
