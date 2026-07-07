@@ -30,14 +30,24 @@ The wizard (`web/src/components/wizard/`) has three steps in `ReportWizard.tsx`:
 
 ## New Design page layout (`StepConfigure`)
 
-A single two-column **grid row**, `grid-cols-[300px_minmax(0,1fr)]`:
+A single-row **CSS grid**: `grid grid-cols-[300px_minmax(0,1fr)] gap-4`
+(one implicit `auto` row, default `align-items: stretch`). The row's height is set by
+the taller cell's *in-flow* content — which will be the right column, because the left
+cell's list is taken out of flow (see below).
 
 ### Left column — slide list (navigation only)
-- A relative wrapper holding an **absolutely-positioned scroll area**
-  (`relative` cell → child `absolute inset-0 overflow-y-auto`). This is the crux of
-  the equal-height requirement: the left cell contributes **no** intrinsic height, so
-  the **right column sets the row height**, and the list fills that height and scrolls
+- The left grid cell is `relative`; the list inside is an **absolutely-positioned
+  scroll area** (`absolute inset-0 overflow-y-auto`). Because the list is out of flow,
+  the left cell has **~0 in-flow content height**, so it never grows the row — the
+  **right column (preview + config) sets the row height**, `align-items: stretch`
+  stretches the left cell to that height, and the absolute list fills it and scrolls
   internally when there are more slides than fit. No JS measurement.
+- Page-scroll model: the row's height *is* the natural height of preview + config, so
+  when that exceeds the viewport the **page** scrolls; the left list scrolls
+  **independently** within the row. (This matches the requested "list height = preview
+  + configuration height" — the list is bound to that height, not the viewport.)
+- A small `min-height` floor on the left cell (e.g. `min-h-[24rem]`) keeps the list
+  usable when a slide's config is unusually short (special "no options" slide).
 - Rows are **compact text rows** reusing the Select deck-row visual: slide number +
   `slideTitle()` + a subtitle `"<Chart Type>, <Question Type>"` (e.g. "Pie Chart,
   Battery") for question slides, `"Bullets, Special"` for special slides. (Reuse the
@@ -58,10 +68,19 @@ A single two-column **grid row**, `grid-cols-[300px_minmax(0,1fr)]`:
   `onEditQuestion && !isSpecialSlide` gate).
 - **Configuration below the preview:** the existing `ChartControls` (chart slides) /
   `SpecialSlideControls` (special slides) / demographics-grid note, moved from the old
-  360 px left panel to full width **under** the preview. Same components, same
-  behavior (chart type, title/subtitle/footer, sort, classifying var, `percent_base`,
-  number format, not-answered, category labels; special heading + markdown bullets +
-  regenerate).
+  360 px left panel to **under** the preview. Same components, same behavior (chart
+  type, title/subtitle/footer, sort, classifying var, `percent_base`, number format,
+  not-answered, category labels; special heading + markdown bullets + regenerate).
+- **Config layout at the wider width:** the config is now much wider than the old
+  360 px panel, so a single column would look sparse. Render the config fields in a
+  **2-column grid** and constrain the block to a readable `max-w-4xl` (left-aligned
+  under the preview). `ConfigForm` already ships the hint for this — its widgets
+  declare `col-span-2` (NumberFormat, Not-answered, Category-labels) even though the
+  container is currently `flex flex-col` — so switch `ConfigForm` to
+  `grid grid-cols-2 gap-4` (those widgets span both columns; simple select/switch
+  fields sit two-across). `ChartControls`' header fields (chart type / slide title /
+  subtitle / footer) may either join that grid or stay stacked full-width above it —
+  implementer's call, but the title/subtitle textareas should be full-width.
 - The empty state ("No slides yet — go to Select…") stays.
 
 ### Removed from Design
@@ -70,9 +89,10 @@ A single two-column **grid row**, `grid-cols-[300px_minmax(0,1fr)]`:
 
 ## Preview page (renamed from Download)
 
-- Rename the step **label** `"Download" → "Preview"` in `ReportWizard`'s `STEPS`
-  (keep the step `id: "download"` to avoid churn, or rename to `"preview"` — implementer's
-  choice; the label is what the user sees).
+- Rename the step **label** `"Download" → "Preview"` in `ReportWizard`'s `STEPS`.
+  **Keep the step `id: "download"`** (and the `configure` id) unchanged — only the
+  user-visible label changes — so existing id/index references (step gating,
+  `onGoToStep`) keep working with no churn.
 - The page shows, top to bottom:
   1. The **all-slides grid** — the current `SlideOverview` thumbnail grid, rendered
      **inline** (a normal section, not a `Dialog`). Clicking a slide **sets it active
@@ -95,21 +115,47 @@ A single two-column **grid row**, `grid-cols-[300px_minmax(0,1fr)]`:
 
 ## Component changes summary
 
-- **`SlideNavigator.tsx`:** delete `SlideNavigator` (the bar). **Extract the grid** —
-  the thumbnail grid currently inside `SlideOverview` — into a reusable
-  `SlideGrid` component (props: `charts`, `materialId`, `grouping`, `questionMap`,
-  `activeRef`, `onSelect`) with **no `Dialog` wrapper**. Keep `slideTitle()` and
-  `SlideThumb` (used by `SlideGrid`). `SlideOverview` (the modal) is removed.
+- **`SlideNavigator.tsx` → rename to `SlideGrid.tsx`:** with the bar gone the filename
+  is misleading. Delete the `SlideNavigator` (bar) component and the `SlideOverview`
+  (modal) wrapper. **Extract the thumbnail grid** (currently inside `SlideOverview`)
+  into a reusable `SlideGrid` component — props `charts`, `materialId`, `grouping`,
+  `questionMap`, `activeRef`, `onSelect(index)`; **no `Dialog`**. Keep `slideTitle()`
+  and `SlideThumb` here (both used by `SlideGrid`, and `slideTitle` by the Design left
+  list). Update all imports (`slideTitle` is imported by `StepConfigure` and
+  `StepSelect`).
 - **`StepConfigure.tsx`:** new grid layout (left list + right preview/config); consume
-  lifted `active`/`setActive`; drop the `SlideNavigator` + `SlideOverview` usage; add
-  the ⓘ details button by the preview.
-- **`StepDownload.tsx`:** add `<SlideGrid onSelect={(i) => { setActive(charts[i].ref); onGoToStep(configure) }} />` above the generate/download controls; receive
-  `charts`, `active`/`setActive`, `onGoToStep`, `grouping`, `questionMap`.
-- **`ReportWizard.tsx`:** lift `active`; relabel Download→Preview; wire the new props
-  to `StepConfigure` and the Preview step.
+  lifted `active`/`setActive` (delete the local `active` state and the two
+  active-validity effects — they move to `ReportWizard`); drop `SlideNavigator` +
+  `SlideOverview` + `overviewOpen` state; simplify the `← / →` handler to drop its now
+  dead `overviewOpen` guard (keep the "ignore while typing in a field" guard); add the
+  ⓘ details button by the preview.
+- **`StepDownload.tsx` (the Preview step):** fetch its own
+  `questionMap` via `useRegroupedQuestions(materialId, draft.grouping)` (same as
+  `StepConfigure` — do **not** lift `questionMap`). Render `<SlideGrid charts={draft.charts} activeRef={active} onSelect={(i) => { setActive(draft.charts[i].question_ref); onGoToStep(CONFIGURE) }} … />` above the existing generate/download controls. New
+  props it receives from `ReportWizard`: `active`, `setActive`, `onGoToStep`.
+- **`ReportWizard.tsx`:** lift `active` + `setActive`; add the two active-validity
+  effects here (they need `draft.charts`); relabel the `download` step's `label`
+  `"Download" → "Preview"`; pass `onGoToStep` (a thin wrapper over the existing step
+  setter) and `active`/`setActive` to both `StepConfigure` and the Preview step.
 - **Shared helper:** extract the deck-row subtitle logic (`KIND_LABELS`,
-  `"<Chart Type>, <Question Type>"` / `"Bullets, Special"`) so the Select deck and the
-  Design left list produce identical strings.
+  `"<Chart Type>, <Question Type>"` / `"Bullets, Special"`) out of `StepSelect`'s
+  `DeckList` into a shared function (e.g. in `lib/charts.ts`) so the Select deck and
+  the Design left list produce identical strings.
+
+## Edge cases & notes
+- **Empty deck:** when `draft.charts.length === 0`, Design shows the existing empty
+  state ("No slides yet — go to Select…"), not the two-column grid. The Preview grid
+  shows its own empty state.
+- **`activeChart` derivation:** `StepConfigure` still derives the shown slide as
+  `charts.find(c => c.question_ref === active) ?? charts[0]` (unchanged), so a
+  transiently-null or stale `active` never renders a blank right column.
+- **Preview-grid warmth:** `SlideGrid` thumbnails use the same content-keyed
+  `useChartPreview` cache as Design. They're warm if the user has visited Design first
+  (its `DeckPrefetch` warms `renderTitle:true`); otherwise they render on-demand and
+  cache. Optionally move `DeckPrefetch` up to `ReportWizard` so both steps stay warm —
+  not required for this change.
+- **Step navigation for the Preview→Design jump** uses the existing step setter (all
+  steps are already reachable; only the final step gates on "at least one chart").
 
 ## Out of scope
 - Select page and its deck (unchanged).
