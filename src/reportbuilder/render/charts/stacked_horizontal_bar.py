@@ -35,5 +35,5 @@ register(ChartPlugin(
     native_build=build_stacked_horizontal_bar,
     suitability=suitability,
     suggest=suggest,
-    config_schema=stacked_schema(),
+    config_schema=stacked_schema(with_row_summary=True),
 ))

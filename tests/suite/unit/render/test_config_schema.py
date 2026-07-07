@@ -189,3 +189,18 @@ def test_combo_schema_has_combo_secondary_and_classifying_var():
 def test_combo_schema_classifying_var_is_optional():
     cv = next(f for f in combo_schema() if f.key == "classifying_var")
     assert cv.required is False
+
+
+def test_stacked_horizontal_row_summary_fields():
+    from reportbuilder.render.config_schema import stacked_schema
+    hks = [f.key for f in stacked_schema(with_row_summary=True)]
+    for k in ("row_summary_fn", "row_summary_label", "row_summary_codes",
+              "row_summary_pos_codes", "row_summary_neg_codes"):
+        assert k in hks
+    fn = next(f for f in stacked_schema(with_row_summary=True)
+              if f.key == "row_summary_fn")
+    assert fn.widget == "select"
+    assert {v for v, _ in fn.options} == {
+        "none", "top2_sum", "top3_sum", "sum", "mean", "net"}
+    # the default stacked schema (used by vertical) does NOT include it
+    assert "row_summary_fn" not in [f.key for f in stacked_schema()]

@@ -195,13 +195,35 @@ def clustered_bar_schema() -> tuple[ConfigField, ...]:
             xtab_layout_field(), percent_base_field(), *_common_tail())
 
 
-def stacked_schema() -> tuple[ConfigField, ...]:
+def row_summary_fields() -> tuple[ConfigField, ...]:
+    """Right-hand per-row summary column (stacked_horizontal_bar only). One value per
+    bar; the picker/label fields the frontend shows depend on the chosen function.
+    (spec 2026-07-07-row-summary-column)"""
+    return (
+        ConfigField(
+            "row_summary_fn", "select", "Row summary",
+            options=(("none", "None"), ("top2_sum", "Top 2 sum"),
+                     ("top3_sum", "Top 3 sum"), ("sum", "Sum of selected"),
+                     ("mean", "Mean"), ("net", "Net (positive − negative)")),
+            default="none",
+            help="Add a summary column on the right — e.g. the 4+5 'agree' share per row.",
+        ),
+        ConfigField("row_summary_label", "text", "Summary header", default=""),
+        ConfigField("row_summary_codes", "not_answered", "Summed codes"),
+        ConfigField("row_summary_pos_codes", "not_answered", "Positive codes"),
+        ConfigField("row_summary_neg_codes", "not_answered", "Negative codes"),
+    )
+
+
+def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]:
     """Stacked charts: the classifying variable is OPTIONAL. With one, each bar is
     a classifier group split by the shared answer categories; without one, the
     chart is a single 100%-stacked bar of the question's answer distribution
-    (the 'total')."""
+    (the 'total'). `with_row_summary` appends the right-hand summary column fields
+    (stacked HORIZONTAL bar only)."""
     return (statistic_field(), classifying_var_field(), percent_base_field(),
-            *_common_tail(sort_stacked=True))
+            *_common_tail(sort_stacked=True),
+            *(row_summary_fields() if with_row_summary else ()))
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:
