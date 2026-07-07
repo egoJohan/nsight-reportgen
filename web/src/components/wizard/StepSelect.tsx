@@ -577,28 +577,26 @@ export default function StepSelect({
           Slides in this report{charts.length > 0 ? ` · ${charts.length}` : ""}
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          {addedQuestions.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              onClick={() => onSelectMany(addedQuestions, false)}
-              title="Remove every question from this report (special slides stay)"
-            >
-              <XIcon className="size-4" /> Unselect all
-            </Button>
-          )}
-          {allChartable.length > addedQuestions.length && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              onClick={() => onSelectMany(allChartable, true)}
-              title="Add every question in the material to this report"
-            >
-              <CheckCheckIcon className="size-4" /> Select all
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            disabled={allChartable.length <= addedQuestions.length}
+            onClick={() => onSelectMany(allChartable, true)}
+            title="Add every question in the material to this report"
+          >
+            <CheckCheckIcon className="size-4" /> Select all
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            disabled={addedQuestions.length === 0}
+            onClick={() => onSelectMany(addedQuestions, false)}
+            title="Remove every question from this report (special slides stay)"
+          >
+            <XIcon className="size-4" /> Unselect all
+          </Button>
           <Button
             variant="outline"
             size="sm"
