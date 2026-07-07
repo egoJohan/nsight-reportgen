@@ -56,6 +56,13 @@ class ChartSpec:
     #   "total"      — every cell over the grand total
     percent_base: str = "auto"
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
+    # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
+    # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
+    row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|sum|mean|net
+    row_summary_codes: tuple[float, ...] = ()        # for "sum"
+    row_summary_pos_codes: tuple[float, ...] = ()    # for "net"
+    row_summary_neg_codes: tuple[float, ...] = ()    # for "net"
+    row_summary_label: str = ""                       # header; "" → default_label(fn)
     options: dict[str, Any] = field(default_factory=dict)  # free-form per-chart-type options (plugin-declared config keys)
 
     def label_override_map(self) -> dict[str, str]:
@@ -108,6 +115,20 @@ class Report:
     grouping: dict[str, Any] = field(
         default_factory=lambda: {"groups": [], "singles": []}
     )
+
+
+_ROW_SUMMARY_DEFAULT_LABEL = {
+    "top2_sum": "Top 2",
+    "top3_sum": "Top 3",
+    "sum": "Sum",
+    "mean": "Keskiarvo",
+    "net": "Net",
+}
+
+
+def default_label(fn: str) -> str:
+    """Default header for a row-summary function (blank for 'none'/unknown)."""
+    return _ROW_SUMMARY_DEFAULT_LABEL.get(fn, "")
 
 
 def report_to_json(report: Report) -> str:
@@ -167,6 +188,11 @@ def report_from_json(data: dict | str) -> Report:
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
             percent_base=c.get("percent_base", "auto"),
+            row_summary_fn=c.get("row_summary_fn", "none"),
+            row_summary_codes=tuple(float(x) for x in c.get("row_summary_codes", ())),
+            row_summary_pos_codes=tuple(float(x) for x in c.get("row_summary_pos_codes", ())),
+            row_summary_neg_codes=tuple(float(x) for x in c.get("row_summary_neg_codes", ())),
+            row_summary_label=c.get("row_summary_label", ""),
             options=dict(c.get("options") or {}),
         )
 

@@ -55,6 +55,35 @@ def _make_report() -> Report:
     )
 
 
+def test_row_summary_roundtrip():
+    from reportbuilder.model.report import default_label
+    assert default_label("top2_sum") == "Top 2"
+    assert default_label("mean") == "Keskiarvo"
+    assert default_label("none") == ""
+    chart = ChartSpec(
+        question_ref="q1",
+        chart_type="stacked_horizontal_bar",
+        statistic="pct",
+        classifying_var=None,
+        number_format=NumberFormat(),
+        sort=SortSpec(basis="pct"),
+        template_slot="s1",
+        elements=ElementToggles(),
+        row_summary_fn="net",
+        row_summary_pos_codes=(4.0, 5.0),
+        row_summary_neg_codes=(1.0, 2.0),
+        row_summary_label="Netto",
+    )
+    r = Report(name="R", render_mode="image", template_ref="", charts=(chart,))
+    restored = report_from_json(report_to_json(r))
+    spec = restored.charts[0]
+    assert spec.row_summary_fn == "net"
+    assert spec.row_summary_pos_codes == (4.0, 5.0)
+    assert spec.row_summary_neg_codes == (1.0, 2.0)
+    assert spec.row_summary_label == "Netto"
+    assert restored == r
+
+
 def test_round_trip_equality():
     """Full round-trip: report_from_json(report_to_json(r)) == r."""
     r = _make_report()
