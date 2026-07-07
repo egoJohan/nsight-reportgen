@@ -3,6 +3,7 @@ import {
   AlertCircleIcon,
   BarChart3Icon,
   ImageIcon,
+  InfoIcon,
   Loader2Icon,
   RotateCcwIcon,
   SparklesIcon,
@@ -24,7 +25,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
-import { SlideNavigator, SlideOverview } from "@/components/wizard/SlideNavigator";
+import { slideTitle } from "@/components/wizard/SlideNavigator";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import {
   CHART_TYPES,
@@ -35,6 +36,7 @@ import {
   isWordcloud,
   rendersAsBullets,
   rendersFullSlide,
+  slideSubtitle,
   SLIDE_ASPECT,
 } from "@/lib/charts";
 
@@ -1247,6 +1249,8 @@ function StepConfigureInner({
   charts,
   grouping,
   aiPending,
+  active,
+  setActive,
   onUpdateChart,
   onEnsureTitles,
   onRegenerateSpecial,
@@ -1255,6 +1259,10 @@ function StepConfigureInner({
   charts: ChartSpec[];
   grouping: GroupingOverride;
   aiPending?: AiPendingMap;
+  // The active slide (question_ref) is owned by ReportWizard so the Preview grid can
+  // select a slide and jump here to edit it.
+  active: string | null;
+  setActive: (ref: string | null) => void;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   // Called with every chart's ref when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
@@ -1264,17 +1272,17 @@ function StepConfigureInner({
   onRegenerateSpecial?: (chart: ChartSpec) => void;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
-  // The active slide is tracked by question_ref (not index) so inserting a slide
-  // at the front or reordering never silently changes which slide is shown.
-  const [active, setActive] = useState<string | null>(null);
-  const [overviewOpen, setOverviewOpen] = useState(false);
   const [editQid, setEditQid] = useState<string | null>(null);
+  const activeRowRef = useRef<HTMLButtonElement>(null);
+  // Scroll the active row into view when the selection changes (← / → or a jump
+  // back from the Preview grid) so the highlighted slide is always visible.
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: "nearest" });
+  }, [active]);
 
-  // ← / → step to the previous / next slide — ignored while typing in a field or
-  // while the Overview is open (so arrow keys behave normally there).
+  // ← / → step to the previous / next slide — ignored while typing in a field.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (overviewOpen) return;
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       const el = document.activeElement as HTMLElement | null;
       if (
@@ -1297,21 +1305,13 @@ function StepConfigureInner({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [overviewOpen, active, charts]);
+  }, [active, charts, setActive]);
 
   const questionMap = useMemo(() => {
     const m = new Map<string, Question>();
     (questions ?? []).forEach((q) => m.set(q.qid, q));
     return m;
   }, [questions]);
-
-  // Keep the active ref valid as charts change (fall back to the first slide).
-  useEffect(() => {
-    if (!charts.length) return;
-    if (!charts.some((c) => c.question_ref === active)) {
-      setActive(charts[0].question_ref);
-    }
-  }, [charts, active]);
 
   // Auto-generate AI slide titles for every chart once Design is open (batched
   // in the background, just like the thumbnails) — not on report load, and not
@@ -1359,27 +1359,90 @@ function StepConfigureInner({
     aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
 
   return (
-    <div className="space-y-4">
-      {/* Background: warm every slide's preview so the deck (and the Overview
-          thumbnails) are ready without clicking each slide (renders nothing). */}
+    <div className="grid grid-cols-[300px_minmax(0,1fr)] items-stretch gap-4">
+      {/* Background: warm every slide's preview so the deck (and the Preview grid)
+          are ready without clicking each slide (renders nothing). */}
       <DeckPrefetch materialId={materialId} charts={charts} />
 
-      {/* Compact navigator: step, jump, or open the full-screen Overview.
-          Adding / removing / reordering slides lives in the Select step. */}
-      <SlideNavigator
-        charts={charts}
-        activeIndex={activeIndex}
-        questionMap={questionMap}
-        onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
-        onOpenOverview={() => setOverviewOpen(true)}
-        onEditQuestion={(qid) => setEditQid(qid)}
-      />
+      {/* LEFT: the slide list. Height-bound to the right column via an absolutely
+          positioned scroll area — the list never grows the row; the preview + config
+          on the right set the height and the list scrolls inside it. Navigation only:
+          add / remove / reorder live in the Select step. */}
+      <div className="relative min-h-[24rem]">
+        <div className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1">
+          {charts.map((c, i) => {
+            const isActive = c.question_ref === active;
+            return (
+              <button
+                key={`${c.question_ref}-${i}`}
+                ref={isActive ? activeRowRef : undefined}
+                onClick={() => setActive(c.question_ref)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg border bg-card py-2 pr-2 pl-2 text-left transition-colors",
+                  isActive
+                    ? "border-primary bg-primary/5 ring-1 ring-primary"
+                    : "hover:border-primary/40"
+                )}
+              >
+                <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {slideSubtitle(c, questionMap)}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* Right: large preview + compact controls */}
+      {/* RIGHT: preview on top, configuration below. */}
       {activeChart && (
-        <div className="grid grid-cols-[360px_minmax(0,1fr)] items-start gap-5">
-          {/* Left: configuration — one option per row */}
-          <div className="rounded-xl border bg-card p-4">
+        <div className="space-y-4">
+          <div className="relative">
+            {activeSpecial ? (
+              <SpecialPreview
+                key={activeChart.question_ref}
+                materialId={materialId}
+                chart={activeChart}
+                bulletsPending={activeBulletsPending}
+              />
+            ) : (
+              <ChartPreview
+                key={activeChart.question_ref}
+                materialId={materialId}
+                chart={activeChart}
+                titlePending={
+                  aiPending?.[activeChart.question_ref]?.titlePending ?? false
+                }
+                labelsPending={
+                  aiPending?.[activeChart.question_ref]?.labelsPending ?? false
+                }
+                questionText={
+                  questionMap.get(activeChart.question_ref)?.text ??
+                  activeChart.question_ref
+                }
+              />
+            )}
+            {/* Question details — chart slides only (special slides are edited inline). */}
+            {!activeSpecial && (
+              <button
+                type="button"
+                title="View question details"
+                onClick={() => setEditQid(activeChart.question_ref)}
+                className="absolute right-2 top-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
+              >
+                <InfoIcon className="size-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Configuration — 2-column at this wider width (ConfigForm honours the
+              existing col-span-2 widgets); capped to a readable max width. */}
+          <div className="max-w-4xl rounded-xl border bg-card p-4">
             {activeSpecial ? (
               activeGrid ? (
                 <p className="text-sm text-muted-foreground">
@@ -1408,47 +1471,8 @@ function StepConfigureInner({
               />
             )}
           </div>
-
-          {/* Right: large preview (the slide's title lives in the navigator above). */}
-          <div className="flex min-w-0 flex-col gap-3">
-            {activeSpecial ? (
-              <SpecialPreview
-                key={activeChart.question_ref}
-                materialId={materialId}
-                chart={activeChart}
-                bulletsPending={activeBulletsPending}
-              />
-            ) : (
-              <ChartPreview
-                key={activeChart.question_ref}
-                materialId={materialId}
-                chart={activeChart}
-                titlePending={
-                  aiPending?.[activeChart.question_ref]?.titlePending ?? false
-                }
-                labelsPending={
-                  aiPending?.[activeChart.question_ref]?.labelsPending ?? false
-                }
-                questionText={
-                  questionMap.get(activeChart.question_ref)?.text ??
-                  activeChart.question_ref
-                }
-              />
-            )}
-          </div>
         </div>
       )}
-
-      <SlideOverview
-        open={overviewOpen}
-        onOpenChange={setOverviewOpen}
-        charts={charts}
-        materialId={materialId}
-        grouping={grouping}
-        questionMap={questionMap}
-        activeRef={active}
-        onSelect={(i) => setActive(charts[i]?.question_ref ?? null)}
-      />
 
       <QuestionDetailsDialog
         materialId={materialId}

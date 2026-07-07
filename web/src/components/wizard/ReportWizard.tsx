@@ -69,8 +69,11 @@ function replaceSpecialGroup(
 const STEPS = [
   { id: "select", label: "Select" },
   { id: "configure", label: "Design" },
-  { id: "download", label: "Download" },
+  { id: "download", label: "Preview" },
 ];
+
+// Index of the Design step — the Preview grid jumps here when a slide is clicked.
+const CONFIGURE_STEP = STEPS.findIndex((s) => s.id === "configure");
 
 // Per-phase instruction shown centered under the stepper (report-specific).
 const STEP_INSTRUCTIONS = [
@@ -159,6 +162,18 @@ export default function ReportWizard({
 
   const [draft, setDraft] = useState<ReportDoc | null>(null);
   const [step, setStep] = useState(0);
+  // Which slide the Design + Preview steps are focused on (source of truth here so
+  // the Preview grid can click a slide and jump to Design showing it).
+  const [active, setActive] = useState<string | null>(null);
+  // Keep `active` valid as the deck changes: default to the first slide, and drop a
+  // stale ref (its slide was removed or a group absorbed its variable).
+  useEffect(() => {
+    const cs = draft?.charts;
+    if (!cs || cs.length === 0) return;
+    if (!active || !cs.some((c) => c.question_ref === active)) {
+      setActive(cs[0].question_ref);
+    }
+  }, [draft, active]);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   // Per-chart pending flags (keyed by question_ref) so the Configure preview
@@ -951,6 +966,8 @@ export default function ReportWizard({
             charts={draft.charts}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
+            active={active}
+            setActive={setActive}
             onUpdateChart={updateChart}
             onEnsureTitles={ensureTitles}
             onRegenerateSpecial={regenerateSpecial}
@@ -962,6 +979,9 @@ export default function ReportWizard({
             reportId={reportId}
             materialId={materialId}
             draft={draft}
+            active={active}
+            setActive={setActive}
+            onGoToDesign={() => setStep(CONFIGURE_STEP)}
             save={save}
           />
         )}

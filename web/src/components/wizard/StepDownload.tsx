@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   FileTextIcon,
@@ -9,24 +9,40 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import type { ReportDoc } from "@/lib/api";
-import { useRenderReport } from "@/lib/queries";
+import type { Question, ReportDoc } from "@/lib/api";
+import { useRegroupedQuestions, useRenderReport } from "@/lib/queries";
 import { downloadBlob, safeFileName } from "@/lib/download";
+import { SlideGrid } from "@/components/wizard/SlideNavigator";
 
 export default function StepDownload({
   caseId,
   reportId,
   materialId,
   draft,
+  active,
+  setActive,
+  onGoToDesign,
   save,
 }: {
   caseId: string;
   reportId: string;
   materialId: string;
   draft: ReportDoc;
+  // The Preview grid highlights the current slide and, on click, selects it and
+  // jumps back to Design to edit it (state owned by ReportWizard).
+  active: string | null;
+  setActive: (ref: string | null) => void;
+  onGoToDesign: () => void;
   save: () => Promise<boolean>;
 }) {
   const render = useRenderReport(caseId);
+  const grouping = draft.grouping ?? { groups: [], singles: [] };
+  const { data: questions } = useRegroupedQuestions(materialId, grouping);
+  const questionMap = useMemo(() => {
+    const m = new Map<string, Question>();
+    (questions ?? []).forEach((q) => m.set(q.qid, q));
+    return m;
+  }, [questions]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rendered, setRendered] = useState(false);
@@ -112,6 +128,27 @@ export default function StepDownload({
 
   return (
     <div className="space-y-5">
+      {/* All slides — a final visual review. Click one to jump back to Design and
+          edit it. Adding / removing / reordering lives in the Select step. */}
+      {!noCharts && (
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="mb-3 text-base font-semibold">
+            All slides ({draft.charts.length})
+          </h3>
+          <SlideGrid
+            charts={draft.charts}
+            materialId={materialId}
+            grouping={grouping}
+            questionMap={questionMap}
+            activeRef={active}
+            onSelect={(i) => {
+              setActive(draft.charts[i].question_ref);
+              onGoToDesign();
+            }}
+          />
+        </div>
+      )}
+
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
