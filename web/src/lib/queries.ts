@@ -90,6 +90,13 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     // The methodology footer is baked into the PNG regardless of render_title (it lives
     // outside the title block), so a footer edit must always re-render the preview.
     footer_note: chart.footer_note,
+    // The row-summary column (function/codes/header) is baked into the chart PNG, so
+    // any change must re-render the preview.
+    row_summary_fn: chart.row_summary_fn ?? "none",
+    row_summary_codes: chart.row_summary_codes ?? null,
+    row_summary_pos_codes: chart.row_summary_pos_codes ?? null,
+    row_summary_neg_codes: chart.row_summary_neg_codes ?? null,
+    row_summary_label: chart.row_summary_label ?? "",
   };
   // The title/description only affect the PNG when baked (render_title on); when
   // the frontend owns the title region, editing it must NOT re-render the chart.
