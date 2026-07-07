@@ -899,6 +899,12 @@ class ChartSpecBody(BaseModel):
     not_answered_codes: list[float] | None = None
     percent_base: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
+    # Right-hand per-row summary column (stacked_horizontal_bar only).
+    row_summary_fn: str = "none"
+    row_summary_codes: list[float] = []
+    row_summary_pos_codes: list[float] = []
+    row_summary_neg_codes: list[float] = []
+    row_summary_label: str = ""
     # The live preview must show the same headline as the rendered deck: when an
     # AI/edited slide title is set, the preview uses it instead of the question text.
     slide_title: str | None = None
@@ -959,6 +965,11 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             (str(full), str(short)) for full, short in body.category_label_overrides
         ),
         percent_base=body.percent_base,
+        row_summary_fn=body.row_summary_fn,
+        row_summary_codes=tuple(float(c) for c in body.row_summary_codes),
+        row_summary_pos_codes=tuple(float(c) for c in body.row_summary_pos_codes),
+        row_summary_neg_codes=tuple(float(c) for c in body.row_summary_neg_codes),
+        row_summary_label=body.row_summary_label,
         slide_title=body.slide_title,
         slide_description=body.slide_description,
         footer_note=body.footer_note,
