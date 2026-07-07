@@ -492,10 +492,7 @@ export default function StepSelect({
         onPick={(type) => onAddSpecial(type, null)}
       />
 
-      {/* FIXED-height scroll area (not max-h) so the pool always occupies the same
-          space whether it holds 1 question or all of them — the "Slides in this
-          report" row + its Select all / Unselect all buttons never move. */}
-      <div className="h-[40vh] space-y-1.5 overflow-y-auto pr-1">
+      <div className="space-y-1.5">
         {pool.map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
