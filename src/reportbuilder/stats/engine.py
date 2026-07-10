@@ -571,15 +571,52 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
     vars_ = [model.variable(n) for n in question.variables]
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     show_empty: bool = getattr(spec, "show_empty_categories", True)
-    base = multi_base(data, vars_)
+
+    # Optional cross-tab: split the options by a classifying variable (or a two-
+    # classifier combo). Each segment gets its OWN base — respondents in that segment
+    # who answered the multi — so a cell reads "% of <segment> who selected <option>".
+    # Segments are code strings; compute() relabels them to the classifier's value
+    # labels via _relabel_segments / _relabel_combo_segments. (2026-07-10)
+    seg_series, ordered = _combo_segmentation(spec, data)
+    seg_codes: list[str] = []
+    seg_mask: dict[str, "pd.Series"] = {}
+    if seg_series is not None:
+        for sc in ordered:
+            m = (seg_series == sc)
+            if bool(m.any()):
+                seg_codes.append(sc)
+                seg_mask[sc] = m
+    elif spec.classifying_var and spec.classifying_var in data.columns:
+        clf_var = model.variables.get(spec.classifying_var)
+        clf = pd.to_numeric(data[spec.classifying_var], errors="coerce")
+        miss = getattr(clf_var, "missing_values", frozenset()) if clf_var else frozenset()
+        for vl in (clf_var.value_labels if clf_var else []):
+            if vl.value in miss:
+                continue
+            m = (clf == float(vl.value))
+            if bool(m.any()):
+                code = str(int(vl.value)) if float(vl.value).is_integer() else str(vl.value)
+                seg_codes.append(code)
+                seg_mask[code] = m
+
+    segments = tuple(seg_codes) + ("Total",)
+    base_total = multi_base(data, vars_)
+    seg_base = {sc: multi_base(data[seg_mask[sc]], vars_) for sc in seg_codes}
+    seg_base["Total"] = base_total
+
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     for idx, v in enumerate(vars_):
         display = overrides.get(v.label, v.label)
         s = pd.to_numeric(data[v.name], errors="coerce")
-        c = int(((s == 1.0) & ~s.isin(v.missing_values)).sum())
-        cells[(display, "Total")] = Cell(pct=pct(c, base, spec.number_format),
-                                         count=count_value(c, spec.number_format), mean=None)
+        sel = (s == 1.0) & ~s.isin(v.missing_values)
+        tc = int(sel.sum())
+        cells[(display, "Total")] = Cell(pct=pct(tc, base_total, spec.number_format),
+                                         count=count_value(tc, spec.number_format), mean=None)
+        for sc in seg_codes:
+            c = int((sel & seg_mask[sc]).sum())
+            cells[(display, sc)] = Cell(pct=pct(c, seg_base[sc], spec.number_format),
+                                        count=count_value(c, spec.number_format), mean=None)
         cell = cells[(display, "Total")]
         rows.append((display, float(idx), {"pct": cell.pct, "count": cell.count,
                                            "mean": 0.0, "data_index": idx, "topbox": cell.pct}))
@@ -587,12 +624,12 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # Hide members whose DISPLAYED value rounds to 0 when show_empty is False. (Task G.4)
     if not show_empty:
         rows = _drop_displayed_zero_rows(
-            rows, cells, ("Total",), spec.statistic, spec.number_format
+            rows, cells, segments, spec.statistic, spec.number_format
         )
 
     categories = tuple(sort_categories(rows, spec.sort))
-    return SeriesResult(categories=categories, segments=("Total",), cells=cells,
-                        base_n={"Total": base}, statistic=spec.statistic)
+    return SeriesResult(categories=categories, segments=segments, cells=cells,
+                        base_n=seg_base, statistic=spec.statistic)
 
 
 def _code_label_map(var: Variable, seg_codes: set[str]) -> dict[str, str]:
