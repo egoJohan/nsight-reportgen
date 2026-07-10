@@ -290,6 +290,61 @@ function SelectWidget({ field, chart, onChange }: WidgetProps) {
   );
 }
 
+// Cross-tab percentage DIRECTION control. The engine values stay
+// question/classifier/total/auto, but the labels NAME the actual variables so the
+// analyst picks the grouping they want ("% within each Sukupuoli") without needing to
+// know which variable is the internal base vs classifier. `question` distributes within
+// each base category (→ each base group sums to 100 %); `classifier` within each
+// classifier group. Variable-named labels only when a single classifier is set and the
+// labels are loaded; otherwise the plugin's static labels. (spec 2026-07-10)
+const PCT_DIRECTION_HINT =
+  "“% within each X” means each X’s bars add up to 100 %.";
+
+function shortVarLabel(label: string | undefined, name: string): string {
+  const t = (label || "").replace(/\s+/g, " ").trim() || name;
+  return t.length > 24 ? t.slice(0, 23) + "…" : t;
+}
+
+function PercentBaseWidget({ field, chart, question, variables, onChange }: WidgetProps) {
+  const byName = new Map((variables ?? []).map((v) => [v.name, v]));
+  const baseVar = question ? byName.get(question.variables?.[0] ?? "") : undefined;
+  const clfVar = chart.classifying_var ? byName.get(chart.classifying_var) : undefined;
+  // Name the variables only for a single-classifier chart with labels loaded — a second
+  // classifier makes the "classifier" side a combination, so keep static labels there.
+  const useNamed =
+    (variables?.length ?? 0) > 0 && !!baseVar && !!clfVar && !chart.classifying_var_2;
+  const opts: [string, string][] = useNamed
+    ? [
+        ["auto", "Automatic"],
+        ["question", `% within each ${shortVarLabel(baseVar!.label, baseVar!.name)}`],
+        ["classifier", `% within each ${shortVarLabel(clfVar!.label, clfVar!.name)}`],
+        ["total", "% of the total"],
+      ]
+    : (field.options ?? []).map((o) => [o.value, o.label]);
+  const value = String(chart.percent_base ?? field.default ?? "auto");
+  const items = Object.fromEntries(opts);
+  return (
+    <Field label={field.label} hint={useNamed ? PCT_DIRECTION_HINT : field.help}>
+      <Select
+        items={items}
+        value={value}
+        onValueChange={(v) => onChange({ percent_base: v } as Partial<ChartSpec>)}
+      >
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {opts.map(([v, l]) => (
+            <SelectItem key={v} value={v}>
+              {l}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 function SwitchWidget({ field, chart, onChange }: WidgetProps) {
   const checked = Boolean(readField(chart, field.key) ?? field.default ?? false);
   return (
@@ -565,6 +620,9 @@ function FieldWidget(props: WidgetProps) {
   const { field, question, chart, materialId, onChange } = props;
   switch (field.widget) {
     case "select":
+      // The cross-tab direction control names the actual variables so the analyst
+      // picks the grouping they want without knowing base/classifier roles.
+      if (field.key === "percent_base") return <PercentBaseWidget {...props} />;
       return <SelectWidget {...props} />;
     case "switch":
       return <SwitchWidget {...props} />;

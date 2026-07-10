@@ -78,6 +78,9 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     statistic: chart.statistic,
     classifying_var: chart.classifying_var,
     classifying_var_2: chart.classifying_var_2 ?? null,
+    // The cross-tab percentage DIRECTION changes the numbers in the PNG, so a change
+    // must re-render the preview (else switching direction silently shows the old one).
+    percent_base: chart.percent_base ?? "auto",
     number_format: chart.number_format,
     sort: chart.sort,
     elements: chart.elements,
