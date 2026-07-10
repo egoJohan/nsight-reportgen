@@ -237,6 +237,10 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
     (the 'total'). `with_row_summary` appends the right-hand summary column fields
     (stacked HORIZONTAL bar only)."""
     return (statistic_field(), percent_base_field(), classifying_var_field(),
+            # A SECOND classifying variable groups the stacked bars into cross-tab combos
+            # (e.g. gender × age) — the engine builds the combos and the stacked renderer
+            # groups them by the primary classifier.
+            classifying_var_2_field(),
             # Row-summary column up front (right after the data options) so it's easy
             # to find — it's the headline feature of a stacked Likert battery.
             *(row_summary_fields() if with_row_summary else ()),

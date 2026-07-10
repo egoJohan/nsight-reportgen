@@ -167,11 +167,14 @@ def test_stacked_schema_classifying_var_is_optional():
     assert cv.required is False
 
 
-def test_stacked_schema_same_field_set_as_standard():
-    # Stacked bars never draw a "Total" bar (bars exclude Total), so stacked omits the
-    # show_total control; otherwise its field set matches standard.
+def test_stacked_schema_fields():
+    # Stacked bars never draw a "Total" bar (bars exclude Total), so no show_total; but
+    # they DO support a second classifying variable (cross-tab combos, grouped by the
+    # primary classifier).
     assert _keys(stacked_schema()) == [
-        k for k in _keys(standard_schema()) if k != "show_total"
+        "statistic", "percent_base", "classifying_var", "classifying_var_2", "sort",
+        "number_format", "show_not_answered", "show_empty_categories",
+        "not_answered_codes", "category_label_overrides",
     ]
 
 
