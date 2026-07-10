@@ -22,6 +22,8 @@ TEAL = "#13615E"
 TEAL_LT = "#7DB8A6"
 RED = "#B23A2E"
 RED_LT = "#E08C82"
+BLUE = "#35618E"        # categorical accent (muted, cream-friendly)
+BLUE_LT = "#86A9CE"
 GRIDC = "#DAD3C7"        # grid / subdued divider colour
 
 # ---------------------------------------------------------------------------
@@ -108,12 +110,28 @@ def scale_colors(n: int) -> list[str]:
     return out
 
 
+# Distinct categorical hues used AFTER the teal ramp is exhausted (5+ series), so
+# many-category charts (pie / clustered bars / line / radar) stay legible instead of
+# repeating teal shades. Red/blue families first per house direction (2026-07-10).
+_EXTRA_HUES: list[str] = [
+    RED,        # 5  red
+    BLUE,       # 6  blue
+    RED_LT,     # 7  red (light)
+    BLUE_LT,    # 8  blue (light)
+    "#8A5A8F",  # 9  plum (red↔blue bridge)
+    "#C99A3A",  # 10 amber
+]
+# Full categorical palette, all visually distinct.
+_CATEGORICAL: list[str] = _TEAL_RAMP + _EXTRA_HUES
+
+
 def series_colors(n: int) -> list[str]:
-    """Return *n* hex colour strings from the teal ramp (REQ-C-27a).
+    """Return *n* distinct hex colour strings for CATEGORICAL series (REQ-C-27a).
 
     Single series → darkest TEAL (most prominent).
-    Multiple series → spread across the ramp, darkest last (= current wave).
-    More than 4 series → cycles the ramp.
+    2–4 series → spread across the teal ramp, darkest last (= current wave).
+    5+ series → keep the teal ramp, then red/blue-family accents so no colour
+    repeats (was: cycled the 4-colour ramp → duplicate colours for different labels).
     """
     if n == 1:
         return [TEAL]
@@ -122,5 +140,11 @@ def series_colors(n: int) -> list[str]:
         # evenly spaced; always include darkest at the end
         indices = [round(i * (len(ramp) - 1) / (n - 1)) for i in range(n)]
         return [ramp[idx] for idx in indices]
-    # More series than ramp slots — cycle
-    return [ramp[i % len(ramp)] for i in range(n)]
+    if n <= len(_CATEGORICAL):
+        return _CATEGORICAL[:n]
+    # Beyond the palette (11+ categories — rare): interpolate extra teal shades so the
+    # tail never exactly repeats an earlier colour.
+    out = list(_CATEGORICAL)
+    for i in range(len(_CATEGORICAL), n):
+        out.append(scale_colors(n)[i])
+    return out[:n]
