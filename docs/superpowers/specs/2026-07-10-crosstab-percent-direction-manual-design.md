@@ -29,58 +29,81 @@ intent maps to opposite options on two otherwise-identical charts. Reproduced li
 
 Make the **manual** direction choice unambiguous by naming the **actual variables** and
 stating the outcome, so an analyst picks the grouping they want without knowing base vs
-classifier and without relying on `auto`. Engine behaviour and the stored `percent_base`
-values are unchanged — this is a **labelling/UX** change on the Design control, plus an
-optional `auto` tie-break refinement.
+classifier and without relying on `auto`. The primary change (Task 1) is **labelling/UX**
+on the Design control only — the engine directions and the stored `percent_base` values
+are unchanged. A secondary, OPTIONAL change (Task 2) refines `auto`'s tie-break and is the
+only part that touches engine behaviour.
 
 ## Design
 
 ### 1. Variable-named option labels (primary, frontend only)
 
-`percent_base` gets a dedicated widget (or a special case in the schema-driven select)
-that builds its option labels from the chart's two variables, which the Design config
-already has in `WidgetProps` (`question` = base, `variables` + `chart.classifying_var`
-= classifier):
+`percent_base` gets a dedicated `PercentBaseWidget` that builds its option labels from
+the chart's two variables, which the Design config already has in `WidgetProps`
+(`question` = base, `variables` + `chart.classifying_var` = classifier):
 
-- let `baseLabel` = the base variable's short label (from `variables`, keyed by
-  `question.variables[0]`; fall back to the question text, truncated).
-- let `clfLabel` = the classifying variable's label (from `variables`, keyed by
-  `chart.classifying_var`).
+- `shortLabel(v)` = the variable's `label` collapsed to one line and trimmed to ≤ 24
+  chars (append `…` when cut); the variable name if the label is empty. Applied to BOTH
+  labels so a verbose variable label (e.g. "Segm. malli B - 6 segmenttiä", or a gender
+  variable whose label is the full question "Identifioitko itsesi") stays readable.
+- `baseLabel` = `shortLabel` of the base variable = `variables[question.variables[0]]`.
+- `clfLabel` = `shortLabel` of `variables[chart.classifying_var]`.
 
-Rendered options (value → label):
+Rendered options (value → label), `auto` first because it stays the default:
 
-- `question` → **"% within each {baseLabel}"** — help: "each {baseLabel}'s bars sum to 100 %".
-- `classifier` → **"% within each {clfLabel}"** — help: "each {clfLabel}'s bars sum to 100 %".
-- `total` → **"% of the total"**.
-- `auto` → **"Automatic (recommended)"** — help: "picks the natural direction from the
-  variables".
+- `auto` → **"Automatic"**
+- `question` → **"% within each {baseLabel}"**
+- `classifier` → **"% within each {clfLabel}"**
+- `total` → **"% of the total"**
+
+Below the control, a single field-level hint (the Select renders one hint, not per-option
+help): **"'% within each X' means each X's bars add up to 100 %."**
 
 So for gender × segment the analyst sees "% within each Sukupuoli" vs "% within each
 segment" and directly picks the one that sums each gender to 100 %, regardless of which
-variable is the internal base. The mapping `question ↔ baseLabel`, `classifier ↔ clfLabel`
-holds because `question` distributes within each base category and `classifier` within
-each classifier group.
+variable is the internal base.
 
-Fallbacks: if either label is missing (labels not loaded, no classifier), fall back to
-the current static labels so the control never renders blank. When `chart.classifying_var`
-is unset the whole control is already hidden (existing behaviour) — unchanged.
+**Mapping (verified):** `question` distributes the classifier within each base category →
+each base group sums to 100 %; `classifier` distributes the base within each classifier
+group → each classifier group sums to 100 %. Confirmed against `case-134/rep-209`:
+`question` → each gender 100 %, `classifier` → each segment 100 %.
+
+**Fallbacks / scope of the relabel:**
+- If `variables` is not yet loaded, or the base variable/question can't be resolved, render
+  today's static labels so the control never blanks or shows a partial `% within each …`.
+- If a SECOND classifier (`chart.classifying_var_2`) is set, the classifier side is a
+  combination of two variables — naming one would be wrong — so keep the static labels in
+  that case (variable-named labels are single-classifier only here; see Out of scope).
+- When `chart.classifying_var` is unset the whole control is already hidden — unchanged.
+
+This part is frontend-only: no change to the engine or to the stored `percent_base` value.
 
 ### 2. `auto` tie-break refinement (secondary, backend, optional)
 
-`resolve_percent_base` currently returns `"question"` only when the base **strictly**
-outranks the classifier; ties fall back to the legacy `"classifier"`. When exactly one
-side is a demographic/segmenter (score 3) it already resolves correctly; the residual
-risk is a **tie** (both sides equal, e.g. a demographic not matched by the regex) landing
-on `"classifier"` — the misleading direction. Refinement: on a tie, prefer the direction
-whose **denominator is the stronger segmenter role**, i.e. keep the denominator on the
-demographic/segment side; only fall back to `"classifier"` when the two are genuinely
-symmetric. This is a small change to the final comparison in `resolve_percent_base`;
-guard it with the existing `test_engine_percent_base_auto.py` + a new tie case. Mark
-OPTIONAL — the manual relabel (part 1) already unblocks the customer.
+`resolve_percent_base` returns `"question"` only when the base **strictly** outranks the
+classifier; equal scores fall back to the legacy `"classifier"`. This only bites if the
+customer's actual failing chart uses `percent_base == "auto"` AND its two variables **tie**
+— e.g. a demographic that `_DEMOGRAPHIC_RE` failed to match (so it scored 2 instead of 3)
+sitting opposite a segment (also 2).
+
+Important: on a genuine tie the resolver has **no signal** that one side ought to be the
+denominator — both scored the same — so a blind tie-break flip to `"question"` would
+silently change the direction of every existing tie chart. So this task is **CONTINGENT on
+the plan's Step 0** (read the failing chart) and takes the lowest-blast-radius form:
+
+- If the tie is caused by a **missed demographic**, extend `_DEMOGRAPHIC_RE` /
+  `segmenter_score` so that variable scores 3; the existing strict-outrank rule then already
+  resolves it to `"question"` — no tie-break change, minimal collateral.
+- Flipping the **global tie default** (`classifier` → `question`) is a broad behavioural
+  change; only do it with Seppo's sign-off and a regression sweep of existing reports.
+
+Either way Task 1 already unblocks the customer, so Task 2 may be deferred entirely.
 
 ## Out of scope
 - New engine directions or changing what `question`/`classifier`/`total` compute.
 - Migrating existing reports' stored `percent_base` values.
+- Variable-named labels for TWO-classifier charts (`classifying_var_2` set) — those keep
+  the static labels for now.
 - Stacked-bar row-summary interactions.
 
 ## Testing / verification
@@ -90,7 +113,8 @@ OPTIONAL — the manual relabel (part 1) already unblocks the customer.
   "Percentages of" options read "% within each {gender label}" / "% within each {segment
   label}", and selecting the gender one makes each gender's bars sum to 100 % in the
   preview. Verify the static-label fallback when `variables` is empty.
-- **Auto tie-break (if built):** a unit test where base and classifier both score 2 and
-  one is a demographic → resolves to `question` (not `classifier`); existing auto tests
-  stay green.
+- **Auto detection (only if Step 0 shows an `auto` mis-resolve):** a unit test that the
+  previously-missed demographic variable now scores 3 and the chart resolves to `question`;
+  existing `test_engine_percent_base_auto.py` + `test_percent_direction_ticket.py` stay green
+  (guards against collateral direction changes).
 - **Manual sign-off:** Seppo verifies against `case-134 / rep-209` after vacation.

@@ -27,36 +27,42 @@
 - Consumes `WidgetProps` (`field`, `chart`, `question`, `variables`, `onChange`).
 - Produces `PercentBaseWidget` rendering the four options with dynamic labels.
 
-- [ ] **Step 1: Add the widget.** In `StepConfigure.tsx`, add:
+- [ ] **Step 1: Add the widget.** In `StepConfigure.tsx`, add. Dynamic, variable-named
+  labels ONLY for a single-classifier chart with variable labels loaded; otherwise the
+  static labels. `auto` is listed first (it stays the default); a single field hint
+  explains the "sum to 100 %" meaning.
 ```tsx
+const HINT = "'% within each X' means each X's bars add up to 100 %.";
+function shortLabel(s: string | undefined, name: string): string {
+  const t = (s || "").replace(/\s+/g, " ").trim() || name;
+  return t.length > 24 ? t.slice(0, 23) + "…" : t;
+}
 function PercentBaseWidget(props: WidgetProps) {
   const { field, chart, question, variables, onChange } = props;
-  const byName = new Map((variables ?? []).map((v) => [v.name, v.label || v.name]));
-  const baseLabel =
-    (question && byName.get(question.variables?.[0] ?? "")) ??
-    (question?.text ? question.text.slice(0, 28) : "this question");
-  const clfLabel = chart.classifying_var
-    ? byName.get(chart.classifying_var) ?? "the segment"
-    : "the segment";
-  // Only relabel when we actually have the variable names; else use static labels.
-  const dynamic =
-    variables && variables.length > 0
-      ? ([
-          ["question", `% within each ${baseLabel}`],
-          ["classifier", `% within each ${clfLabel}`],
-          ["total", "% of the total"],
-          ["auto", "Automatic (recommended)"],
-        ] as const)
-      : (field.options ?? []).map((o) => [o.value, o.label] as const);
+  const byVar = new Map((variables ?? []).map((v) => [v.name, v]));
+  const baseVar = question ? byVar.get(question.variables?.[0] ?? "") : undefined;
+  const clfVar = chart.classifying_var ? byVar.get(chart.classifying_var) : undefined;
+  // Variable-named labels need: labels loaded, base + classifier resolved, and NO 2nd
+  // classifier (its "classifier" side is a combination — naming one would be wrong).
+  const useNamed =
+    (variables?.length ?? 0) > 0 && baseVar && clfVar && !chart.classifying_var_2;
+  const opts: readonly (readonly [string, string])[] = useNamed
+    ? [
+        ["auto", "Automatic"],
+        ["question", `% within each ${shortLabel(baseVar!.label, baseVar!.name)}`],
+        ["classifier", `% within each ${shortLabel(clfVar!.label, clfVar!.name)}`],
+        ["total", "% of the total"],
+      ]
+    : (field.options ?? []).map((o) => [o.value, o.label] as const);
   const value = String(chart.percent_base ?? field.default ?? "auto");
-  const items = Object.fromEntries(dynamic.map(([v, l]) => [v, l]));
+  const items = Object.fromEntries(opts.map(([v, l]) => [v, l]));
   return (
-    <Field label={field.label} hint={field.help}>
+    <Field label={field.label} hint={useNamed ? HINT : field.help}>
       <Select items={items} value={value}
         onValueChange={(v) => onChange({ percent_base: v } as Partial<ChartSpec>)}>
         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
-          {dynamic.map(([v, l]) => (
+          {opts.map(([v, l]) => (
             <SelectItem key={v} value={v}>{l}</SelectItem>
           ))}
         </SelectContent>
@@ -81,23 +87,31 @@ function PercentBaseWidget(props: WidgetProps) {
 
 ---
 
-### Task 2 (OPTIONAL, secondary): `auto` tie-break prefers the segmenter denominator
+### Task 2 (OPTIONAL, CONTINGENT on Step 0): fix `auto` only if a demographic was mis-detected
+
+Do this ONLY if Step 0 shows the customer's failing chart uses `percent_base=="auto"` and
+its two variables **tie** because a demographic wasn't matched by `_DEMOGRAPHIC_RE`. On a
+genuine tie the resolver has no signal to prefer a side, so the fix is to improve DETECTION
+(make the demographic score 3), NOT to flip the global tie default (which would silently
+change every existing tie chart). If Step 0 shows an explicit/legacy `"classifier"`, skip
+Task 2 entirely — Task 1 covers it.
 
 **Files:**
-- Modify: `src/reportbuilder/stats/percent_base.py` (`resolve_percent_base` final comparison)
+- Modify: `src/reportbuilder/stats/percent_base.py` (`_DEMOGRAPHIC_RE` / `segmenter_score`)
 - Test: `tests/suite/unit/stats/test_percent_base_resolve.py`
 
-**Interfaces:** unchanged signature `resolve_percent_base(question, spec, model) -> str`.
+- [ ] **Step 1: Failing test.** For the specific variable Step 0 found, assert
+`segmenter_score(var, text) == 3` and that a gender×segment chart with that variable resolves
+to `"question"`. (Fails today because the label/text slips past the regex.)
 
-- [ ] **Step 1: Failing test.** Build a cross-tab where base and classifier BOTH score 2, but one is a demographic (score would be 3 if the regex matched) — assert current code returns `"classifier"` (documents the tie fallback), then after the fix returns `"question"` when the base is the demographic side. Add a case mirroring the existing resolve tests' fixture.
+- [ ] **Step 2: Implement.** Extend `_DEMOGRAPHIC_RE` (or the label/text feeding it) so that
+variable is recognised as demographic; leave the strict-outrank comparison untouched.
 
-- [ ] **Step 2: Implement.** Change the final line so a tie resolves toward the stronger *segmenter role* (demographic/segment as denominator) rather than the blanket legacy `"classifier"`; keep the strict-outrank path as-is. Keep the change minimal and commented.
+- [ ] **Step 3: Run** `.venv/bin/python -m pytest tests/suite/unit/stats/test_percent_base_resolve.py tests/suite/unit/stats/test_engine_percent_base_auto.py tests/suite/unit/stats/test_percent_direction_ticket.py -q` — all green (no collateral direction changes).
 
-- [ ] **Step 3: Run** `.venv/bin/python -m pytest tests/suite/unit/stats/test_percent_base_resolve.py tests/suite/unit/stats/test_engine_percent_base_auto.py tests/suite/unit/stats/test_percent_direction_ticket.py -q` — all green.
+- [ ] **Step 4: Update memory.** Refresh the `crosstab-percent-direction` memo.
 
-- [ ] **Step 4: Update memory.** Refresh `crosstab-percent-direction` memo with the tie-break rule.
-
-- [ ] **Step 5: Commit.** `fix(stats): auto percent-direction tie-break favours the segmenter denominator`
+- [ ] **Step 5: Commit.** `fix(stats): detect <var> as a demographic so auto percent-direction resolves correctly`
 
 ---
 
