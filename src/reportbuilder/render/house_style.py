@@ -10,6 +10,7 @@ import threading as _threading
 
 import matplotlib as _mpl
 from matplotlib import font_manager as _fm
+from matplotlib.colors import to_rgb
 from pptx.dml.color import RGBColor
 
 # ---------------------------------------------------------------------------
@@ -118,6 +119,15 @@ _BLUE_RAMP: list[str] = ["#C4D6E8", "#86A9CE", "#5580AC", "#35618E"]
 _RED_RAMP: list[str] = ["#F0CBC6", "#E08C82", "#C55A4C", "#B23A2E"]
 # Full categorical palette: teal family, then blue family, then red family.
 _CATEGORICAL: list[str] = _TEAL_RAMP + _BLUE_RAMP + _RED_RAMP
+
+
+def contrast_ink(color) -> str:
+    """Label colour for text placed ON a coloured fill: white on dark fills, INK on
+    light — so a percentage stays legible on any slice/segment/bar, including the
+    darkest teal/blue/red. Accepts a hex string or an (r,g,b[,a]) tuple. (REQ-C-27a)"""
+    r, g, b = to_rgb(color)
+    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "#FFFFFF" if lum < 0.55 else INK
 
 
 def series_colors(n: int) -> list[str]:

@@ -34,7 +34,7 @@ from reportbuilder.render.image._mpl import (
     render_png, place_picture_square, series_values, format_value,
 )
 from reportbuilder.render.house_style import (
-    register_fonts, series_colors, INK, MUTED, CREAM, GRIDC,
+    register_fonts, series_colors, contrast_ink, INK, MUTED, CREAM, GRIDC,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 
@@ -130,10 +130,12 @@ def _render_pie(ctx, *, donut: bool) -> None:
     )
     ax.set_aspect("equal")
 
-    for t in autotexts:
+    # Colour each slice's % label for contrast with ITS wedge — white on dark slices,
+    # INK on light — so labels stay legible on the darker teal/blue/red slices.
+    for t, wedge in zip(autotexts, wedges):
         t.set_fontsize(10.0)
         t.set_fontweight("bold")
-        t.set_color(INK)
+        t.set_color(contrast_ink(wedge.get_facecolor()))
 
     if ctx.spec.elements.axis_names or ctx.spec.elements.legend:
         _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt)
