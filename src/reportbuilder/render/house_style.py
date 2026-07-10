@@ -110,19 +110,14 @@ def scale_colors(n: int) -> list[str]:
     return out
 
 
-# Distinct categorical hues used AFTER the teal ramp is exhausted (5+ series), so
-# many-category charts (pie / clustered bars / line / radar) stay legible instead of
-# repeating teal shades. Red/blue families first per house direction (2026-07-10).
-_EXTRA_HUES: list[str] = [
-    RED,        # 5  red
-    BLUE,       # 6  blue
-    RED_LT,     # 7  red (light)
-    BLUE_LT,    # 8  blue (light)
-    "#8A5A8F",  # 9  plum (red↔blue bridge)
-    "#C99A3A",  # 10 amber
-]
-# Full categorical palette, all visually distinct.
-_CATEGORICAL: list[str] = _TEAL_RAMP + _EXTRA_HUES
+# After the teal ramp, add whole HUE FAMILIES — each its own light→dark gradient,
+# same approach as the teal ramp — so many-category charts (pie / clustered bars /
+# line / radar) stay legible instead of repeating teal shades. Order per house
+# direction: teal, then blue, then red (2026-07-10).
+_BLUE_RAMP: list[str] = ["#C4D6E8", "#86A9CE", "#5580AC", "#35618E"]
+_RED_RAMP: list[str] = ["#F0CBC6", "#E08C82", "#C55A4C", "#B23A2E"]
+# Full categorical palette: teal family, then blue family, then red family.
+_CATEGORICAL: list[str] = _TEAL_RAMP + _BLUE_RAMP + _RED_RAMP
 
 
 def series_colors(n: int) -> list[str]:
@@ -130,8 +125,9 @@ def series_colors(n: int) -> list[str]:
 
     Single series → darkest TEAL (most prominent).
     2–4 series → spread across the teal ramp, darkest last (= current wave).
-    5+ series → keep the teal ramp, then red/blue-family accents so no colour
-    repeats (was: cycled the 4-colour ramp → duplicate colours for different labels).
+    5+ series → teal ramp, then a blue gradient, then a red gradient (each family a
+    light→dark ramp) so no colour repeats (was: cycled the 4-colour ramp → duplicate
+    colours for different labels).
     """
     if n == 1:
         return [TEAL]
