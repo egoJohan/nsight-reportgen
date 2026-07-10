@@ -306,10 +306,15 @@ function shortVarLabel(label: string | undefined, name: string): string {
 }
 
 function PercentBaseWidget({ field, chart, question, variables, onChange }: WidgetProps) {
-  // The percentage DIRECTION only applies to the % statistic on a classified chart.
-  // When it doesn't apply, keep an empty grid cell (right of "Statistic") so nothing
-  // else re-lays-out.
-  if (chart.statistic !== "pct" || !chart.classifying_var) {
+  // The percentage DIRECTION only applies to the % statistic on a classified,
+  // non-stacked chart. A 100%-stacked bar is always "within each bar", so the choice
+  // doesn't apply. When it doesn't apply, keep an empty grid cell (right of
+  // "Statistic") so nothing else re-lays-out.
+  if (
+    chart.statistic !== "pct" ||
+    !chart.classifying_var ||
+    chart.chart_type.startsWith("stacked")
+  ) {
     return <div aria-hidden />;
   }
   const byName = new Map((variables ?? []).map((v) => [v.name, v]));

@@ -429,6 +429,12 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     pb = getattr(spec, "percent_base", "auto")
     if not (spec.classifying_var and real_segs):
         pb = "classifier"
+    elif spec.chart_type in _STACKED_BAR_TYPES:
+        # A 100%-stacked bar's bars ARE the classifier groups, each a full stack of the
+        # base categories → the only coherent direction is "classifier" (base distributed
+        # within each classifier group, so each bar sums to 100%). Any other direction
+        # would print labels that don't add up to the 100%-filled bar. (2026-07-10)
+        pb = "classifier"
     elif pb == "auto":
         pb = resolve_percent_base(question, spec, model)
     elif pb not in ("classifier", "question", "total"):
