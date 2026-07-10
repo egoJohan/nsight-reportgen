@@ -183,8 +183,8 @@ function ChartPreview({
 
         {loading && url && (
           <div className="absolute inset-0 z-20 flex items-center justify-center">
-            <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
-              <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="flex items-center gap-3 rounded-full bg-background/95 px-6 py-3 text-base font-semibold text-foreground shadow-xl ring-1 ring-border backdrop-blur-sm">
+              <Loader2Icon className="size-6 animate-spin text-primary" strokeWidth={2.75} />
               Updating…
             </div>
           </div>
@@ -1261,8 +1261,8 @@ function SpecialPreview({
         )}
         {loading && url && (
           <div className="absolute inset-0 z-20 flex items-center justify-center">
-            <div className="flex items-center gap-2.5 rounded-full bg-background/95 px-5 py-2.5 text-sm font-semibold text-foreground shadow-lg ring-1 ring-border backdrop-blur-sm">
-              <div className="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="flex items-center gap-3 rounded-full bg-background/95 px-6 py-3 text-base font-semibold text-foreground shadow-xl ring-1 ring-border backdrop-blur-sm">
+              <Loader2Icon className="size-6 animate-spin text-primary" strokeWidth={2.75} />
               Updating…
             </div>
           </div>
