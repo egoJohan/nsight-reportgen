@@ -87,7 +87,7 @@ _MAX_LABELED_SEGMENTS_V: int = 4
 # question split by a background group has tall bars that easily hold a label, whereas a
 # dense two-classifier cross-tab makes thin ones. (Mean/median render clustered, so this
 # is what makes their by-group value labels appear.)
-_MIN_LABEL_BAR_PT: float = 8.0
+_MIN_LABEL_BAR_PT: float = 5.0
 
 
 def _hbar_row_pt(n_cats: int, fig_h_in: float) -> float:
@@ -611,7 +611,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # multiply — a two-classifier cross-tab packs many thin bars per row), so the
     # label stays a bit smaller than the bar and never touches its neighbours.
     per_bar_pt = row_pt * (0.7 / n_segs if n_segs > 1 else 0.62)
-    value_fs = max(6.0, min(9.5, per_bar_pt * 0.9))
+    value_fs = max(5.5, min(9.5, per_bar_pt * 0.9))
 
     off = _label_offset(max_val)
     for i, seg in enumerate(segs):
