@@ -53,11 +53,13 @@ def test_score_derived_segment_is_middle():
     assert segmenter_score(_segment(), "Klusteri") == 2
 
 
-def test_gender_base_segment_classifier_resolves_to_question():
+def test_auto_defaults_to_classifier_main_classification():
+    # New default (2026-07-10): auto always resolves to "classifier" — percentages of
+    # the main classification (each classifier group = 100%).
     g, s = _gender(), _segment()
     model = QuestionModel(variables={"sukupuoli": g, "klusteri": s}, questions=[])
     q = Question(qid="sukupuoli", kind="single", variables=("sukupuoli",), text="Sukupuoli")
-    assert resolve_percent_base(q, _spec("klusteri"), model) == "question"
+    assert resolve_percent_base(q, _spec("klusteri"), model) == "classifier"
 
 
 def test_opinion_base_gender_classifier_resolves_to_classifier():

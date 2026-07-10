@@ -101,16 +101,10 @@ def resolve_show_total(spec, has_real_classifier: bool) -> bool:
 
 
 def resolve_percent_base(question, spec, model) -> str:
-    """Resolve `percent_base == "auto"` to a concrete direction ("question" or
-    "classifier"). No classifier → "classifier" (only a Total). The base variable
-    takes the denominator only when it strictly outranks the classifier."""
-    cv = getattr(spec, "classifying_var", None)
-    if not cv or not question.variables:
-        return "classifier"
-    base_var = model.variables.get(question.variables[0])
-    clf_var = model.variables.get(cv)
-    if base_var is None or clf_var is None:
-        return "classifier"
-    base_score = segmenter_score(base_var, question.text or "")
-    clf_score = segmenter_score(clf_var, clf_var.label or "")
-    return "question" if base_score > clf_score else "classifier"
+    """Resolve `percent_base == "auto"`. Default: percentages OF THE MAIN CLASSIFICATION
+    — each classifying-variable group sums to 100 % (the "classifier" direction, i.e.
+    "% of <group> who …"). Johan's call (2026-07-10): the old role-based heuristic
+    (base wins when it outranks the classifier) guessed the wrong direction too often;
+    the manual "Percentages of" control ("% within each <base>") is the override for the
+    reverse reading. `segmenter_score` is kept for the questions API / callers."""
+    return "classifier"

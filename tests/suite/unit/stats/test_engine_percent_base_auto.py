@@ -21,15 +21,17 @@ def _spec(question_ref, classifying_var, percent_base="auto"):
                      percent_base=percent_base)
 
 
-def test_auto_gender_by_segment_distributes_within_each_gender():
+def test_auto_defaults_to_the_main_classification():
     df, model = read_sav(str(FIXTURE))
-    q = model.question("sukupuoli")  # base = demographic gender, classifier = segment
+    q = model.question("sukupuoli")  # base = gender, classifier = segment
     r = compute(q, _spec("sukupuoli", "segmentti"), df, model)
-    # Gender outranks the derived segment → "question": within each gender the 7
-    # segments form a distribution (≈100%). "% of men in each segment."
-    for gender in ("Mies", "Nainen"):
-        total = sum((r.cell(gender, s).pct or 0) for s in r.segments if s != "Total")
-        assert 99.0 <= total <= 101.0, f"{gender} segments sum={total}"
+    # New default (2026-07-10): "% of the main classification" — each classifier
+    # (segment) group's categories form a distribution summing to 100%.
+    for seg in r.segments:
+        if seg == "Total":
+            continue
+        total = sum((r.cell(cat, seg).pct or 0) for cat in r.categories)
+        assert 99.0 <= total <= 101.0, f"{seg} categories sum={total}"
 
 
 def test_auto_opinion_by_gender_distributes_within_each_gender():

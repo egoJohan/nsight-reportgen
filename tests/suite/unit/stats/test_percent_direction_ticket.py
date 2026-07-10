@@ -58,11 +58,11 @@ def test_question_direction_is_the_wanted_reading():
         assert 99.0 <= seg_total <= 101.0, f"{gender} segments sum={seg_total}"
 
 
-def test_auto_already_resolves_to_the_wanted_direction():
-    """The current auto-resolution ALREADY picks 'question' for gender(base) ×
-    segment(classifier) — so the reported chart must have percent_base pinned to
-    'classifier' rather than 'auto'. This documents where the fix belongs."""
+def test_auto_defaults_to_classifier_main_classification():
+    """auto now always resolves to 'classifier' — percentages of the main
+    classification (each classifier group = 100%). The 'question' reading (each base
+    category = 100%) is reached via the manual 'Percentages of' control. (2026-07-10)"""
     df, model = read_sav(str(FIXTURE))
     q = model.question("sukupuoli")
     spec = _spec("sukupuoli", "segmentti", "auto")
-    assert resolve_percent_base(q, spec, model) == "question"
+    assert resolve_percent_base(q, spec, model) == "classifier"
