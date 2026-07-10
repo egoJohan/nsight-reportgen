@@ -13,6 +13,28 @@ def pct(count: float, base: int, fmt: NumberFormat) -> float:
     return round(count / base * 100.0, fmt.pct_decimals)
 
 
+def largest_remainder(counts: list[float], base: int, decimals: int) -> list[float]:
+    """Round each ``count/base*100`` to ``decimals`` places so the set sums to the
+    same rounded total as the raw values — exactly 100 for a full partition (avoids
+    e.g. 54 % + 45 % = 99 %). Largest-remainder method: the +1s go to the values with
+    the biggest fractional parts. Returned list is aligned to ``counts``. (REQ-N-01)"""
+    if not base or not counts:
+        return [0.0 for _ in counts]
+    scale = 10 ** decimals
+    raw = [c / base * 100.0 * scale for c in counts]
+    floors = [math.floor(x) for x in raw]
+    deficit = int(round(sum(raw))) - sum(floors)
+    if deficit > 0:  # hand out +1 to the largest remainders
+        order = sorted(range(len(raw)), key=lambda i: raw[i] - floors[i], reverse=True)
+        for k in range(deficit):
+            floors[order[k % len(order)]] += 1
+    elif deficit < 0:  # (rare) reclaim from the smallest remainders
+        order = sorted(range(len(raw)), key=lambda i: raw[i] - floors[i])
+        for k in range(-deficit):
+            floors[order[k % len(order)]] -= 1
+    return [f / scale for f in floors]
+
+
 def count_value(count: float, fmt: NumberFormat) -> float:
     """Integer count; round UP (ceil) if fmt.count_round_up else round-to-nearest. (REQ-N-03)"""
     return float(math.ceil(count) if fmt.count_round_up else round(count))

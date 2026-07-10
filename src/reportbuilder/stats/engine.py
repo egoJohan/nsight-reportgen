@@ -17,7 +17,7 @@ from reportbuilder.stats.percent_base import resolve_percent_base, resolve_show_
 from reportbuilder.stats.registry import statistic as get_statistic
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.stats.sorting import sort_categories
-from reportbuilder.stats.statistics import pct, count_value, summary_value
+from reportbuilder.stats.statistics import pct, count_value, summary_value, largest_remainder
 # Import statistics module to trigger built-in registrations
 import reportbuilder.stats.statistics  # noqa: F401
 
@@ -445,6 +445,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             denom_q[_display] = sum(counts.get((_code, s), 0) for s in real_segs)
 
     cells: dict[tuple[str, str], Cell] = {}
+    raw_cb: dict[tuple[str, str], tuple[float, int]] = {}  # (count, base) per cell
     rows = []
     for code, display, data_index in entries:
         for seg in segments:
@@ -457,6 +458,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 base = grand_total if seg == "Total" else denom_q.get(display, 0)
             else:
                 base = denom.get(seg, 0)
+            raw_cb[(display, seg)] = (c, base)
             cells[(display, seg)] = Cell(pct=pct(c, base, spec.number_format),
                                          count=count_value(c, spec.number_format),
                                          mean=None)
@@ -490,6 +492,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             for seg in segments:
                 mc = missing_n.get(seg, 0)
                 base = denom.get(seg, 0)
+                raw_cb[(na_display, seg)] = (mc, base)
                 cells[(na_display, seg)] = Cell(
                     pct=pct(mc, base, spec.number_format),
                     count=count_value(mc, spec.number_format),
@@ -513,6 +516,30 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 reverse=spec.sort.descending,
             )
             segments = tuple(reals) + (("Total",) if "Total" in segments else ())
+
+    # Largest-remainder rounding so each 100%-partition's displayed %s sum to exactly
+    # 100 (avoids e.g. 54 % + 45 % = 99 %). pct statistic only; the partition axis
+    # follows the percentage direction. (2026-07-10)
+    if spec.statistic == "pct":
+        dec = spec.number_format.pct_decimals
+
+        def _reround(keys):
+            keys = [k for k in keys if k in cells]
+            bs = [raw_cb.get(k, (0, 0))[1] for k in keys]
+            base_g = bs[0] if bs else 0
+            if base_g and all(b == base_g for b in bs):
+                cs = [raw_cb.get(k, (0, 0))[0] for k in keys]
+                for k, p in zip(keys, largest_remainder(cs, base_g, dec)):
+                    cells[k] = dataclasses.replace(cells[k], pct=p)
+
+        if pb == "question":
+            for cat in categories:                      # each base-category's segments
+                _reround([(cat, s) for s in segments if s != "Total"])
+            if "Total" in segments:                     # the grand-total distribution column
+                _reround([(cat, "Total") for cat in categories])
+        else:                                           # classifier/total: each column
+            for seg in segments:
+                _reround([(cat, seg) for cat in categories])
 
     # A stacked bar split by a classifier can carry the right-hand row-summary column
     # too (one value per bar / classifier group), exactly like a battery. (2026-07-10)
