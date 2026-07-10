@@ -147,10 +147,11 @@ def test_classifying_var_field_required_variant():
 
 def test_standard_schema_field_set():
     keys = _keys(standard_schema())
-    # percent_base sits right after statistic (renders on the "Statistic" row).
+    # percent_base sits right after statistic (renders on the "Statistic" row);
+    # show_total (the "Total column" control) follows it.
     assert keys == [
-        "statistic", "percent_base", "classifying_var", "sort", "number_format",
-        "show_not_answered", "show_empty_categories",
+        "statistic", "percent_base", "show_total", "classifying_var", "sort",
+        "number_format", "show_not_answered", "show_empty_categories",
         "not_answered_codes", "category_label_overrides",
     ]
 
@@ -167,7 +168,11 @@ def test_stacked_schema_classifying_var_is_optional():
 
 
 def test_stacked_schema_same_field_set_as_standard():
-    assert _keys(stacked_schema()) == _keys(standard_schema())
+    # Stacked bars never draw a "Total" bar (bars exclude Total), so stacked omits the
+    # show_total control; otherwise its field set matches standard.
+    assert _keys(stacked_schema()) == [
+        k for k in _keys(standard_schema()) if k != "show_total"
+    ]
 
 
 def test_single_series_schema_omits_classifying_var():

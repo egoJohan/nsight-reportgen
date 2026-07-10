@@ -55,6 +55,12 @@ class ChartSpec:
     #   "question"   — distribute the classifier within each base category
     #   "total"      — every cell over the grand total
     percent_base: str = "auto"
+    # Whether the cross-tab "Total" reference series is drawn:
+    #   "auto" — hide it in a within-category % distribution (where it sits on a
+    #            different denominator and can't be read alongside the segments);
+    #            show it for counts/means, "% of total", and single-series charts.
+    #   "on" / "off" — force it.
+    show_total: str = "auto"
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
     # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
     # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
@@ -188,6 +194,7 @@ def report_from_json(data: dict | str) -> Report:
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
             percent_base=c.get("percent_base", "auto"),
+            show_total=c.get("show_total", "auto"),
             row_summary_fn=c.get("row_summary_fn", "none"),
             row_summary_codes=tuple(float(x) for x in c.get("row_summary_codes", ())),
             row_summary_pos_codes=tuple(float(x) for x in c.get("row_summary_pos_codes", ())),

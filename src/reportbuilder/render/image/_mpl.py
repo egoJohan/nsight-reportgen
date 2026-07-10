@@ -202,6 +202,12 @@ def series_values(series):
     ]
     if not segs:  # everything was tiny — fall back to the overall column
         segs = [s for s in series.segments if s == "Total"] or list(series.segments)
+    # Drop the "Total" reference series when the chart opts out (show_total=False),
+    # unless it is the ONLY series (a single-series 'Total'-only chart). (2026-07-10)
+    if getattr(series, "show_total", True) is False:
+        non_total = [s for s in segs if s != "Total"]
+        if non_total:
+            segs = non_total
     data = {
         seg: [
             float(series.cell(c, seg).value(series.statistic) or 0.0)

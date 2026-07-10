@@ -81,6 +81,8 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     // The cross-tab percentage DIRECTION changes the numbers in the PNG, so a change
     // must re-render the preview (else switching direction silently shows the old one).
     percent_base: chart.percent_base ?? "auto",
+    // Showing/hiding the "Total" reference series changes the PNG too.
+    show_total: chart.show_total ?? "auto",
     number_format: chart.number_format,
     sort: chart.sort,
     elements: chart.elements,

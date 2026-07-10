@@ -898,6 +898,7 @@ class ChartSpecBody(BaseModel):
     show_empty_categories: bool = True
     not_answered_codes: list[float] | None = None
     percent_base: str = "auto"
+    show_total: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
     # Right-hand per-row summary column (stacked_horizontal_bar only).
     row_summary_fn: str = "none"
@@ -965,6 +966,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             (str(full), str(short)) for full, short in body.category_label_overrides
         ),
         percent_base=body.percent_base,
+        show_total=body.show_total,
         row_summary_fn=body.row_summary_fn,
         row_summary_codes=tuple(float(c) for c in body.row_summary_codes),
         row_summary_pos_codes=tuple(float(c) for c in body.row_summary_pos_codes),

@@ -72,6 +72,29 @@ def segmenter_score(var, text: str = "") -> int:
     return 1
 
 
+def resolve_show_total(spec, has_real_classifier: bool) -> bool:
+    """Whether the cross-tab "Total" reference series should be drawn (2026-07-10).
+
+    "on"/"off" force it. "auto" hides it only in a WITHIN-CATEGORY percentage
+    distribution — statistic == "pct" with a direction that makes each group sum to
+    100% (question/classifier, and "auto" which always resolves to one of those) —
+    because there the Total sits on a different denominator and can't be read next to
+    the segments. It stays for counts/means, for "% of total", and for single-series
+    charts where the Total IS the only series."""
+    mode = getattr(spec, "show_total", "auto")
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    if not has_real_classifier:
+        return True                       # single series → the Total is the series
+    within_category_pct = (
+        spec.statistic == "pct"
+        and getattr(spec, "percent_base", "auto") in ("auto", "question", "classifier")
+    )
+    return not within_category_pct
+
+
 def resolve_percent_base(question, spec, model) -> str:
     """Resolve `percent_base == "auto"` to a concrete direction ("question" or
     "classifier"). No classifier → "classifier" (only a Total). The base variable

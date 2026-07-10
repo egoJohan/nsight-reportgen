@@ -174,8 +174,8 @@ def standard_schema() -> tuple[ConfigField, ...]:
     """Multi-series-capable charts: optional classifying variable."""
     # percent_base sits right after the statistic so the "Percentages of" direction
     # renders on the same row as "Statistic" (and self-hides for non-% statistics).
-    return (statistic_field(), percent_base_field(), classifying_var_field(),
-            *_common_tail())
+    return (statistic_field(), percent_base_field(), show_total_field(),
+            classifying_var_field(), *_common_tail())
 
 
 def xtab_layout_field() -> ConfigField:
@@ -193,8 +193,21 @@ def xtab_layout_field() -> ConfigField:
 def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
-    return (statistic_field(), percent_base_field(), classifying_var_field(),
-            classifying_var_2_field(), xtab_layout_field(), *_common_tail())
+    return (statistic_field(), percent_base_field(), show_total_field(),
+            classifying_var_field(), classifying_var_2_field(), xtab_layout_field(),
+            *_common_tail())
+
+
+def show_total_field() -> ConfigField:
+    # Whether the cross-tab "Total" reference series is drawn. "Automatic" hides it in
+    # a within-category % distribution (where it can't sum with the segments) and shows
+    # it for counts/means and "% of total". The frontend hides this control until a
+    # classifying variable is chosen (no classifier → no Total to toggle).
+    return ConfigField(
+        "show_total", "select", "Total column",
+        options=(("auto", "Automatic"), ("on", "Show"), ("off", "Hide")),
+        default="auto",
+    )
 
 
 def row_summary_fields() -> tuple[ConfigField, ...]:
@@ -238,5 +251,5 @@ def single_series_schema() -> tuple[ConfigField, ...]:
 def combo_schema() -> tuple[ConfigField, ...]:
     """Combo: this question is the x-axis (bars); pick a numeric secondary
     variable for the mean-per-category line, or split by a classifying variable."""
-    return (statistic_field(), percent_base_field(), combo_secondary_field(),
-            classifying_var_field(), *_common_tail())
+    return (statistic_field(), percent_base_field(), show_total_field(),
+            combo_secondary_field(), classifying_var_field(), *_common_tail())

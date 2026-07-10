@@ -34,6 +34,10 @@ class SeriesResult:
     # Optional right-hand summary value per bar (row_summary feature), aligned to the
     # bars the stacked-horizontal-bar renderer draws. None when off. (spec 2026-07-07)
     row_summaries: tuple[float, ...] | None = None
+    # Whether the "Total" reference series should be drawn. False → renderers drop the
+    # "Total" segment (unless it's the only series). Resolved by the engine from
+    # ChartSpec.show_total + the percentage direction. (2026-07-10)
+    show_total: bool = True
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

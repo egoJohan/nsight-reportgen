@@ -739,11 +739,14 @@ function ChartControls({
   let schema = isBattery
     ? rawSchema.filter((f) => f.key !== "classifying_var")
     : rawSchema;
-  // The second classifier only makes sense once a classifying variable is chosen.
+  // The second classifier and the "Total column" control only make sense once a
+  // classifying variable is chosen — without one there is no Total to toggle.
   // (percent_base stays in the schema even when it doesn't apply — PercentBaseWidget
   //  renders an empty placeholder so the "Statistic" row keeps its layout.)
   if (!chart.classifying_var) {
-    schema = schema.filter((f) => f.key !== "classifying_var_2");
+    schema = schema.filter(
+      (f) => f.key !== "classifying_var_2" && f.key !== "show_total"
+    );
   }
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {

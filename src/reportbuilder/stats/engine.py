@@ -13,7 +13,7 @@ from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec, SortSpec
 from reportbuilder.stats.aggregate import aggregate_counts
 from reportbuilder.stats.base_rules import single_base, multi_base, segment_bases
-from reportbuilder.stats.percent_base import resolve_percent_base
+from reportbuilder.stats.percent_base import resolve_percent_base, resolve_show_total
 from reportbuilder.stats.registry import statistic as get_statistic
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.stats.sorting import sort_categories
@@ -763,6 +763,10 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             result, model, spec.classifying_var, spec.classifying_var_2)
     elif spec.classifying_var:
         result = _relabel_segments(result, model, spec.classifying_var)
+    # Resolve whether the "Total" reference series is drawn (ChartSpec.show_total +
+    # the percentage direction). Renderers read SeriesResult.show_total. (2026-07-10)
+    has_real_classifier = any(s != "Total" for s in result.segments)
+    result = dataclasses.replace(result, show_total=resolve_show_total(spec, has_real_classifier))
     return result
 
 
