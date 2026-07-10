@@ -514,9 +514,20 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             )
             segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
+    # A stacked bar split by a classifier can carry the right-hand row-summary column
+    # too (one value per bar / classifier group), exactly like a battery. (2026-07-10)
+    row_summaries = None
+    if _bars_are_segments and getattr(spec, "row_summary_fn", "none") != "none":
+        code_by_display = {d: c for c, d, _ in entries}
+        pairs = [(c, code_by_display[c]) for c in categories if c in code_by_display]
+        statements = [s for s in segments if s != "Total"]
+        row_summaries = _compute_row_summaries(
+            spec, statements, [c for c, _ in pairs], [code for _, code in pairs], cells)
+
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n={s: denom.get(s, 0) for s in segments},
-                        statistic=spec.statistic, caption=scale_caption)
+                        statistic=spec.statistic, caption=scale_caption,
+                        row_summaries=row_summaries)
 
 
 def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
