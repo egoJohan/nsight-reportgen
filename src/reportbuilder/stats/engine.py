@@ -1139,11 +1139,11 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         n = int(mapped.notna().sum())
         base_by_stmt[v.label] = n
         vc = mapped.value_counts()
-        for p, lbl in zip(points, levels):
-            c = int(vc.get(p, 0))
-            cells[(lbl, v.label)] = Cell(
-                pct=pct(c, n, spec.number_format), count=float(c), mean=None
-            )
+        # Largest-remainder so each statement's scale levels sum to exactly 100 %.
+        counts_l = [int(vc.get(p, 0)) for p in points]
+        pcts_l = largest_remainder(counts_l, n, spec.number_format.pct_decimals)
+        for lbl, c, pv in zip(levels, counts_l, pcts_l):
+            cells[(lbl, v.label)] = Cell(pct=pv, count=float(c), mean=None)
 
     # "Top 2/3 sum" sort: order the statement bars by their summed two (or three) highest
     # scale levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
