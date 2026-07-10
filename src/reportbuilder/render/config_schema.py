@@ -172,7 +172,9 @@ def classifying_var_2_field() -> ConfigField:
 
 def standard_schema() -> tuple[ConfigField, ...]:
     """Multi-series-capable charts: optional classifying variable."""
-    return (statistic_field(), classifying_var_field(), percent_base_field(),
+    # percent_base sits right after the statistic so the "Percentages of" direction
+    # renders on the same row as "Statistic" (and self-hides for non-% statistics).
+    return (statistic_field(), percent_base_field(), classifying_var_field(),
             *_common_tail())
 
 
@@ -191,8 +193,8 @@ def xtab_layout_field() -> ConfigField:
 def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
-    return (statistic_field(), classifying_var_field(), classifying_var_2_field(),
-            xtab_layout_field(), percent_base_field(), *_common_tail())
+    return (statistic_field(), percent_base_field(), classifying_var_field(),
+            classifying_var_2_field(), xtab_layout_field(), *_common_tail())
 
 
 def row_summary_fields() -> tuple[ConfigField, ...]:
@@ -221,7 +223,7 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
     chart is a single 100%-stacked bar of the question's answer distribution
     (the 'total'). `with_row_summary` appends the right-hand summary column fields
     (stacked HORIZONTAL bar only)."""
-    return (statistic_field(), classifying_var_field(), percent_base_field(),
+    return (statistic_field(), percent_base_field(), classifying_var_field(),
             # Row-summary column up front (right after the data options) so it's easy
             # to find — it's the headline feature of a stacked Likert battery.
             *(row_summary_fields() if with_row_summary else ()),
@@ -236,5 +238,5 @@ def single_series_schema() -> tuple[ConfigField, ...]:
 def combo_schema() -> tuple[ConfigField, ...]:
     """Combo: this question is the x-axis (bars); pick a numeric secondary
     variable for the mean-per-category line, or split by a classifying variable."""
-    return (statistic_field(), combo_secondary_field(),
-            classifying_var_field(), percent_base_field(), *_common_tail())
+    return (statistic_field(), percent_base_field(), combo_secondary_field(),
+            classifying_var_field(), *_common_tail())

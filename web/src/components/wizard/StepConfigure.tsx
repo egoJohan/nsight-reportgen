@@ -205,10 +205,11 @@ function Field({
   label,
   required,
   children,
-  hint,
 }: {
   label: string;
   required?: boolean;
+  // Accepted for call-site compatibility but no longer rendered — the orange
+  // per-field "tips" were removed from the config section.
   hint?: string;
   children: React.ReactNode;
 }) {
@@ -219,7 +220,6 @@ function Field({
         {required && <span className="ml-1 text-destructive">*</span>}
       </Label>
       {children}
-      {hint && <p className="text-xs text-amber-600">{hint}</p>}
     </div>
   );
 }
@@ -306,6 +306,12 @@ function shortVarLabel(label: string | undefined, name: string): string {
 }
 
 function PercentBaseWidget({ field, chart, question, variables, onChange }: WidgetProps) {
+  // The percentage DIRECTION only applies to the % statistic on a classified chart.
+  // When it doesn't apply, keep an empty grid cell (right of "Statistic") so nothing
+  // else re-lays-out.
+  if (chart.statistic !== "pct" || !chart.classifying_var) {
+    return <div aria-hidden />;
+  }
   const byName = new Map((variables ?? []).map((v) => [v.name, v]));
   const baseVar = question ? byName.get(question.variables?.[0] ?? "") : undefined;
   const clfVar = chart.classifying_var ? byName.get(chart.classifying_var) : undefined;
@@ -733,12 +739,11 @@ function ChartControls({
   let schema = isBattery
     ? rawSchema.filter((f) => f.key !== "classifying_var")
     : rawSchema;
-  // The second classifier and the percentage-direction control only make sense
-  // once a classifying variable is chosen — hide them until then.
+  // The second classifier only makes sense once a classifying variable is chosen.
+  // (percent_base stays in the schema even when it doesn't apply — PercentBaseWidget
+  //  renders an empty placeholder so the "Statistic" row keeps its layout.)
   if (!chart.classifying_var) {
-    schema = schema.filter(
-      (f) => f.key !== "classifying_var_2" && f.key !== "percent_base"
-    );
+    schema = schema.filter((f) => f.key !== "classifying_var_2");
   }
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {
