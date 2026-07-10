@@ -88,6 +88,11 @@ def resolve_show_total(spec, has_real_classifier: bool) -> bool:
         return False
     if not has_real_classifier:
         return True                       # single series → the Total is the series
+    # A STACKED bar's "Total" is a 100%-stacked reference (same 0–100 scale as every
+    # other bar), so it's always a valid comparison — unlike a clustered bar where the
+    # Total is a base-marginal bar on a different denominator. Show it by default. (2026-07-10)
+    if getattr(spec, "chart_type", "") in ("stacked_horizontal_bar", "stacked_vertical_bar"):
+        return True
     within_category_pct = (
         spec.statistic == "pct"
         and getattr(spec, "percent_base", "auto") in ("auto", "question", "classifier")

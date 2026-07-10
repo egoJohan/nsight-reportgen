@@ -42,5 +42,10 @@ def test_with_classifier_still_transposes_to_segment_bars():
     s = SeriesResult(categories=("Yes", "No"), segments=("A", "B", "Total"),
                      cells=cells, base_n={"Total": 100, "A": 50, "B": 50}, statistic="pct")
     bars, stack, data = _stacked_layout(s)
-    assert bars == ["A", "B"]  # 'Total' excluded when real segments exist
+    # Real classifier segments are the bars; the overall 'Total' is kept as a trailing
+    # reference bar (show_total defaults on). Off → excluded.
+    assert bars == ["A", "B", "Total"]
     assert list(stack) == ["Yes", "No"]
+    import dataclasses
+    bars_off, _, _ = _stacked_layout(dataclasses.replace(s, show_total=False))
+    assert bars_off == ["A", "B"]

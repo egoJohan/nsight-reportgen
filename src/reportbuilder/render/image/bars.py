@@ -674,10 +674,16 @@ def _stacked_layout(series):
     case).
     """
     cats, segs, data = series_values(series)
-    bars = [s for s in segs if s != "Total"]
-    if not bars:
+    real = [s for s in segs if s != "Total"]
+    if not real:
         # No classifier: one 'Total' bar, stacked by the answer categories.
         bars = ["Total"]
+    elif "Total" in segs:
+        # Classified + show_total: append the overall distribution as a reference
+        # "Total" bar (series_values already dropped it when show_total is off).
+        bars = real + ["Total"]
+    else:
+        bars = real
     stack = cats
     new_data = {
         qcat: [data[seg][ci] for seg in bars] for ci, qcat in enumerate(cats)

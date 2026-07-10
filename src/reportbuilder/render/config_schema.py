@@ -241,6 +241,8 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
             # (e.g. gender × age) — the engine builds the combos and the stacked renderer
             # groups them by the primary classifier.
             classifying_var_2_field(),
+            # Show/hide the overall "Total" reference bar (a 100% reference stack).
+            show_total_field(),
             # Row-summary column up front (right after the data options) so it's easy
             # to find — it's the headline feature of a stacked Likert battery.
             *(row_summary_fields() if with_row_summary else ()),

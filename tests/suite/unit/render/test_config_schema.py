@@ -168,13 +168,12 @@ def test_stacked_schema_classifying_var_is_optional():
 
 
 def test_stacked_schema_fields():
-    # Stacked bars never draw a "Total" bar (bars exclude Total), so no show_total; but
-    # they DO support a second classifying variable (cross-tab combos, grouped by the
-    # primary classifier).
+    # Stacked bars support a second classifying variable (cross-tab combos, grouped by
+    # the primary classifier) AND an overall "Total" reference bar (a 100% ref stack).
     assert _keys(stacked_schema()) == [
-        "statistic", "percent_base", "classifying_var", "classifying_var_2", "sort",
-        "number_format", "show_not_answered", "show_empty_categories",
-        "not_answered_codes", "category_label_overrides",
+        "statistic", "percent_base", "classifying_var", "classifying_var_2",
+        "show_total", "sort", "number_format", "show_not_answered",
+        "show_empty_categories", "not_answered_codes", "category_label_overrides",
     ]
 
 

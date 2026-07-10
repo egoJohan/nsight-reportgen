@@ -215,10 +215,12 @@ def test_image_line_places_picture():
 
 # --- Regression: stacked layout transpose + vertical-bar orientation ---------
 
-def test_stacked_layout_excludes_total_and_transposes():
-    """_stacked_layout: bars = classifier segments (no 'Total'); stack = answer
-    categories; each bar sums to 100 (column %)."""
+def test_stacked_layout_total_reference_bar_and_transposes():
+    """_stacked_layout: bars = classifier segments; stack = answer categories; each bar
+    sums to 100 (column %). The overall 'Total' is kept as a reference bar when
+    show_total is on, and excluded when off."""
     from reportbuilder.render.image.bars import _stacked_layout
+    import dataclasses
 
     cells = {
         ("Yes", "A"): Cell(pct=60.0, count=None, mean=None),
@@ -234,12 +236,15 @@ def test_stacked_layout_excludes_total_and_transposes():
         cells=cells,
         base_n={"Total": 100, "A": 50, "B": 50},
         statistic="pct",
-    )
+    )  # show_total defaults True
     bars, stack, data = _stacked_layout(s)
-    assert bars == ["A", "B"]  # 'Total' excluded
+    assert bars == ["A", "B", "Total"]  # Total kept as the reference bar
     assert list(stack) == ["Yes", "No"]
     for bi in range(len(bars)):
         assert abs(sum(data[q][bi] for q in stack) - 100.0) < 1e-6
+    # show_total off → Total excluded
+    bars_off, _, _ = _stacked_layout(dataclasses.replace(s, show_total=False))
+    assert bars_off == ["A", "B"]
 
 
 def test_stacked_layout_without_classifier_single_total_bar():
