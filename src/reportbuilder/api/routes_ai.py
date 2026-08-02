@@ -209,7 +209,7 @@ def ai_slide_title(
         # Apply the report's grouping so battery/multi qids resolve (REQ: AI titles for
         # combined questions). No-op when the caller sends no grouping.
         if body.grouping:
-            model = apply_grouping_override(model, body.grouping)
+            model = apply_grouping_override(model, body.grouping, df=df)
     except HTTPException:
         raise
     except Exception as exc:  # data load is part of the AI flow — degrade to 503

@@ -1380,6 +1380,11 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     return SeriesResult(
         categories=tuple(levels), segments=tuple(bars),
         cells=cells, base_n=base_n, statistic="pct",
-        segment_primary=segment_primary or None,
+        # NOT segment_primary: the cross-tab grouping draws the primary as a ROTATED
+        # label beside the axis, which assumes short values ("Mies"/"Nainen"). A
+        # battery's primary is a full statement, and rendering those rotated smears
+        # them together and crushes the plot. The statement-major ORDER already puts
+        # each statement's segments adjacent, and every bar keeps its own readable
+        # "<statement> · <segment>" tick. (spec 2026-08-02 §2.4)
         row_summaries=_compute_row_summaries(spec, bars, levels, points, cells),
     )

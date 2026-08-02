@@ -92,16 +92,17 @@ def test_stacked_battery_bars_are_statement_by_segment():
                           "Modernius · Polku 1", "Modernius · Polku 2")
 
 
-def test_stacked_battery_groups_by_statement():
-    """segment_primary drives the renderer's grouping — statements adjacent."""
+def test_stacked_battery_orders_statement_major_without_rotated_group_labels():
+    """The bar ORDER puts each statement's segments adjacent, but segment_primary is
+    deliberately NOT set: the cross-tab grouping renders the primary as a rotated
+    label beside the axis, which assumes short values. A battery's primary is a full
+    statement, and rotating those smears them together and crushes the plot."""
     model, q, df = _setup()
     r = engine.compute(q, _spec("stacked_horizontal_bar"), df, model)
-    assert r.segment_primary == {
-        "Laadukkuus · Polku 1": "Laadukkuus",
-        "Laadukkuus · Polku 2": "Laadukkuus",
-        "Modernius · Polku 1": "Modernius",
-        "Modernius · Polku 2": "Modernius",
-    }
+    assert r.segment_primary is None
+    # statement-major: both segments of a statement sit together
+    assert [s.split(" · ")[0] for s in r.segments] == [
+        "Laadukkuus", "Laadukkuus", "Modernius", "Modernius"]
 
 
 def test_stacked_battery_cells_split_by_segment():

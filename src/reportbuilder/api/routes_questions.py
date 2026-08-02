@@ -561,7 +561,7 @@ def question_summary(
     df, model = _load_df_model(material_id, client)
     if grouping:
         try:
-            model = apply_grouping_override(model, json.loads(grouping))
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
         except (ValueError, TypeError):
             pass  # malformed grouping → fall back to the base model
     try:
@@ -1133,7 +1133,9 @@ def preview_chart(
     finally:
         os.unlink(tmp_path)
 
-    model = apply_grouping_override(model, body.grouping or {})
+    # df is passed so indicator-family (banner) groups resolve here too — without
+    # it the picker offers a banner classifier the PREVIEW then silently ignores.
+    model = apply_grouping_override(model, body.grouping or {}, df=df)
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories
