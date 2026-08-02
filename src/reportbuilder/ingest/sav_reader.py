@@ -251,6 +251,23 @@ def _is_metadata(name: str, label: str) -> bool:
     return False
 
 
+def _is_empty_column(series) -> bool:
+    """True when a column holds no answers at all.
+
+    Nobody answered it, so it cannot be a question: it can only ever produce a
+    blank slide, and it occupies a row in Select that does nothing. Blanks are
+    not answers — the Erisan material's "m"/"p" columns hold "" rather than
+    nulls. A 0 IS an answer.
+    """
+    try:
+        nn = series.dropna()
+        if len(nn) == 0:
+            return True
+        return not bool(nn.astype(str).str.strip().ne("").any())
+    except Exception:
+        return False
+
+
 def _is_constant_marker(name: str, var: "Variable", series) -> bool:
     """Return True for a structural/total marker column that is NOT a real
     question: it has no human label (label == variable name), no value labels,
@@ -360,6 +377,7 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
         Question(qid=_slug(name), kind="single", variables=(name,), text=variables[name].label)
         for name in df.columns
         if not _is_metadata(name, variables[name].label)
+        and not _is_empty_column(df[name])
         and not _is_constant_marker(name, variables[name], df[name])
         and not _is_unlabeled_helper(name, variables[name])
     ]
