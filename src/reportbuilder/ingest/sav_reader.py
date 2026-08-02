@@ -51,6 +51,29 @@ def _is_coded_string(series: pd.Series) -> bool:
     return (len(nn) / distinct) >= _CODED_MIN_RATIO
 
 
+def _natural_key(s: str) -> list[tuple[int, int, str]]:
+    """Sort key that orders 'Polku 2' before 'Polku 10'.
+
+    Every element is the SAME shape — (kind, number, text) — so a numeric chunk is
+    never compared against a text chunk. Returning a bare mix of ints and strs
+    raises TypeError as soon as one value starts with a digit ("1 - Ei lainkaan")
+    and another with a letter ("Ei osaa sanoa"); numbers sort before words."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower())
+            for t in re.split(r"(\d+)", s) if t != ""]
+
+
+def string_categories(series: pd.Series) -> tuple[str, ...]:
+    """The categories of a LABEL-LESS string categorical: its distinct non-blank
+    values, natural-sorted.
+
+    Sorted rather than first-seen because row order in a SAV is arbitrary, and the
+    category order must be reproducible across exports of the same data.
+    (spec 2026-08-02 §1.2)"""
+    nn = series.dropna().astype(str)
+    nn = nn[nn.str.strip() != ""]
+    return tuple(sorted({v.strip() for v in nn}, key=_natural_key))
+
+
 def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     """Detect open-ended free-text variables (Task G.1).
 

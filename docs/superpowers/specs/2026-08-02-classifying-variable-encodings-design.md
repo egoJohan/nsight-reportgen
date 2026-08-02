@@ -385,6 +385,13 @@ none reach the question list or picker. The regression test above pins this.
   corpus.
 - `near_partition` is evaluated per model load. Cost is O(rows × members) over
   candidate families only; negligible at these sizes, but it is new per-load work.
+- **DataHive D1 parity.** All statistics currently run locally through duckdb and
+  pandas; `DataHiveClient.aggregate` (the D1 primitive) has no call sites, and every
+  deployment runs `NSIGHT_DEMO=1` against the in-memory store. Both §0's Total rule
+  and §2.3's `seg_masks` land in that local path (`stats/aggregate.py`, which
+  describes itself as "the seam datahive's D1 primitive later replaces"). If D1 is
+  ever swapped in, both semantics must be mirrored there or the numbers diverge
+  silently.
 - Materials with fewer than 30 respondents never auto-detect a banner classifier
   (the absolute floor exceeds `n`). Manual grouping still reaches it. This is
   deliberate — exclusivity is not evidence of anything at that sample size.

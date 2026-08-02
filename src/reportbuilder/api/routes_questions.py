@@ -34,7 +34,7 @@ from reportbuilder.api.model_loader import (
     material_config,
     value_merges,
 )
-from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
+from reportbuilder.ingest.sav_reader import read_sav, string_categories, _is_metadata
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.model.report import (
     ChartSpec,
@@ -206,31 +206,52 @@ def _is_likert_scale(var) -> bool:
     return uniq[0] == 1 and uniq == list(range(1, len(uniq) + 1)) and uniq[-1] <= 11
 
 
-def _segmentable(var) -> bool:
+def _string_cats(var, df) -> tuple[str, ...]:
+    """Distinct values of a LABEL-LESS string categorical, or () when the data
+    isn't available. A coded path/concept column ("Pakkausilme 1"/"Pakkausilme 2")
+    carries its categories in the values, not in value labels."""
+    if df is None or var.name not in getattr(df, "columns", []):
+        return ()
+    return string_categories(df[var.name])
+
+
+def _segmentable(var, df=None) -> bool:
     """True when a variable is a MEANINGFUL classifying/segmentation variable.
 
     A low-cardinality categorical that is background/demographic (age, region,
     ownership tier, branch, …) — NOT a Likert rating item (measured, not used to
     segment) and not a high-cardinality single-choice question. This keeps the
     'Classifying variable' picker to the handful of variables an analyst would
-    actually cross-tabulate by, instead of every categorical in the file."""
+    actually cross-tabulate by, instead of every categorical in the file.
+
+    A LABEL-LESS string categorical is judged by its distinct VALUES instead of its
+    value labels — `df` supplies them. (spec 2026-08-02 §1.2)"""
     if var.measurement != "categorical":
         return False
+    if not var.value_labels:
+        return 2 <= len(_string_cats(var, df)) <= 10
     nv = len(var.value_labels)
     if not (2 <= nv <= 10):
         return False
     return not _is_likert_scale(var)
 
 
-def _has_real_category_labels(var) -> bool:
-    """True when a variable's value labels are substantive category names (e.g.
+def _has_real_category_labels(var, df=None) -> bool:
+    """True when a variable's categories are substantive names (e.g.
     'enemmistöomistajat', 'Branch A') rather than generic flags (TRUE/FALSE/EMPTY)
     — used to keep analyst segment recodes (whose NAME looks like paradata) in the
-    classifying-variable picker while still dropping bare binary URL flags."""
+    classifying-variable picker while still dropping bare binary URL flags.
+
+    For a label-less string categorical the candidates are its distinct VALUES, so
+    a string column holding TRUE/FALSE is filtered exactly like a labelled one."""
     generic = {"true", "false", "empty", "yes", "no", "kyllä", "ei", "-", "—", ""}
+    if var.value_labels:
+        candidates = [vl.label or "" for vl in var.value_labels]
+    else:
+        candidates = list(_string_cats(var, df))
     named = [
-        lbl for vl in var.value_labels
-        if (lbl := (vl.label or "").strip())
+        lbl for c in candidates
+        if (lbl := c.strip())
         and any(ch.isalpha() for ch in lbl)
         and lbl.lower() not in generic
     ]
@@ -356,14 +377,17 @@ def _value_list(model: QuestionModel, q) -> list[dict]:
     return [{"code": vl.value, "label": vl.label} for vl in var.value_labels]
 
 
-def _category_labels(model: QuestionModel, q) -> list[str]:
+def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
     """Base category label strings in render order (the label-override editor's list).
 
-    Single: non-missing value labels of the primary variable. Multi: member-variable labels.
+    Single: non-missing value labels of the primary variable — or, for a LABEL-LESS
+    string categorical, its distinct values. Multi: member-variable labels.
     """
     if q.kind in ("multi", "battery"):
         return [model.variables[v].label for v in q.variables]
     var = model.variables[q.variables[0]]
+    if not var.value_labels:
+        return list(_string_cats(var, df))
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
 
 
@@ -506,7 +530,7 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             "compatible_chart_types": compatible,
             "missing_values": _missing_value_list(model, q.qid),
             "values": _value_list(model, q),
-            "category_labels": _category_labels(model, q),
+            "category_labels": _category_labels(model, q, _df_or_none()),
             # Endpoint gloss a stacked bar appends to its subtitle by default ("" when
             # the question has no such scale) — the Subtitle box prefills with it.
             "scale_gloss": _scale_gloss(model, q),
@@ -562,7 +586,7 @@ def question_summary(
         ],
         "value_labels": _value_list(model, q),
         "missing_values": _missing_value_list(model, q.qid),
-        "category_labels": _category_labels(model, q),
+        "category_labels": _category_labels(model, q, df),
         "scale_gloss": _scale_gloss(model, q),
         "chartable": chartable,
         "non_chartable_reason": reason,
@@ -661,7 +685,7 @@ def list_variables(
             return False
         if not _is_metadata(v.name, v.label or v.name):
             return True
-        return _segmentable(v) and _has_real_category_labels(v)
+        return _segmentable(v, _df_or_none()) and _has_real_category_labels(v, _df_or_none())
 
     all_vars = [v for v in model.variables.values() if _keep(v)]
     # Stable sort: categorical before scale; original file order within each tier.
@@ -685,7 +709,8 @@ def list_variables(
                 # derived binary SEGMENT FLAG (e.g. "Suosittelijat", "Kokemusta":
                 # 0/1 membership the analyst cross-tabs by). Drives the
                 # classifying-variable picker.
-                "segmentable": _segmentable(var) or _is_binary_flag(var, _df_or_none()),
+                "segmentable": (_segmentable(var, _df_or_none())
+                                or _is_binary_flag(var, _df_or_none())),
                 # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
                 "tickbox": _is_binary(var),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
