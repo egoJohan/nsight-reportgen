@@ -33,6 +33,47 @@ _SUFFIX = re.compile(r"O?\d+$")
 # A0.2: explicit O-pattern family detector
 _O_PATTERN = re.compile(r"^(var\d+)[Oo]\d+$", re.IGNORECASE)
 
+# "Polku1"/"Polku2" -> stem "polku"; also tolerates "Polku_1" and "Polku-01".
+_STEM_PATTERN = re.compile(r"^(.*?)[ _\-]?0*(\d+)$")
+
+# A "banner" family is one indicator column per group (Polku1/Polku2): the columns
+# SPLIT the sample rather than collecting several ticks per respondent. Overlap is
+# measured among COVERED respondents so a screened design — where only qualifiers
+# see a concept — still counts, and the floor is an absolute count so a family only
+# one person answered cannot pass on vacuous exclusivity. (spec 2026-08-02 §2.1)
+_BANNER_MIN_COVERED = 30
+_BANNER_MIN_COVERAGE = 0.10
+_BANNER_MAX_OVERLAP = 0.02
+
+
+def member_masks(df, members: tuple[str, ...]):
+    """`column == 1` per member, or None when any member is absent from `df`."""
+    import pandas as pd
+
+    masks = []
+    for name in members:
+        if name not in getattr(df, "columns", []):
+            return None
+        masks.append(pd.to_numeric(df[name], errors="coerce") == 1.0)
+    return masks
+
+
+def near_partition(masks, n: int) -> bool:
+    """True when these indicator masks split the sample into usable segments."""
+    import pandas as pd
+
+    k = len(masks)
+    if not (2 <= k <= 10) or n <= 0:
+        return False
+    if any(int(m.sum()) < 1 for m in masks):
+        return False
+    frame = pd.concat(masks, axis=1)
+    covered = int(frame.any(axis=1).sum())
+    if covered < max(_BANNER_MIN_COVERED, _BANNER_MIN_COVERAGE * n):
+        return False
+    overlap = int((frame.sum(axis=1) >= 2).sum())
+    return (overlap / covered) <= _BANNER_MAX_OVERLAP
+
 
 def _prefix(name: str) -> str:
     return _SUFFIX.sub("", name)
