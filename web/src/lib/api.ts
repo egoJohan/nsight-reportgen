@@ -172,6 +172,10 @@ export interface ChartSpec {
   // Marks it as NOT the question's primary slide, so the Step 1 question toggle
   // leaves it alone.
   compare_group?: string | null;
+  // Unticked in Select: the slide stays in the report (keeping its content) but is
+  // left OUT of the deck. Special slides have no catalog to be re-added from, so
+  // unticking must not delete them.
+  excluded?: boolean;
   // Override the methodology footer (e.g. a simpler "N = 950"); null = auto
   // ("<stat> · n = N"). "{n}" expands to the base count, "{stat}" to the stat label.
   footer_note: string | null;

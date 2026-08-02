@@ -377,14 +377,25 @@ export default function ReportWizard({
     [mutate]
   );
 
-  const removeChart = useCallback(
+  // Tick/untick a slide that has no catalog row of its own (a special slide).
+  // Unticking keeps the chart — and its bullets — and only leaves it out of the deck.
+  const toggleChartExcluded = useCallback(
     (index: number) => {
       mutate((d) => ({
         ...d,
-        charts: normalizeSlots(d.charts.filter((_, i) => i !== index)),
+        charts: d.charts.map((c, i) =>
+          i === index ? { ...c, excluded: !c.excluded } : c
+        ),
       }));
     },
     [mutate]
+  );
+
+  // The deck as it will render: Design, the preview grid and the export all skip
+  // slides that were unticked in Select.
+  const includedCharts = useMemo(
+    () => (draft?.charts ?? []).filter((c) => !c.excluded),
+    [draft]
   );
 
   const reorderCharts = useCallback(
@@ -1013,9 +1024,9 @@ export default function ReportWizard({
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
             onSelectMany={selectMany}
-            onRemoveChart={removeChart}
             onAddSpecial={addSpecialSlide}
             onAddComparison={addComparisonSection}
+            onToggleExcluded={toggleChartExcluded}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}
@@ -1024,7 +1035,7 @@ export default function ReportWizard({
         {step === 1 && (
           <StepConfigure
             materialId={materialId}
-            charts={draft.charts}
+            charts={includedCharts}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
             active={active}
