@@ -310,16 +310,39 @@ def _is_demographic(model: QuestionModel, q) -> bool:
     return bool(_DEMOGRAPHIC_RE.search(q.text or "")) or bool(_DEMOGRAPHIC_RE.search(var.label or ""))
 
 
-def _question_chartable(model: QuestionModel, q) -> tuple[bool, str | None]:
+def _question_chartable(model: QuestionModel, q, df=None) -> tuple[bool, str | None]:
     """Whether a question can be charted, plus a reason when it cannot (Task J.3).
 
-    Open-ended free-text questions are now chartable — as a *word cloud only*
-    (see the questions route, which wires their suggested/compatible types). A
-    question is only non-chartable when it has no variables at all.
+    Open-ended free-text questions are chartable — as a *word cloud only* (see the
+    questions route, which wires their suggested/compatible types).
+
+    A question is non-chartable when it has no variables, or — when `df` is given —
+    when NOBODY answered any of them. The Erisan material carries two such columns
+    ("m" and "p", 0 answers out of 511); offered like any other question, they can
+    only ever produce a blank slide. Without a DataFrame the check is skipped, so
+    model-only callers are unaffected.
     """
     if not q.variables:
         return False, "No variables"
+    if df is not None and not _has_any_answer(q, df):
+        return False, "No answers in the data"
     return True, None
+
+
+def _has_any_answer(q, df) -> bool:
+    """True when at least one respondent answered at least one of the question's
+    variables. Blank strings are not answers — the empty columns hold "" rather
+    than nulls."""
+    for name in q.variables:
+        if name not in getattr(df, "columns", []):
+            continue
+        col = df[name]
+        nn = col.dropna()
+        if len(nn) == 0:
+            continue
+        if nn.astype(str).str.strip().ne("").any():
+            return True
+    return False
 
 
 def _compatible_chart_types(question, series: SeriesResult) -> list[str]:
@@ -491,7 +514,7 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
 
     questions = []
     for q in model.questions:
-        chartable, reason = _question_chartable(model, q)
+        chartable, reason = _question_chartable(model, q, _df_or_none())
         if not chartable:
             suggested = None
             compatible = []
@@ -569,7 +592,7 @@ def question_summary(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Question '{qid}' not found") from exc
 
-    chartable, reason = _question_chartable(model, q)
+    chartable, reason = _question_chartable(model, q, df)
     is_text = _is_text_question(model, q)
     out: dict = {
         "qid": q.qid,
