@@ -256,6 +256,56 @@ export function makeChart(
   };
 }
 
+/** A stable per-chart id. question_ref is no longer unique — a comparison section
+ * adds a second slide for a question that already has a total-level one. */
+export function newSlideId(): string {
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+}
+
+/** Chart types that can draw more than one series. A pie cannot — which is why a
+ * total-level pie must become a clustered bar when split into groups.
+ * (spec 2026-08-02-compare-groups-section §2) */
+const MULTI_SERIES_CAPABLE = new Set<string>([
+  "horizontal_bar",
+  "vertical_bar",
+  "line",
+  "radar",
+  "combo",
+  "scatter",
+  "stacked_horizontal_bar",
+  "stacked_vertical_bar",
+]);
+
+export function supportsMultiSeries(chartType: string): boolean {
+  return MULTI_SERIES_CAPABLE.has(chartType);
+}
+
+/** A comparison slide for `source`, split by `classifyingVar`.
+ *
+ * - Clears classifying_var_2: with a BANNER classifier the engine rejects a second
+ *   classifier outright, so carrying one over would make the slide fail to render.
+ * - Carries no slide_title, so generating a dozen slides fires no AI title calls.
+ * - Falls back to a clustered bar when the source type cannot show two series. */
+export function makeComparisonSlide(
+  source: ChartSpec,
+  classifyingVar: string
+): ChartSpec {
+  return {
+    ...source,
+    slide_id: newSlideId(),
+    compare_group: classifyingVar,
+    classifying_var: classifyingVar,
+    classifying_var_2: null,
+    percent_base: "auto",
+    chart_type: supportsMultiSeries(source.chart_type)
+      ? source.chart_type
+      : "horizontal_bar",
+    slide_title: null,
+  };
+}
+
 /**
  * Build a fresh special (non-chart) slide spec. Heading goes in slide_title,
  * bullet content in options.bullets. Carries all serde-required ChartSpec
