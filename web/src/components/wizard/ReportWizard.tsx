@@ -24,7 +24,9 @@ import {
   isSpecialSlide,
   isThemes,
   makeChart,
+  makeComparisonSlide,
   makeSpecialSlide,
+  newSlideId,
   normalizeSlots,
 } from "@/lib/charts";
 import StepSelect from "./StepSelect";
@@ -194,14 +196,26 @@ export default function ReportWizard({
         name: loaded.name,
         render_mode: "image",
         template_ref: loaded.template_ref ?? "",
-        charts: loaded.charts ?? [],
+        // The backend deliberately leaves slide_id empty (backfilling there would
+        // break its exact round-trip), so the EDITOR assigns one on load. Charts
+        // written before slide_id existed get one here.
+        charts: (loaded.charts ?? []).map((c) =>
+          c.slide_id ? c : { ...c, slide_id: newSlideId() }
+        ),
         grouping: loaded.grouping ?? { groups: [], singles: [] },
       });
     }
   }, [loaded, draft]);
 
+  // "Is this question in the report?" counts PRIMARY slides only: a question
+  // whose sole chart is a comparison slide is not itself added.
   const addedRefs = useMemo(
-    () => new Set((draft?.charts ?? []).map((c) => c.question_ref)),
+    () =>
+      new Set(
+        (draft?.charts ?? [])
+          .filter((c) => !c.compare_group)
+          .map((c) => c.question_ref)
+      ),
     [draft]
   );
 
@@ -255,7 +269,11 @@ export default function ReportWizard({
           return {
             ...d,
             charts: normalizeSlots(
-              d.charts.filter((c) => c.question_ref !== q.qid)
+              // A comparison slide is not the question's PRIMARY slide, so
+              // unticking the question must not delete it. (compare-groups §3)
+              d.charts.filter(
+                (c) => c.question_ref !== q.qid || !!c.compare_group
+              )
             ),
           };
         }
@@ -298,12 +316,19 @@ export default function ReportWizard({
           return {
             ...d,
             charts: normalizeSlots(
-              d.charts.filter((c) => isSpecialSlide(c) || !qids.has(c.question_ref))
+              d.charts.filter(
+                (c) =>
+                  isSpecialSlide(c) ||
+                  !!c.compare_group ||
+                  !qids.has(c.question_ref)
+              )
             ),
           };
         }
         const present = new Set(
-          d.charts.filter((c) => !isSpecialSlide(c)).map((c) => c.question_ref)
+          d.charts
+            .filter((c) => !isSpecialSlide(c) && !c.compare_group)
+            .map((c) => c.question_ref)
         );
         const additions = questions
           .filter((q) => !present.has(q.qid))
@@ -653,6 +678,29 @@ export default function ReportWizard({
   // Add a special slide (synchronously, returning its anchor ref so the caller
   // can select it) and generate its bullets in the background — spanning pages
   // when the content overflows one slide.
+  // Generate a "Compare groups" section: one slide per chosen question, split by
+  // `classifyingVar`. APPENDED after the last slide — a comparison section is a
+  // closing section, and addSpecialSlide's front-of-deck placement would bury the
+  // report's opening. (spec 2026-08-02-compare-groups-section §1)
+  const addComparisonSection = useCallback(
+    (classifyingVar: string, qids: string[]) => {
+      mutate((d) => {
+        // Source each new slide from the question's PRIMARY chart so it inherits
+        // the author's chart type, label overrides and formatting.
+        const primary = new Map(
+          d.charts.filter((c) => !c.compare_group).map((c) => [c.question_ref, c])
+        );
+        const made = qids
+          .map((qid) => primary.get(qid))
+          .filter((c): c is ChartSpec => !!c)
+          .map((c) => makeComparisonSlide(c, classifyingVar));
+        if (made.length === 0) return d;
+        return { ...d, charts: normalizeSlots([...d.charts, ...made]) };
+      });
+    },
+    [mutate]
+  );
+
   const addSpecialSlide = useCallback(
     (type: string, afterRef?: string | null): string => {
       const heading = SPECIAL_HEADINGS[type];
@@ -953,6 +1001,7 @@ export default function ReportWizard({
             onSelectMany={selectMany}
             onRemoveChart={removeChart}
             onAddSpecial={addSpecialSlide}
+            onAddComparison={addComparisonSection}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}

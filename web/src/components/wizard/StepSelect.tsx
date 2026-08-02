@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { Question, GroupingOverride, BatterySuggestion, ChartSpec } from "@/lib/api";
-import { useRegroupedQuestions, useBatterySuggestions } from "@/lib/queries";
+import { useRegroupedQuestions, useBatterySuggestions, useVariables } from "@/lib/queries";
 import { isSpecialSlide } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -99,6 +99,7 @@ export default function StepSelect({
   onSelectMany,
   onRemoveChart,
   onAddSpecial,
+  onAddComparison,
   grouping,
   onGroupingChange,
   onPruneRefs,
@@ -111,10 +112,13 @@ export default function StepSelect({
   onSelectMany: (questions: Question[], select: boolean) => void;
   onRemoveChart: (index: number) => void;
   onAddSpecial: (type: string, afterRef?: string | null) => string | void;
+  onAddComparison: (classifyingVar: string, qids: string[]) => void;
   grouping: GroupingOverride;
   onGroupingChange: (override: GroupingOverride) => void;
   onPruneRefs: (validQids: Set<string>) => void;
 }) {
+  // Needed by the "Compare groups" form's Group-by picker.
+  const { data: variables } = useVariables(materialId);
   const { data: questions, isLoading, isError } = useRegroupedQuestions(
     materialId,
     grouping
@@ -317,7 +321,7 @@ export default function StepSelect({
           className="shrink-0"
           onClick={() => setAddSpecialOpen(true)}
         >
-          <PlusIcon className="size-4" /> Add special slide
+          <PlusIcon className="size-4" /> Add slide
         </Button>
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {addedQuestions.length} in report
@@ -389,6 +393,12 @@ export default function StepSelect({
         // Insert at the FRONT of the deck (afterRef=null) so the new slide is
         // immediately visible at the top rather than scrolled off the bottom.
         onPick={(type) => onAddSpecial(type, null)}
+        materialId={materialId}
+        grouping={grouping}
+        variables={variables}
+        questions={questions}
+        reportQids={addedRefs}
+        onAddComparison={onAddComparison}
       />
 
       {/* Title + Select all / Unselect all (right-aligned). Always shown. */}
