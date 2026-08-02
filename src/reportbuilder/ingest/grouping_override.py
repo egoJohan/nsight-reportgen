@@ -17,6 +17,7 @@ import dataclasses
 from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.ingest.multi_group import (
     _is_binary, _group_text, apply_groups, suggest_multi_groups,
+    suggest_indicator_families,
 )
 from reportbuilder.ingest.battery_group import _slug, apply_batteries, suggest_batteries
 
@@ -88,7 +89,8 @@ def _apply_manual_batteries(model: QuestionModel,
     return QuestionModel(variables=variables, questions=questions)
 
 
-def apply_grouping_override(model: QuestionModel, override: dict | None) -> QuestionModel:
+def apply_grouping_override(model: QuestionModel, override: dict | None,
+                            df=None) -> QuestionModel:
     override = override or {}
     known = set(model.variables)
 
@@ -129,6 +131,11 @@ def apply_grouping_override(model: QuestionModel, override: dict | None) -> Ques
 
     # Auto multi suggestions that don't touch a manual member or a forced single.
     auto_multi = [g for g in suggest_multi_groups(model) if not (set(g) & blocked)]
+    # Indicator families (one 1-or-missing column per group) need the DATA to tell
+    # a banner from a tick-box grid, so they are suggested separately. Without a
+    # DataFrame this is a no-op and behaviour is exactly as before. (spec §2.2)
+    auto_multi += [g for g in suggest_indicator_families(model, df)
+                   if not (set(g) & blocked) and g not in auto_multi]
     all_multi = manual_groups + auto_multi
     m = apply_groups(model, all_multi) if all_multi else model
     m = _inject_labels(m, override.get("groups", []) or [])

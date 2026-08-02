@@ -113,11 +113,52 @@ def _group_text(model: QuestionModel, members: tuple[str, ...]) -> str:
     stem = os.path.commonprefix(labels).rstrip(" :-")
     if stem and " " in stem.strip():
         return stem
+    # A BANNER family's labels are "<Stem> <n>" ("Polku 1"/"Polku 2"), so a
+    # single-word stem is the right title even though the guard above rejects one.
+    # Only when every label is the stem plus a bare number — a shared question word
+    # ("Kuinka hyvin …"/"Kuinka usein …") never reduces to that. (spec §2.2)
+    if stem and all(re.fullmatch(rf"{re.escape(stem)}[ _\-]*\d+", lbl.strip())
+                    for lbl in labels):
+        return stem
     return labels[0]
 
 
 def _group_qid(members: tuple[str, ...]) -> str:
     return _prefix(members[0]).lower() or members[0].lower()
+
+
+def suggest_indicator_families(model: QuestionModel, df) -> list[tuple[str, ...]]:
+    """Ungrouped 0/1 indicator columns that, bucketed by name stem, split the sample.
+
+    Complements `suggest_multi_groups`, which only buckets variables carrying binary
+    VALUE LABELS — the same columns exported WITHOUT labels are otherwise invisible,
+    which is why one export of a study offers a path classifier and another does not.
+
+    Returns [] without a DataFrame: whether columns split the sample cannot be told
+    from metadata alone. (spec 2026-08-02 §2.2)"""
+    import pandas as pd
+
+    if df is None:
+        return []
+    grouped = {v for q in model.questions
+               if q.kind in ("multi", "battery") for v in q.variables}
+    buckets: "OrderedDict[str, list[str]]" = OrderedDict()
+    for name, var in model.variables.items():
+        if name in grouped or name not in getattr(df, "columns", []):
+            continue
+        s = pd.to_numeric(df[name], errors="coerce")
+        vals = set(s.dropna().unique().tolist())
+        if not vals or not vals <= {0.0, 1.0}:
+            continue
+        m = _STEM_PATTERN.match(name)
+        if m and m.group(1):
+            buckets.setdefault(m.group(1).lower(), []).append(name)
+    out: list[tuple[str, ...]] = []
+    for members in buckets.values():
+        masks = member_masks(df, tuple(members))
+        if masks and near_partition(masks, len(df)):
+            out.append(tuple(members))
+    return out
 
 
 def enrich_model(model: QuestionModel) -> QuestionModel:

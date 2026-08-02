@@ -106,11 +106,11 @@ def _apply_merges(model: QuestionModel, merges: dict) -> QuestionModel:
     return QuestionModel(variables=model.variables, questions=questions)
 
 
-def _finalize(model, material_id: str, client, override: dict | None):
+def _finalize(model, material_id: str, client, override: dict | None, df=None):
     """Apply the report's grouping override, then the material's per-question
     cleaning (name overrides + value merges) — so they show consistently
     everywhere the model is used. Config is loaded once."""
-    model = apply_grouping_override(model, override or {})
+    model = apply_grouping_override(model, override or {}, df=df)
     cfg = material_config(material_id, client)
     model = _apply_labels(model, _labels_from_cfg(cfg))
     model = _apply_merges(model, _merges_from_cfg(cfg))
@@ -118,15 +118,15 @@ def _finalize(model, material_id: str, client, override: dict | None):
 
 
 def model_for_material(material_id: str, client, override: dict | None = None):
-    _df, model, _label = _read(material_id, client)
-    return _finalize(model, material_id, client, override)
+    df, model, _label = _read(material_id, client)
+    return _finalize(model, material_id, client, override, df=df)
 
 
 def df_model_for_material(material_id: str, client, override: dict | None = None):
     df, model, _label = _read(material_id, client)
-    return df, _finalize(model, material_id, client, override)
+    return df, _finalize(model, material_id, client, override, df=df)
 
 
 def df_model_label_for_material(material_id: str, client, override: dict | None = None):
     df, model, label = _read(material_id, client)
-    return df, _finalize(model, material_id, client, override), label
+    return df, _finalize(model, material_id, client, override, df=df), label
