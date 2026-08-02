@@ -26,6 +26,7 @@ const SPECIAL_KIND: Record<string, string> = {
   special_overview: "Overview",
   special_conclusion: "Conclusion",
   special_demographics: "Demographics",
+  special_blank: "Empty slide",
 };
 
 // Lightweight details for a special (non-question) slide — special slides have no

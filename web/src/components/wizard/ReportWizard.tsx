@@ -398,6 +398,17 @@ export default function ReportWizard({
     [draft]
   );
 
+  // Design is given the INCLUDED list, but its callbacks address charts by index
+  // and the mutations run against the FULL draft. Without this translation,
+  // excluding any slide makes Design edit and reorder the WRONG chart.
+  const includedToFull = useMemo(() => {
+    const out: number[] = [];
+    (draft?.charts ?? []).forEach((c, i) => {
+      if (!c.excluded) out.push(i);
+    });
+    return out;
+  }, [draft]);
+
   const reorderCharts = useCallback(
     (from: number, to: number) => {
       mutate((d) => ({
@@ -1040,8 +1051,10 @@ export default function ReportWizard({
             aiPending={aiPending}
             active={active}
             setActive={setActive}
-            onReorder={reorderCharts}
-            onUpdateChart={updateChart}
+            onReorder={(from, to) =>
+              reorderCharts(includedToFull[from] ?? from, includedToFull[to] ?? to)
+            }
+            onUpdateChart={(i, patch) => updateChart(includedToFull[i] ?? i, patch)}
             onEnsureTitles={ensureTitles}
             onRegenerateSpecial={regenerateSpecial}
           />

@@ -52,7 +52,13 @@ export default function StepDownload({
   const abortRef = useRef<AbortController | null>(null);
 
   const fileBase = safeFileName(draft.name);
-  const noCharts = draft.charts.length === 0;
+  // Slides unticked in Select are kept in the report but left OUT of the deck, so
+  // Preview must show — and count — exactly what will be assembled.
+  const deckCharts = useMemo(
+    () => draft.charts.filter((c) => !c.excluded),
+    [draft.charts]
+  );
+  const noCharts = deckCharts.length === 0;
 
   useEffect(
     () => () => {
@@ -133,8 +139,8 @@ export default function StepDownload({
         <div className="min-w-0">
           <h3 className="text-base font-semibold">Generate your deck</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Assemble {draft.charts.length}{" "}
-            {draft.charts.length === 1 ? "slide" : "slides"} into a PowerPoint
+            Assemble {deckCharts.length}{" "}
+            {deckCharts.length === 1 ? "slide" : "slides"} into a PowerPoint
             deck and PDF. Rendering can take a moment.
           </p>
         </div>
@@ -181,16 +187,16 @@ export default function StepDownload({
       {!noCharts && (
         <div className="rounded-xl border bg-card p-4">
           <h3 className="mb-3 text-base font-semibold">
-            All slides ({draft.charts.length})
+            All slides ({deckCharts.length})
           </h3>
           <SlideGrid
-            charts={draft.charts}
+            charts={deckCharts}
             materialId={materialId}
             grouping={grouping}
             questionMap={questionMap}
             activeRef={active}
             onSelect={(i) => {
-              setActive(draft.charts[i].question_ref);
+              setActive(deckCharts[i].question_ref);
               onGoToDesign();
             }}
           />
