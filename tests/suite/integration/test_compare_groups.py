@@ -26,6 +26,24 @@ def _load():
     return r, df, model
 
 
+def _a_single_chart(r, model):
+    """The first ordinary single-question chart in the report.
+
+    Chosen dynamically rather than by qid: the fixture report is edited by hand
+    during testing, so pinning "var3" made these tests fail the moment that slide
+    was removed."""
+    for c in r.charts:
+        if c.chart_type.startswith("special") or c.compare_group:
+            continue
+        try:
+            q = model.question(c.question_ref)
+        except Exception:
+            continue
+        if q.kind == "single" and 2 <= len(model.variables[q.variables[0]].value_labels) <= 8:
+            return c, q
+    pytest.skip("no suitable single-question chart in the fixture report")
+
+
 def _generated(src, classifying_var="polku"):
     """What makeComparisonSlide produces, mirrored in Python."""
     return dataclasses.replace(
@@ -44,15 +62,15 @@ def _generated(src, classifying_var="polku"):
 
 def test_a_generated_slide_has_two_groups_with_the_known_bases():
     r, df, model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
-    res = engine.compute(model.question("var3"), _generated(src), df, model)
+    src, q = _a_single_chart(r, model)
+    res = engine.compute(q, _generated(src), df, model)
     assert sorted(res.base_n[s] for s in res.segments if s != "Total") == [255, 256]
 
 
 def test_a_pie_becomes_a_bar_so_both_groups_are_visible():
     """The customer's total-level slide is a pie; a pie cannot draw two series."""
     r, df, model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
+    src, _q = _a_single_chart(r, model)
     pie = dataclasses.replace(src, chart_type="pie")
     assert _generated(pie).chart_type == "horizontal_bar"
     # a chart type that CAN show two series is left alone
@@ -67,31 +85,31 @@ def test_clearing_the_second_classifier_avoids_the_banner_error():
     """A source slide that is a cross-tab would otherwise raise: the engine rejects
     a banner classifier combined with a second classifying variable."""
     r, df, model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
-    crossed = dataclasses.replace(src, classifying_var="var4", classifying_var_2="var5")
-    engine.compute(model.question("var3"), _generated(crossed), df, model)  # no raise
+    src, q = _a_single_chart(r, model)
+    crossed = dataclasses.replace(src, classifying_var="var5", classifying_var_2="var6")
+    engine.compute(q, _generated(crossed), df, model)  # must not raise
 
 
 def test_carrying_the_second_classifier_over_would_have_raised():
     """Pins WHY the field is cleared, so a future refactor cannot quietly undo it."""
     r, df, model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
-    bad = dataclasses.replace(src, classifying_var="polku", classifying_var_2="var4")
+    src, q = _a_single_chart(r, model)
+    bad = dataclasses.replace(src, classifying_var="polku", classifying_var_2="var5")
     with pytest.raises(ValueError, match="second classifying variable"):
-        engine.compute(model.question("var3"), bad, df, model)
+        engine.compute(q, bad, df, model)
 
 
 def test_a_generated_slide_carries_no_title():
     """So a dozen generated slides fire no AI title calls."""
-    r, _df, _model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
+    r, _df, model = _load()
+    src, _q = _a_single_chart(r, model)
     assert _generated(dataclasses.replace(src, slide_title="X")).slide_title is None
 
 
 def test_both_encodings_of_the_path_generate_the_same_numbers():
     r, df, model = _load()
-    src = next(c for c in r.charts if c.question_ref == "var3")
-    by_banner = engine.compute(model.question("var3"), _generated(src, "polku"), df, model)
-    by_string = engine.compute(model.question("var3"), _generated(src, "var214"), df, model)
+    src, q = _a_single_chart(r, model)
+    by_banner = engine.compute(q, _generated(src, "polku"), df, model)
+    by_string = engine.compute(q, _generated(src, "var214"), df, model)
     assert sorted(by_banner.base_n[s] for s in by_banner.segments if s != "Total") == \
            sorted(by_string.base_n[s] for s in by_string.segments if s != "Total")

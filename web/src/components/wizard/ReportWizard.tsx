@@ -207,15 +207,11 @@ export default function ReportWizard({
     }
   }, [loaded, draft]);
 
-  // "Is this question in the report?" counts PRIMARY slides only: a question
-  // whose sole chart is a comparison slide is not itself added.
+  // "Is this question in the report?" — ANY slide showing it counts, comparison
+  // slides included. Counting only primaries left a question that has comparison
+  // slides looking un-added, which emptied the Compare groups question list.
   const addedRefs = useMemo(
-    () =>
-      new Set(
-        (draft?.charts ?? [])
-          .filter((c) => !c.compare_group)
-          .map((c) => c.question_ref)
-      ),
+    () => new Set((draft?.charts ?? []).map((c) => c.question_ref)),
     [draft]
   );
 
@@ -234,8 +230,15 @@ export default function ReportWizard({
   const pruneToValidRefs = useCallback(
     (valid: Set<string>) => {
       mutate((d) => {
+        // Keep anything whose ref is SYNTHETIC ("sp_…") as well as anything the
+        // type registry recognises. A special slide whose type this build does not
+        // know yet (a stale module after a hot reload) would otherwise be pruned
+        // away the moment it is added, which looked like the slide "disappearing".
         const kept = d.charts.filter(
-          (c) => isSpecialSlide(c) || valid.has(c.question_ref)
+          (c) =>
+            isSpecialSlide(c) ||
+            c.question_ref.startsWith("sp_") ||
+            valid.has(c.question_ref)
         );
         return kept.length === d.charts.length ? d : { ...d, charts: kept };
       });
@@ -269,11 +272,11 @@ export default function ReportWizard({
           return {
             ...d,
             charts: normalizeSlots(
-              // A comparison slide is not the question's PRIMARY slide, so
-              // unticking the question must not delete it. (compare-groups §3)
-              d.charts.filter(
-                (c) => c.question_ref !== q.qid || !!c.compare_group
-              )
+              // Unticking a question removes EVERY slide showing it, comparison
+              // slides included. Sparing them orphans slides for a question the
+              // list says is not in the report — and leaves the deck in a state
+              // the user cannot get back out of from Step 1.
+              d.charts.filter((c) => c.question_ref !== q.qid)
             ),
           };
         }
@@ -317,10 +320,7 @@ export default function ReportWizard({
             ...d,
             charts: normalizeSlots(
               d.charts.filter(
-                (c) =>
-                  isSpecialSlide(c) ||
-                  !!c.compare_group ||
-                  !qids.has(c.question_ref)
+                (c) => isSpecialSlide(c) || !qids.has(c.question_ref)
               )
             ),
           };
