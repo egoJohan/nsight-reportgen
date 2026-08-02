@@ -154,3 +154,62 @@ def test_regroup_valid_multi_returns_questions(client_mock):
     assert "questions" in body
     # The battery-suggestion hint list is always present (empty when nothing qualifies).
     assert isinstance(body.get("battery_suggestions"), list)
+
+
+# ---- banner classifiers in the picker (spec 2026-08-02 §2.4) ---------------
+
+def test_variables_entries_all_carry_a_usable_name(client_mock):
+    """Every entry's `name` is what lands in ChartSpec.classifying_var — a variable
+    name, or a qid for a question-backed banner classifier."""
+    r = client_mock.get("/materials/mat-x/variables")
+    assert r.status_code == 200
+    rows = r.json()["variables"]
+    assert rows
+    for v in rows:
+        assert isinstance(v["name"], str) and v["name"]
+        assert "segmentable" in v
+
+
+def test_banner_rows_are_appended_for_a_near_partition_multi():
+    """/variables enumerates model.variables, so a question-backed classifier needs
+    an explicit synthetic entry or it can never be picked."""
+    import pandas as pd
+
+    from reportbuilder.api.routes_questions import _banner_classifier_rows
+    from reportbuilder.model.question import Question, QuestionModel, Variable
+
+    def _v(n, l):
+        return Variable(name=n, label=l, measurement="categorical",
+                        value_labels=(), missing_values=frozenset())
+
+    model = QuestionModel(
+        variables={"Polku1": _v("Polku1", "Polku 1"), "Polku2": _v("Polku2", "Polku 2")},
+        questions=[Question(qid="polku", kind="multi",
+                            variables=("Polku1", "Polku2"), text="Polku")],
+    )
+    df = pd.DataFrame({"Polku1": [1.0] * 100 + [None] * 100,
+                       "Polku2": [None] * 100 + [1.0] * 100})
+    rows = _banner_classifier_rows(model, df)
+    assert [r["name"] for r in rows] == ["polku"]
+    assert rows[0]["segmentable"] is True and rows[0]["banner"] is True
+    assert rows[0]["label"] == "Polku"
+    # no DataFrame -> cannot be measured -> nothing offered
+    assert _banner_classifier_rows(model, None) == []
+
+
+def test_an_overlapping_multi_is_not_offered_as_a_banner():
+    import pandas as pd
+
+    from reportbuilder.api.routes_questions import _banner_classifier_rows
+    from reportbuilder.model.question import Question, QuestionModel, Variable
+
+    def _v(n, l):
+        return Variable(name=n, label=l, measurement="categorical",
+                        value_labels=(), missing_values=frozenset())
+
+    model = QuestionModel(
+        variables={"a1": _v("a1", "A"), "a2": _v("a2", "B")},
+        questions=[Question(qid="a", kind="multi", variables=("a1", "a2"), text="A")],
+    )
+    df = pd.DataFrame({"a1": [1.0] * 200, "a2": [1.0] * 200})   # everyone in both
+    assert _banner_classifier_rows(model, df) == []

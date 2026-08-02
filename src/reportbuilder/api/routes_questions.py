@@ -723,8 +723,46 @@ def list_variables(
                 "scale_compat_key": _scale_compat_key(var),
             }
             for var in all_vars
-        ]
+        ] + _banner_classifier_rows(model, None if include_all else _df_or_none())
     }
+
+
+def _banner_classifier_rows(model: QuestionModel, df) -> list[dict]:
+    """Synthetic picker entries for banner classifiers.
+
+    A banner classifier is a QUESTION (a near-partition multi such as
+    Polku1+Polku2), so it would never appear in a list built from
+    `model.variables`. `name` is the qid — what lands in
+    ChartSpec.classifying_var, which the engine resolves variable-name-first.
+    Empty without a DataFrame or in include_all mode (the grouping editor wants
+    raw variables). (spec 2026-08-02 §2.4)"""
+    from reportbuilder.ingest.multi_group import member_masks, near_partition
+
+    if df is None:
+        return []
+    rows: list[dict] = []
+    for q in model.questions:
+        if q.kind != "multi":
+            continue
+        masks = member_masks(df, q.variables)
+        if not masks or not near_partition(masks, len(df)):
+            continue
+        rows.append({
+            "name": q.qid,
+            "label": q.text or q.qid,
+            "measurement": "categorical",
+            "n_values": len(q.variables),
+            "aggregatable": False,
+            "segmentable": True,
+            "tickbox": False,
+            "scale": False,
+            "scale_key": None,
+            "scale_compat_key": None,
+            # Marks a question-backed classifier whose segments may overlap: no
+            # second classifier and no "each category" direction. (§2.4, §2.5)
+            "banner": True,
+        })
+    return rows
 
 
 class GroupSpec(BaseModel):

@@ -32,6 +32,27 @@ def _seg_key(code: float) -> str:
     return str(int(code)) if float(code).is_integer() else str(code)
 
 
+def _banner_masks(spec, data: pd.DataFrame, model: QuestionModel):
+    """Segment masks when `classifying_var` names a near-partition MULTI question.
+
+    Resolution is variable-name-first — a real DataFrame column or model variable
+    always wins — so this only fires for a qid. Returns None otherwise, leaving
+    every existing classifier untouched. (spec 2026-08-02 §2.4)"""
+    from reportbuilder.ingest.multi_group import member_masks, near_partition
+
+    cv = getattr(spec, "classifying_var", None)
+    if not cv or cv in data.columns or cv in model.variables:
+        return None
+    q = next((x for x in model.questions
+              if x.qid == cv and x.kind == "multi"), None)
+    if q is None:
+        return None
+    masks = member_masks(data, q.variables)
+    if not masks or not near_partition(masks, len(data)):
+        return None
+    return {model.variable(v).label: m for v, m in zip(q.variables, masks)}
+
+
 def _numeric_like(values: pd.Series) -> bool:
     """True when the values are really numbers held as strings — those keep the
     existing numeric segmentation path so their value labels still resolve."""
@@ -212,9 +233,19 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
     var = model.variable(question.variables[0])   # single var; multi: first var
     label = question.text or var.label
     fmt = spec.number_format
-    seg_series, ordered = _combo_segmentation(spec, data)
-    if seg_series is not None or spec.classifying_var:
-        if seg_series is not None:                   # cross-tab: two classifiers
+    banner = _banner_masks(spec, data, model)
+    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
+    usable_clf = spec.classifying_var and spec.classifying_var in data.columns
+    if banner is not None or seg_series is not None or usable_clf:
+        if banner is not None:                       # banner: indicator columns
+            bases = segment_bases(data, var, seg_masks=banner)
+            segments = (*banner.keys(), "Total")
+            # A summary statistic reads one value per segment; represent the banner
+            # as a key series (segments are disjoint by construction here).
+            seg_series = pd.Series([None] * len(data), index=data.index, dtype=object)
+            for label, m in banner.items():
+                seg_series.loc[m] = label
+        elif seg_series is not None:                 # cross-tab: two classifiers
             bases = segment_bases(data, var, seg_series=seg_series)
             segments = (*ordered, "Total")
         else:
@@ -393,20 +424,28 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     show_empty: bool = getattr(spec, "show_empty_categories", True)
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
-    seg_series, ordered = _combo_segmentation(spec, data)
-    if seg_series is not None:                       # cross-tab: two classifiers
+    banner = _banner_masks(spec, data, model)
+    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
+    if banner is not None:                           # banner: indicator columns
+        bases = segment_bases(data, var, missing_override=eff, seg_masks=banner)
+        counts = aggregate_counts(data, var.name, seg_masks=banner)
+        segments = (*banner.keys(), "Total")
+    elif seg_series is not None:                     # cross-tab: two classifiers
         bases = segment_bases(data, var, missing_override=eff, seg_series=seg_series)
         counts = aggregate_counts(data, var.name, seg_series=seg_series)
         segments = (*ordered, "Total")
-    elif spec.classifying_var:
+    elif spec.classifying_var and spec.classifying_var in data.columns:
         bases = segment_bases(data, var, spec.classifying_var, missing_override=eff,
                               classifier_var=model.variables.get(spec.classifying_var))
         counts = aggregate_counts(data, var.name, spec.classifying_var)
         segments = tuple(s for s in bases if s != "Total")
         segments = (*segments, "Total") if segments else ("Total",)
     else:
+        # No usable classifier — including a stored qid that no longer resolves to a
+        # near-partition banner (the data changed). Degrade to a single Total series
+        # rather than failing, matching the lenient handling of stale groupings.
         bases = {"Total": single_base(data, var, missing_override=eff)}
-        counts = aggregate_counts(data, var.name, spec.classifying_var)
+        counts = aggregate_counts(data, var.name)
         segments = ("Total",)
 
     # When show_not_answered is True, recompute over total (valid + missing). (REQ-D-06, MV)
@@ -625,10 +664,17 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # who answered the multi — so a cell reads "% of <segment> who selected <option>".
     # Segments are code strings; compute() relabels them to the classifier's value
     # labels via _relabel_segments / _relabel_combo_segments. (2026-07-10)
-    seg_series, ordered = _combo_segmentation(spec, data)
+    banner = _banner_masks(spec, data, model)
+    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
     seg_codes: list[str] = []
     seg_mask: dict[str, "pd.Series"] = {}
-    if seg_series is not None:
+    if banner is not None:
+        # A banner classifier is ALREADY one mask per segment — exactly this shape.
+        for label, m in banner.items():
+            if bool(m.any()):
+                seg_codes.append(label)
+                seg_mask[label] = m
+    elif seg_series is not None:
         for sc in ordered:
             m = (seg_series == sc)
             if bool(m.any()):
