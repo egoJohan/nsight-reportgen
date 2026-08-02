@@ -2,6 +2,14 @@
 
 **Date:** 2026-08-02
 **Status:** approved (design), pending implementation plan
+**Revision:** 2. Changes from revision 1, all found in review:
+§1.1 a third of the customer's questions do not split at all, so the dialog needs a
+backend call to know which — revision 1 wrongly claimed no new endpoint;
+§2 a generated slide must clear `classifying_var_2` or a banner classifier raises;
+§3 the marker moved out of the `options` bag, which is part of the preview cache key;
+§1.2 the dialog is once-only per type and calls every special slide AI-written,
+neither of which fits this one;
+§1.3 generating a dozen slides must not fire a dozen AI title calls.
 
 ## Problem
 
@@ -43,7 +51,8 @@ Group by:  [ Polku                    ▾ ]
 Questions: [x] Identifioitko itsesi…?
            [x] Minkä ikäinen olet?
            [x] Missä päin Suomea asut?
-           [ ] …
+           [ ] Kuinka houkuttelevana pidät oheista pakkausta?
+               — only one group answered this question
 ```
 
 - **Group by** lists the same variables as the Design panel's Classifying variable
@@ -51,10 +60,58 @@ Questions: [x] Identifioitko itsesi…?
   banner classifiers such as `Polku`, coded path columns such as
   `Pakkausilme 1 tai 2`, demographics, and analyst segment recodes — so the feature
   is "compare any groups across the report", of which the packaging arm is one case.
-- **Questions** defaults to the questions already in the report, all ticked.
+- **Questions** lists the questions already in the report. A question the chosen
+  variable does not actually split is shown disabled with the reason, and cannot be
+  ticked (§1.1). The rest default to ticked.
 - Confirming inserts one chart slide per ticked question, each with
-  `classifying_var` set to the chosen variable, as a contiguous block after the
-  active slide (the placement rule `addSpecialSlide` already uses).
+  `classifying_var` set to the chosen variable, as one contiguous block **appended
+  after the last chart slide** — not at the front of the deck, which is where
+  `addSpecialSlide(type, null)` puts a special slide. A comparison section is a
+  closing section, and inserting it at the front would bury the report's opening.
+
+### 1.1 Not every question splits — this must be visible
+
+Measured on the customer's own report: **6 of its 18 questions produce a
+one-group split** under `Polku`. Every one is a battery whose member variables
+belong to a single arm (`Houkuttelevuus_1` is asked only of path 1), so
+classifying it by the path yields that arm and nothing else. Two other batteries —
+asked of everyone — split correctly.
+
+Generating slides blindly would hand the author six charts that look unsplit and
+have to be deleted by hand. So the dialog must know, per question, how many groups
+survive. That is data-dependent, so it needs a backend call:
+
+```
+GET /materials/{id}/split-groups?classifying_var=<name-or-qid>&grouping=<json>
+  → { "var3": 2, "battery-kuinka-houkuttelevana-…": 1, … }
+```
+
+It reuses the existing model load and `_classifier_masks`, counting the segments
+that have any answered data for each question — the same `_drop_empty_segments`
+rule the engine already applies, so the dialog can never disagree with the chart.
+
+The dialog calls it when the **Group by** value changes and disables every question
+whose count is below 2, labelled "only one group answered this question".
+
+### 1.2 Two dialog assumptions this breaks
+
+`AddSpecialDialog` currently renders each choice `disabled={added}` — a special
+slide is once-only — and its subtitle reads *"Special slides are written by AI from
+the report's data."* Neither holds here:
+
+- **Compare groups is repeatable.** Comparing by `Polku` and then by gender are two
+  legitimate sections, so this entry is exempt from the once-only rule.
+- **Nothing about it is AI-written.** The dialog subtitle moves onto the individual
+  choices, so the three AI slides keep that promise and this one does not make it.
+
+### 1.3 No burst of AI title calls
+
+Adding an ordinary slide triggers the wizard's AI title generation. A comparison
+section is a dozen slides at once, which would fire a dozen egoHive calls in
+parallel — slow, and enough to exhaust a quota (which this project has already hit
+once). Generated slides are therefore created with **no `slide_title`**, so each
+falls back to the question text, and the author regenerates titles individually
+from Design if they want them. Nothing is silently spent on their behalf.
 
 Unlike the other special slides these are ordinary chart slides — no AI content, no
 `special_*` chart type — so every existing Design control works on them unchanged.
@@ -74,6 +131,13 @@ clustered bar:
 
 The question's own chart type is read from its existing slide when it has one, else
 from `suggested_chart_type`.
+
+**A generated slide also clears `classifying_var_2`.** Carrying a second classifier
+over from the source slide is not merely odd — with a banner classifier the engine
+*raises* (`ValueError`, spec §2.5 of the classifying-variable work), so a report
+whose source slide happens to be a cross-tab would fail to render. The generated
+slide is a clean two-group comparison: one classifier, `percent_base` left at
+`auto`.
 
 ## 3. Slide identity
 
@@ -95,12 +159,17 @@ charts. Today that shows as a single tick, and unticking would silently delete b
 - Step 1's tick still answers "is this question in the report?" (`question_ref`
   membership, unchanged).
 - Unticking a question removes only its **primary** slides. A generated comparison
-  slide is marked with `options.compare_group = "<variable name>"` — the existing
-  free-form options bag, so no second first-class field — and a slide carrying that
-  marker is never removed by the Step 1 toggle. "Primary" is therefore *unmarked*,
-  not *unclassified*: a chart the author classified by hand stays primary, which is
-  what they'd expect. Comparison slides are removed from the slide grid like any
-  other slide.
+  slide is marked with **`ChartSpec.compare_group = "<variable>"`**, and a slide
+  carrying that marker is never removed by the Step 1 toggle. "Primary" is therefore
+  *unmarked*, not *unclassified*: a chart the author classified by hand stays
+  primary, which is what they'd expect. Comparison slides are removed from the slide
+  grid like any other slide.
+
+  The marker is a first-class field rather than a key in the free-form `options`
+  bag for two reasons: `options` is plugin-config space, and it is part of the
+  **preview cache key** (`queries.ts`), so a marker there would make an otherwise
+  identical chart render twice. `compare_group` and `slide_id` are both excluded
+  from that key — neither changes a single pixel of the PNG.
 - New slides get a random `slide_id` (the scheme `specialRef` already uses).
   Reports saved before this change have none; each chart is assigned
   `f"{question_ref}#{index}"` on load, which is deterministic, so loading and
@@ -109,6 +178,13 @@ charts. Today that shows as a single tick, and unticking would silently delete b
 `question_ref` keeps its meaning — which question the chart shows — so the backend
 is unaffected: it renders per chart and never assumed refs were unique.
 
+**Known limitation, deliberately not fixed here.** `AiPendingMap` is also keyed by
+`question_ref` (`aiPending?.[activeChart.question_ref]?.titlePending`), so
+regenerating a title on the total slide shows the spinner on its comparison twin as
+well. It is cosmetic — the wrong slide shows "Updating…" briefly — and re-keying the
+AI orchestrator on `slide_id` is a larger change than this feature warrants. Worth
+doing if per-slide AI state ever matters for anything beyond a spinner.
+
 ## 4. What is NOT needed
 
 Worth recording, because it shapes the size of this work:
@@ -116,10 +192,15 @@ Worth recording, because it shapes the size of this work:
 - No engine change. `classifying_var` already produces the required series, for a
   banner classifier, a coded string column, or an ordinary value-labelled variable.
 - No renderer change. The clustered bar already draws one series per group.
-- No new backend endpoint. The variable list and the question list both already
-  exist.
+- No new statistics. §1.1's endpoint counts segments using the engine's existing
+  `_classifier_masks` + `_drop_empty_segments`; it computes nothing new, it just
+  exposes what the chart would do.
 
-The work is a dialog, a slide-generation function, and the `slide_id` model change.
+The work is a dialog, one read-only endpoint, a slide-generation function, and two
+`ChartSpec` fields.
+
+*(Revision 1 claimed "no new backend endpoint". That was wrong: whether a question
+splits is a property of the DATA, and the dialog cannot know it without asking.)*
 
 ## 5. Testing
 
@@ -137,7 +218,21 @@ The work is a dialog, a slide-generation function, and the `slide_id` model chan
   change them.
 
 **Generation:** picking a variable and three questions inserts exactly three charts,
-each with the right `classifying_var`, in the chosen order, after the active slide.
+each with the right `classifying_var`, in the chosen order, appended after the last
+chart slide. A source slide carrying `classifying_var_2` yields a generated slide
+with it cleared — the regression guard for the banner `ValueError`.
+
+**Split availability (§1.1):** on the client fixture, `Polku` reports 2 groups for
+the 12 questions that split and 1 for the 6 single-arm batteries; those 6 are
+disabled in the dialog. A classifier that splits nothing disables every row and the
+confirm button.
+
+**Preview cache:** two charts differing only in `slide_id` / `compare_group` produce
+the same cache key, so the second is served from cache rather than re-rendered.
+
+**Dialog:** Compare groups stays enabled after a section has been added (unlike the
+three AI slides); generated slides carry no `slide_title` and trigger no AI title
+request.
 
 **End to end, on the client fixture:** a generated slide for a demographic question
 classified by `Polku` renders with two series and per-group bases 255 / 256 — the
