@@ -765,6 +765,70 @@ def _banner_classifier_rows(model: QuestionModel, df) -> list[dict]:
     return rows
 
 
+@questions_router.get("/materials/{material_id}/split-groups")
+def split_groups(
+    material_id: str,
+    classifying_var: str,
+    grouping: str | None = None,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """How many groups each question would ACTUALLY show if split by
+    `classifying_var`. The "Compare groups" dialog disables the ones below 2.
+
+    Counted with the ENGINE's own helpers, so the dialog can never disagree with
+    the chart: a battery whose members belong to a single study arm (Houkuttelevuus_1
+    is asked only of path 1) yields that arm and nothing else, and offering it would
+    generate a slide that looks unsplit. Measured on the reporting material, 6 of its
+    18 questions are like that. (spec 2026-08-02-compare-groups-section §1.1)"""
+    import pandas as pd
+
+    from reportbuilder.stats.engine import _classifier_masks
+
+    df, model = _load_df_model(material_id, client)
+    if grouping:
+        try:
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
+        except (ValueError, TypeError):
+            pass  # malformed grouping → fall back to the base model
+
+    spec = ChartSpec(
+        question_ref="", chart_type="horizontal_bar", statistic="pct",
+        classifying_var=classifying_var, number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"), template_slot="s",
+        elements=ElementToggles(),
+    )
+    masks = _classifier_masks(spec, df, model)
+    if not masks:
+        return {"groups": {q.qid: 0 for q in model.questions}}
+
+    def _answered(q) -> "pd.Series":
+        """Rows that answered ANY of the question's variables.
+
+        Generic on purpose: engine._drop_empty_segments defines "answered" through
+        scale_levels, which is empty for anything that isn't a rating scale — using
+        it here reported 0 groups for every multi and 2-value single."""
+        m = pd.Series(False, index=df.index)
+        for name in q.variables:
+            if name not in df.columns:
+                continue
+            col = df[name]
+            num = pd.to_numeric(col, errors="coerce")
+            if num.notna().any():
+                var = model.variables.get(name)
+                miss = getattr(var, "missing_values", frozenset()) if var else frozenset()
+                present = num.notna() & ~num.isin(list(miss))
+            else:
+                present = col.notna() & col.astype(str).str.strip().ne("")
+            m = m | present.fillna(False)
+        return m
+
+    out: dict[str, int] = {}
+    for q in model.questions:
+        ans = _answered(q)
+        out[q.qid] = sum(1 for mask in masks.values() if bool((ans & mask).any()))
+    return {"groups": out}
+
+
 class GroupSpec(BaseModel):
     """One manual group in the override. `battery` is reserved for Phase 2."""
     kind: Literal["multi", "battery"] = "multi"
