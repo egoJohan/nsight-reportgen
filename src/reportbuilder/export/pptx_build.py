@@ -38,6 +38,8 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
     series_by_ref: dict = {}
     titles: dict = {}
     for spec in report.charts:
+        if getattr(spec, "excluded", False):
+            continue          # unticked in Select — kept in the report, off the deck
         if cancel_check is not None and cancel_check():
             raise RenderCancelled()
         # Demographics grid: compute a series per cell chart (by question_ref).

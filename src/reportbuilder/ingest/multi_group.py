@@ -33,6 +33,47 @@ _SUFFIX = re.compile(r"O?\d+$")
 # A0.2: explicit O-pattern family detector
 _O_PATTERN = re.compile(r"^(var\d+)[Oo]\d+$", re.IGNORECASE)
 
+# "Polku1"/"Polku2" -> stem "polku"; also tolerates "Polku_1" and "Polku-01".
+_STEM_PATTERN = re.compile(r"^(.*?)[ _\-]?0*(\d+)$")
+
+# A "banner" family is one indicator column per group (Polku1/Polku2): the columns
+# SPLIT the sample rather than collecting several ticks per respondent. Overlap is
+# measured among COVERED respondents so a screened design — where only qualifiers
+# see a concept — still counts, and the floor is an absolute count so a family only
+# one person answered cannot pass on vacuous exclusivity. (spec 2026-08-02 §2.1)
+_BANNER_MIN_COVERED = 30
+_BANNER_MIN_COVERAGE = 0.10
+_BANNER_MAX_OVERLAP = 0.02
+
+
+def member_masks(df, members: tuple[str, ...]):
+    """`column == 1` per member, or None when any member is absent from `df`."""
+    import pandas as pd
+
+    masks = []
+    for name in members:
+        if name not in getattr(df, "columns", []):
+            return None
+        masks.append(pd.to_numeric(df[name], errors="coerce") == 1.0)
+    return masks
+
+
+def near_partition(masks, n: int) -> bool:
+    """True when these indicator masks split the sample into usable segments."""
+    import pandas as pd
+
+    k = len(masks)
+    if not (2 <= k <= 10) or n <= 0:
+        return False
+    if any(int(m.sum()) < 1 for m in masks):
+        return False
+    frame = pd.concat(masks, axis=1)
+    covered = int(frame.any(axis=1).sum())
+    if covered < max(_BANNER_MIN_COVERED, _BANNER_MIN_COVERAGE * n):
+        return False
+    overlap = int((frame.sum(axis=1) >= 2).sum())
+    return (overlap / covered) <= _BANNER_MAX_OVERLAP
+
 
 def _prefix(name: str) -> str:
     return _SUFFIX.sub("", name)
@@ -72,11 +113,52 @@ def _group_text(model: QuestionModel, members: tuple[str, ...]) -> str:
     stem = os.path.commonprefix(labels).rstrip(" :-")
     if stem and " " in stem.strip():
         return stem
+    # A BANNER family's labels are "<Stem> <n>" ("Polku 1"/"Polku 2"), so a
+    # single-word stem is the right title even though the guard above rejects one.
+    # Only when every label is the stem plus a bare number — a shared question word
+    # ("Kuinka hyvin …"/"Kuinka usein …") never reduces to that. (spec §2.2)
+    if stem and all(re.fullmatch(rf"{re.escape(stem)}[ _\-]*\d+", lbl.strip())
+                    for lbl in labels):
+        return stem
     return labels[0]
 
 
 def _group_qid(members: tuple[str, ...]) -> str:
     return _prefix(members[0]).lower() or members[0].lower()
+
+
+def suggest_indicator_families(model: QuestionModel, df) -> list[tuple[str, ...]]:
+    """Ungrouped 0/1 indicator columns that, bucketed by name stem, split the sample.
+
+    Complements `suggest_multi_groups`, which only buckets variables carrying binary
+    VALUE LABELS — the same columns exported WITHOUT labels are otherwise invisible,
+    which is why one export of a study offers a path classifier and another does not.
+
+    Returns [] without a DataFrame: whether columns split the sample cannot be told
+    from metadata alone. (spec 2026-08-02 §2.2)"""
+    import pandas as pd
+
+    if df is None:
+        return []
+    grouped = {v for q in model.questions
+               if q.kind in ("multi", "battery") for v in q.variables}
+    buckets: "OrderedDict[str, list[str]]" = OrderedDict()
+    for name, var in model.variables.items():
+        if name in grouped or name not in getattr(df, "columns", []):
+            continue
+        s = pd.to_numeric(df[name], errors="coerce")
+        vals = set(s.dropna().unique().tolist())
+        if not vals or not vals <= {0.0, 1.0}:
+            continue
+        m = _STEM_PATTERN.match(name)
+        if m and m.group(1):
+            buckets.setdefault(m.group(1).lower(), []).append(name)
+    out: list[tuple[str, ...]] = []
+    for members in buckets.values():
+        masks = member_masks(df, tuple(members))
+        if masks and near_partition(masks, len(df)):
+            out.append(tuple(members))
+    return out
 
 
 def enrich_model(model: QuestionModel) -> QuestionModel:

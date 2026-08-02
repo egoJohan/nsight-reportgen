@@ -24,7 +24,9 @@ import {
   isSpecialSlide,
   isThemes,
   makeChart,
+  makeComparisonSlide,
   makeSpecialSlide,
+  newSlideId,
   normalizeSlots,
 } from "@/lib/charts";
 import StepSelect from "./StepSelect";
@@ -194,12 +196,20 @@ export default function ReportWizard({
         name: loaded.name,
         render_mode: "image",
         template_ref: loaded.template_ref ?? "",
-        charts: loaded.charts ?? [],
+        // The backend deliberately leaves slide_id empty (backfilling there would
+        // break its exact round-trip), so the EDITOR assigns one on load. Charts
+        // written before slide_id existed get one here.
+        charts: (loaded.charts ?? []).map((c) =>
+          c.slide_id ? c : { ...c, slide_id: newSlideId() }
+        ),
         grouping: loaded.grouping ?? { groups: [], singles: [] },
       });
     }
   }, [loaded, draft]);
 
+  // "Is this question in the report?" — ANY slide showing it counts, comparison
+  // slides included. Counting only primaries left a question that has comparison
+  // slides looking un-added, which emptied the Compare groups question list.
   const addedRefs = useMemo(
     () => new Set((draft?.charts ?? []).map((c) => c.question_ref)),
     [draft]
@@ -220,8 +230,15 @@ export default function ReportWizard({
   const pruneToValidRefs = useCallback(
     (valid: Set<string>) => {
       mutate((d) => {
+        // Keep anything whose ref is SYNTHETIC ("sp_…") as well as anything the
+        // type registry recognises. A special slide whose type this build does not
+        // know yet (a stale module after a hot reload) would otherwise be pruned
+        // away the moment it is added, which looked like the slide "disappearing".
         const kept = d.charts.filter(
-          (c) => isSpecialSlide(c) || valid.has(c.question_ref)
+          (c) =>
+            isSpecialSlide(c) ||
+            c.question_ref.startsWith("sp_") ||
+            valid.has(c.question_ref)
         );
         return kept.length === d.charts.length ? d : { ...d, charts: kept };
       });
@@ -255,6 +272,10 @@ export default function ReportWizard({
           return {
             ...d,
             charts: normalizeSlots(
+              // Unticking a question removes EVERY slide showing it, comparison
+              // slides included. Sparing them orphans slides for a question the
+              // list says is not in the report — and leaves the deck in a state
+              // the user cannot get back out of from Step 1.
               d.charts.filter((c) => c.question_ref !== q.qid)
             ),
           };
@@ -298,12 +319,16 @@ export default function ReportWizard({
           return {
             ...d,
             charts: normalizeSlots(
-              d.charts.filter((c) => isSpecialSlide(c) || !qids.has(c.question_ref))
+              d.charts.filter(
+                (c) => isSpecialSlide(c) || !qids.has(c.question_ref)
+              )
             ),
           };
         }
         const present = new Set(
-          d.charts.filter((c) => !isSpecialSlide(c)).map((c) => c.question_ref)
+          d.charts
+            .filter((c) => !isSpecialSlide(c) && !c.compare_group)
+            .map((c) => c.question_ref)
         );
         const additions = questions
           .filter((q) => !present.has(q.qid))
@@ -352,14 +377,25 @@ export default function ReportWizard({
     [mutate]
   );
 
-  const removeChart = useCallback(
+  // Tick/untick a slide that has no catalog row of its own (a special slide).
+  // Unticking keeps the chart — and its bullets — and only leaves it out of the deck.
+  const toggleChartExcluded = useCallback(
     (index: number) => {
       mutate((d) => ({
         ...d,
-        charts: normalizeSlots(d.charts.filter((_, i) => i !== index)),
+        charts: d.charts.map((c, i) =>
+          i === index ? { ...c, excluded: !c.excluded } : c
+        ),
       }));
     },
     [mutate]
+  );
+
+  // The deck as it will render: Design, the preview grid and the export all skip
+  // slides that were unticked in Select.
+  const includedCharts = useMemo(
+    () => (draft?.charts ?? []).filter((c) => !c.excluded),
+    [draft]
   );
 
   const reorderCharts = useCallback(
@@ -575,6 +611,10 @@ export default function ReportWizard({
     special_overview: "Tutkimuksen taustaa",
     special_conclusion: "Johtopäätökset",
     special_demographics: "Vastaajat",
+    // Blank: placeholder heading. An entirely empty slide renders as a blank
+    // cream page and reads as "nothing was added" — give the author something
+    // visible to overwrite.
+    special_blank: "Otsikko",
   };
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
   const reportQuestionRefs = useCallback(
@@ -653,10 +693,40 @@ export default function ReportWizard({
   // Add a special slide (synchronously, returning its anchor ref so the caller
   // can select it) and generate its bullets in the background — spanning pages
   // when the content overflows one slide.
+  // Generate a "Compare groups" section: one slide per chosen question, split by
+  // `classifyingVar`. APPENDED after the last slide — a comparison section is a
+  // closing section, and addSpecialSlide's front-of-deck placement would bury the
+  // report's opening. (spec 2026-08-02-compare-groups-section §1)
+  const addComparisonSection = useCallback(
+    (classifyingVar: string, qids: string[]) => {
+      mutate((d) => {
+        // Source each new slide from the question's PRIMARY chart so it inherits
+        // the author's chart type, label overrides and formatting.
+        const primary = new Map(
+          d.charts.filter((c) => !c.compare_group).map((c) => [c.question_ref, c])
+        );
+        const made = qids
+          .map((qid) => primary.get(qid))
+          .filter((c): c is ChartSpec => !!c)
+          .map((c) => makeComparisonSlide(c, classifyingVar));
+        if (made.length === 0) return d;
+        return { ...d, charts: normalizeSlots([...d.charts, ...made]) };
+      });
+    },
+    [mutate]
+  );
+
   const addSpecialSlide = useCallback(
     (type: string, afterRef?: string | null): string => {
       const heading = SPECIAL_HEADINGS[type];
-      const placeholder = makeSpecialSlide(type, { slide_title: heading });
+      const placeholder = makeSpecialSlide(type, {
+        slide_title: heading,
+        // A blank slide is never filled in by AI, so it needs starter content or
+        // it renders empty. Markdown: "*" starts a bullet, two spaces nest one.
+        ...(type === "special_blank"
+          ? { bullets: ["* Kirjoita sisältö tähän", "  * Sisennetty alakohta"] }
+          : {}),
+      });
       const group = placeholder.question_ref;
       const anchor = {
         ...placeholder,
@@ -673,6 +743,9 @@ export default function ReportWizard({
         else charts.unshift(anchor);
         return { ...d, charts: normalizeSlots(charts) };
       });
+      // An empty slide is AUTHOR-written: no AI call, nothing pending. Firing one
+      // would also spend quota on a slide whose whole point is to be hand-written.
+      if (type === "special_blank") return group;
       setBulletsPending(group, true);
       void (async () => {
         try {
@@ -951,8 +1024,9 @@ export default function ReportWizard({
             addedRefs={addedRefs}
             onToggle={toggleQuestion}
             onSelectMany={selectMany}
-            onRemoveChart={removeChart}
             onAddSpecial={addSpecialSlide}
+            onAddComparison={addComparisonSection}
+            onToggleExcluded={toggleChartExcluded}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}
@@ -961,7 +1035,7 @@ export default function ReportWizard({
         {step === 1 && (
           <StepConfigure
             materialId={materialId}
-            charts={draft.charts}
+            charts={includedCharts}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
             active={active}

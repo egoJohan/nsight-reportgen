@@ -268,6 +268,10 @@ function PercentBaseWidget({ field, chart, question, variables, onChange }: Widg
         ["total", "% of the total"],
       ]
     : (field.options ?? []).map((o) => [o.value, o.label]);
+  // A banner classifier's segments may overlap, so they cannot be distributed
+  // within a category — drop that direction rather than offer nonsense.
+  const banner = usesBannerClassifier(chart, variables);
+  const shown = banner ? opts.filter(([v]) => v !== "question") : opts;
   const value = String(chart.percent_base ?? field.default ?? "auto");
   const items = Object.fromEntries(opts);
   return (
@@ -281,7 +285,7 @@ function PercentBaseWidget({ field, chart, question, variables, onChange }: Widg
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {opts.map(([v, l]) => (
+          {shown.map(([v, l]) => (
             <SelectItem key={v} value={v}>
               {l}
             </SelectItem>
@@ -321,10 +325,24 @@ function isSegmenter(v: Variable): boolean {
   return v.measurement === "categorical" && n >= 2 && n <= 15;
 }
 
+/** True when the chart's primary classifier is a BANNER — a question-backed
+ * classifier built from separate indicator columns, whose segments may overlap.
+ * Such a classifier supports neither a second classifier nor the "within each
+ * category" percentage direction. (spec 2026-08-02 §2.4, §2.5) */
+function usesBannerClassifier(chart: ChartSpec, variables?: Variable[]): boolean {
+  if (!chart.classifying_var) return false;
+  return (variables ?? []).some(
+    (v) => v.name === chart.classifying_var && v.banner === true
+  );
+}
+
 function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps) {
   // Generic over the field key so it drives BOTH the primary classifying_var and
   // the secondary classifying_var_2 (cross-tab).
   const key = field.key as "classifying_var" | "classifying_var_2";
+  // A banner classifier can't be crossed with a second variable — hide the control
+  // rather than let the author build a chart the engine will reject.
+  if (key === "classifying_var_2" && usesBannerClassifier(chart, variables)) return null;
   const current = (chart[key] as string | null | undefined) ?? null;
   const other =
     key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
@@ -1299,14 +1317,18 @@ function SpecialSlideControls({
           }
         />
       </Field>
-      <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
-        {pending ? (
-          <Loader2Icon className="size-4 animate-spin" />
-        ) : (
-          <SparklesIcon className="size-4" />
-        )}
-        Regenerate
-      </Button>
+      {/* An Empty slide has no generated content to regenerate — it is written by
+          hand, so the button would do nothing but spend a call. */}
+      {chart.chart_type !== "special_blank" && (
+        <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
+          {pending ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <SparklesIcon className="size-4" />
+          )}
+          Regenerate
+        </Button>
+      )}
     </div>
   );
 }

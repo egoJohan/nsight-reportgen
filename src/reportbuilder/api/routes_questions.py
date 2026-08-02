@@ -34,7 +34,7 @@ from reportbuilder.api.model_loader import (
     material_config,
     value_merges,
 )
-from reportbuilder.ingest.sav_reader import read_sav, _is_metadata
+from reportbuilder.ingest.sav_reader import read_sav, string_categories, _is_metadata
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.model.report import (
     ChartSpec,
@@ -206,31 +206,52 @@ def _is_likert_scale(var) -> bool:
     return uniq[0] == 1 and uniq == list(range(1, len(uniq) + 1)) and uniq[-1] <= 11
 
 
-def _segmentable(var) -> bool:
+def _string_cats(var, df) -> tuple[str, ...]:
+    """Distinct values of a LABEL-LESS string categorical, or () when the data
+    isn't available. A coded path/concept column ("Pakkausilme 1"/"Pakkausilme 2")
+    carries its categories in the values, not in value labels."""
+    if df is None or var.name not in getattr(df, "columns", []):
+        return ()
+    return string_categories(df[var.name])
+
+
+def _segmentable(var, df=None) -> bool:
     """True when a variable is a MEANINGFUL classifying/segmentation variable.
 
     A low-cardinality categorical that is background/demographic (age, region,
     ownership tier, branch, …) — NOT a Likert rating item (measured, not used to
     segment) and not a high-cardinality single-choice question. This keeps the
     'Classifying variable' picker to the handful of variables an analyst would
-    actually cross-tabulate by, instead of every categorical in the file."""
+    actually cross-tabulate by, instead of every categorical in the file.
+
+    A LABEL-LESS string categorical is judged by its distinct VALUES instead of its
+    value labels — `df` supplies them. (spec 2026-08-02 §1.2)"""
     if var.measurement != "categorical":
         return False
+    if not var.value_labels:
+        return 2 <= len(_string_cats(var, df)) <= 10
     nv = len(var.value_labels)
     if not (2 <= nv <= 10):
         return False
     return not _is_likert_scale(var)
 
 
-def _has_real_category_labels(var) -> bool:
-    """True when a variable's value labels are substantive category names (e.g.
+def _has_real_category_labels(var, df=None) -> bool:
+    """True when a variable's categories are substantive names (e.g.
     'enemmistöomistajat', 'Branch A') rather than generic flags (TRUE/FALSE/EMPTY)
     — used to keep analyst segment recodes (whose NAME looks like paradata) in the
-    classifying-variable picker while still dropping bare binary URL flags."""
+    classifying-variable picker while still dropping bare binary URL flags.
+
+    For a label-less string categorical the candidates are its distinct VALUES, so
+    a string column holding TRUE/FALSE is filtered exactly like a labelled one."""
     generic = {"true", "false", "empty", "yes", "no", "kyllä", "ei", "-", "—", ""}
+    if var.value_labels:
+        candidates = [vl.label or "" for vl in var.value_labels]
+    else:
+        candidates = list(_string_cats(var, df))
     named = [
-        lbl for vl in var.value_labels
-        if (lbl := (vl.label or "").strip())
+        lbl for c in candidates
+        if (lbl := c.strip())
         and any(ch.isalpha() for ch in lbl)
         and lbl.lower() not in generic
     ]
@@ -356,14 +377,17 @@ def _value_list(model: QuestionModel, q) -> list[dict]:
     return [{"code": vl.value, "label": vl.label} for vl in var.value_labels]
 
 
-def _category_labels(model: QuestionModel, q) -> list[str]:
+def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
     """Base category label strings in render order (the label-override editor's list).
 
-    Single: non-missing value labels of the primary variable. Multi: member-variable labels.
+    Single: non-missing value labels of the primary variable — or, for a LABEL-LESS
+    string categorical, its distinct values. Multi: member-variable labels.
     """
     if q.kind in ("multi", "battery"):
         return [model.variables[v].label for v in q.variables]
     var = model.variables[q.variables[0]]
+    if not var.value_labels:
+        return list(_string_cats(var, df))
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
 
 
@@ -506,7 +530,7 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             "compatible_chart_types": compatible,
             "missing_values": _missing_value_list(model, q.qid),
             "values": _value_list(model, q),
-            "category_labels": _category_labels(model, q),
+            "category_labels": _category_labels(model, q, _df_or_none()),
             # Endpoint gloss a stacked bar appends to its subtitle by default ("" when
             # the question has no such scale) — the Subtitle box prefills with it.
             "scale_gloss": _scale_gloss(model, q),
@@ -537,7 +561,7 @@ def question_summary(
     df, model = _load_df_model(material_id, client)
     if grouping:
         try:
-            model = apply_grouping_override(model, json.loads(grouping))
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
         except (ValueError, TypeError):
             pass  # malformed grouping → fall back to the base model
     try:
@@ -562,7 +586,7 @@ def question_summary(
         ],
         "value_labels": _value_list(model, q),
         "missing_values": _missing_value_list(model, q.qid),
-        "category_labels": _category_labels(model, q),
+        "category_labels": _category_labels(model, q, df),
         "scale_gloss": _scale_gloss(model, q),
         "chartable": chartable,
         "non_chartable_reason": reason,
@@ -661,7 +685,7 @@ def list_variables(
             return False
         if not _is_metadata(v.name, v.label or v.name):
             return True
-        return _segmentable(v) and _has_real_category_labels(v)
+        return _segmentable(v, _df_or_none()) and _has_real_category_labels(v, _df_or_none())
 
     all_vars = [v for v in model.variables.values() if _keep(v)]
     # Stable sort: categorical before scale; original file order within each tier.
@@ -685,7 +709,8 @@ def list_variables(
                 # derived binary SEGMENT FLAG (e.g. "Suosittelijat", "Kokemusta":
                 # 0/1 membership the analyst cross-tabs by). Drives the
                 # classifying-variable picker.
-                "segmentable": _segmentable(var) or _is_binary_flag(var, _df_or_none()),
+                "segmentable": (_segmentable(var, _df_or_none())
+                                or _is_binary_flag(var, _df_or_none())),
                 # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
                 "tickbox": _is_binary(var),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
@@ -698,8 +723,110 @@ def list_variables(
                 "scale_compat_key": _scale_compat_key(var),
             }
             for var in all_vars
-        ]
+        ] + _banner_classifier_rows(model, None if include_all else _df_or_none())
     }
+
+
+def _banner_classifier_rows(model: QuestionModel, df) -> list[dict]:
+    """Synthetic picker entries for banner classifiers.
+
+    A banner classifier is a QUESTION (a near-partition multi such as
+    Polku1+Polku2), so it would never appear in a list built from
+    `model.variables`. `name` is the qid — what lands in
+    ChartSpec.classifying_var, which the engine resolves variable-name-first.
+    Empty without a DataFrame or in include_all mode (the grouping editor wants
+    raw variables). (spec 2026-08-02 §2.4)"""
+    from reportbuilder.ingest.multi_group import member_masks, near_partition
+
+    if df is None:
+        return []
+    rows: list[dict] = []
+    for q in model.questions:
+        if q.kind != "multi":
+            continue
+        masks = member_masks(df, q.variables)
+        if not masks or not near_partition(masks, len(df)):
+            continue
+        rows.append({
+            "name": q.qid,
+            "label": q.text or q.qid,
+            "measurement": "categorical",
+            "n_values": len(q.variables),
+            "aggregatable": False,
+            "segmentable": True,
+            "tickbox": False,
+            "scale": False,
+            "scale_key": None,
+            "scale_compat_key": None,
+            # Marks a question-backed classifier whose segments may overlap: no
+            # second classifier and no "each category" direction. (§2.4, §2.5)
+            "banner": True,
+        })
+    return rows
+
+
+@questions_router.get("/materials/{material_id}/split-groups")
+def split_groups(
+    material_id: str,
+    classifying_var: str,
+    grouping: str | None = None,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """How many groups each question would ACTUALLY show if split by
+    `classifying_var`. The "Compare groups" dialog disables the ones below 2.
+
+    Counted with the ENGINE's own helpers, so the dialog can never disagree with
+    the chart: a battery whose members belong to a single study arm (Houkuttelevuus_1
+    is asked only of path 1) yields that arm and nothing else, and offering it would
+    generate a slide that looks unsplit. Measured on the reporting material, 6 of its
+    18 questions are like that. (spec 2026-08-02-compare-groups-section §1.1)"""
+    import pandas as pd
+
+    from reportbuilder.stats.engine import _classifier_masks
+
+    df, model = _load_df_model(material_id, client)
+    if grouping:
+        try:
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
+        except (ValueError, TypeError):
+            pass  # malformed grouping → fall back to the base model
+
+    spec = ChartSpec(
+        question_ref="", chart_type="horizontal_bar", statistic="pct",
+        classifying_var=classifying_var, number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"), template_slot="s",
+        elements=ElementToggles(),
+    )
+    masks = _classifier_masks(spec, df, model)
+    if not masks:
+        return {"groups": {q.qid: 0 for q in model.questions}}
+
+    def _answered(q) -> "pd.Series":
+        """Rows that answered ANY of the question's variables.
+
+        Generic on purpose: engine._drop_empty_segments defines "answered" through
+        scale_levels, which is empty for anything that isn't a rating scale — using
+        it here reported 0 groups for every multi and 2-value single."""
+        m = pd.Series(False, index=df.index)
+        for name in q.variables:
+            if name not in df.columns:
+                continue
+            col = df[name]
+            num = pd.to_numeric(col, errors="coerce")
+            if num.notna().any():
+                var = model.variables.get(name)
+                miss = getattr(var, "missing_values", frozenset()) if var else frozenset()
+                present = num.notna() & ~num.isin(list(miss))
+            else:
+                present = col.notna() & col.astype(str).str.strip().ne("")
+            m = m | present.fillna(False)
+        return m
+
+    out: dict[str, int] = {}
+    for q in model.questions:
+        ans = _answered(q)
+        out[q.qid] = sum(1 for mask in masks.values() if bool((ans & mask).any()))
+    return {"groups": out}
 
 
 class GroupSpec(BaseModel):
@@ -1070,7 +1197,9 @@ def preview_chart(
     finally:
         os.unlink(tmp_path)
 
-    model = apply_grouping_override(model, body.grouping or {})
+    # df is passed so indicator-family (banner) groups resolve here too — without
+    # it the picker offers a banner classifier the PREVIEW then silently ignores.
+    model = apply_grouping_override(model, body.grouping or {}, df=df)
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories

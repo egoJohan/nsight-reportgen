@@ -64,7 +64,8 @@ def assert_complete(prs: Presentation, report: Report,
         # Bullet/grid slides don't add exactly one picture; exclude them.
         expected = len([
             c for c in report.charts
-            if not renders_as_bullets(c) and not is_demographics_grid(c)
+            if not getattr(c, "excluded", False)
+            and not renders_as_bullets(c) and not is_demographics_grid(c)
         ])
     if rendered != expected:
         raise CompletenessError(
@@ -136,6 +137,8 @@ def render_report(
     _titles = titles or {}
 
     for spec in report.charts:
+        if getattr(spec, "excluded", False):
+            continue          # unticked in Select — kept in the report, off the deck
         # Cooperative cancellation: bail out promptly between slides when signalled.
         if cancel_check is not None and cancel_check():
             raise RenderCancelled()
@@ -191,6 +194,8 @@ def render_report(
     # cell that actually has a series (computed above).
     expected_pics = 0
     for spec in report.charts:
+        if getattr(spec, "excluded", False):
+            continue
         if renders_as_bullets(spec):
             continue
         if is_demographics_grid(spec):
