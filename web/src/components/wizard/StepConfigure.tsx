@@ -185,7 +185,21 @@ function readField(chart: ChartSpec, key: string): unknown {
 // First-class ChartSpec fields that may be ABSENT on a chart loaded from an older
 // saved report (added after that report was written). They must still patch the
 // top-level field, not the free-form options bag.
-const FIRST_CLASS_KEYS = new Set(["percent_base"]);
+// First-class ChartSpec fields that may be ABSENT from a chart object — either on
+// a report written before the field existed, or on one makeChart just created.
+// Without this, patchField sees `key in chart === false` and writes the value to
+// the free-form `options` bag, where the backend never reads it: choosing
+// "Top 2 sum" on a new slide was silently lost on ten of the customer's slides.
+const FIRST_CLASS_KEYS = new Set([
+  "percent_base",
+  "show_total",
+  "classifying_var_2",
+  "row_summary_fn",
+  "row_summary_codes",
+  "row_summary_pos_codes",
+  "row_summary_neg_codes",
+  "row_summary_label",
+]);
 
 function patchField(
   chart: ChartSpec,

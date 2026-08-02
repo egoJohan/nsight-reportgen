@@ -107,3 +107,41 @@ def test_a_blank_slide_round_trips_with_its_bullets():
     assert out.chart_type == "special_blank"
     assert out.slide_title == "Omat huomiot"
     assert out.options["bullets"] == ["* eka", "  * sisennetty"]
+
+
+# ---- config keys that landed in the free-form options bag -------------------
+# The editor decides where to write a config value by checking `key in chart`.
+# makeChart never set row_summary_fn, so on a slide added in-session the key was
+# absent and "Top 2 sum" was written to options.row_summary_fn — which the backend
+# ignores. Ten slides in the customer's report were silently stuck on "none".
+
+def test_a_row_summary_stranded_in_options_is_recovered():
+    doc = _doc(_chart("a"))
+    doc["charts"][0]["row_summary_fn"] = "none"
+    doc["charts"][0]["options"] = {"row_summary_fn": "top2_sum"}
+    c = report_from_json(doc).charts[0]
+    assert c.row_summary_fn == "top2_sum"
+
+
+def test_an_explicit_row_summary_wins_over_options():
+    doc = _doc(_chart("a"))
+    doc["charts"][0]["row_summary_fn"] = "top3_sum"
+    doc["charts"][0]["options"] = {"row_summary_fn": "top2_sum"}
+    assert report_from_json(doc).charts[0].row_summary_fn == "top3_sum"
+
+
+def test_the_stranded_row_summary_codes_are_recovered_too():
+    doc = _doc(_chart("a"))
+    doc["charts"][0]["options"] = {
+        "row_summary_fn": "sum",
+        "row_summary_codes": [4.0, 5.0],
+        "row_summary_label": "Top 2",
+    }
+    c = report_from_json(doc).charts[0]
+    assert c.row_summary_fn == "sum"
+    assert c.row_summary_codes == (4.0, 5.0)
+    assert c.row_summary_label == "Top 2"
+
+
+def test_a_chart_with_no_options_is_unaffected():
+    assert report_from_json(_doc(_chart("a"))).charts[0].row_summary_fn == "none"

@@ -255,6 +255,13 @@ export function makeChart(
     footer_note: null,
     // Auto-detect the cross-tab percentage direction from the variables' roles.
     percent_base: "auto",
+    show_total: "auto",
+    // Present from the start so the config form patches the FIELD, not options.
+    row_summary_fn: "none",
+    row_summary_codes: [],
+    row_summary_pos_codes: [],
+    row_summary_neg_codes: [],
+    row_summary_label: "",
   };
 }
 

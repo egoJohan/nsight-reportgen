@@ -181,6 +181,20 @@ def report_from_json(data: dict | str) -> Report:
             return tuple((str(k), str(v)) for k, v in raw.items())
         return tuple((str(pair[0]), str(pair[1])) for pair in raw)
 
+    def _rs(c: dict, key: str, default):
+        """A row-summary setting, recovering one stranded in the options bag.
+
+        The editor writes a config value to the free-form `options` when the key is
+        absent from the chart object, and a freshly created chart carried no
+        row_summary_* keys — so choosing "Top 2 sum" on a new slide was saved to
+        options and silently ignored. An explicit top-level value always wins.
+        """
+        v = c.get(key)
+        if v not in (None, "", "none", (), []):
+            return v
+        opt = (c.get("options") or {}).get(key)
+        return opt if opt not in (None, "", (), []) else (v if v is not None else default)
+
     def _chart(c: dict) -> ChartSpec:
         nf = c["number_format"]
         so = c["sort"]
@@ -216,11 +230,11 @@ def report_from_json(data: dict | str) -> Report:
             category_label_overrides=_label_overrides(c),
             percent_base=c.get("percent_base", "auto"),
             show_total=c.get("show_total", "auto"),
-            row_summary_fn=c.get("row_summary_fn", "none"),
-            row_summary_codes=tuple(float(x) for x in c.get("row_summary_codes", ())),
-            row_summary_pos_codes=tuple(float(x) for x in c.get("row_summary_pos_codes", ())),
-            row_summary_neg_codes=tuple(float(x) for x in c.get("row_summary_neg_codes", ())),
-            row_summary_label=c.get("row_summary_label", ""),
+            row_summary_fn=_rs(c, "row_summary_fn", "none"),
+            row_summary_codes=tuple(float(x) for x in _rs(c, "row_summary_codes", ())),
+            row_summary_pos_codes=tuple(float(x) for x in _rs(c, "row_summary_pos_codes", ())),
+            row_summary_neg_codes=tuple(float(x) for x in _rs(c, "row_summary_neg_codes", ())),
+            row_summary_label=_rs(c, "row_summary_label", ""),
             options=dict(c.get("options") or {}),
             slide_id=str(c.get("slide_id") or ""),
             excluded=bool(c.get("excluded") or False),
