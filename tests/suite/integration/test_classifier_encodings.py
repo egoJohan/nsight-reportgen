@@ -50,8 +50,12 @@ def test_export_offers_a_path_classifier(mid):
 
 @pytest.mark.parametrize("mid", ["mat-erisan", "mat-erisan2"])
 def test_var214_is_a_two_value_categorical(mid):
-    df, _model = _load(mid)
-    assert string_categories(df["var214"]) == ("Pakkausilme 1", "Pakkausilme 2")
+    """It arrives as CODES + value labels, like any other categorical — the column
+    itself is numeric, so charting it as a question works."""
+    _df, model = _load(mid)
+    v = model.variables["var214"]
+    assert v.measurement == "categorical"
+    assert [vl.label for vl in v.value_labels] == ["Pakkausilme 1", "Pakkausilme 2"]
 
 
 def test_both_exports_agree_on_the_model():

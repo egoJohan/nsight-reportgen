@@ -38,7 +38,13 @@ _CODED_MAX_LEN = 80
 
 
 def _is_coded_string(series: pd.Series) -> bool:
-    """True when a label-less string column looks like a coded categorical."""
+    """True when a label-less STRING column looks like a coded categorical.
+
+    Numeric columns are excluded up front: a 0/1 analyst flag stringifies to two
+    short repeated values and would otherwise qualify, which turned derived
+    recodes such as `Inhimilli` into labelled questions."""
+    if pd.api.types.is_numeric_dtype(series):
+        return False
     nn = series.dropna().astype(str)
     nn = nn[nn.str.strip() != ""]
     if len(nn) == 0:
@@ -72,6 +78,23 @@ def string_categories(series: pd.Series) -> tuple[str, ...]:
     nn = series.dropna().astype(str)
     nn = nn[nn.str.strip() != ""]
     return tuple(sorted({v.strip() for v in nn}, key=_natural_key))
+
+
+def _codes_for_coded_string(series: pd.Series) -> tuple[pd.Series, list[tuple[float, str]]]:
+    """Turn a coded STRING column into numeric codes plus value labels.
+
+    Marking such a column categorical is not enough: every path that charts a
+    question assumes numeric codes and value labels, so charting one raised
+    "could not convert string to float". Normalising once here means no consumer
+    needs a string special case. Codes follow `string_categories` order (natural
+    sort), so they are stable across exports; blanks become missing.
+    """
+    cats = string_categories(series)
+    code_of = {c: float(i + 1) for i, c in enumerate(cats)}
+    stripped = series.astype(str).str.strip()
+    codes = stripped.map(code_of)
+    codes[series.isna()] = float("nan")
+    return codes, [(code_of[c], c) for c in cats]
 
 
 def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
@@ -314,7 +337,13 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             # A coded STRING column is a categorical whatever the SAV's measure
             # attribute claims — these are often exported as "scale", and a string
             # column has no numeric basis to be a scale on. (spec 2026-08-02 §1.1)
+            # Convert it to CODES + value labels so it behaves like any other
+            # categorical everywhere: charting a question, classifying by it, the
+            # not-answered picker and label overrides all assume numeric codes.
             measurement = "categorical"
+            codes, pairs = _codes_for_coded_string(df[name])
+            df[name] = codes
+            vls = tuple(ValueLabel(code, label) for code, label in pairs)
         variables[name] = Variable(
             name=name,
             label=labels.get(name) or name,
