@@ -58,6 +58,7 @@ def _classifier_keep(seg: pd.Series, classifier_var: Variable | None) -> set[flo
 def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None = None,
                   missing_override: set[float] | None = None,
                   *, seg_series: pd.Series | None = None,
+                  seg_masks: dict[str, pd.Series] | None = None,
                   classifier_var: Variable | None = None) -> dict[str, int]:
     """Per-segment base + a "Total", each excluding missing in the reported var and
     the classifier. (REQ-C-14)
@@ -68,11 +69,25 @@ def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None
     When `seg_series` is given it IS the segmentation (its values are the segment
     keys, e.g. cross-tab combo strings) and is used as-is — no numeric coercion.
 
+    When `seg_masks` is given it IS the segmentation — one boolean mask per segment,
+    which unlike `seg_series` may OVERLAP (a banner column set). Each segment's base
+    comes from its own mask and "Total" is the union, so with overlap
+    Total < sum of segments, and with a screened design Total < len(data).
+    Takes precedence over `seg_series`. (spec 2026-08-02 §2.3)
+
     When `classifier_var` (the classifying variable's Variable) is given, classifier
     codes that are its missing values — or that carry no value label when it has any —
     are dropped, so a bare unlabelled sentinel (e.g. 99) never appears as a group.
     """
     valid = _valid_mask(data, var, missing_override)
+    if seg_masks is not None:
+        any_seg = pd.Series(False, index=data.index)
+        for m in seg_masks.values():
+            any_seg = any_seg | m
+        bases = {"Total": int((valid & any_seg).sum())}
+        for key, m in seg_masks.items():
+            bases[str(key)] = int((valid & m).sum())
+        return bases
     if seg_series is not None:
         bases: dict[str, int] = {"Total": int((valid & seg_series.notna()).sum())}
         for key in seg_series.dropna().unique():

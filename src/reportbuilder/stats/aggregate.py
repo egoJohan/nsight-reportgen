@@ -4,7 +4,7 @@ import pandas as pd
 
 def aggregate_counts(data: pd.DataFrame, value_var: str,
                      classifying_var: str | None = None,
-                     *, seg_series=None,
+                     *, seg_series=None, seg_masks=None,
                      ) -> dict[tuple[float | None, str], int]:
     """Raw (unweighted, unrounded) cell counts keyed by (value_code, segment_label).
     segment_label is "Total" when there is no classifier; with one, both per-segment
@@ -12,7 +12,24 @@ def aggregate_counts(data: pd.DataFrame, value_var: str,
 
     When `seg_series` is given it IS the segmentation (its string values are the
     segment keys, e.g. cross-tab combos); its keys are used as-is (no numeric cast).
+    When `seg_masks` is given it IS the segmentation — one boolean mask per segment,
+    which may OVERLAP, so counts are taken per mask rather than by a single GROUP BY
+    (a respondent in two segments counts once in each). "Total" counts the union,
+    matching base_rules.segment_bases. (spec 2026-08-02 §2.3)
+
     This is the seam datahive's D1 primitive later replaces (same core signature)."""
+    if seg_masks is not None:
+        counts: dict[tuple[float | None, str], int] = {}
+        v = pd.to_numeric(data[value_var], errors="coerce")
+        answered = v.notna()
+        any_seg = pd.Series(False, index=data.index)
+        for m in seg_masks.values():
+            any_seg = any_seg | m
+        for key, mask in list(seg_masks.items()) + [("Total", any_seg)]:
+            sub = v[answered & mask]
+            for code, cnt in sub.value_counts().items():
+                counts[(float(code), str(key))] = int(cnt)
+        return counts
     if seg_series is not None:
         data = data.assign(__seg__=list(seg_series))
         seg_col: str | None = "__seg__"
