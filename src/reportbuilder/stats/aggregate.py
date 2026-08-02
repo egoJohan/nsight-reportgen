@@ -22,9 +22,16 @@ def aggregate_counts(data: pd.DataFrame, value_var: str,
     con.register("d", data)
     counts: dict[tuple[float | None, str], int] = {}
 
+    # The Total column sits on the SAME population as the per-segment bases (see
+    # base_rules.segment_bases): a respondent the classifier does not cover belongs
+    # to no segment and must not inflate the Total, or the Total column's
+    # percentages exceed 100%. Without a classifier, every row counts.
+    # (spec 2026-08-02 §0)
+    where = f'"{value_var}" IS NOT NULL'
+    if seg_col is not None:
+        where += f' AND "{seg_col}" IS NOT NULL'
     total = con.execute(
-        f'SELECT "{value_var}" AS v, COUNT(*) AS n '
-        f'FROM d WHERE "{value_var}" IS NOT NULL GROUP BY v'
+        f'SELECT "{value_var}" AS v, COUNT(*) AS n FROM d WHERE {where} GROUP BY v'
     ).fetchall()
     for v, n in total:
         counts[(float(v), "Total")] = int(n)
