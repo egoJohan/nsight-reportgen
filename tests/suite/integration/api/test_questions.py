@@ -213,3 +213,36 @@ def test_an_overlapping_multi_is_not_offered_as_a_banner():
     )
     df = pd.DataFrame({"a1": [1.0] * 200, "a2": [1.0] * 200})   # everyone in both
     assert _banner_classifier_rows(model, df) == []
+
+
+# ---- the preview must honour a stranded row-summary setting ----------------
+# The preview builds its ChartSpec from the REQUEST BODY, not from a parsed
+# Report, so recovering the setting only in report_from_json left the on-screen
+# chart with no summary column while the exported deck had one.
+
+def test_preview_recovers_a_row_summary_stranded_in_options():
+    from reportbuilder.api.routes_questions import ChartSpecBody, _rs
+
+    body = ChartSpecBody(
+        question_ref="q", chart_type="stacked_horizontal_bar",
+        options={"row_summary_fn": "top2_sum", "row_summary_label": "Top 2"},
+    )
+    assert _rs(body, "row_summary_fn", "none") == "top2_sum"
+    assert _rs(body, "row_summary_label", "") == "Top 2"
+
+
+def test_preview_prefers_an_explicit_row_summary_over_options():
+    from reportbuilder.api.routes_questions import ChartSpecBody, _rs
+
+    body = ChartSpecBody(
+        question_ref="q", chart_type="stacked_horizontal_bar",
+        row_summary_fn="top3_sum", options={"row_summary_fn": "top2_sum"},
+    )
+    assert _rs(body, "row_summary_fn", "none") == "top3_sum"
+
+
+def test_preview_row_summary_defaults_to_none():
+    from reportbuilder.api.routes_questions import ChartSpecBody, _rs
+
+    body = ChartSpecBody(question_ref="q", chart_type="stacked_horizontal_bar")
+    assert _rs(body, "row_summary_fn", "none") == "none"

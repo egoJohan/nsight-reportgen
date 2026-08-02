@@ -42,7 +42,14 @@ from reportbuilder.model.report import (
     NumberFormat,
     Report,
     SortSpec,
+    row_summary_setting,
 )
+
+
+def _rs(body, key: str, default):
+    """Row-summary setting from a request body, recovering one stranded in options."""
+    return row_summary_setting(getattr(body, key, None),
+                               dict(getattr(body, "options", None) or {}), key, default)
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.engine import (
     compute, scale_levels, battery_scale_levels, scale_endpoint_gloss, _wordcloud,
@@ -1141,11 +1148,14 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         percent_base=body.percent_base,
         show_total=body.show_total,
-        row_summary_fn=body.row_summary_fn,
-        row_summary_codes=tuple(float(c) for c in body.row_summary_codes),
-        row_summary_pos_codes=tuple(float(c) for c in body.row_summary_pos_codes),
-        row_summary_neg_codes=tuple(float(c) for c in body.row_summary_neg_codes),
-        row_summary_label=body.row_summary_label,
+        # Recover a setting the editor stranded in `options` — the PREVIEW builds
+        # its spec from the body, so recovering only in report_from_json left the
+        # on-screen chart without its summary column. (shared helper)
+        row_summary_fn=_rs(body, "row_summary_fn", "none"),
+        row_summary_codes=tuple(float(c) for c in _rs(body, "row_summary_codes", ())),
+        row_summary_pos_codes=tuple(float(c) for c in _rs(body, "row_summary_pos_codes", ())),
+        row_summary_neg_codes=tuple(float(c) for c in _rs(body, "row_summary_neg_codes", ())),
+        row_summary_label=_rs(body, "row_summary_label", ""),
         slide_title=body.slide_title,
         slide_description=body.slide_description,
         footer_note=body.footer_note,

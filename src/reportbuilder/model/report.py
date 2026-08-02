@@ -158,6 +158,27 @@ def default_label(fn: str) -> str:
     return _ROW_SUMMARY_DEFAULT_LABEL.get(fn, "")
 
 
+def row_summary_setting(value, options: dict | None, key: str, default):
+    """A row-summary setting, recovering one stranded in the free-form options bag.
+
+    The editor writes a config value to `options` when the key is absent from the
+    chart object, and a freshly created chart carried no row_summary_* keys — so
+    choosing "Top 2 sum" on a new slide was saved there and silently ignored. An
+    explicit top-level value always wins.
+
+    Shared by report_from_json AND the preview endpoint: the preview builds its
+    spec from the request body, not from a parsed Report, so recovering in only
+    one of them leaves the on-screen chart still missing its summary column.
+    """
+    empty = (None, "", "none", (), [])
+    if value not in empty:
+        return value
+    opt = (options or {}).get(key)
+    if opt not in empty and opt is not None:
+        return opt
+    return value if value is not None else default
+
+
 def report_to_json(report: Report) -> str:
     """Serialize a Report to a canonical JSON string (tuples become JSON arrays)."""
     return json.dumps(asdict(report), ensure_ascii=False, sort_keys=True)
@@ -182,18 +203,7 @@ def report_from_json(data: dict | str) -> Report:
         return tuple((str(pair[0]), str(pair[1])) for pair in raw)
 
     def _rs(c: dict, key: str, default):
-        """A row-summary setting, recovering one stranded in the options bag.
-
-        The editor writes a config value to the free-form `options` when the key is
-        absent from the chart object, and a freshly created chart carried no
-        row_summary_* keys — so choosing "Top 2 sum" on a new slide was saved to
-        options and silently ignored. An explicit top-level value always wins.
-        """
-        v = c.get(key)
-        if v not in (None, "", "none", (), []):
-            return v
-        opt = (c.get("options") or {}).get(key)
-        return opt if opt not in (None, "", (), []) else (v if v is not None else default)
+        return row_summary_setting(c.get(key), c.get("options"), key, default)
 
     def _chart(c: dict) -> ChartSpec:
         nf = c["number_format"]
