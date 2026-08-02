@@ -320,8 +320,11 @@ def test_scatter_xy_absent_key_is_none():
 # ---- special-slide helpers -------------------------------------------------
 
 def test_special_slide_types_membership():
+    # special_blank is the AUTHOR-written one (heading + markdown bullets, no AI);
+    # it rides the same machinery, so it must be a recognised special type.
     assert SPECIAL_SLIDE_TYPES == frozenset(
-        {"special_overview", "special_conclusion", "special_demographics"}
+        {"special_overview", "special_conclusion", "special_demographics",
+         "special_blank"}
     )
 
 

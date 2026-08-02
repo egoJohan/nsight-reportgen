@@ -95,11 +95,15 @@ SPECIAL_SLIDE_TYPES: frozenset[str] = frozenset({
     "special_overview",
     "special_conclusion",
     "special_demographics",
+    # An AUTHOR-written slide: a heading plus markdown bullets, no AI. It rides the
+    # same machinery as the generated ones (bullets in options["bullets"]), and must
+    # be listed here or the renderer would try to compute a data series for it.
+    "special_blank",
 })
 
 
 def is_special_slide(spec: "ChartSpec") -> bool:
-    """True for a non-chart special slide (Overview/Conclusion/Demographics)."""
+    """True for a non-chart special slide (Overview/Conclusion/Demographics/blank)."""
     return spec.chart_type in SPECIAL_SLIDE_TYPES
 
 

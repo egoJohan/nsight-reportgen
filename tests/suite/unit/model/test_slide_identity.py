@@ -78,3 +78,32 @@ def test_assigned_ids_are_stable_across_a_save_and_reload():
     once = report_from_json(doc)
     twice = report_from_json(json.loads(report_to_json(once)))
     assert [c.slide_id for c in once.charts] == [c.slide_id for c in twice.charts]
+
+
+# ---- the blank special slide -----------------------------------------------
+# An author-written slide: a heading plus markdown bullets, no AI. It rides the
+# existing special-slide machinery, so it must be a recognised special type or
+# the renderer would try to compute a data series for it.
+
+def test_special_blank_is_a_special_slide():
+    from reportbuilder.model.report import (
+        SPECIAL_SLIDE_TYPES, is_special_slide, renders_as_bullets,
+    )
+    from dataclasses import replace as _replace
+
+    assert "special_blank" in SPECIAL_SLIDE_TYPES
+    blank = _replace(_chart("sp_blank_1"), chart_type="special_blank")
+    assert is_special_slide(blank) is True
+    assert renders_as_bullets(blank) is True
+
+
+def test_a_blank_slide_round_trips_with_its_bullets():
+    from dataclasses import replace as _replace
+
+    blank = _replace(_chart("sp_blank_1"), chart_type="special_blank",
+                     slide_title="Omat huomiot",
+                     options={"bullets": ["* eka", "  * sisennetty"]})
+    out = report_from_json(_doc(blank)).charts[0]
+    assert out.chart_type == "special_blank"
+    assert out.slide_title == "Omat huomiot"
+    assert out.options["bullets"] == ["* eka", "  * sisennetty"]

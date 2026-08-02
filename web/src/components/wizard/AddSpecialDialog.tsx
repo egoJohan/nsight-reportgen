@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { ColumnsIcon, FileTextIcon, ListChecksIcon, Loader2Icon, UsersIcon } from "lucide-react";
+import {
+  ColumnsIcon,
+  FileTextIcon,
+  ListChecksIcon,
+  Loader2Icon,
+  PencilLineIcon,
+  UsersIcon,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -52,6 +60,14 @@ const SLIDE_CHOICES: {
     Icon: UsersIcon,
   },
   {
+    type: "special_blank",
+    label: "Empty slide",
+    description:
+      "A heading and your own bullets, written in markdown — nothing generated.",
+    Icon: PencilLineIcon,
+    repeatable: true,
+  },
+  {
     type: "compare_groups",
     label: "Compare groups",
     description:
@@ -94,8 +110,18 @@ export function AddSpecialDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      {/* The compare form is a working surface listing whole question sentences,
+          so it follows ManageGroupingDialog's shape rather than the small chooser's:
+          a flex COLUMN with a scrolling body and a footer pinned at the bottom, so
+          the actions are always reachable however long the question list is. */}
+      <DialogContent
+        className={
+          mode === "compare"
+            ? "flex max-h-[85vh] flex-col gap-4 sm:max-w-2xl"
+            : undefined
+        }
+      >
+        <DialogHeader className="min-w-0">
           <DialogTitle>
             {mode === "compare" ? "Compare groups" : "Add a slide"}
           </DialogTitle>
@@ -215,6 +241,8 @@ function CompareGroupsForm({
   }, [clf, materialId, grouping, questions]);
 
   const splits = (qid: string) => (counts?.[qid] ?? 0) >= 2;
+  // The questions this variable actually splits — the only ones selectable.
+  const selectable = questions.filter((q) => splits(q.qid)).map((q) => q.qid);
   const toggle = (qid: string) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -223,9 +251,12 @@ function CompareGroupsForm({
       return next;
     });
 
+  const chosen = questions.map((q) => q.qid).filter((q) => picked.has(q));
+
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
+    <>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
+      <div className="min-w-0 space-y-1.5">
         <Label className="text-xs font-medium text-muted-foreground">Group by</Label>
         <Select value={clf} onValueChange={(v) => setClf(v ?? "")}>
           <SelectTrigger className="w-full">
@@ -241,8 +272,36 @@ function CompareGroupsForm({
         </Select>
       </div>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Questions</Label>
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex items-center justify-between gap-3">
+          <Label className="text-xs font-medium text-muted-foreground">
+            Questions
+          </Label>
+          {/* Only the questions this variable SPLITS can be selected, so
+              "Select all" means all selectable ones — never a disabled row. */}
+          {clf && !loading && selectable.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                disabled={picked.size === selectable.length}
+                onClick={() => setPicked(new Set(selectable))}
+              >
+                Select all
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                disabled={picked.size === 0}
+                onClick={() => setPicked(new Set())}
+              >
+                Select none
+              </Button>
+            </div>
+          )}
+        </div>
         {!clf ? (
           <p className="text-xs text-muted-foreground">
             Choose a variable to see which questions it splits.
@@ -253,27 +312,31 @@ function CompareGroupsForm({
             split…
           </p>
         ) : (
-          <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
+          <div className="w-full space-y-1 overflow-x-hidden rounded-md border p-2">
             {questions.map((q) => {
               const ok = splits(q.qid);
               return (
                 <label
                   key={q.qid}
-                  className={`flex items-start gap-2 rounded p-1.5 text-xs ${
+                  className={`flex w-full items-start gap-2 rounded p-1.5 text-xs ${
                     ok ? "cursor-pointer hover:bg-accent/50" : "opacity-50"
                   }`}
                 >
                   <input
                     type="checkbox"
-                    className="mt-0.5"
+                    className="mt-0.5 shrink-0"
                     disabled={!ok}
                     checked={picked.has(q.qid)}
                     onChange={() => toggle(q.qid)}
                   />
-                  <span className="min-w-0">
-                    <span className="block truncate">{q.text || q.qid}</span>
+                  {/* Question texts are long sentences, so they WRAP rather than
+                      truncate — `truncate` sets white-space: nowrap, which made the
+                      row expand past the dialog instead of shrinking to it.
+                      min-w-0 lets the flex child shrink below its content width. */}
+                  <span className="min-w-0 flex-1 break-words">
+                    <span className="block">{q.text || q.qid}</span>
                     {!ok && (
-                      <span className="text-muted-foreground">
+                      <span className="block text-muted-foreground">
                         only one group answered this question
                       </span>
                     )}
@@ -285,18 +348,18 @@ function CompareGroupsForm({
         )}
       </div>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>
           Back
         </Button>
-        <Button
-          size="sm"
-          disabled={!clf || picked.size === 0}
-          onClick={() => onSubmit(clf, questions.map((q) => q.qid).filter((q) => picked.has(q)))}
-        >
-          Add {picked.size || ""} slide{picked.size === 1 ? "" : "s"}
+        <Button disabled={!clf || chosen.length === 0} onClick={() => onSubmit(clf, chosen)}>
+          {chosen.length
+            ? `Add ${chosen.length} slide${chosen.length === 1 ? "" : "s"}`
+            : "Add slides"}
         </Button>
-      </div>
-    </div>
+      </DialogFooter>
+    </>
   );
 }

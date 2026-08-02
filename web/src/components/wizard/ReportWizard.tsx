@@ -600,6 +600,10 @@ export default function ReportWizard({
     special_overview: "Tutkimuksen taustaa",
     special_conclusion: "Johtopäätökset",
     special_demographics: "Vastaajat",
+    // Blank: placeholder heading. An entirely empty slide renders as a blank
+    // cream page and reads as "nothing was added" — give the author something
+    // visible to overwrite.
+    special_blank: "Otsikko",
   };
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
   const reportQuestionRefs = useCallback(
@@ -704,7 +708,14 @@ export default function ReportWizard({
   const addSpecialSlide = useCallback(
     (type: string, afterRef?: string | null): string => {
       const heading = SPECIAL_HEADINGS[type];
-      const placeholder = makeSpecialSlide(type, { slide_title: heading });
+      const placeholder = makeSpecialSlide(type, {
+        slide_title: heading,
+        // A blank slide is never filled in by AI, so it needs starter content or
+        // it renders empty. Markdown: "*" starts a bullet, two spaces nest one.
+        ...(type === "special_blank"
+          ? { bullets: ["* Kirjoita sisältö tähän", "  * Sisennetty alakohta"] }
+          : {}),
+      });
       const group = placeholder.question_ref;
       const anchor = {
         ...placeholder,
@@ -721,6 +732,9 @@ export default function ReportWizard({
         else charts.unshift(anchor);
         return { ...d, charts: normalizeSlots(charts) };
       });
+      // An empty slide is AUTHOR-written: no AI call, nothing pending. Firing one
+      // would also spend quota on a slide whose whole point is to be hand-written.
+      if (type === "special_blank") return group;
       setBulletsPending(group, true);
       void (async () => {
         try {

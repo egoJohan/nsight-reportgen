@@ -58,6 +58,8 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
   special_overview: "Overview",
   special_conclusion: "Conclusion",
   special_demographics: "Demographics",
+  // Author-written: a heading plus markdown bullets, no AI.
+  special_blank: "Empty slide",
 };
 
 export function isSpecialSlide(chart: { chart_type: string }): boolean {
