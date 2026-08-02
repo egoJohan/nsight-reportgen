@@ -896,25 +896,62 @@ def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
     return []
 
 
+def battery_scale_levels(vars_: list[Variable]) -> list[tuple[float, str]]:
+    """The shared rating-scale ``(point, label)`` pairs a STACKED battery stacks by,
+    ascending by point.
+
+    Members share one scale, so the levels come from the FIRST member with a
+    parseable one. Empty when no member has a scale."""
+    level_label: dict[float, str] = {}
+    for v in vars_:
+        lv = scale_levels(v)
+        if lv:
+            for _code, label, point in lv:
+                level_label.setdefault(point, label)
+            break
+    return [(p, level_label[p]) for p in sorted(level_label)]
+
+
+def scale_endpoint_gloss(categories) -> str:
+    """For a numeric rating scale whose levels read '1 - Täysin eri mieltä' … '7 - Täysin
+    samaa mieltä' (bare numbers in the middle), return the endpoint gloss
+    '1 = Täysin eri mieltä · 7 = Täysin samaa mieltä' — the wording that moves off the
+    (numbers-only) stacked-bar legend into the subtitle. Empty when the categories
+    aren't such a scale, or neither endpoint carries a description."""
+    cats = [str(c) for c in categories]
+    if len(cats) < 3:
+        return ""
+    parsed = []
+    for c in cats:
+        m = re.match(r"\s*(\d+)\s*[-–:.)]?\s*(.*)", c)
+        if not m:
+            return ""  # a non-numeric level → not a numeric scale
+        parsed.append((m.group(1), m.group(2).strip()))
+    ends = [f"{n} = {desc}" for n, desc in (parsed[0], parsed[-1]) if desc]
+    return " · ".join(ends)
+
+
 def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
              model: QuestionModel) -> SeriesResult:
     """A rating battery: one bar per member (category), value = the MEAN rating
     on the members' shared 1..N scale (no-answer codes excluded). Members were
     relabelled to their category by the battery grouper, so category == label."""
     vars_ = [model.variable(n) for n in question.variables]
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     answered_any = pd.Series(False, index=data.index)
     for idx, v in enumerate(vars_):
+        display = overrides.get(v.label, v.label)
         scale = {c: p for c, _lbl, p in scale_levels(v)}
         s = pd.to_numeric(data[v.name], errors="coerce")
         mapped = s.map(scale)
         answered_any = answered_any | mapped.notna()
         n = int(mapped.notna().sum())
         mean = float(mapped.mean()) if n > 0 else None
-        cells[(v.label, "Total")] = Cell(pct=None, count=float(n), mean=mean)
+        cells[(display, "Total")] = Cell(pct=None, count=float(n), mean=mean)
         key = mean if mean is not None else 0.0
-        rows.append((v.label, float(idx),
+        rows.append((display, float(idx),
                      {"pct": key, "count": n, "mean": key, "data_index": idx, "topbox": key}))
 
     base = int(answered_any.sum())
@@ -973,14 +1010,17 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
     source decks' brand-image radar (attributes × brands). `members` (explicit series)
     overrides the `_parallel_batteries` auto-detect when given."""
     sibs = members if members is not None else _parallel_batteries(question, model)
-    attrs = [model.variable(v).label for v in question.variables]   # canonical order
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    raw_attrs = [model.variable(v).label for v in question.variables]   # canonical order
+    attrs = [overrides.get(a, a) for a in raw_attrs]                    # display labels
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}
     entities: list[str] = []
     for q in sibs:
         ent = _series_label(q, sibs)
         entities.append(ent)
-        by_label = {model.variable(v).label: v for v in q.variables}
+        by_label = {overrides.get(lbl, lbl): v for v, lbl in
+                    ((v, model.variable(v).label) for v in q.variables)}
         answered = pd.Series(False, index=data.index)
         for attr in attrs:
             vn = by_label.get(attr)
@@ -1034,7 +1074,9 @@ def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
     that adjective. The multi twin of `_battery_comparison`. `members` (explicit series)
     overrides the `_parallel_questions` auto-detect when given."""
     sibs = members if members is not None else _parallel_questions(question, model)
-    options = [model.variable(v).label for v in question.variables]   # this q's axis order
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    raw_options = [model.variable(v).label for v in question.variables]  # this q's axis order
+    options = [overrides.get(o, o) for o in raw_options]                 # display labels
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}
     segments: list[str] = []
@@ -1047,7 +1089,8 @@ def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
         else:
             seen[label] = 1
         segments.append(label)
-        by_label = {model.variable(v).label: v for v in q.variables}
+        by_label = {overrides.get(lbl, lbl): v for v, lbl in
+                    ((v, model.variable(v).label) for v in q.variables)}
         base = multi_base(data, [model.variable(v) for v in q.variables])
         for opt in options:
             vn = by_label.get(opt)
@@ -1118,32 +1161,29 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     vars_ = [model.variable(n) for n in question.variables]
     # Shared scale levels from the first member with a parseable scale (digit- OR
     # word-labelled, via scale_levels).
-    level_label: dict[float, str] = {}
-    for v in vars_:
-        lv = scale_levels(v)
-        if lv:
-            for _code, label, point in lv:
-                level_label.setdefault(point, label)
-            break
-    points = sorted(level_label)                       # 1..N ascending
-    levels = [level_label[p] for p in points]          # stack-segment labels
-    statements = [v.label for v in vars_]              # bar labels (member order)
+    scale_pts = battery_scale_levels(vars_)            # [(point, label)], 1..N ascending
+    points = [p for p, _lbl in scale_pts]
+    levels = [lbl for _p, lbl in scale_pts]            # stack-segment labels
+    # Bar labels (member order), honouring the author's category-label overrides —
+    # the editor lists the member labels, so a shortened label must reach the bars.
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    statements = [overrides.get(v.label, v.label) for v in vars_]
 
     cells: dict[tuple[str, str], Cell] = {}
     base_by_stmt: dict[str, int] = {}
     answered_any = pd.Series(False, index=data.index)
-    for v in vars_:
+    for v, stmt in zip(vars_, statements):
         scale = {c: p for c, _lbl, p in scale_levels(v)}
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
         n = int(mapped.notna().sum())
-        base_by_stmt[v.label] = n
+        base_by_stmt[stmt] = n
         vc = mapped.value_counts()
         # Largest-remainder so each statement's scale levels sum to exactly 100 %.
         counts_l = [int(vc.get(p, 0)) for p in points]
         pcts_l = largest_remainder(counts_l, n, spec.number_format.pct_decimals)
         for lbl, c, pv in zip(levels, counts_l, pcts_l):
-            cells[(lbl, v.label)] = Cell(pct=pv, count=float(c), mean=None)
+            cells[(lbl, stmt)] = Cell(pct=pv, count=float(c), mean=None)
 
     # "Top 2/3 sum" sort: order the statement bars by their summed two (or three) highest
     # scale levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
