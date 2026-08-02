@@ -35,6 +35,7 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   isDemographicsGrid,
+  isStacked,
   isThemes,
   rendersAsBullets,
   rendersFullSlide,
@@ -735,6 +736,7 @@ function ChartControls({
       <SubtitleField
         chart={chart}
         questionText={question?.text ?? chart.question_ref}
+        scaleGloss={question?.scale_gloss ?? ""}
         onChange={onChange}
       />
       <FooterNoteField chart={chart} onChange={onChange} />
@@ -782,23 +784,32 @@ function SlideTitleField({
 function SubtitleField({
   chart,
   questionText,
+  scaleGloss,
   onChange,
 }: {
   chart: ChartSpec;
   questionText: string;
+  scaleGloss: string;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
+  // A stacked bar shows the scale as bare numbers, so the renderer appends the endpoint
+  // gloss ("1 = … · 5 = …") to the DEFAULT subtitle. Prefill it here so the box holds the
+  // exact line that renders — a battery's gloss is taken from its first member's scale
+  // and usually needs rewording once several questions are merged into one battery.
+  const gloss = isStacked(chart.chart_type) ? scaleGloss : "";
+  const fallback = gloss ? `${questionText}   ${gloss}` : questionText;
   return (
     <Field label="Subtitle">
       <Textarea
-        value={chart.slide_description ?? questionText}
+        value={chart.slide_description ?? fallback}
         rows={2}
         className="resize-y"
         onChange={(e) => onChange({ slide_description: e.target.value || null })}
       />
       <p className="text-xs text-muted-foreground">
-        The question line shown just above the chart. Defaults to the question text; edits
-        are saved to this report only — they don’t rename the question.
+        The question line shown just above the chart. Defaults to the question text
+        {gloss ? " plus the scale legend" : ""}; edits are saved to this report only — they
+        don’t rename the question. Clear the box to restore the default.
       </p>
     </Field>
   );

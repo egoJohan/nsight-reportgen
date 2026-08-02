@@ -18,13 +18,12 @@ Slide-text polish (R2):
 """
 from __future__ import annotations
 
-import re
-
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
+from reportbuilder.stats.engine import scale_endpoint_gloss
 
 _FONT = "Liberation Sans"
 # One fixed title size for EVERY slide (chart + special) so titles never vary in
@@ -35,23 +34,8 @@ _IN = Inches(1)
 _STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
 
 
-def _scale_endpoint_gloss(categories) -> str:
-    """For a numeric rating scale whose levels read '1 - Täysin eri mieltä' … '7 - Täysin
-    samaa mieltä' (bare numbers in the middle), return the endpoint gloss
-    '1 = Täysin eri mieltä · 7 = Täysin samaa mieltä' — the wording that moves off the
-    (numbers-only) legend into the subtitle. Empty when the categories aren't such a
-    scale, or neither endpoint carries a description."""
-    cats = [str(c) for c in categories]
-    if len(cats) < 3:
-        return ""
-    parsed = []
-    for c in cats:
-        m = re.match(r"\s*(\d+)\s*[-–:.)]?\s*(.*)", c)
-        if not m:
-            return ""  # a non-numeric level → not a numeric scale
-        parsed.append((m.group(1), m.group(2).strip()))
-    ends = [f"{n} = {desc}" for n, desc in (parsed[0], parsed[-1]) if desc]
-    return " · ".join(ends)
+# `scale_endpoint_gloss` lives in stats.engine so the questions API can offer the SAME
+# default text to the frontend's Subtitle box (the subtitle owns the whole line).
 
 # Statistic → Finnish methodology label (generic; no question-specific text)
 _STAT_FOOTER: dict[str, str] = {
@@ -158,8 +142,12 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         secondary = slide_description or (question if has_distinct_title else "")
         # On a STACKED bar the scale sits in the legend as bare numbers; move the endpoint
         # wording (1 = … · 7 = …) into the subtitle so the meaning isn't lost. (customer)
-        if getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES:
-            gloss = _scale_endpoint_gloss(ctx.series.categories)
+        # Only as the DEFAULT: an authored slide_description owns the whole line, so the
+        # author can reword or drop a gloss that fits only one battery member (the levels
+        # come from the first member with a parseable scale). The frontend prefills its
+        # Subtitle box with this same default, so what you edit is what renders.
+        if not slide_description and getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES:
+            gloss = scale_endpoint_gloss(ctx.series.categories)
             if gloss:
                 secondary = f"{secondary}   {gloss}" if secondary else gloss
         # One fixed title size for every slide (no length-based stepping).
