@@ -23,6 +23,34 @@ def _measurement(spss_measure: str) -> str:
     return "scale" if (spss_measure or "").lower() == "scale" else "categorical"
 
 
+# A coded string column (few short values, each repeated many times) is a
+# CATEGORICAL, not an open-ended answer — e.g. a packaging study's path column
+# holding "Pakkausilme 1"/"Pakkausilme 2". `ratio` is the discriminator: a genuine
+# open-end has roughly one row per distinct value even when few people answered
+# ("Muu, mikä?" -> 5 distinct, 5 answers), while a coded category is repeated
+# across the sample. `maxlen` is only a guard against pathological repeated
+# boilerplate — a sweep over maxlen 20..120 x ratio 5..20 across 147 real text
+# variables gave an identical outcome in every cell, so the rule rests on
+# `distinct` and `ratio`. (spec 2026-08-02 §1.1)
+_CODED_MAX_DISTINCT = 12
+_CODED_MIN_RATIO = 10.0
+_CODED_MAX_LEN = 80
+
+
+def _is_coded_string(series: pd.Series) -> bool:
+    """True when a label-less string column looks like a coded categorical."""
+    nn = series.dropna().astype(str)
+    nn = nn[nn.str.strip() != ""]
+    if len(nn) == 0:
+        return False
+    distinct = nn.nunique()
+    if distinct == 0 or distinct > _CODED_MAX_DISTINCT:
+        return False
+    if int(nn.str.len().max()) > _CODED_MAX_LEN:
+        return False
+    return (len(nn) / distinct) >= _CODED_MIN_RATIO
+
+
 def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     """Detect open-ended free-text variables (Task G.1).
 
@@ -30,6 +58,10 @@ def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     the bulk of its non-null values are not coercible to numbers (e.g. free-text
     answers like "Alzheimer potilas"). Such variables have no chartable numeric
     basis and must be flagged non-chartable rather than crashing the renderer.
+
+    A coded STRING categorical is excluded — see `_is_coded_string`. A column with
+    no non-blank answers stays text (and so non-chartable), which is safer than a
+    categorical with no categories.
     """
     if value_labels:
         return False  # coded categorical — has a numeric basis
@@ -37,7 +69,9 @@ def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     if len(nn) == 0:
         return False
     coerced = pd.to_numeric(nn, errors="coerce")
-    return float(coerced.isna().mean()) > 0.5
+    if float(coerced.isna().mean()) <= 0.5:
+        return False
+    return not _is_coded_string(nn)
 
 
 def _user_missing(ranges: list | None) -> frozenset[float]:
@@ -253,6 +287,11 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
         # so questions built from them can be flagged non-chartable downstream.
         if _is_text_variable(df[name], vls):
             measurement = "text"
+        elif not vls and _is_coded_string(df[name]):
+            # A coded STRING column is a categorical whatever the SAV's measure
+            # attribute claims — these are often exported as "scale", and a string
+            # column has no numeric basis to be a scale on. (spec 2026-08-02 §1.1)
+            measurement = "categorical"
         variables[name] = Variable(
             name=name,
             label=labels.get(name) or name,
