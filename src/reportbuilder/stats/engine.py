@@ -50,7 +50,53 @@ def _banner_masks(spec, data: pd.DataFrame, model: QuestionModel):
     masks = member_masks(data, q.variables)
     if not masks or not near_partition(masks, len(data)):
         return None
+    if getattr(spec, "classifying_var_2", None):
+        # Crossing possibly-overlapping masks with a second variable has no obvious
+        # base semantics, so it is deferred — but say so instead of silently
+        # dropping the second classifier. (spec 2026-08-02 §2.5)
+        raise ValueError(
+            f"'{cv}' is a banner classifier (its segments come from separate "
+            f"columns and may overlap) and cannot be combined with a second "
+            f"classifying variable "
+            f"('{getattr(spec, 'classifying_var_2', None)}'). Remove the second "
+            f"classifier, or classify by an ordinary variable instead."
+        )
     return {model.variable(v).label: m for v, m in zip(q.variables, masks)}
+
+
+def _classifier_masks(spec, data: pd.DataFrame, model: QuestionModel):
+    """One boolean mask per segment for ANY classifier form, or None.
+
+    Unifies the three shapes a classifier can take — a banner qid (indicator
+    columns), a coded STRING column, and a value-labelled numeric column — so paths
+    that segment by hand (the batteries) don't each reimplement the resolution.
+    Ordered: banner, then the column's own values. (spec 2026-08-02 §2.4)"""
+    banner = _banner_masks(spec, data, model)
+    if banner:
+        return banner
+    cv = getattr(spec, "classifying_var", None)
+    if not cv or cv not in data.columns:
+        return None
+    col = data[cv]
+    if not pd.api.types.is_numeric_dtype(col):
+        vals = col.dropna().astype(str).str.strip()
+        vals = vals[vals != ""]
+        if len(vals) and not _numeric_like(vals):
+            stripped = col.astype(str).str.strip()
+            return {v: (stripped == v) for v in string_categories(col)}
+    var = model.variables.get(cv)
+    if var is None or not var.value_labels:
+        return None
+    num = pd.to_numeric(col, errors="coerce")
+    miss = getattr(var, "missing_values", frozenset())
+    out: dict[str, pd.Series] = {}
+    for vl in var.value_labels:
+        if vl.value in miss:
+            continue
+        mask = num == float(vl.value)
+        if bool(mask.any()):
+            out[vl.label] = mask
+    return out or None
 
 
 def _numeric_like(values: pd.Series) -> bool:
@@ -998,33 +1044,70 @@ def scale_endpoint_gloss(categories) -> str:
     return " · ".join(ends)
 
 
+def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
+    """Remove segments in which NOBODY answered this battery.
+
+    Some studies ask each path its own variable set (Houkuttelevuus_1 for path 1,
+    Houkuttelevuus_2 for path 2), so cross-tabbing one of those batteries by the
+    path leaves the other path with no data. Drawing blank bars for it is noise;
+    `_multi` already skips empty segments the same way. (spec 2026-08-02 §2.4)"""
+    if not seg_masks:
+        return seg_masks
+    answered = pd.Series(False, index=data.index)
+    for v in vars_:
+        scale = {c: p for c, _lbl, p in scale_levels(v)}
+        answered = answered | pd.to_numeric(
+            data[v.name], errors="coerce").map(scale).notna()
+    kept = {lbl: m for lbl, m in seg_masks.items() if bool((answered & m).any())}
+    return kept or None
+
+
 def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
              model: QuestionModel) -> SeriesResult:
     """A rating battery: one bar per member (category), value = the MEAN rating
     on the members' shared 1..N scale (no-answer codes excluded). Members were
-    relabelled to their category by the battery grouper, so category == label."""
+    relabelled to their category by the battery grouper, so category == label.
+
+    With a classifying variable each member gets one bar PER SEGMENT — the natural
+    clustered shape — so a concept test can compare the paths on every attribute.
+    (spec 2026-08-02 §2.4)"""
     vars_ = [model.variable(n) for n in question.variables]
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    seg_masks = _drop_empty_segments(
+        _classifier_masks(spec, data, model), vars_, data)
+    # Always compute the Total column; resolve_show_total decides whether it's drawn.
+    all_mask = pd.Series(True, index=data.index)
+    segs: dict[str, pd.Series] = dict(seg_masks or {})
+    segs["Total"] = all_mask
+
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
     answered_any = pd.Series(False, index=data.index)
+    base_by_seg: dict[str, int] = {}
     for idx, v in enumerate(vars_):
         display = overrides.get(v.label, v.label)
         scale = {c: p for c, _lbl, p in scale_levels(v)}
-        s = pd.to_numeric(data[v.name], errors="coerce")
-        mapped = s.map(scale)
+        mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
-        n = int(mapped.notna().sum())
-        mean = float(mapped.mean()) if n > 0 else None
-        cells[(display, "Total")] = Cell(pct=None, count=float(n), mean=mean)
-        key = mean if mean is not None else 0.0
+        for seg, mask in segs.items():
+            sub = mapped[mask]
+            n = int(sub.notna().sum())
+            mean = float(sub.mean()) if n > 0 else None
+            cells[(display, seg)] = Cell(pct=None, count=float(n), mean=mean)
+        # Sorting keys come from the Total column so the category order is stable
+        # however the segments differ.
+        tot = cells[(display, "Total")]
+        key = tot.mean if tot.mean is not None else 0.0
         rows.append((display, float(idx),
-                     {"pct": key, "count": n, "mean": key, "data_index": idx, "topbox": key}))
+                     {"pct": key, "count": tot.count, "mean": key,
+                      "data_index": idx, "topbox": key}))
 
-    base = int(answered_any.sum())
+    for seg, mask in segs.items():
+        base_by_seg[seg] = int((answered_any & mask).sum())
     categories = tuple(sort_categories(rows, spec.sort))
-    return SeriesResult(categories=categories, segments=("Total",), cells=cells,
-                        base_n={"Total": base}, statistic="mean")
+    segments = (*(s for s in segs if s != "Total"), "Total")
+    return SeriesResult(categories=categories, segments=segments, cells=cells,
+                        base_n=base_by_seg, statistic="mean")
 
 
 def _has_question(model: QuestionModel, qid: str) -> bool:
@@ -1236,37 +1319,67 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     statements = [overrides.get(v.label, v.label) for v in vars_]
 
+    # Optional split by a classifying variable. Statement x level x segment is three
+    # dimensions and a SeriesResult holds two, so a segment turns each statement into
+    # several BARS labelled "<statement> · <segment>"; `segment_primary` then groups
+    # them by statement, putting the paths adjacent — the comparison a concept test
+    # exists to make. (spec 2026-08-02 §2.4)
+    seg_masks = _drop_empty_segments(
+        _classifier_masks(spec, data, model), vars_, data)
+    all_mask = pd.Series(True, index=data.index)
+    seg_items = list((seg_masks or {}).items()) or [(None, all_mask)]
+
     cells: dict[tuple[str, str], Cell] = {}
-    base_by_stmt: dict[str, int] = {}
+    base_by_bar: dict[str, int] = {}
+    segment_primary: dict[str, str] = {}
+    bars: list[str] = []
     answered_any = pd.Series(False, index=data.index)
     for v, stmt in zip(vars_, statements):
         scale = {c: p for c, _lbl, p in scale_levels(v)}
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
-        n = int(mapped.notna().sum())
-        base_by_stmt[stmt] = n
-        vc = mapped.value_counts()
-        # Largest-remainder so each statement's scale levels sum to exactly 100 %.
-        counts_l = [int(vc.get(p, 0)) for p in points]
-        pcts_l = largest_remainder(counts_l, n, spec.number_format.pct_decimals)
-        for lbl, c, pv in zip(levels, counts_l, pcts_l):
-            cells[(lbl, stmt)] = Cell(pct=pv, count=float(c), mean=None)
+        for seg_label, mask in seg_items:
+            bar = stmt if seg_label is None else f"{stmt} · {seg_label}"
+            bars.append(bar)
+            if seg_label is not None:
+                segment_primary[bar] = stmt
+            sub = mapped[mask]
+            n = int(sub.notna().sum())
+            base_by_bar[bar] = n
+            vc = sub.value_counts()
+            # Largest-remainder so each bar's scale levels sum to exactly 100 %.
+            counts_l = [int(vc.get(p, 0)) for p in points]
+            pcts_l = largest_remainder(counts_l, n, spec.number_format.pct_decimals)
+            for lbl, c, pv in zip(levels, counts_l, pcts_l):
+                cells[(lbl, bar)] = Cell(pct=pv, count=float(c), mean=None)
 
     # "Top 2/3 sum" sort: order the statement bars by their summed two (or three) highest
     # scale levels (e.g. 4+5), descending — so the most-"agree" statement leads. Auto-
     # derives the top-N from the scale, so it works for any N. (REQ-S-04)
+    # With a split, statements are reordered as a BLOCK (ranked by their Total) so the
+    # per-statement groups stay intact.
     if spec.sort.basis in ("topbox_sum", "top3_sum") and len(levels) >= 2:
         n_top = 3 if spec.sort.basis == "top3_sum" else 2
         top = levels[-n_top:]
-        statements = sorted(
-            statements,
-            key=lambda stmt: sum((cells[(lvl, stmt)].pct or 0.0) for lvl in top),
-            reverse=spec.sort.descending,
-        )
 
-    base_n = {"Total": int(answered_any.sum()), **base_by_stmt}
+        def _topbox(bar: str) -> float:
+            return sum((cells[(lvl, bar)].pct or 0.0) for lvl in top)
+
+        if segment_primary:
+            by_stmt: dict[str, list[str]] = {}
+            for bar in bars:
+                by_stmt.setdefault(segment_primary[bar], []).append(bar)
+            order = sorted(by_stmt,
+                           key=lambda s: sum(_topbox(b) for b in by_stmt[s]) / len(by_stmt[s]),
+                           reverse=spec.sort.descending)
+            bars = [b for s in order for b in by_stmt[s]]
+        else:
+            bars = sorted(bars, key=_topbox, reverse=spec.sort.descending)
+
+    base_n = {"Total": int(answered_any.sum()), **base_by_bar}
     return SeriesResult(
-        categories=tuple(levels), segments=tuple(statements),
+        categories=tuple(levels), segments=tuple(bars),
         cells=cells, base_n=base_n, statistic="pct",
-        row_summaries=_compute_row_summaries(spec, statements, levels, points, cells),
+        segment_primary=segment_primary or None,
+        row_summaries=_compute_row_summaries(spec, bars, levels, points, cells),
     )

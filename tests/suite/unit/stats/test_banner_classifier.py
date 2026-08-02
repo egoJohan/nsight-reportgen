@@ -100,3 +100,50 @@ def test_screened_banner_total_excludes_unqualified_respondents():
     for seg in ("Polku 1", "Polku 2"):
         total = sum((r.cell(c, seg).pct or 0) for c in r.categories)
         assert abs(total - 100.0) < 0.5
+
+
+# ---- unsupported combinations (spec §2.4, §2.5) ----------------------------
+import pytest  # noqa: E402
+
+
+def _with_gender(model, df):
+    model.variables["gender"] = Variable(
+        name="gender", label="Sukupuoli", measurement="categorical",
+        value_labels=(ValueLabel(1.0, "Nainen"), ValueLabel(2.0, "Mies")),
+        missing_values=frozenset())
+    df["gender"] = [1.0, 2.0] * (len(df) // 2)
+    return model, df
+
+
+def test_second_classifier_with_a_banner_raises_a_clear_error():
+    """Crossing overlapping masks with a second variable has no obvious base
+    semantics, so it is deferred — but it must SAY so. It used to silently ignore
+    the second classifier and return the banner split as if nothing were wrong."""
+    model, q, df = _setup()
+    model, df = _with_gender(model, df)
+    with pytest.raises(ValueError, match="second classifying variable"):
+        engine.compute(q, _spec(classifying_var_2="gender"), df, model)
+
+
+def test_two_ordinary_classifiers_still_cross_tab():
+    """The guard must not touch the existing two-classifier cross-tab."""
+    model, q, df = _setup()
+    model, df = _with_gender(model, df)
+    clf = Variable(name="clf", label="C", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "A"), ValueLabel(2.0, "B")),
+                   missing_values=frozenset())
+    model.variables["clf"] = clf
+    df["clf"] = [1.0] * 100 + [2.0] * 100
+    r = engine.compute(q, _spec(classifying_var="clf", classifying_var_2="gender"),
+                       df, model)
+    assert any("·" in s for s in r.segments)
+
+
+def test_percent_base_question_falls_back_for_a_banner():
+    """Overlapping segments cannot be distributed within a category, so the
+    'each category' direction must fall back rather than produce nonsense."""
+    model, q, df = _setup()
+    r = engine.compute(q, _spec(percent_base="question"), df, model)
+    for seg in ("Polku 1", "Polku 2"):
+        total = sum((r.cell(c, seg).pct or 0) for c in r.categories)
+        assert abs(total - 100.0) < 0.5

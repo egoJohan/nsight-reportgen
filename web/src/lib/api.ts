@@ -58,6 +58,10 @@ export interface Variable {
   // Whether this is a meaningful classifying/segmentation variable (background/
   // demographic categorical, not a Likert item) — drives the classifier picker.
   segmentable?: boolean;
+  // True for a BANNER classifier — a question-backed classifier (one indicator
+  // column per group, e.g. Polku1+Polku2) whose segments may overlap, so it
+  // supports neither a second classifier nor the "within each category" direction.
+  banner?: boolean;
   // A genuine multi-response tick-box (binary 0/1) — the only kind groupable
   // into a multi-response question.
   tickbox?: boolean;
