@@ -1317,14 +1317,18 @@ function SpecialSlideControls({
           }
         />
       </Field>
-      <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
-        {pending ? (
-          <Loader2Icon className="size-4 animate-spin" />
-        ) : (
-          <SparklesIcon className="size-4" />
-        )}
-        Regenerate
-      </Button>
+      {/* An Empty slide has no generated content to regenerate — it is written by
+          hand, so the button would do nothing but spend a call. */}
+      {chart.chart_type !== "special_blank" && (
+        <Button variant="outline" size="sm" disabled={pending} onClick={onRegenerate}>
+          {pending ? (
+            <Loader2Icon className="size-4 animate-spin" />
+          ) : (
+            <SparklesIcon className="size-4" />
+          )}
+          Regenerate
+        </Button>
+      )}
     </div>
   );
 }
