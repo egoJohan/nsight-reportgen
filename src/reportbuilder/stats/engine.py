@@ -9,6 +9,7 @@ import dataclasses
 import os
 import re
 import pandas as pd
+from reportbuilder.ingest.sav_reader import string_categories
 from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec, SortSpec
 from reportbuilder.stats.aggregate import aggregate_counts
@@ -31,6 +32,12 @@ def _seg_key(code: float) -> str:
     return str(int(code)) if float(code).is_integer() else str(code)
 
 
+def _numeric_like(values: pd.Series) -> bool:
+    """True when the values are really numbers held as strings — those keep the
+    existing numeric segmentation path so their value labels still resolve."""
+    return bool(pd.to_numeric(values, errors="coerce").notna().all())
+
+
 def _combo_segmentation(spec: ChartSpec, data: pd.DataFrame):
     """Cross-tab segmentation for TWO classifiers → (seg_series, ordered_keys).
 
@@ -41,6 +48,20 @@ def _combo_segmentation(spec: ChartSpec, data: pd.DataFrame):
     """
     cv1 = spec.classifying_var
     cv2 = getattr(spec, "classifying_var_2", None)
+    # A coded STRING classifier (a path/concept column with no value labels) has no
+    # numeric codes, so the pd.to_numeric path below would blank every row. Its
+    # values ARE the segment keys — exactly what seg_series accepts. A column whose
+    # strings are really numbers ("1"/"2") keeps the numeric path so its value
+    # labels still resolve. (spec 2026-08-02 §1.2)
+    if (cv1 and not cv2 and cv1 in data.columns
+            and not pd.api.types.is_numeric_dtype(data[cv1])):
+        vals = data[cv1].dropna().astype(str).str.strip()
+        vals = vals[vals != ""]
+        if len(vals) and not _numeric_like(vals):
+            keys = pd.Series([None] * len(data), index=data.index, dtype=object)
+            keys.loc[vals.index] = vals
+            # Same ordering the picker and the label editor use — one source of truth.
+            return keys, string_categories(data[cv1])
     if not (cv1 and cv2):
         return None, None
     c1 = pd.to_numeric(data[cv1], errors="coerce")
