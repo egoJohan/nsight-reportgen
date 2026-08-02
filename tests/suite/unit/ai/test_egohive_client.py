@@ -250,3 +250,48 @@ def test_build_prompt_includes_topic_and_numbers():
     assert "Tunnettuus" in prompt
     assert "Attendo" in prompt
     assert "86" in prompt
+
+
+# --------------------------------------------------------------------------- #
+# In-band agent errors (egoHive answers HTTP 200 with the error as the reply)
+# --------------------------------------------------------------------------- #
+# Regression (2026-08-02): a quota-blocked account made egoHive reply
+# "Error in agent 'nsight-demo': … token_limit_exceeded" with HTTP 200, and the
+# wizard rendered that string as the slide title. The client must translate it
+# into an EgoHiveError so callers degrade to the question text / full labels.
+_AGENT_ERR = ("Error in agent 'nsight-demo': LLM call failed after 3 attempts: "
+              "Account a802 is not active: token_limit_exceeded")
+
+
+def test_in_band_agent_error_raises_instead_of_returning_it(env_creds, monkeypatch):
+    _install_urlopen(monkeypatch, [{"session_id": "s"}, {"content": _AGENT_ERR}])
+    with pytest.raises(EgoHiveError) as exc:
+        C.egohive_chat("p")
+    # the underlying cause is preserved for the log / 503 detail
+    assert "token_limit_exceeded" in str(exc.value)
+    # …and the raw "Error in agent" wrapper is not what callers see as content
+    assert "Error in agent" not in str(exc.value)
+
+
+def test_in_band_agent_error_detected_after_whitespace(env_creds, monkeypatch):
+    _install_urlopen(monkeypatch,
+                     [{"session_id": "s"}, {"content": f"\n  {_AGENT_ERR}"}])
+    with pytest.raises(EgoHiveError):
+        C.egohive_chat("p")
+
+
+def test_multiline_agent_error_raises(env_creds, monkeypatch):
+    """The detail can wrap onto further lines (tracebacks) — still an error."""
+    _install_urlopen(monkeypatch,
+                     [{"session_id": "s"},
+                      {"content": "Error in agent 'a': boom\n  at line 2"}])
+    with pytest.raises(EgoHiveError):
+        C.egohive_chat("p")
+
+
+def test_reply_merely_mentioning_the_phrase_is_not_an_error(env_creds, monkeypatch):
+    """Only the anchored egoHive wrapper counts — a legitimate answer that quotes
+    the phrase mid-sentence must still come back as content."""
+    body = "Raportissa näkyi teksti Error in agent 'x': tämä on silti vastaus"
+    _install_urlopen(monkeypatch, [{"session_id": "s"}, {"content": body}])
+    assert C.egohive_chat("p") == body

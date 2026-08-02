@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -48,6 +49,15 @@ DEFAULT_TIMEOUT = 60.0
 
 class EgoHiveError(RuntimeError):
     """Raised when egoHive is unreachable, returns an error, or auth fails."""
+
+
+# egoHive reports agent-level failures IN BAND: the flow executor puts
+# "Error in agent '<name>': <detail>" into the reply `content` and still answers
+# HTTP 200 (see agent_node_executor._execute; there is no structured error field
+# on the chat response). Detect it so callers get an EgoHiveError and degrade to
+# their non-AI default, instead of rendering the error text as a slide title.
+# Anchored at the start so a legitimate reply quoting the phrase isn't caught.
+_AGENT_ERROR_RE = re.compile(r"^Error in agent '[^']*':\s*(?P<detail>.+)", re.DOTALL)
 
 
 # --------------------------------------------------------------------------- #
@@ -238,7 +248,12 @@ def _send_message(
     text = (resp or {}).get("content")
     if text is None:
         raise EgoHiveError(f"egoHive chat returned no content: {resp!r}")
-    return text.strip()
+    text = text.strip()
+    if (m := _AGENT_ERROR_RE.match(text)):
+        # An in-band agent failure (HTTP 200 with the error as the reply) — surface
+        # it as an error so the caller falls back instead of using it as content.
+        raise EgoHiveError(f"egoHive agent failed: {m.group('detail').strip()}")
+    return text
 
 
 def _build_prompt(topic: str, numbers: Mapping[str, Any]) -> str:
