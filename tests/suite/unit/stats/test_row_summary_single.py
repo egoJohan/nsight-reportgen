@@ -8,6 +8,8 @@ appear there as well, with or without a classifying variable.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from reportbuilder.model.question import Question, QuestionModel, ValueLabel, Variable
@@ -62,6 +64,49 @@ def test_classified_stacked_bar_still_gets_one_value_per_bar():
     model, q, df = _setup()
     r = engine.compute(q, _spec(classifying_var="polku", row_summary_fn="top2_sum"),
                        df, model)
-    bars = [s for s in r.segments if s != "Total"]
-    assert bars == ["Polku 1", "Polku 2"]
-    assert r.row_summaries is not None and len(r.row_summaries) == len(bars)
+    assert list(r.segments) == ["Polku 1", "Polku 2", "Total"]
+    # One value per bar, the "Total" reference bar included, each keyed to its bar.
+    assert r.row_summary_keys == r.segments
+    assert r.row_summaries is not None and len(r.row_summaries) == len(r.segments)
+
+
+def _setup_with_a_tiny_group():
+    """As _setup, but the classifier has a THIRD group with a near-empty base — the
+    renderer drops such a group (MIN_SEGMENT_BASE), so the summary values must not be
+    read positionally against the bars that survive."""
+    model, q, df = _setup()
+    clf = model.variables["polku"]
+    model.variables["polku"] = replace(
+        clf, value_labels=clf.value_labels + (ValueLabel(3.0, "Muuten"),))
+    # 4 respondents in "Muuten", all at the top of the scale -> its top2 is 100 %.
+    df.loc[df.index[:4], "polku"] = 3.0
+    df.loc[df.index[:4], "q"] = 5.0
+    return model, q, df
+
+
+def test_row_summaries_are_keyed_to_their_bar():
+    model, q, df = _setup_with_a_tiny_group()
+    r = engine.compute(q, _spec(classifying_var="polku", row_summary_fn="top2_sum"),
+                       df, model)
+    keyed = dict(zip(r.row_summary_keys, r.row_summaries))
+    assert keyed["Muuten"] == 100.0
+    # The Total row is a bar too, and carries the overall top 2 — not a neighbour's.
+    top2 = (r.cell("4", "Total").pct or 0.0) + (r.cell("5", "Total").pct or 0.0)
+    assert keyed["Total"] == round(top2, 0)
+
+
+def test_dropped_tiny_group_does_not_shift_the_total_bars_summary():
+    from reportbuilder.render.image._mpl import MIN_SEGMENT_BASE
+    from reportbuilder.render.image.bars import _stacked_layout, _row_summary_by_bar
+
+    model, q, df = _setup_with_a_tiny_group()
+    r = engine.compute(q, _spec(classifying_var="polku", row_summary_fn="top2_sum"),
+                       df, model)
+    assert r.base_n["Muuten"] < MIN_SEGMENT_BASE, "the tiny group is renderer-dropped"
+
+    bars, _stack, _data = _stacked_layout(r)
+    assert "Muuten" not in bars
+    by_bar = _row_summary_by_bar(r, bars)
+    top2 = (r.cell("4", "Total").pct or 0.0) + (r.cell("5", "Total").pct or 0.0)
+    assert by_bar[bars.index("Total")] == round(top2, 0), "Total keeps its OWN value"
+    assert len(by_bar) == len(bars)

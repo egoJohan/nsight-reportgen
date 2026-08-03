@@ -51,12 +51,29 @@ def _format_summary(val: float, fn: str, nf) -> str:
     return f"{s} %" if nf.show_pct_sign else s
 
 
-def _draw_row_summary(ctx, ax, y) -> None:
+def _row_summary_by_bar(series, bars) -> list[float | None]:
+    """The row-summary value for each of `bars`, or None where there is none.
+
+    The engine keys its values by bar label because the renderer does NOT draw every
+    segment the engine computes — a near-empty classifier group is dropped
+    (MIN_SEGMENT_BASE) and "Total" can be hidden — so zipping the values against the
+    surviving bars would silently shift each one onto its neighbour's row."""
+    rs = series.row_summaries
+    if not rs:
+        return [None] * len(bars)
+    keys = getattr(series, "row_summary_keys", ())
+    if not keys:                                # legacy/hand-built series: positional
+        return list(rs) + [None] * (len(bars) - len(rs))
+    by_key = dict(zip(keys, rs))
+    return [by_key.get(b) for b in bars]
+
+
+def _draw_row_summary(ctx, ax, y, bars) -> None:
     """Right-hand per-row summary column (row_summary feature): a header above the
     top bar and one value per bar, aligned to `y`. No-op when the series carries no
     row_summaries. (spec 2026-07-07-row-summary-column)"""
-    rs = ctx.series.row_summaries
-    if not rs:
+    vals = _row_summary_by_bar(ctx.series, bars)
+    if all(v is None for v in vals):
         return
     fn = ctx.spec.row_summary_fn
     nf = ctx.spec.number_format
@@ -66,7 +83,9 @@ def _draw_row_summary(ctx, ax, y) -> None:
     col_x = 109.0
     ax.text(col_x, max(y) + 0.9, header, ha="center", va="center",
             fontsize=9.0, fontweight="bold", color=MUTED, zorder=6)
-    for yi, val in zip(y, rs):
+    for yi, val in zip(y, vals):
+        if val is None:
+            continue
         ax.text(col_x, yi, _format_summary(val, fn, nf), ha="center", va="center",
                 fontsize=11.0, fontweight="bold", color=INK, zorder=6)
 
@@ -804,7 +823,7 @@ def build_image_bar_stacked(ctx) -> None:
         ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     _apply_bar_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
-    _draw_row_summary(ctx, ax, y)  # right-hand per-row summary column (if configured)
+    _draw_row_summary(ctx, ax, y, cats)  # right-hand per-row column (if configured)
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))

@@ -31,9 +31,12 @@ class SeriesResult:
     # group ("Mies"), so renderers can group the bars/stacks by primary with gaps. None
     # for single-classifier / non-classifier charts. (REQ-C-14c)
     segment_primary: dict[str, str] | None = None
-    # Optional right-hand summary value per bar (row_summary feature), aligned to the
-    # bars the stacked-horizontal-bar renderer draws. None when off. (spec 2026-07-07)
+    # Optional right-hand summary value per bar (row_summary feature). None when off.
+    # `row_summary_keys` names the bar each value belongs to: the renderer drops bars
+    # (a near-empty classifier group, a hidden "Total"), so the values must be looked
+    # up by label, never zipped positionally. (spec 2026-07-07)
     row_summaries: tuple[float, ...] | None = None
+    row_summary_keys: tuple[str, ...] = ()
     # Whether the "Total" reference series should be drawn. False → renderers drop the
     # "Total" segment (unless it's the only series). Resolved by the engine from
     # ChartSpec.show_total + the percentage direction. (2026-07-10)

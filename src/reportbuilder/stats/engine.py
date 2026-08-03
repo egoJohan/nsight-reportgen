@@ -652,6 +652,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # the single 'Total' column IS the one bar (see _stacked_layout) and is just as
     # much a row to summarise. (2026-07-10, 2026-08-03)
     row_summaries = None
+    statements: list[str] = []
     if (spec.chart_type in _STACKED_BAR_TYPES
             and getattr(spec, "row_summary_fn", "none") != "none"):
         # Stack levels in ASCENDING scale order, independent of the display sort, so
@@ -660,14 +661,17 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         flip = -1.0 if scale_entries is not None else 1.0
         shown = set(categories)
         levels = sorted((e for e in entries if e[1] in shown), key=lambda e: flip * e[2])
-        statements = [s for s in segments if s != "Total"] or ["Total"]
+        # Every rendered bar gets a value, the "Total" reference bar included — it is
+        # a row like any other. Values are keyed by bar, not positional.
+        statements = list(segments)
         row_summaries = _compute_row_summaries(
             spec, statements, [d for _, d, _ in levels], [c for c, _, _ in levels], cells)
 
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n={s: denom.get(s, 0) for s in segments},
                         statistic=spec.statistic, caption=scale_caption,
-                        row_summaries=row_summaries)
+                        row_summaries=row_summaries,
+                        row_summary_keys=tuple(statements))
 
 
 def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
@@ -826,6 +830,7 @@ def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
                if seg != "Total"},
         base_n={rl(s): n for s, n in result.base_n.items()},
         segment_primary=segment_primary or None,
+        row_summary_keys=tuple(rl(s) for s in result.row_summary_keys),
     )
 
 
@@ -852,7 +857,10 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
     new_cells = {(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()}
     new_base = {rl(s): n for s, n in result.base_n.items()}
     return dataclasses.replace(
-        result, segments=new_segs, cells=new_cells, base_n=new_base
+        result, segments=new_segs, cells=new_cells, base_n=new_base,
+        # The row-summary values are keyed by segment, so their keys are display
+        # labels too — otherwise the renderer looks them up by label and finds none.
+        row_summary_keys=tuple(rl(s) for s in result.row_summary_keys),
     )
 
 
@@ -1394,4 +1402,5 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # each statement's segments adjacent, and every bar keeps its own readable
         # "<statement> · <segment>" tick. (spec 2026-08-02 §2.4)
         row_summaries=_compute_row_summaries(spec, bars, levels, points, cells),
+        row_summary_keys=tuple(bars),
     )
