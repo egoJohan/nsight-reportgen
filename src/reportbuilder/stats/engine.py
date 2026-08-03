@@ -647,15 +647,22 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             for seg in segments:
                 _reround([(cat, seg) for cat in categories])
 
-    # A stacked bar split by a classifier can carry the right-hand row-summary column
-    # too (one value per bar / classifier group), exactly like a battery. (2026-07-10)
+    # A stacked bar carries the right-hand row-summary column (one value per BAR),
+    # exactly like a battery. The bars are the classifier groups; with NO classifier
+    # the single 'Total' column IS the one bar (see _stacked_layout) and is just as
+    # much a row to summarise. (2026-07-10, 2026-08-03)
     row_summaries = None
-    if _bars_are_segments and getattr(spec, "row_summary_fn", "none") != "none":
-        code_by_display = {d: c for c, d, _ in entries}
-        pairs = [(c, code_by_display[c]) for c in categories if c in code_by_display]
-        statements = [s for s in segments if s != "Total"]
+    if (spec.chart_type in _STACKED_BAR_TYPES
+            and getattr(spec, "row_summary_fn", "none") != "none"):
+        # Stack levels in ASCENDING scale order, independent of the display sort, so
+        # "top 2" always means the two highest scale points. A partially-labelled scale
+        # charts high→low and carries -point as its ordering key, hence the flip.
+        flip = -1.0 if scale_entries is not None else 1.0
+        shown = set(categories)
+        levels = sorted((e for e in entries if e[1] in shown), key=lambda e: flip * e[2])
+        statements = [s for s in segments if s != "Total"] or ["Total"]
         row_summaries = _compute_row_summaries(
-            spec, statements, [c for c, _ in pairs], [code for _, code in pairs], cells)
+            spec, statements, [d for _, d, _ in levels], [c for c, _, _ in levels], cells)
 
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n={s: denom.get(s, 0) for s in segments},
