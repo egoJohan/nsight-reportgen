@@ -24,6 +24,7 @@ export function SlideGrid({
   materialId: string;
   grouping: GroupingOverride;
   questionMap: Map<string, Question>;
+  // The active slide's slide_id (question_ref is not unique across slides).
   activeRef: string | null;
   onSelect: (index: number) => void;
 }) {
@@ -35,7 +36,7 @@ export function SlideGrid({
           materialId={materialId}
           chart={c}
           index={i}
-          isActive={c.question_ref === activeRef}
+          isActive={c.slide_id === activeRef}
           grouping={grouping}
           questionMap={questionMap}
           onClick={() => onSelect(i)}

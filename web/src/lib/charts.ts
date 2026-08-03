@@ -262,6 +262,10 @@ export function makeChart(
     row_summary_pos_codes: [],
     row_summary_neg_codes: [],
     row_summary_label: "",
+    // Identity from creation: the deck may hold TWO slides for one question (the
+    // total-level one and the same result split by another variable), and
+    // question_ref cannot tell them apart.
+    slide_id: newSlideId(),
   };
 }
 
@@ -356,6 +360,7 @@ export function makeSpecialSlide(
     // `group` ties together the pages of one logical special slide (so a regen
     // can replace the whole set); absent for single-page slides.
     options: { bullets: opts?.bullets ?? [], ...(opts?.group ? { group: opts.group } : {}) },
+    slide_id: newSlideId(),
   };
 }
 

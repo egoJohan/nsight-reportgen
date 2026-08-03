@@ -196,7 +196,7 @@ export default function StepDownload({
             questionMap={questionMap}
             activeRef={active}
             onSelect={(i) => {
-              setActive(deckCharts[i].question_ref);
+              setActive(deckCharts[i].slide_id ?? null);
               onGoToDesign();
             }}
           />

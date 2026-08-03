@@ -1410,7 +1410,7 @@ function StepConfigureInner({
   charts: ChartSpec[];
   grouping: GroupingOverride;
   aiPending?: AiPendingMap;
-  // The active slide (question_ref) is owned by ReportWizard so the Preview grid can
+  // The active slide (slide_id) is owned by ReportWizard so the Preview grid can
   // select a slide and jump here to edit it.
   active: string | null;
   setActive: (ref: string | null) => void;
@@ -1454,13 +1454,13 @@ function StepConfigureInner({
         return;
       // Handle the key here (stop the page/list from scrolling) even at the ends.
       e.preventDefault();
-      const cur = Math.max(0, charts.findIndex((c) => c.question_ref === active));
+      const cur = Math.max(0, charts.findIndex((c) => c.slide_id === active));
       const target = Math.max(
         0,
         Math.min(charts.length - 1, prev ? cur - 1 : cur + 1)
       );
       if (target !== cur && charts[target]) {
-        setActive(charts[target].question_ref);
+        setActive(charts[target].slide_id ?? null);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -1507,11 +1507,11 @@ function StepConfigureInner({
     );
   }
 
-  const activeChart =
-    charts.find((c) => c.question_ref === active) ?? charts[0];
-  const activeIndex = activeChart
-    ? charts.findIndex((c) => c.question_ref === activeChart.question_ref)
-    : -1;
+  // Resolved by slide_id, not question_ref: a deck may hold TWO slides for one
+  // question — the total-level result and the same result split by another
+  // variable — and matching on the question made every edit land on the first.
+  const activeIndex = charts.findIndex((c) => c.slide_id === active);
+  const activeChart = activeIndex >= 0 ? charts[activeIndex] : charts[0];
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
   // A "themes" chart is an open-ended question rendered as bullets — unlike a true
@@ -1551,7 +1551,7 @@ function StepConfigureInner({
             className="absolute inset-0 space-y-1.5 overflow-y-auto pr-1"
           >
             {charts.map((c, i) => {
-              const isActive = c.question_ref === active;
+              const isActive = c.slide_id === active;
               return (
                 <div
                   key={`${c.question_ref}-${i}`}
@@ -1576,7 +1576,7 @@ function StepConfigureInner({
                     <GripVerticalIcon className="size-4" />
                   </span>
                   <button
-                    onClick={() => setActive(c.question_ref)}
+                    onClick={() => setActive(c.slide_id ?? null)}
                     className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left outline-none focus:outline-none focus-visible:outline-none focus-visible:ring-0"
                   >
                     <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">

@@ -172,8 +172,8 @@ export default function ReportWizard({
   useEffect(() => {
     const cs = draft?.charts;
     if (!cs || cs.length === 0) return;
-    if (!active || !cs.some((c) => c.question_ref === active)) {
-      setActive(cs[0].question_ref);
+    if (!active || !cs.some((c) => c.slide_id === active)) {
+      setActive(cs[0].slide_id ?? null);
     }
   }, [draft, active]);
   const [dirty, setDirty] = useState(false);
