@@ -519,6 +519,18 @@ export default function StepSelect({
                       >
                         <InfoIcon className="size-4 text-muted-foreground" /> View details
                       </button>
+                      {/* Unticking only leaves a special slide out of the deck; this
+                          throws it away, bullets and all. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRemoveChart(i);
+                          setMenuQid(null);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+                      >
+                        <XIcon className="size-4" /> Delete slide
+                      </button>
                     </div>
                   )}
                 </div>
@@ -618,6 +630,22 @@ export default function StepSelect({
                     >
                       <InfoIcon className="size-4 text-muted-foreground" /> View details
                     </button>
+                    {/* This row is the question's FIRST slide; the extra-slide rows
+                        below delete their own. When it is the only one, deleting it
+                        unticks the question (nothing is left showing it). */}
+                    {isAdded && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = (slidesByRef.get(q.qid) ?? [])[0];
+                          if (first) onRemoveChart(first.index);
+                          setMenuQid(null);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+                      >
+                        <XIcon className="size-4" /> Delete slide
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

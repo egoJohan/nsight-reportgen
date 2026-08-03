@@ -466,6 +466,21 @@ export default function ReportWizard({
     };
   }, []);
 
+  // Autosave: a browser reload does NOT run the unmount cleanup above, so every
+  // edit made since the last manual Save used to be thrown away by a refresh —
+  // an added special slide, a retyped title, a changed chart type. Save shortly
+  // after the edits settle instead. The Save button stays (it also commits
+  // immediately); `dirty` still drives the "Unsaved changes" indicator, so the
+  // header goes quiet on its own once the autosave lands.
+  const AUTOSAVE_DELAY_MS = 1500;
+  useEffect(() => {
+    if (!dirty) return;
+    const h = setTimeout(() => {
+      if (dirtyRef.current) void saveRef.current();
+    }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(h);
+  }, [dirty, draft]);
+
   // ── Auto AI slide titles (batched, like the chart thumbnails) ─────────────
   // When the Design step is open, titles are generated automatically for every
   // chart — the same way the thumbnails auto-render — NOT eagerly on report
