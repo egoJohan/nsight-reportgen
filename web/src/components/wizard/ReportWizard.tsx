@@ -377,6 +377,19 @@ export default function ReportWizard({
     [mutate]
   );
 
+  // Delete ONE slide by its position in the full chart list. Distinct from
+  // unticking a question (which removes every slide showing it) — a question may
+  // hold both a total-level slide and one split by another variable.
+  const removeChart = useCallback(
+    (index: number) => {
+      mutate((d) => ({
+        ...d,
+        charts: normalizeSlots(d.charts.filter((_, i) => i !== index)),
+      }));
+    },
+    [mutate]
+  );
+
   // Tick/untick a slide that has no catalog row of its own (a special slide).
   // Unticking keeps the chart — and its bullets — and only leaves it out of the deck.
   const toggleChartExcluded = useCallback(
@@ -1038,6 +1051,7 @@ export default function ReportWizard({
             onAddSpecial={addSpecialSlide}
             onAddComparison={addComparisonSection}
             onToggleExcluded={toggleChartExcluded}
+            onRemoveChart={removeChart}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}

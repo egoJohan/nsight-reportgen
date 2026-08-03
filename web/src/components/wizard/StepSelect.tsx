@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import type { Question, GroupingOverride, BatterySuggestion, ChartSpec } from "@/lib/api";
+import type { Question, GroupingOverride, BatterySuggestion, ChartSpec, Variable } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions, useVariables } from "@/lib/queries";
 import { isSpecialSlide } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
@@ -70,6 +70,15 @@ function isWordcloudOnly(q: Question): boolean {
   );
 }
 
+/** How an EXTRA slide for a question differs from the first one — the classifying
+ * variable it is split by, or "copy" when it is split by nothing. */
+function slideVariant(chart: ChartSpec, variables: Variable[] | undefined): string {
+  const by = chart.compare_group || chart.classifying_var;
+  if (!by) return "copy";
+  const v = (variables ?? []).find((x) => x.name === by);
+  return `by ${v?.label ?? by}`;
+}
+
 function KindBadge({ q }: { q: Question }) {
   if (q.kind === "battery") {
     return (
@@ -98,6 +107,7 @@ export default function StepSelect({
   addedRefs,
   onToggle,
   onSelectMany,
+  onRemoveChart,
   onAddSpecial,
   onAddComparison,
   onToggleExcluded,
@@ -111,6 +121,7 @@ export default function StepSelect({
   addedRefs: Set<string>;
   onToggle: (question: Question) => void;
   onSelectMany: (questions: Question[], select: boolean) => void;
+  onRemoveChart: (index: number) => void;
   onAddSpecial: (type: string, afterRef?: string | null) => string | void;
   onAddComparison: (classifyingVar: string, qids: string[]) => void;
   onToggleExcluded: (index: number) => void;
@@ -154,6 +165,20 @@ export default function StepSelect({
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [menuQid]);
+
+  // Every slide showing each question, with its index in the FULL chart list —
+  // a question may hold a total-level slide AND the same result split by another
+  // variable, and each must be deletable on its own.
+  const slidesByRef = useMemo(() => {
+    const m = new Map<string, { chart: ChartSpec; index: number }[]>();
+    charts.forEach((chart, index) => {
+      if (isSpecialSlide(chart)) return;
+      const list = m.get(chart.question_ref) ?? [];
+      list.push({ chart, index });
+      m.set(chart.question_ref, list);
+    });
+    return m;
+  }, [charts]);
 
   const sKey = (vars: string[]) => [...vars].sort().join(",");
   const activeSuggestions = (suggestions ?? []).filter(
@@ -596,6 +621,57 @@ export default function StepSelect({
                   </div>
                 )}
               </div>
+
+              {/* One row per EXTRA slide showing this question — the same result
+                  split by another variable. Unticking the question still removes
+                  them all; Delete slide removes just this one. */}
+              {(slidesByRef.get(q.qid) ?? []).slice(1).map(({ chart, index }) => {
+                const rowKey = chart.slide_id ?? `${q.qid}-${index}`;
+                return (
+                  <div key={rowKey} className="relative mt-1.5 ml-6">
+                    <div className="flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 py-2 pr-11 pl-3 text-left">
+                      <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
+                        <CheckIcon className="size-3.5" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-2 text-sm leading-snug">
+                          {q.text}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {slideVariant(chart, variables)}
+                        </span>
+                      </span>
+                      <Badge variant="secondary" className="shrink-0 whitespace-nowrap font-normal">
+                        Extra slide
+                      </Badge>
+                    </div>
+                    <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
+                      <button
+                        type="button"
+                        title="More…"
+                        onClick={() => setMenuQid(menuQid === rowKey ? null : rowKey)}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <MoreVerticalIcon className="size-4" />
+                      </button>
+                      {menuQid === rowKey && (
+                        <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onRemoveChart(index);
+                              setMenuQid(null);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+                          >
+                            <XIcon className="size-4" /> Delete slide
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           );
         })}
