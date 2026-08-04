@@ -1061,6 +1061,20 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     qvars = [model.variable(n) for n in question.variables]
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
+    # Crossing a BANNER classifier (segments from separate columns, possibly
+    # overlapping) with a second variable has no defensible base. The SEPARATE
+    # layout never crosses, so it is allowed. This guard lived inside
+    # _banner_masks until that became a pure resolver. (spec 2026-08-02 §2.5,
+    # 2026-08-04)
+    cv2 = getattr(spec, "classifying_var_2", None)
+    if cv2 and not _separate_layout(spec) and _banner_masks(spec, data, model):
+        raise ValueError(
+            f"'{spec.classifying_var}' is a banner classifier (its segments come "
+            f"from separate columns and may overlap) and cannot be combined with a "
+            f"second classifying variable ('{cv2}'). Set the two-variable layout to "
+            f"Separate panels, remove the second classifier, or classify by an "
+            f"ordinary variable instead."
+        )
     if question.kind == "comparison":
         # An explicit comparison overlays its member questions as series — chart-type
         # agnostic (radar draws polygons, a grouped bar draws clusters). Members not in
@@ -1100,10 +1114,13 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
         else:
             result = _single(question, spec, data, model)
     # Display segment codes as the classifying variable's value labels (a cross-tab
-    # of two classifiers joins both labels: "Male · 25-34 vuotias").
-    if spec.classifying_var and getattr(spec, "classifying_var_2", None):
-        result = _relabel_combo_segments(
-            result, model, spec.classifying_var, spec.classifying_var_2)
+    # of two classifiers joins both labels: "Male · 25-34 vuotias"). The SEPARATE
+    # layout already emits display labels, and _relabel_combo_segments would split
+    # them on "|" and mangle them. (2026-08-04)
+    if _separate_layout(spec):
+        pass
+    elif spec.classifying_var and cv2:
+        result = _relabel_combo_segments(result, model, spec.classifying_var, cv2)
     elif spec.classifying_var:
         result = _relabel_segments(result, model, spec.classifying_var)
     # Resolve whether the "Total" reference series is drawn (ChartSpec.show_total +
