@@ -63,4 +63,12 @@ def test_multi_segments_are_the_sum_not_the_product():
 def test_multi_segment_primary_is_the_variable():
     model, q, df = _setup()
     r = engine.compute(q, _spec(), df, model)
-    assert len(set(r.segment_primary.values())) == 2
+    # The exact VARIABLE labels, not cv1's value labels ("Nainen"/"Mies") — a
+    # regression that reverted to the crossed path's primary assignment while
+    # still routing segments through _separate_masks would still yield 2
+    # distinct values (just the wrong ones) and slip past a bare len() check.
+    assert set(r.segment_primary.values()) == {"Sukupuoli", "Ikäryhmät"}
+    assert r.segment_primary == {
+        "Sukupuoli · Nainen": "Sukupuoli", "Sukupuoli · Mies": "Sukupuoli",
+        "Ikäryhmät · Nuoret": "Ikäryhmät", "Ikäryhmät · Vanhat": "Ikäryhmät",
+    }

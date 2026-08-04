@@ -862,6 +862,7 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # No bare "Total" segment in separate mode: each panel carries its own
     # "<label> · Total" instead, and a Total across two unrelated variables is
     # noise (matches _single's separate-mode handling).
+    # (spec 2026-08-04-separate-classifier-panels)
     segments = tuple(seg_codes) if separate is not None else tuple(seg_codes) + ("Total",)
     base_total = multi_base(data, vars_)
     seg_base = {sc: multi_base(data[seg_mask[sc]], vars_) for sc in seg_codes}
