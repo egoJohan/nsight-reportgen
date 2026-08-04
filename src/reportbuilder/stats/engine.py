@@ -332,9 +332,29 @@ def _summary(question: Question, spec: ChartSpec, data: pd.DataFrame,
     var = model.variable(question.variables[0])   # single var; multi: first var
     label = question.text or var.label
     fmt = spec.number_format
-    banner = _banner_masks(spec, data, model)
-    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
+    separate = _separate_masks(spec, data, model)
+    banner = None if separate is not None else _banner_masks(spec, data, model)
+    seg_series, ordered = ((None, None) if (banner or separate is not None)
+                           else _combo_segmentation(spec, data))
     usable_clf = spec.classifying_var and spec.classifying_var in data.columns
+    if separate is not None:
+        # A respondent belongs to a group of BOTH variables at once, so the key
+        # SERIES this function otherwise uses to represent a segmentation cannot
+        # express it — take each segment's rows straight from its own mask instead.
+        # Cell shape mirrors the classifier branch below. (spec 2026-08-04)
+        sep_masks, sep_primary = separate
+        bases = segment_bases(data, var, seg_masks=sep_masks)
+        cells: dict[tuple[str, str], Cell] = {}
+        for seg, m in sep_masks.items():
+            v = summary_value(data.loc[m, var.name], var, fmt, stat)
+            if stat.name == "mean":
+                cells[(label, seg)] = Cell(pct=None, count=None, mean=v)
+            else:
+                cells[(label, seg)] = Cell(pct=None, count=None, mean=None,
+                                           extra=((stat.name, v),))
+        return SeriesResult(categories=(label,), segments=tuple(sep_masks),
+                            cells=cells, base_n=bases, statistic=stat.name,
+                            segment_primary=sep_primary)
     if banner is not None or seg_series is not None or usable_clf:
         if banner is not None:                       # banner: indicator columns
             bases = segment_bases(data, var, seg_masks=banner)
