@@ -146,7 +146,14 @@ def add_filter_annotation(ctx: RenderContext) -> None:
 
     txBox = ctx.slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
-    tf.text = ctx.spec.classifying_var
+    # In the SEPARATE layout the slide is split by BOTH variables, side by side;
+    # naming only the first would misdescribe the chart. (spec 2026-08-04)
+    opts = getattr(ctx.spec, "options", None) or {}
+    cv2 = getattr(ctx.spec, "classifying_var_2", None)
+    if cv2 and opts.get("xtab_layout") == "separate":
+        tf.text = f"{ctx.spec.classifying_var} · {cv2}"
+    else:
+        tf.text = ctx.spec.classifying_var
 
     font_name, font_size = ctx.style.font_for("filter_var")
     run = tf.paragraphs[0].runs[0]
