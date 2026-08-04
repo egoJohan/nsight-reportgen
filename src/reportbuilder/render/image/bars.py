@@ -807,10 +807,71 @@ def _stacked_layout(series):
     return bars, stack, new_data
 
 
+def _render_stacked_variable_panels(ctx, cats) -> None:
+    """SEPARATE layout for the stacked types: one 100%-stacked panel per classifying
+    VARIABLE. The stacked builders have no panel path of their own — they only draw
+    the grouped/rotated-primary layout — so this is the panel equivalent.
+
+    Decision, not an oversight: `build_image_column_stacked` (the VERTICAL 100%-
+    stacked type) also calls this HORIZONTAL panel renderer. A 100% stack reads the
+    same either way — the composition is what matters, not the axis — and the
+    panel titles already carry the variable, so a dedicated vertical layout would
+    duplicate this one for no legible gain. (spec 2026-08-04-separate-classifier-panels)
+    """
+    series = ctx.series
+    groups = _primary_groups(series)
+    bars_all, stack, data = _stacked_layout(series)
+    clrs = scale_colors(len(stack))                 # the stack is the shared scale
+    rows = 2 if _stack_panels([_secondary_tick(s) for _p, segs in groups for s in segs]) else 1
+    flat_vals = [v for seg in stack for v in data[seg] if v is not None]
+    max_bars = max((len(segs) for _p, segs in groups), default=1)
+    # Own budget, not the clustered renderer's: each row here is ONE full-width
+    # 100%-stack bar (no clustering within a row), the same shape of problem the
+    # plain horizontal-bar builder solves with `_HBAR_ROW_IN` (0.52in — enough for a
+    # bar plus up to 2 wrapped label lines). `+2.0` is the same fixed chrome budget
+    # (title + value axis + legend margins) `_render_variable_panels` validates for
+    # its horizontal branch. When panels stack (rows == 2) each row needs its own
+    # copy of that budget, so the whole thing is multiplied by `rows`.
+    tall_in = (max_bars * _HBAR_ROW_IN + 2.0) * rows
+    fig, axes = new_figure_grid(ctx, len(groups), tall_in=tall_in, rows=rows,
+                                sharey=False)   # panels draw DIFFERENT bars, not a shared axis
+
+    for ax, (p, segs) in zip(axes, groups):
+        # `bars_all` (from `_stacked_layout`) is base-filtered and may drop a
+        # near-empty group's bar; `segs` (from `_primary_groups`) is not, so a
+        # panel's bars are the intersection — re-indexed against `bars_all`, not
+        # the raw `series.segments`, so a filtered-out bar can never misalign the
+        # rest (see `new_figure_grid`'s sharey note for the sibling pitfall this
+        # mirrors: trusting a helper's implicit assumptions without checking them).
+        bars = [b for b in segs if b in bars_all]
+        idx = [bars_all.index(b) for b in bars]
+        panel = {s: [data[s][i] for i in idx] for s in stack}
+        y = np.arange(len(bars))[::-1]
+        _draw_stacked_panel(ax, bars, stack, panel, clrs, ctx, y, flat_vals)
+        ax.set_yticks(y)
+        ax.set_yticklabels([_wrap_label(_secondary_tick(b)) for b in bars],
+                           fontsize=10.5, color=INK)
+        ax.tick_params(axis="y", labelleft=True)
+        ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
+        _apply_bar_style(ax, 100.0)
+        ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+        _draw_row_summary(ctx, ax, y, bars)         # per panel, keyed by bar
+
+    if ctx.spec.elements.legend and len(stack) > 1:
+        _legend_below(axes[-1], len(stack))
+    fig.subplots_adjust(bottom=0.24, wspace=0.18, hspace=0.45, top=0.9, left=0.2)
+    place_picture(ctx, render_png(fig))
+
+
 def build_image_column_stacked(ctx) -> None:
     """Stacked vertical (100%) bar chart: bars = classifier segments, stack =
     answer categories (house style)."""
     cats, segs, data = _stacked_layout(ctx.series)
+    if _resolve_xtab_layout(ctx) == "separate":
+        # Reuses the horizontal panel renderer — see the comment on
+        # `_render_stacked_variable_panels` for why.
+        _render_stacked_variable_panels(ctx, cats)
+        return
     fig, ax = new_figure(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
     clrs = scale_colors(len(segs))
@@ -873,10 +934,40 @@ def build_image_column_stacked(ctx) -> None:
 # build_image_bar_stacked
 # ---------------------------------------------------------------------------
 
+def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals) -> None:
+    """Draw ONE 100%-stacked horizontal panel onto `ax`.
+
+    Shared by the single-axes builder and the SEPARATE panel renderer. Each bar's
+    segment WIDTHS are normalised to its own total so the right edges align, while
+    the LABELS keep the original rounded percentages. (spec 2026-08-04)"""
+    n_bars = len(bars)
+    totals = np.array([sum(data[s][i] or 0.0 for s in stack) for i in range(n_bars)])
+    norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    lefts = np.zeros(n_bars)
+    for i, seg in enumerate(stack):
+        orig = np.array([data[seg][j] or 0.0 for j in range(n_bars)])
+        widths = orig * norm
+        # R4.2: "Not answered" category bars get MUTED grey.
+        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in bars]
+        ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
+                edgecolor="none", zorder=3)
+        for yi, ov, l, w, bc in zip(y, orig, lefts, widths, bar_clrs):
+            if w > 1:
+                ax.text(l + w / 2, yi,
+                        format_value(ov, ctx.series.statistic, ctx.spec.number_format,
+                                     flat_vals),
+                        ha="center", va="center", fontsize=9.0, fontweight="bold",
+                        color=contrast_ink(bc), zorder=5)
+        lefts = lefts + widths
+
+
 def build_image_bar_stacked(ctx) -> None:
     """Stacked horizontal (100%) bar chart: bars = classifier segments, stack =
     answer categories (house style)."""
     cats, segs, data = _stacked_layout(ctx.series)
+    if _resolve_xtab_layout(ctx) == "separate":
+        _render_stacked_variable_panels(ctx, cats)
+        return
     fig, ax = new_figure(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
     clrs = scale_colors(len(segs))
@@ -891,31 +982,7 @@ def build_image_bar_stacked(ctx) -> None:
         y = np.arange(n_cats)[::-1]
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
-    # 100%-stacked: every bar must fill exactly to 100. Rounded category
-    # percentages sum to 99–101 per bar, so normalise each bar's segment WIDTHS to
-    # its own total — the right edges then align perfectly — while the data LABELS
-    # still show the original (rounded) percentages.
-    totals = np.array([sum(data[s][i] or 0.0 for s in segs) for i in range(n_cats)])
-    norm = np.where(totals > 0, 100.0 / totals, 1.0)
-    lefts = np.zeros(n_cats)
-
-    for i, seg in enumerate(segs):
-        orig = np.array([data[seg][j] or 0.0 for j in range(n_cats)])
-        widths = orig * norm
-        # R4.2: "Not answered" category bars get MUTED grey.
-        bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
-        ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
-                edgecolor="none", zorder=3)
-        for yi, ov, l, w, bc in zip(y, orig, lefts, widths, bar_clrs):
-            if w > 1:
-                ax.text(
-                    l + w / 2, yi,
-                    format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
-                    ha="center", va="center",
-                    fontsize=9.0, fontweight="bold",
-                    color=contrast_ink(bc), zorder=5,
-                )
-        lefts = lefts + widths
+    _draw_stacked_panel(ax, cats, segs, data, clrs, ctx, y, flat_vals)
 
     ax.set_yticks(y)
     if grouped:

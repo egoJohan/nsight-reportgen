@@ -183,3 +183,114 @@ def test_vertical_stacked_panels_grow_figure_height(monkeypatch):
         f"stacked vertical panels rendered at {captured['h_in']}in tall — "
         "did not grow to fit a second row of x-tick labels + legend"
     )
+
+
+@pytest.mark.parametrize("chart_type", ["stacked_horizontal_bar", "stacked_vertical_bar"])
+def test_stacked_separate_panels_render_one_picture(chart_type):
+    model, question, df = _setup()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type), df, model)
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+    IMAGE_BUILDERS[chart_type](ctx)
+    assert_single_picture(slide, slot)
+
+
+def test_stacked_separate_panels_keep_their_row_summary_per_panel():
+    model, question, df = _setup()
+    spec = _spec("stacked_horizontal_bar", row_summary_fn="top2_sum")
+    series = compute(question, spec, df, model)
+    from reportbuilder.render.image.bars import _primary_groups, _row_summary_by_bar
+    for _p, segs in _primary_groups(series):
+        vals = _row_summary_by_bar(series, list(segs))
+        assert len(vals) == len(segs)
+        assert all(v is not None for v in vals), "every bar in the panel has its value"
+
+
+@pytest.mark.parametrize("chart_type", ["stacked_horizontal_bar", "stacked_vertical_bar"])
+def test_stacked_separate_panels_render_two_axes_titled_by_variable(chart_type, monkeypatch):
+    """`assert_single_picture` alone would ALSO pass on a flat, un-panelled stacked
+    chart (still one picture) — this is the only test that can fail if the SEPARATE
+    dispatch is missing or wired to the wrong function. Spies on render_png (called
+    once, right before the figure is handed to place_picture and cleared) to inspect
+    the figure's axes/titles before they're discarded."""
+    import reportbuilder.render.image.bars as bars_mod
+
+    model, question, df = _setup()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type), df, model)
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+
+    captured = {}
+    real_render_png = bars_mod.render_png
+
+    def _spy(fig):
+        captured["n_axes"] = len(fig.axes)
+        captured["titles"] = [ax.get_title() for ax in fig.axes]
+        # Bar labels differ per panel (2 for Sukupuoli, 3 for Ikäryhmät) — this can
+        # only be true if the axes are NOT sharey-linked (see `new_figure_grid`'s
+        # sharey note): with sharey=True the second axes' set_ylim/set_yticks call
+        # silently overwrites the first's too, so both would report 3 bars.
+        captured["n_bars"] = [len(ax.get_yticks()) for ax in fig.axes]
+        return real_render_png(fig)
+
+    monkeypatch.setattr(bars_mod, "render_png", _spy)
+    IMAGE_BUILDERS[chart_type](ctx)
+
+    assert captured["n_axes"] == 2, "one panel per classifying variable, not per group"
+    assert captured["titles"] == ["Sukupuoli", "Ikäryhmät"]
+    # Sukupuoli: Nainen, Mies, + the reference "Total" bar the stacked engine adds
+    # per group → 3. Ikäryhmät: Nuoret, Keski, Vanhat, + Total → 4.
+    assert captured["n_bars"] == [3, 4], (
+        "each panel must keep its OWN bar count — a shared/linked y-axis would "
+        "make both panels report the same (last-drawn) count"
+    )
+
+
+def test_stacked_separate_panels_grow_figure_height_with_rows(monkeypatch):
+    """Regression-shaped test for the stacked panel renderer's own height budget.
+
+    Unlike the clustered `_setup()` fixture (5 digit answer categories, which never
+    trips `_stack_panels`), the STACKED types trip `_stack_panels` on `_setup()`
+    already: the engine appends a per-group reference "Total" bar for stacked
+    chart types (see `_stacked_layout`'s docstring), so Sukupuoli's panel has 3
+    bars (Nainen, Mies, Total) and Ikäryhmät's has 4 (Nuoret, Keski, Vanhat,
+    Total) — 7 bars flattened across panels, > 6, so `rows == 2`. That makes this
+    the stacked-rows path the earlier clustered-panel regression warns about, and
+    it needs its OWN fixture-independent, machine-verifiable assertion (font-metric
+    -dependent overlap checks are not) — the figure height computed from the fixed
+    constants `_render_stacked_variable_panels` documents: max_bars(4) *
+    `_HBAR_ROW_IN`(0.52) + 2.0, all * rows(2) = 8.16in.
+    """
+    import reportbuilder.render.image.bars as bars_mod
+
+    model, question, df = _setup()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec("stacked_horizontal_bar"), df, model)
+    _prs, slide, slot, ctx = make_ctx("stacked_horizontal_bar", series, **spec_kw)
+
+    # Independently confirm the fixture really does trip rows == 2 and max_bars == 4
+    # before trusting the height computed from them (a wrong premise would make the
+    # height assertion pass for the wrong reason).
+    groups = bars_mod._primary_groups(series)
+    assert [len(segs) for _p, segs in groups] == [3, 4]
+    flat = [bars_mod._secondary_tick(s) for _p, segs in groups for s in segs]
+    assert bars_mod._stack_panels(flat) is True
+
+    captured = {}
+    real_render_png = bars_mod.render_png
+
+    def _spy(fig):
+        captured["h_in"] = fig.get_size_inches()[1]
+        return real_render_png(fig)
+
+    monkeypatch.setattr(bars_mod, "render_png", _spy)
+    IMAGE_BUILDERS["stacked_horizontal_bar"](ctx)
+
+    expected = (4 * bars_mod._HBAR_ROW_IN + 2.0) * 2
+    assert captured["h_in"] == pytest.approx(expected), (
+        f"expected {expected}in from the documented max_bars*_HBAR_ROW_IN+2.0 * "
+        f"rows budget, got {captured['h_in']}in"
+    )

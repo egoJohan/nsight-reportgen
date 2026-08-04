@@ -124,18 +124,31 @@ def new_figure(ctx):
     return fig, ax
 
 
-def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1):
-    """Figure with n subplots (shared y-axis), house style applied — for cross-tab
-    SMALL MULTIPLES (one panel per primary classifier value) and for the SEPARATE
-    layout (one panel per classifying VARIABLE). `rows` > 1 stacks the panels one
-    above the other, which the separate layout uses when the category labels need
-    the full width. (spec 2026-08-04)"""
+def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
+                     sharey: bool = True):
+    """Figure with n subplots, house style applied — for cross-tab SMALL MULTIPLES
+    (one panel per primary classifier value) and for the SEPARATE layout (one
+    panel per classifying VARIABLE). `rows` > 1 stacks the panels one above the
+    other, which the separate layout uses when the category labels need the full
+    width. (spec 2026-08-04)
+
+    `sharey` defaults to True (panels share one category axis — small multiples
+    and the clustered separate-panel renderer all draw the SAME categories in
+    every panel, just different classifying groups). Matplotlib's `sharey=True`
+    links the y VIEW LIMITS across every axes in the grid (not just the visible
+    tick labels) — verified: with two panels of a different bar COUNT each,
+    `ax.set_ylim(...)` on the second panel silently overwrites the first
+    panel's limits too, and the second panel's `set_yticks` overwrites the
+    first's ticks. The stacked separate-panel renderer draws a DIFFERENT set of
+    bars per panel (one variable's classifier segments, not the shared answer
+    categories) and must pass `sharey=False` to keep each panel's ticks/limits
+    independent. (spec 2026-08-04-separate-classifier-panels)"""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
     cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
-    axes = fig.subplots(max(1, rows), cols, sharey=True, sharex=False)
+    axes = fig.subplots(max(1, rows), cols, sharey=sharey, sharex=False)
     axes = [axes] if n <= 1 else list(np.ravel(axes))
     for extra in axes[n:]:                        # an odd count leaves a blank cell
         extra.set_visible(False)
