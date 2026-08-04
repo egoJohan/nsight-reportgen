@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import matplotlib
 matplotlib.use("Agg")
+import numpy as np
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
@@ -123,15 +124,22 @@ def new_figure(ctx):
     return fig, ax
 
 
-def new_figure_grid(ctx, n: int, *, tall_in: float | None = None):
-    """Figure with n side-by-side subplots (shared y-axis), house style applied — for
-    cross-tab SMALL MULTIPLES (one panel per primary classifier value)."""
+def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1):
+    """Figure with n subplots (shared y-axis), house style applied — for cross-tab
+    SMALL MULTIPLES (one panel per primary classifier value) and for the SEPARATE
+    layout (one panel per classifying VARIABLE). `rows` > 1 stacks the panels one
+    above the other, which the separate layout uses when the category labels need
+    the full width. (spec 2026-08-04)"""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
-    axes = fig.subplots(1, max(1, n), sharey=True, sharex=False)
-    axes = [axes] if n <= 1 else list(axes)
+    cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
+    axes = fig.subplots(max(1, rows), cols, sharey=True, sharex=False)
+    axes = [axes] if n <= 1 else list(np.ravel(axes))
+    for extra in axes[n:]:                        # an odd count leaves a blank cell
+        extra.set_visible(False)
+    axes = axes[:n]
     fig.patch.set_facecolor(CREAM)
     for ax in axes:
         ax.set_facecolor(CREAM)

@@ -396,13 +396,15 @@ def _secondary_tick(cat: str) -> str:
 
 def _resolve_xtab_layout(ctx):
     """For a cross-tab (segment_primary present), resolve the effective layout —
-    'grouped' or 'small_multiples'. Returns None when not a cross-tab. 'auto' groups
-    when the combo count is small enough to stay legible, else uses panels."""
+    'grouped', 'small_multiples', or 'separate' (explicit only — 'auto' never
+    resolves to it; separate mode is opted into via `xtab_layout` in the spec).
+    Returns None when not a cross-tab. 'auto' groups when the combo count is
+    small enough to stay legible, else uses panels."""
     sp = getattr(ctx.series, "segment_primary", None)
     if not sp:
         return None
     mode = (getattr(ctx.spec, "options", None) or {}).get("xtab_layout", "auto")
-    if mode in ("grouped", "small_multiples"):
+    if mode in ("grouped", "small_multiples", "separate"):
         return mode
     n_combos = len(ctx.series.segments)
     n_primary = len(set(sp.values()))
@@ -482,6 +484,81 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     place_picture(ctx, render_png(fig))
 
 
+def _stack_panels(cats: list[str]) -> bool:
+    """True when SEPARATE panels should sit one above the other rather than side by
+    side. Side-by-side halves each panel's width, so the same label pressure
+    _should_orient_horizontal measures decides it. (spec 2026-08-04)"""
+    return len(cats) > 6 or any(len(c) > 14 for c in cats)
+
+
+def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
+    """SEPARATE layout: one panel per classifying VARIABLE, each an ordinary
+    clustered bar of (answer categories x that variable's groups).
+
+    Unlike small multiples the panels do NOT share a series axis — panel 1 shows
+    gender's groups, panel 2 age's — so each carries its own legend and its own
+    colours, restarting at index 0. A shared ramp would imply "Nainen" and
+    "Nuoret" correspond. The VALUE axis is shared so the bars stay comparable.
+    (spec 2026-08-04-separate-classifier-panels)"""
+    from matplotlib.patches import Patch
+    series = ctx.series
+    groups = _primary_groups(series)
+    _c, _s, data = series_values(series)
+    n_cat = len(cats)
+    rows = 2 if _stack_panels(list(cats)) else 1
+    all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, [])
+                if v is not None]
+    max_val = max(all_vals, default=0.0)
+    tall = n_cat * 0.42 + 2.0
+    fig, axes = new_figure_grid(ctx, len(groups),
+                                tall_in=(tall * rows if not vertical else None),
+                                rows=rows)
+
+    for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
+        n = len(segs)
+        clrs = series_colors(n)
+        if vertical:
+            x = np.arange(n_cat)
+            w = 0.82 / n if n > 1 else 0.6
+            for i, seg in enumerate(segs):
+                vals = data.get(seg, [None] * n_cat)
+                off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
+                ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
+                       edgecolor="none", zorder=3)
+            ax.set_xticks(x)
+            ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
+                               color=INK, rotation=_XTICK_ROTATION, ha="right",
+                               rotation_mode="anchor")
+            _apply_column_style(ax, max_val, series.statistic)
+        else:
+            y = np.arange(n_cat)[::-1]
+            h = 0.82 / n if n > 1 else 0.6
+            for i, seg in enumerate(segs):
+                vals = data.get(seg, [None] * n_cat)
+                off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
+                ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
+                        edgecolor="none", zorder=3)
+            ax.set_yticks(y)
+            _apply_bar_style(ax, max_val, series.statistic)
+            # The y-axis is SHARED, so set the category labels once and hide their
+            # DISPLAY elsewhere (clearing them would clear the shared axis).
+            first_in_row = (k == 0) if rows == 1 else True
+            if k == 0:
+                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=INK)
+            ax.tick_params(axis="y", labelleft=first_in_row)
+        # Each panel is titled with its VARIABLE, not with a group of the first one.
+        ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+        if ctx.spec.elements.legend:
+            names = [_secondary_tick(s) for s in segs]
+            handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
+            ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
+                      ncol=min(len(names), 4), frameon=False, fontsize=9)
+
+    fig.subplots_adjust(bottom=0.24, wspace=0.12, hspace=0.45, top=0.9,
+                        left=0.12 if vertical else 0.2)
+    place_picture(ctx, render_png(fig))
+
+
 def _should_orient_horizontal(cats: list[str]) -> bool:
     """Return True if auto-orientation picks horizontal bars.
 
@@ -504,10 +581,14 @@ def build_image_column(ctx) -> None:
     vertical low for many/long labels, so it is never auto-CHOSEN for those.)
     (REQ-C-24b/f, REQ-C-27a)"""
     cats, segs, data = series_values(ctx.series)
-    if _resolve_xtab_layout(ctx) == "small_multiples":
+    layout = _resolve_xtab_layout(ctx)
+    if layout == "separate":
+        _render_variable_panels(ctx, cats, vertical=True)
+        return
+    if layout == "small_multiples":
         _render_small_multiples(ctx, cats, vertical=True)
-    else:
-        _render_column_v(ctx, cats, segs, data)
+        return
+    _render_column_v(ctx, cats, segs, data)
 
 
 def _render_column_v(ctx, cats, segs, data) -> None:
@@ -575,10 +656,14 @@ def _render_column_v(ctx, cats, segs, data) -> None:
 def build_image_bar(ctx) -> None:
     """Horizontal grouped bar chart with house style (REQ-C-24b/f, REQ-C-27a)."""
     cats, segs, data = series_values(ctx.series)
-    if _resolve_xtab_layout(ctx) == "small_multiples":
+    layout = _resolve_xtab_layout(ctx)
+    if layout == "separate":
+        _render_variable_panels(ctx, cats, vertical=False)
+        return
+    if layout == "small_multiples":
         _render_small_multiples(ctx, cats, vertical=False)
-    else:
-        _render_bar_h(ctx, cats, segs, data)
+        return
+    _render_bar_h(ctx, cats, segs, data)
 
 
 def _render_bar_h(ctx, cats, segs, data) -> None:
