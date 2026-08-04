@@ -634,9 +634,21 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             cells[(display, seg)] = Cell(pct=pct(c, base, spec.number_format),
                                          count=count_value(c, spec.number_format),
                                          mean=None)
-        # Separate-panel mode has no bare "Total" segment (each panel keeps its own
-        # per-variable "<label> · Total" instead) — fall back rather than KeyError.
-        total_cell = cells.get((display, "Total")) or Cell(pct=None, count=None, mean=None)
+        if separate is not None:
+            # Separate-panel mode has no bare "Total" segment (each panel keeps its
+            # own per-variable "<label> · Total" instead), so there is no
+            # cells[(display, "Total")] to read. aggregate_counts/segment_bases still
+            # carry the OVERALL union under the "Total" key — the same numbers the
+            # crossed path's Total column would have carried — so the row's sort
+            # values (pct/count/topbox) stay real numbers instead of collapsing to
+            # None, which crashed sort_categories for any basis other than
+            # data_order/top3_sum (e.g. the UI's default "pct" sort). (2026-08-04)
+            _tot_c = counts.get((code, "Total"), 0)
+            _tot_b = bases.get("Total", 0)
+            total_cell = Cell(pct=pct(_tot_c, _tot_b, spec.number_format),
+                              count=count_value(_tot_c, spec.number_format), mean=None)
+        else:
+            total_cell = cells[(display, "Total")]
         rows.append((display, code, {"pct": total_cell.pct, "count": total_cell.count,
                                      "mean": 0.0, "data_index": data_index,
                                      "topbox": total_cell.pct}))
@@ -690,11 +702,22 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             if separate is not None:
                 # Sort WITHIN each panel. A global sort would interleave the two
                 # variables' segments and destroy the panel grouping. (2026-08-04)
+                # Each panel's OWN "<label> · Total" is a reference bar, not a group
+                # to rank — like the bare "Total" pinned outside separate mode, it is
+                # excluded from the sort and pinned at the END of its panel.
+                # (2026-08-04)
                 _sp = separate[1]
+
+                def _is_panel_total(s: str) -> bool:
+                    return s == f"{_sp[s]} · Total"
+
                 order: list[str] = []
                 for panel in dict.fromkeys(_sp[s] for s in reals):
-                    order += sorted((s for s in reals if _sp[s] == panel),
-                                    key=_topbox, reverse=spec.sort.descending)
+                    panel_segs = [s for s in reals if _sp[s] == panel]
+                    groups = [s for s in panel_segs if not _is_panel_total(s)]
+                    totals = [s for s in panel_segs if _is_panel_total(s)]
+                    order += sorted(groups, key=_topbox, reverse=spec.sort.descending)
+                    order += totals
                 reals = order
             else:
                 reals.sort(key=_topbox, reverse=spec.sort.descending)
