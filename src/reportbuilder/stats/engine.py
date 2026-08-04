@@ -523,9 +523,16 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     show_empty: bool = getattr(spec, "show_empty_categories", True)
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
-    banner = _banner_masks(spec, data, model)
-    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
-    if banner is not None:                           # banner: indicator columns
+    separate = _separate_masks(spec, data, model)
+    banner = None if separate is not None else _banner_masks(spec, data, model)
+    seg_series, ordered = ((None, None) if (banner or separate is not None)
+                           else _combo_segmentation(spec, data))
+    if separate is not None:                         # two classifiers SIDE BY SIDE
+        sep_masks, sep_primary = separate
+        bases = segment_bases(data, var, missing_override=eff, seg_masks=sep_masks)
+        counts = aggregate_counts(data, var.name, seg_masks=sep_masks)
+        segments = tuple(sep_masks)                  # no bare "Total": it is no panel
+    elif banner is not None:                         # banner: indicator columns
         bases = segment_bases(data, var, missing_override=eff, seg_masks=banner)
         counts = aggregate_counts(data, var.name, seg_masks=banner)
         segments = (*banner.keys(), "Total")
@@ -588,6 +595,12 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     pb = getattr(spec, "percent_base", "auto")
     if not (spec.classifying_var and real_segs):
         pb = "classifier"
+    elif separate is not None:
+        # The segments come from two UNRELATED variables, so "within each answer
+        # category" would distribute across cuts that share no denominator and
+        # print labels that don't sum. Each panel is a plain per-group
+        # distribution. (spec 2026-08-04)
+        pb = "classifier"
     elif spec.chart_type in _STACKED_BAR_TYPES:
         # A 100%-stacked bar's bars ARE the classifier groups, each a full stack of the
         # base categories → the only coherent direction is "classifier" (base distributed
@@ -621,7 +634,9 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             cells[(display, seg)] = Cell(pct=pct(c, base, spec.number_format),
                                          count=count_value(c, spec.number_format),
                                          mean=None)
-        total_cell = cells[(display, "Total")]
+        # Separate-panel mode has no bare "Total" segment (each panel keeps its own
+        # per-variable "<label> · Total" instead) — fall back rather than KeyError.
+        total_cell = cells.get((display, "Total")) or Cell(pct=None, count=None, mean=None)
         rows.append((display, code, {"pct": total_cell.pct, "count": total_cell.count,
                                      "mean": 0.0, "data_index": data_index,
                                      "topbox": total_cell.pct}))
@@ -667,13 +682,22 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         n_top = 3 if spec.sort.basis == "top3_sum" else 2
         top_cats = _top_scale_categories(var, categories, n_top)
         if top_cats:
+            def _topbox(seg: str) -> float:
+                return sum((cells.get((c, seg)) or Cell(pct=None)).pct or 0.0
+                           for c in top_cats)
+
             reals = [s for s in segments if s != "Total"]
-            reals.sort(
-                key=lambda seg: sum(
-                    (cells.get((c, seg)) or Cell(pct=None)).pct or 0.0 for c in top_cats
-                ),
-                reverse=spec.sort.descending,
-            )
+            if separate is not None:
+                # Sort WITHIN each panel. A global sort would interleave the two
+                # variables' segments and destroy the panel grouping. (2026-08-04)
+                _sp = separate[1]
+                order: list[str] = []
+                for panel in dict.fromkeys(_sp[s] for s in reals):
+                    order += sorted((s for s in reals if _sp[s] == panel),
+                                    key=_topbox, reverse=spec.sort.descending)
+                reals = order
+            else:
+                reals.sort(key=_topbox, reverse=spec.sort.descending)
             segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
     # Largest-remainder rounding so each 100%-partition's displayed %s sum to exactly
@@ -720,11 +744,14 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         row_summaries = _compute_row_summaries(
             spec, statements, [d for _, d, _ in levels], [c for c, _, _ in levels], cells)
 
+    base_n = {s: denom.get(s, 0) for s in segments}
+    base_n.setdefault("Total", bases.get("Total", 0))
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
-                        base_n={s: denom.get(s, 0) for s in segments},
+                        base_n=base_n,
                         statistic=spec.statistic, caption=scale_caption,
                         row_summaries=row_summaries,
-                        row_summary_keys=tuple(statements))
+                        row_summary_keys=tuple(statements),
+                        segment_primary=(separate[1] if separate is not None else None))
 
 
 def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
