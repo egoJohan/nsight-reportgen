@@ -172,7 +172,7 @@ def test_stacked_schema_fields():
     # the primary classifier) AND an overall "Total" reference bar (a 100% ref stack).
     assert _keys(stacked_schema()) == [
         "statistic", "percent_base", "classifying_var", "classifying_var_2",
-        "show_total", "sort", "number_format", "show_not_answered",
+        "xtab_layout", "show_total", "sort", "number_format", "show_not_answered",
         "show_empty_categories", "not_answered_codes", "category_label_overrides",
     ]
 
@@ -212,3 +212,18 @@ def test_stacked_horizontal_row_summary_fields():
         "none", "top2_sum", "top3_sum", "sum", "mean", "net"}
     # the default stacked schema (used by vertical) does NOT include it
     assert "row_summary_fn" not in [f.key for f in stacked_schema()]
+
+
+def test_xtab_layout_offers_separate_panels():
+    from reportbuilder.render.config_schema import xtab_layout_field
+    values = [v for v, _label in xtab_layout_field().options]
+    assert values == ["auto", "grouped", "small_multiples", "separate"]
+
+
+def test_all_two_classifier_schemas_carry_the_layout_control():
+    from reportbuilder.render.config_schema import clustered_bar_schema, stacked_schema
+    for schema in (clustered_bar_schema(), stacked_schema(),
+                   stacked_schema(with_row_summary=True)):
+        keys = [f.key for f in schema]
+        assert "classifying_var_2" in keys
+        assert "xtab_layout" in keys, "a chart with two classifiers can choose the layout"

@@ -182,11 +182,14 @@ def xtab_layout_field() -> ConfigField:
     return ConfigField(
         "xtab_layout", "select", "Two-variable layout",
         options=(("auto", "Automatic"), ("grouped", "Grouped bars"),
-                 ("small_multiples", "Small multiples")),
+                 ("small_multiples", "Small multiples"),
+                 ("separate", "Separate panels (one per variable)")),
         default="auto",
         help=("With a second classifying variable: 'Grouped bars' pulls the bars apart "
               "into groups by the first variable; 'Small multiples' draws one panel per "
-              "value of the first variable. 'Automatic' groups when it fits, else panels."),
+              "value of the first variable; 'Separate panels' does NOT cross them — one "
+              "panel per variable, each an ordinary split. 'Automatic' groups when it "
+              "fits, else panels, and never chooses Separate on its own."),
     )
 
 
@@ -241,6 +244,7 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
             # (e.g. gender × age) — the engine builds the combos and the stacked renderer
             # groups them by the primary classifier.
             classifying_var_2_field(),
+            xtab_layout_field(),
             # Show/hide the overall "Total" reference bar (a 100% reference stack).
             show_total_field(),
             # Row-summary column up front (right after the data options) so it's easy
