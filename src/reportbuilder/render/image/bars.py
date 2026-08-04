@@ -510,8 +510,20 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 if v is not None]
     max_val = max(all_vals, default=0.0)
     tall = n_cat * 0.42 + 2.0
+    # Vertical (column) panels: height does NOT scale with n_cat the way the
+    # horizontal `tall` term does — categories sit on the shared x-axis, so more
+    # of them widen a panel, not tallen it. What DOES need height per row is each
+    # panel's own rotated/wrapped x-tick label band plus its own legend below it.
+    # The un-stacked (rows == 1) case already renders cleanly at the 4.5in
+    # `new_figure`/`new_figure_grid` default — that default is exactly the height
+    # `_render_column_v` (build_image_column's un-stacked path) already uses for a
+    # plot + rotated x-ticks + one legend band, the same ingredients each panel
+    # here has. So 4.5in is a validated per-row budget; when panels stack
+    # (rows == 2) each row needs its own copy of it, so multiply by `rows`.
+    # Leave it None for rows == 1 to keep that already-correct sizing untouched.
+    v_tall = 4.5 * rows if rows > 1 else None
     fig, axes = new_figure_grid(ctx, len(groups),
-                                tall_in=(tall * rows if not vertical else None),
+                                tall_in=(tall * rows if not vertical else v_tall),
                                 rows=rows)
 
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
@@ -540,8 +552,18 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                         edgecolor="none", zorder=3)
             ax.set_yticks(y)
             _apply_bar_style(ax, max_val, series.statistic)
-            # The y-axis is SHARED, so set the category labels once and hide their
-            # DISPLAY elsewhere (clearing them would clear the shared axis).
+            # The y-axis is SHARED (sharey=True in new_figure_grid), so all axes
+            # share ONE tick formatter/label set — calling set_yticklabels once at
+            # k==0 propagates to every panel; `labelleft` then controls only which
+            # panel's axis actually DISPLAYS that shared text (clearing the labels
+            # instead would blank the shared axis for every panel, not just one).
+            # When stacked (rows == 2), `cols` (len(groups) // rows) is 1 today —
+            # this layout always has exactly TWO classifying variables, so each
+            # row holds exactly one panel and is its own leftmost column. That
+            # collapses "leftmost of each row" to "every panel", hence `True`
+            # unconditionally here. This assumption breaks silently (duplicate
+            # labels drawn on non-leftmost columns) if a THIRD classifying
+            # variable is ever added and cols > 1 while rows > 1.
             first_in_row = (k == 0) if rows == 1 else True
             if k == 0:
                 ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=INK)
