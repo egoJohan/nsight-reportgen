@@ -824,11 +824,17 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # who answered the multi — so a cell reads "% of <segment> who selected <option>".
     # Segments are code strings; compute() relabels them to the classifier's value
     # labels via _relabel_segments / _relabel_combo_segments. (2026-07-10)
-    banner = _banner_masks(spec, data, model)
-    seg_series, ordered = (None, None) if banner else _combo_segmentation(spec, data)
+    separate = _separate_masks(spec, data, model)
+    banner = None if separate is not None else _banner_masks(spec, data, model)
+    seg_series, ordered = ((None, None) if (banner or separate is not None)
+                           else _combo_segmentation(spec, data))
     seg_codes: list[str] = []
     seg_mask: dict[str, "pd.Series"] = {}
-    if banner is not None:
+    if separate is not None:                          # two classifiers SIDE BY SIDE
+        for label, m in separate[0].items():
+            seg_codes.append(label)
+            seg_mask[label] = m
+    elif banner is not None:
         # A banner classifier is ALREADY one mask per segment — exactly this shape.
         for label, m in banner.items():
             if bool(m.any()):
@@ -853,7 +859,10 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 seg_codes.append(code)
                 seg_mask[code] = m
 
-    segments = tuple(seg_codes) + ("Total",)
+    # No bare "Total" segment in separate mode: each panel carries its own
+    # "<label> · Total" instead, and a Total across two unrelated variables is
+    # noise (matches _single's separate-mode handling).
+    segments = tuple(seg_codes) if separate is not None else tuple(seg_codes) + ("Total",)
     base_total = multi_base(data, vars_)
     seg_base = {sc: multi_base(data[seg_mask[sc]], vars_) for sc in seg_codes}
     seg_base["Total"] = base_total
@@ -883,7 +892,8 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
     categories = tuple(sort_categories(rows, spec.sort))
     return SeriesResult(categories=categories, segments=segments, cells=cells,
-                        base_n=seg_base, statistic=spec.statistic)
+                        base_n=seg_base, statistic=spec.statistic,
+                        segment_primary=(separate[1] if separate is not None else None))
 
 
 def _code_label_map(var: Variable, seg_codes: set[str]) -> dict[str, str]:
