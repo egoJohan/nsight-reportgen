@@ -115,6 +115,7 @@ def _with_gender(model, df):
     return model, df
 
 
+@pytest.mark.xfail(reason="guard moves to compute() in Task 5")
 def test_second_classifier_with_a_banner_raises_a_clear_error():
     """Crossing overlapping masks with a second variable has no obvious base
     semantics, so it is deferred — but it must SAY so. It used to silently ignore

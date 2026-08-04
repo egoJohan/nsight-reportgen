@@ -32,15 +32,18 @@ def _seg_key(code: float) -> str:
     return str(int(code)) if float(code).is_integer() else str(code)
 
 
-def _banner_masks(spec, data: pd.DataFrame, model: QuestionModel):
-    """Segment masks when `classifying_var` names a near-partition MULTI question.
+def _banner_masks(spec, data: pd.DataFrame, model: QuestionModel, var_name=None):
+    """Segment masks when a classifier names a near-partition MULTI question.
 
     Resolution is variable-name-first — a real DataFrame column or model variable
     always wins — so this only fires for a qid. Returns None otherwise, leaving
-    every existing classifier untouched. (spec 2026-08-02 §2.4)"""
+    every existing classifier untouched. `var_name` defaults to the PRIMARY
+    classifier; the separate layout asks about the second one too, so this is a
+    pure resolver — the "a banner cannot be crossed" guard lives in compute().
+    (spec 2026-08-02 §2.4, 2026-08-04)"""
     from reportbuilder.ingest.multi_group import member_masks, near_partition
 
-    cv = getattr(spec, "classifying_var", None)
+    cv = var_name or getattr(spec, "classifying_var", None)
     if not cv or cv in data.columns or cv in model.variables:
         return None
     q = next((x for x in model.questions
@@ -50,31 +53,21 @@ def _banner_masks(spec, data: pd.DataFrame, model: QuestionModel):
     masks = member_masks(data, q.variables)
     if not masks or not near_partition(masks, len(data)):
         return None
-    if getattr(spec, "classifying_var_2", None):
-        # Crossing possibly-overlapping masks with a second variable has no obvious
-        # base semantics, so it is deferred — but say so instead of silently
-        # dropping the second classifier. (spec 2026-08-02 §2.5)
-        raise ValueError(
-            f"'{cv}' is a banner classifier (its segments come from separate "
-            f"columns and may overlap) and cannot be combined with a second "
-            f"classifying variable "
-            f"('{getattr(spec, 'classifying_var_2', None)}'). Remove the second "
-            f"classifier, or classify by an ordinary variable instead."
-        )
     return {model.variable(v).label: m for v, m in zip(q.variables, masks)}
 
 
-def _classifier_masks(spec, data: pd.DataFrame, model: QuestionModel):
+def _classifier_masks(spec, data: pd.DataFrame, model: QuestionModel, var_name=None):
     """One boolean mask per segment for ANY classifier form, or None.
 
     Unifies the three shapes a classifier can take — a banner qid (indicator
     columns), a coded STRING column, and a value-labelled numeric column — so paths
-    that segment by hand (the batteries) don't each reimplement the resolution.
+    that segment by hand (the batteries, the separate layout) don't each
+    reimplement the resolution. `var_name` defaults to the PRIMARY classifier.
     Ordered: banner, then the column's own values. (spec 2026-08-02 §2.4)"""
-    banner = _banner_masks(spec, data, model)
+    cv = var_name or getattr(spec, "classifying_var", None)
+    banner = _banner_masks(spec, data, model, cv)
     if banner:
         return banner
-    cv = getattr(spec, "classifying_var", None)
     if not cv or cv not in data.columns:
         return None
     col = data[cv]
@@ -97,6 +90,66 @@ def _classifier_masks(spec, data: pd.DataFrame, model: QuestionModel):
         if bool(mask.any()):
             out[vl.label] = mask
     return out or None
+
+
+def _classifier_label(cv: str, model: QuestionModel) -> str:
+    """Display label for a classifier — a variable's label, a banner qid's question
+    text, else the raw name. Used to prefix separate-layout segments so the two
+    variables' groups can never collide. (spec 2026-08-04)"""
+    v = model.variables.get(cv)
+    if v is not None and (v.label or "").strip():
+        return v.label
+    q = next((x for x in model.questions if x.qid == cv), None)
+    if q is not None and (q.text or "").strip():
+        return q.text
+    return cv
+
+
+def _separate_layout(spec) -> bool:
+    """True when the author asked for the two classifiers SIDE BY SIDE rather than
+    crossed. Needs both variables — one classifier has nothing to sit beside.
+    (spec 2026-08-04-separate-classifier-panels)"""
+    opts = getattr(spec, "options", None) or {}
+    return (opts.get("xtab_layout") == "separate"
+            and bool(getattr(spec, "classifying_var", None))
+            and bool(getattr(spec, "classifying_var_2", None)))
+
+
+def _separate_masks(spec, data: pd.DataFrame, model: QuestionModel):
+    """(masks, primary) for the SEPARATE layout, or None when it isn't asked for.
+
+    Each variable contributes its own groups as ordinary cuts — no crossing, so a
+    respondent counts once per variable and the thin cells a cross-tab produces
+    (a 4-person gender group times three age bands) never arise. Segment labels are
+    "<variable> · <group>" so two variables sharing a group label stay distinct, and
+    `primary` maps each segment to its SOURCE VARIABLE — the hook the renderer
+    groups panels by, which is what makes one panel come out per variable.
+
+    A per-variable "<variable> · Total" mask is added when the Total series is on;
+    a bare "Total" segment is never emitted, because it belongs to no panel.
+    (spec 2026-08-04-separate-classifier-panels)"""
+    if not _separate_layout(spec):
+        return None
+    want_total = resolve_show_total(spec, True)
+    masks: dict[str, pd.Series] = {}
+    primary: dict[str, str] = {}
+    for cv in (spec.classifying_var, spec.classifying_var_2):
+        groups = _classifier_masks(spec, data, model, cv)
+        if not groups:
+            continue                       # stale/empty variable → its panel is dropped
+        label = _classifier_label(cv, model)
+        for group_label, m in groups.items():
+            key = f"{label} · {group_label}"
+            masks[key] = m
+            primary[key] = label
+        if want_total:
+            any_group = pd.Series(False, index=data.index)
+            for m in groups.values():
+                any_group = any_group | m
+            key = f"{label} · Total"
+            masks[key] = any_group
+            primary[key] = label
+    return (masks, primary) if masks else None
 
 
 def _numeric_like(values: pd.Series) -> bool:

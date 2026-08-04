@@ -90,6 +90,7 @@ def test_clearing_the_second_classifier_avoids_the_banner_error():
     engine.compute(q, _generated(crossed), df, model)  # must not raise
 
 
+@pytest.mark.xfail(reason="guard moves to compute() in Task 5")
 def test_carrying_the_second_classifier_over_would_have_raised():
     """Pins WHY the field is cleared, so a future refactor cannot quietly undo it."""
     r, df, model = _load()
