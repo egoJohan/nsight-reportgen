@@ -212,12 +212,22 @@ function patchField(
   return { options: { ...(chart.options ?? {}), [key]: value } };
 }
 
-function SelectWidget({ field, chart, onChange }: WidgetProps) {
+function SelectWidget({ field, chart, variables, onChange }: WidgetProps) {
   const opts = field.options ?? [];
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
   const value = String(
     readField(chart, field.key) ?? field.default ?? opts[0]?.value ?? ""
   );
+  // A banner classifier's groups come from separate columns and can overlap, so
+  // it cannot be CROSSED with a second variable — only the crossed layouts
+  // ("Automatic" / "Grouped bars" / "Small multiples") are disabled here;
+  // "Separate panels" does not cross them, so it stays selectable. (spec 2026-08-04)
+  const bannerLocked = field.key === "xtab_layout" && usesBannerClassifier(chart, variables);
+  const bannerLabel =
+    (variables ?? []).find((v) => v.name === chart.classifying_var)?.label ||
+    chart.classifying_var ||
+    "This variable";
+  const bannerReason = `${bannerLabel}'s groups come from separate columns and can overlap, so they cannot be crossed with another variable.`;
   return (
     <Field label={field.label} hint={field.help}>
       <Select
@@ -229,11 +239,19 @@ function SelectWidget({ field, chart, onChange }: WidgetProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {opts.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
+          {opts.map((o) => {
+            const disabled = bannerLocked && o.value !== "separate";
+            return (
+              <SelectItem
+                key={o.value}
+                value={o.value}
+                disabled={disabled}
+                title={disabled ? bannerReason : undefined}
+              >
+                {o.label}
+              </SelectItem>
+            );
+          })}
         </SelectContent>
       </Select>
     </Field>
@@ -354,9 +372,12 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
   // Generic over the field key so it drives BOTH the primary classifying_var and
   // the secondary classifying_var_2 (cross-tab).
   const key = field.key as "classifying_var" | "classifying_var_2";
-  // A banner classifier can't be crossed with a second variable — hide the control
-  // rather than let the author build a chart the engine will reject.
-  if (key === "classifying_var_2" && usesBannerClassifier(chart, variables)) return null;
+  // A field that vanishes teaches the author nothing — "the horizontal bar no
+  // longer lets me pick a second classifying variable" was this, silently. Always
+  // render it; say why when it cannot be used yet. A banner primary no longer
+  // disables this row — separate mode does not cross the two variables, so
+  // picking a second one against a banner primary is legal. (spec 2026-08-04)
+  const noPrimary = key === "classifying_var_2" && !chart.classifying_var;
   const current = (chart[key] as string | null | undefined) ?? null;
   const other =
     key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
@@ -369,20 +390,50 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
     __none__: "None",
     ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
   };
+  // A banner classifier cannot be CROSSED with a second variable (its groups come
+  // from separate columns and can overlap), but it can sit beside one. Whenever the
+  // pair becomes banner + second, pin the layout to Separate panels so the chart is
+  // never left in a state the engine rejects — and so the author is not sent to a
+  // control (Two-variable layout) that only appears once two classifiers exist.
+  // Applies to BOTH edit directions: picking a second var against a banner primary,
+  // and switching the primary to a banner var while a second is already set.
+  // (spec 2026-08-04)
+  const withBannerGuard = (patch: Partial<ChartSpec>): Partial<ChartSpec> => {
+    const next = { ...chart, ...patch } as ChartSpec;
+    if (
+      next.classifying_var &&
+      next.classifying_var_2 &&
+      usesBannerClassifier(next, variables) &&
+      (next.options?.xtab_layout ?? "auto") !== "separate"
+    ) {
+      return {
+        ...patch,
+        options: { ...(chart.options ?? {}), xtab_layout: "separate" },
+      };
+    }
+    return patch;
+  };
+  const reason = noPrimary ? "Choose a classifying variable first." : undefined;
   return (
     <Field
       label={field.label}
       required={required}
-      hint={missing ? "This chart needs a dimension to split by" : undefined}
+      hint={reason ?? (missing ? "This chart needs a dimension to split by" : undefined)}
     >
       <Select
         items={items}
         value={current ?? "__none__"}
+        disabled={noPrimary}
         onValueChange={(v) =>
-          onChange({ [key]: v === "__none__" ? null : v } as Partial<ChartSpec>)
+          onChange(
+            withBannerGuard({ [key]: v === "__none__" ? null : v } as Partial<ChartSpec>)
+          )
         }
       >
-        <SelectTrigger className={cn("w-full", missing && "border-destructive")}>
+        <SelectTrigger
+          className={cn("w-full", missing && "border-destructive")}
+          disabled={noPrimary}
+        >
           <SelectValue placeholder="None" />
         </SelectTrigger>
         <SelectContent>
@@ -399,17 +450,19 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
           type="button"
           className="mt-1 text-left text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
           onClick={() =>
-            onChange({
-              classifying_var: current,
-              classifying_var_2: chart.classifying_var,
-            } as Partial<ChartSpec>)
+            onChange(
+              withBannerGuard({
+                classifying_var: current,
+                classifying_var_2: chart.classifying_var,
+              } as Partial<ChartSpec>)
+            )
           }
         >
           ⇄ Swap — make the other variable the primary (outer) grouping
         </button>
       )}
-      {field.help && (
-        <p className="text-xs leading-snug text-muted-foreground">{field.help}</p>
+      {(reason ?? field.help) && (
+        <p className="text-xs leading-snug text-muted-foreground">{reason ?? field.help}</p>
       )}
     </Field>
   );
@@ -712,14 +765,14 @@ function ChartControls({
   let schema = isBattery
     ? rawSchema.filter((f) => f.key !== "classifying_var")
     : rawSchema;
-  // The second classifier and the "Total column" control only make sense once a
-  // classifying variable is chosen — without one there is no Total to toggle.
-  // (percent_base stays in the schema even when it doesn't apply — PercentBaseWidget
-  //  renders an empty placeholder so the "Statistic" row keeps its layout.)
+  // The "Total column" control only makes sense once a classifying variable is
+  // chosen — without one there is no Total to toggle. `classifying_var_2` STAYS in
+  // the schema without a primary — ClassifyingVarWidget renders it disabled with a
+  // stated reason, instead of the row disappearing. (percent_base stays in the
+  // schema even when it doesn't apply — PercentBaseWidget renders an empty
+  // placeholder so the "Statistic" row keeps its layout.) (spec 2026-08-04)
   if (!chart.classifying_var) {
-    schema = schema.filter(
-      (f) => f.key !== "classifying_var_2" && f.key !== "show_total"
-    );
+    schema = schema.filter((f) => f.key !== "show_total");
   }
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {
@@ -752,6 +805,17 @@ function ChartControls({
     // Dropping to a chart type without a 2nd classifier clears the cross-tab.
     if (patch.chart_type && !supportsClassifying2(patch.chart_type) && chart.classifying_var_2) {
       extra.classifying_var_2 = null;
+    }
+    // A stale `separate` (or any other pinned layout) must not survive onto a type
+    // with no second classifier — the "Two-variable layout" control disappears with
+    // it, but the value would otherwise sit inert in options and resurface if the
+    // type later regains a second classifier.
+    if (
+      patch.chart_type &&
+      !supportsClassifying2(patch.chart_type) &&
+      chart.options?.xtab_layout
+    ) {
+      extra.options = { ...(chart.options ?? {}), xtab_layout: undefined };
     }
     onChange({ ...patch, ...extra });
   };
