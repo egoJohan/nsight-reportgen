@@ -1086,20 +1086,7 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     qvars = [model.variable(n) for n in question.variables]
     if qvars and all(v.measurement == "text" for v in qvars):
         raise ValueError(TEXT_NOT_CHARTABLE_MSG)
-    # Crossing a BANNER classifier (segments from separate columns, possibly
-    # overlapping) with a second variable has no defensible base. The SEPARATE
-    # layout never crosses, so it is allowed. This guard lived inside
-    # _banner_masks until that became a pure resolver. (spec 2026-08-02 §2.5,
-    # 2026-08-04)
     cv2 = getattr(spec, "classifying_var_2", None)
-    if cv2 and not _separate_layout(spec) and _banner_masks(spec, data, model):
-        raise ValueError(
-            f"'{spec.classifying_var}' is a banner classifier (its segments come "
-            f"from separate columns and may overlap) and cannot be combined with a "
-            f"second classifying variable ('{cv2}'). Set the two-variable layout to "
-            f"Separate panels, remove the second classifier, or classify by an "
-            f"ordinary variable instead."
-        )
     if question.kind == "comparison":
         # An explicit comparison overlays its member questions as series — chart-type
         # agnostic (radar draws polygons, a grouped bar draws clusters). Members not in
@@ -1111,6 +1098,27 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
         if members:
             return compute(members[0], spec, data, model)
         raise ValueError("comparison has no resolvable members")
+    # Crossing a BANNER classifier (segments from separate columns, possibly
+    # overlapping) with a second variable has no defensible base. The SEPARATE
+    # layout never crosses, so it is allowed. This guard lived inside
+    # _banner_masks until that became a pure resolver. (spec 2026-08-02 §2.5,
+    # 2026-08-04)
+    #
+    # It sits BELOW the comparison dispatch on purpose: `_multi_comparison` /
+    # `_battery_comparison` overlay their member questions as the series and never
+    # consult a classifier at all, so a saved comparison slide carrying a leftover
+    # banner `classifying_var` + `classifying_var_2` has always computed fine,
+    # ignoring both. Guarding above the dispatch made those slides 422 on preview
+    # and export blank — a regression on a feature this layout never touched.
+    # (2026-08-04 final review, I5)
+    if cv2 and not _separate_layout(spec) and _banner_masks(spec, data, model):
+        raise ValueError(
+            f"'{spec.classifying_var}' is a banner classifier (its segments come "
+            f"from separate columns and may overlap) and cannot be combined with a "
+            f"second classifying variable ('{cv2}'). Set the two-variable layout to "
+            f"Separate panels, remove the second classifier, or classify by an "
+            f"ordinary variable instead."
+        )
     if question.kind == "battery":
         # A battery shown as a stacked bar is a 100% DISTRIBUTION: each statement
         # is a bar split by the shared rating-scale levels (the source decks'
