@@ -2,6 +2,8 @@
 and the composed per-family schemas (pure, declarative UI contract)."""
 from __future__ import annotations
 
+import pytest
+
 from reportbuilder.render.config_schema import (
     ConfigField,
     STATISTIC_OPTIONS,
@@ -218,6 +220,27 @@ def test_xtab_layout_offers_separate_panels():
     from reportbuilder.render.config_schema import xtab_layout_field
     values = [v for v, _label in xtab_layout_field().options]
     assert values == ["auto", "grouped", "small_multiples", "separate"]
+
+
+def test_clustered_schema_keeps_all_four_layouts():
+    from reportbuilder.render.config_schema import clustered_bar_schema
+    fld = next(f for f in clustered_bar_schema() if f.key == "xtab_layout")
+    assert [v for v, _ in fld.options] == [
+        "auto", "grouped", "small_multiples", "separate"]
+
+
+@pytest.mark.parametrize("with_row_summary", [False, True])
+def test_stacked_schema_only_offers_layouts_that_do_something(with_row_summary):
+    """`build_image_bar_stacked` / `build_image_column_stacked` test for
+    "separate" and otherwise ALWAYS draw the grouped layout — they have no
+    small-multiples path at all. Offering "Grouped bars" and "Small multiples"
+    there was a control that lies: two silently inert options.
+    (2026-08-04 final review, I6)"""
+    from reportbuilder.render.config_schema import stacked_schema
+    fld = next(f for f in stacked_schema(with_row_summary=with_row_summary)
+               if f.key == "xtab_layout")
+    assert [v for v, _ in fld.options] == ["auto", "separate"]
+    assert "Small multiples" not in (fld.help or "")
 
 
 def test_all_two_classifier_schemas_carry_the_layout_control():

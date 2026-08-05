@@ -178,18 +178,40 @@ def standard_schema() -> tuple[ConfigField, ...]:
             classifying_var_field(), *_common_tail())
 
 
-def xtab_layout_field() -> ConfigField:
+_XTAB_LAYOUT_LABELS: dict[str, str] = {
+    "auto": "Automatic",
+    "grouped": "Grouped bars",
+    "small_multiples": "Small multiples",
+    "separate": "Separate panels (one per variable)",
+}
+
+
+def xtab_layout_field(*, values: tuple[str, ...] = (
+        "auto", "grouped", "small_multiples", "separate")) -> ConfigField:
+    """The two-variable layout control, offering only the values the chart type in
+    question actually ACTS on.
+
+    The clustered builders honour all four. The STACKED builders test for
+    "separate" and otherwise always draw the grouped layout, so offering them
+    "Grouped bars" / "Small multiples" is a control that lies — two options that
+    silently do nothing. (2026-08-04 final review, I6)"""
+    crossed = "grouped" in values
+    help_text = "With a second classifying variable: "
+    if crossed:
+        help_text += ("'Grouped bars' pulls the bars apart into groups by the first "
+                      "variable; 'Small multiples' draws one panel per value of the "
+                      "first variable; ")
+    help_text += ("'Separate panels' does NOT cross them — one panel per variable, "
+                  "each an ordinary split. 'Automatic' ")
+    help_text += ("groups when it fits, else panels, and never chooses Separate on "
+                  "its own." if crossed else
+                  "crosses the two variables into one set of grouped bars, and never "
+                  "chooses Separate on its own.")
     return ConfigField(
         "xtab_layout", "select", "Two-variable layout",
-        options=(("auto", "Automatic"), ("grouped", "Grouped bars"),
-                 ("small_multiples", "Small multiples"),
-                 ("separate", "Separate panels (one per variable)")),
+        options=tuple((v, _XTAB_LAYOUT_LABELS[v]) for v in values),
         default="auto",
-        help=("With a second classifying variable: 'Grouped bars' pulls the bars apart "
-              "into groups by the first variable; 'Small multiples' draws one panel per "
-              "value of the first variable; 'Separate panels' does NOT cross them — one "
-              "panel per variable, each an ordinary split. 'Automatic' groups when it "
-              "fits, else panels, and never chooses Separate on its own."),
+        help=help_text,
     )
 
 
@@ -244,7 +266,10 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
             # (e.g. gender × age) — the engine builds the combos and the stacked renderer
             # groups them by the primary classifier.
             classifying_var_2_field(),
-            xtab_layout_field(),
+            # Only "auto" (crossed, grouped by the primary) and "separate" — the
+            # stacked builders have no small-multiples path and grouping IS their
+            # crossed layout, so the other two values would do nothing here.
+            xtab_layout_field(values=("auto", "separate")),
             # Show/hide the overall "Total" reference bar (a 100% reference stack).
             show_total_field(),
             # Row-summary column up front (right after the data options) so it's easy
