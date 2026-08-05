@@ -179,3 +179,35 @@ def test_format_value_manual_mode_honours_mean_decimals():
 
 def test_format_value_no_fmt_defaults_to_auto_pct_sign():
     assert _mpl.format_value(60.0, "pct", None, all_values=[60.0, 40.0]) == "60 %"
+
+
+# ---- new_figure_grid -------------------------------------------------------
+
+def _grid_ctx():
+    from types import SimpleNamespace
+
+    from suite._helpers import make_slot
+    return SimpleNamespace(slot=make_slot())
+
+
+@pytest.mark.parametrize("n,rows", [(1, 1), (1, 2), (2, 1), (2, 2), (3, 2)])
+def test_new_figure_grid_always_returns_plain_axes(n, rows):
+    """Every returned element must be a real Axes, whatever the (n, rows) shape.
+
+    Regression: `fig.subplots` returns a bare Axes ONLY for a 1x1 grid — with
+    rows == 2 and n == 1 it returns a 2-element ndarray, which the old
+    `[axes] if n <= 1 else …` wrapped instead of flattening, so the very next
+    `ax.set_facecolor(CREAM)` raised
+    `AttributeError: 'numpy.ndarray' object has no attribute 'set_facecolor'`.
+    The separate layout reaches (n=1, rows=2) whenever one classifying variable
+    resolves to no groups and the labels ask for stacked panels. (2026-08-04)
+    """
+    from matplotlib.axes import Axes
+
+    fig, axes = _mpl.new_figure_grid(_grid_ctx(), n, rows=rows)
+    try:
+        assert len(axes) == n
+        assert all(isinstance(ax, Axes) for ax in axes)
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close(fig)

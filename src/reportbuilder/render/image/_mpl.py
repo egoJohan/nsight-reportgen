@@ -149,7 +149,13 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     fig = _new_agg_figure(w_in, h_in)
     cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
     axes = fig.subplots(max(1, rows), cols, sharey=sharey, sharex=False)
-    axes = [axes] if n <= 1 else list(np.ravel(axes))
+    # `fig.subplots` returns a bare Axes only for a 1x1 grid; with rows > 1 it
+    # returns an ndarray even when n == 1 (the separate layout hits exactly that
+    # when one classifying variable resolves to no groups and the labels want two
+    # rows). np.atleast_1d + ravel flattens BOTH shapes to a plain list of Axes;
+    # wrapping in a list unconditionally would leave an ndarray element behind and
+    # blow up on the first `ax.set_facecolor`. (spec 2026-08-04)
+    axes = list(np.ravel(np.atleast_1d(axes)))
     for extra in axes[n:]:                        # an odd count leaves a blank cell
         extra.set_visible(False)
     axes = axes[:n]

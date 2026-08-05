@@ -59,6 +59,54 @@ def _setup_stacked():
     return model, question, df
 
 
+def _setup_stale_second():
+    """The degradation the design promises: the SECOND classifying variable no
+    longer resolves (a stale name / an all-missing column), so only ONE panel
+    survives — while the labels still ask for stacked panels (`rows == 2`).
+
+    Deliberately breaks the intersection every other separate-mode fixture in
+    this file shares (two healthy variables, short labels): 7 answer categories
+    trip `_stack_panels` for the CLUSTERED renderers (which measure the answer
+    categories) and the >14-char group labels trip it for the STACKED one
+    (which measures the bar labels), so both renderers reach
+    `new_figure_grid(n=1, rows=2)`. (2026-08-04 final review, C1)"""
+    q = Variable(name="q", label="Suhtautuminen", measurement="scale",
+                 value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 8)),
+                 missing_values=frozenset())
+    sex = Variable(name="sex", label="Sukupuoli", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "Naiset ja muunsukupuoliset"),
+                                 ValueLabel(2.0, "Miehet ja muut vastaajat")),
+                   missing_values=frozenset())
+    model = QuestionModel(variables={"q": q, "sex": sex}, questions=[])
+    question = Question(qid="q", kind="single", variables=("q",), text="Suhtautuminen")
+    df = pd.DataFrame({
+        "q": [float(i) for i in range(1, 8)] * 18,     # 126 rows, 7 categories
+        "sex": ([1.0] * 63) + ([2.0] * 63),
+    })
+    return model, question, df
+
+
+@pytest.mark.parametrize("chart_type", ["horizontal_bar", "vertical_bar",
+                                        "stacked_horizontal_bar",
+                                        "stacked_vertical_bar"])
+def test_a_stale_second_variable_still_renders_its_surviving_panel(chart_type):
+    """One panel + a two-row layout must not crash.
+
+    Pre-fix this raised `AttributeError: 'numpy.ndarray' object has no attribute
+    'set_facecolor'` inside `new_figure_grid`: with `rows=2`, `fig.subplots(2, 1)`
+    returns an ndarray even for n == 1, and the old `[axes] if n <= 1` wrapped
+    that array instead of flattening it. (2026-08-04 final review, C1)"""
+    model, question, df = _setup_stale_second()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="ei_ole_enaa",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type, classifying_var_2="ei_ole_enaa"),
+                     df, model)
+    assert len(set(series.segment_primary.values())) == 1, "only one panel survives"
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+    IMAGE_BUILDERS[chart_type](ctx)
+    assert_single_picture(slide, slot)
+
+
 def _spec(chart_type, **kw) -> ChartSpec:
     base = dict(question_ref="q", chart_type=chart_type, statistic="pct",
                 classifying_var="sex", classifying_var_2="age",
