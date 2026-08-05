@@ -131,13 +131,23 @@ def _separate_masks(spec, data: pd.DataFrame, model: QuestionModel):
     if not _separate_layout(spec):
         return None
     want_total = resolve_show_total(spec, True)
+    cvs = (spec.classifying_var, spec.classifying_var_2)
+    labels = [_classifier_label(cv, model) for cv in cvs]
+    if labels[0] == labels[1]:
+        # Two DIFFERENT variables carrying the SAME label — common in recoded SAV
+        # files. Left alone, both variables map to one `primary` value, so the two
+        # collapse into a single panel of mixed series; and if they also share a
+        # GROUP label the dict key collides and one variable's mask is overwritten,
+        # silently dropping a segment from the chart. Disambiguate with the variable
+        # NAME, and only in this case, so the normal case keeps its clean labels.
+        # (2026-08-04 final review, I7)
+        labels = [f"{lbl} ({cv})" for lbl, cv in zip(labels, cvs)]
     masks: dict[str, pd.Series] = {}
     primary: dict[str, str] = {}
-    for cv in (spec.classifying_var, spec.classifying_var_2):
+    for cv, label in zip(cvs, labels):
         groups = _classifier_masks(spec, data, model, cv)
         if not groups:
             continue                       # stale/empty variable → its panel is dropped
-        label = _classifier_label(cv, model)
         for group_label, m in groups.items():
             key = f"{label} · {group_label}"
             masks[key] = m
