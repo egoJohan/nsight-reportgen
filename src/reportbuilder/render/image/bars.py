@@ -72,6 +72,11 @@ def _draw_row_summary(ctx, ax, y, bars) -> None:
     """Right-hand per-row summary column (row_summary feature): a header above the
     top bar and one value per bar, aligned to `y`. No-op when the series carries no
     row_summaries. (spec 2026-07-07-row-summary-column)"""
+    if len(y) == 0:
+        # No bars to summarise — `min(y)`/`max(y)` below would raise on an empty
+        # sequence. Callers omit an empty panel, so this is belt-and-braces for any
+        # future caller that does not. (final review I3)
+        return
     vals = _row_summary_by_bar(ctx.series, bars)
     if all(v is None for v in vals):
         return
@@ -424,6 +429,29 @@ def _primary_groups(series):
     return [(p, by_primary[p]) for p in order]
 
 
+def _drawable_panels(groups, drawable) -> list[tuple[str, list[str]]]:
+    """`groups` (from `_primary_groups`, which sees EVERY segment) narrowed to the
+    series that will actually be drawn, with panels that keep none dropped entirely.
+
+    `_primary_groups` reads `series.segments`, but `series_values`/`_stacked_layout`
+    drop segments computed on a near-empty base (MIN_SEGMENT_BASE) and a hidden
+    "Total". Zipping the two together gives a panel that is titled and legended but
+    holds only 0-height bars — a phantom reading "0 %". The design says such a panel
+    vanishes, so it does.
+
+    Only the SEPARATE renderers use this: each of their panels is a whole classifying
+    VARIABLE with its own colours and its own legend, so dropping one loses nothing
+    the reader could have cross-referenced. Small multiples share one colour ramp and
+    one legend across panels, keyed by position — filtering there would shift a
+    panel's colours out of step with its siblings.
+
+    Never returns an empty list in practice: every key of `drawable` comes from
+    `series.segments`, so at least the panel that owns it survives.
+    (spec 2026-08-04, final review I3/I4)"""
+    kept = [(p, [s for s in segs if s in drawable]) for p, segs in groups]
+    return [(p, segs) for p, segs in kept if segs]
+
+
 def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     """Cross-tab SMALL MULTIPLES: one subplot per PRIMARY value, each a clustered bar of
     (answer categories × the SECONDARY classifier). Shared value axis + one legend."""
@@ -502,8 +530,10 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     (spec 2026-08-04-separate-classifier-panels)"""
     from matplotlib.patches import Patch
     series = ctx.series
-    groups = _primary_groups(series)
     _c, _s, data = series_values(series)
+    # A variable whose every group fell under MIN_SEGMENT_BASE has nothing to draw;
+    # its panel is omitted rather than rendered as titled, legended 0 % bars.
+    groups = _drawable_panels(_primary_groups(series), data)
     n_cat = len(cats)
     rows = 2 if _stack_panels(list(cats)) else 1
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, [])
@@ -819,8 +849,11 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     duplicate this one for no legible gain. (spec 2026-08-04-separate-classifier-panels)
     """
     series = ctx.series
-    groups = _primary_groups(series)
     bars_all, stack, data = _stacked_layout(series)
+    # `bars_all` is base-filtered; a variable whose every group is near-empty keeps
+    # no bar at all, and a panel with no bars used to reach `min(y)` on an empty
+    # sequence (ValueError). It is omitted instead. (final review I3)
+    groups = _drawable_panels(_primary_groups(series), bars_all)
     clrs = scale_colors(len(stack))                 # the stack is the shared scale
     rows = 2 if _stack_panels([_secondary_tick(s) for _p, segs in groups for s in segs]) else 1
     flat_vals = [v for seg in stack for v in data[seg] if v is not None]
@@ -836,14 +869,13 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     fig, axes = new_figure_grid(ctx, len(groups), tall_in=tall_in, rows=rows,
                                 sharey=False)   # panels draw DIFFERENT bars, not a shared axis
 
-    for ax, (p, segs) in zip(axes, groups):
+    for ax, (p, bars) in zip(axes, groups):
         # `bars_all` (from `_stacked_layout`) is base-filtered and may drop a
-        # near-empty group's bar; `segs` (from `_primary_groups`) is not, so a
-        # panel's bars are the intersection — re-indexed against `bars_all`, not
-        # the raw `series.segments`, so a filtered-out bar can never misalign the
-        # rest (see `new_figure_grid`'s sharey note for the sibling pitfall this
-        # mirrors: trusting a helper's implicit assumptions without checking them).
-        bars = [b for b in segs if b in bars_all]
+        # near-empty group's bar, so `_drawable_panels` already narrowed each panel
+        # to its surviving bars. They are re-indexed against `bars_all`, not the raw
+        # `series.segments`, so a filtered-out bar can never misalign the rest (see
+        # `new_figure_grid`'s sharey note for the sibling pitfall this mirrors:
+        # trusting a helper's implicit assumptions without checking them).
         idx = [bars_all.index(b) for b in bars]
         panel = {s: [data[s][i] for i in idx] for s in stack}
         y = np.arange(len(bars))[::-1]

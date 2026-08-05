@@ -107,6 +107,65 @@ def test_a_stale_second_variable_still_renders_its_surviving_panel(chart_type):
     assert_single_picture(slide, slot)
 
 
+def _setup_tiny_second():
+    """The second variable's groups are ALL under MIN_SEGMENT_BASE (10): only 9
+    respondents carry an age at all, three per band. `show_total="off"` denies the
+    panel the per-variable Total bar that would otherwise rescue it, so the whole
+    Ikäryhmät panel has nothing drawable.
+
+    The other separate-mode fixtures give both variables healthy bases, which is
+    what hid the empty-panel crash and the phantom panel.
+    (2026-08-04 final review, I3/I4)"""
+    model, question, _ = _setup()
+    df = pd.DataFrame({
+        "q": [1.0, 2.0, 3.0, 4.0, 5.0] * 24,
+        "sex": ([1.0] * 60) + ([2.0] * 60),
+        "age": [1.0, 2.0, 3.0] * 3 + [float("nan")] * 111,
+    })
+    return model, question, df
+
+
+@pytest.mark.parametrize("chart_type", ["horizontal_bar", "vertical_bar",
+                                        "stacked_horizontal_bar",
+                                        "stacked_vertical_bar"])
+def test_an_all_tiny_panel_is_omitted_not_drawn_empty(chart_type, monkeypatch):
+    """A variable whose every group is below MIN_SEGMENT_BASE contributes no
+    panel at all.
+
+    Pre-fix, the CLUSTERED renderers took their panels from `_primary_groups`
+    (every segment) but their values from `series_values` (base-filtered), so the
+    dead variable still got a titled, legended panel of 0-height bars reading
+    "0 %" — the design says it vanishes. The STACKED renderer did worse: an empty
+    bar list reached `ax.set_ylim(min(y) - 0.7, …)` and raised
+    `ValueError: min() iterable argument is empty`.
+    (2026-08-04 final review, I3/I4)"""
+    import reportbuilder.render.image.bars as bars_mod
+
+    model, question, df = _setup_tiny_second()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   show_total="off", options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type, show_total="off"), df, model)
+    # Confirm the premise: the engine DOES emit the age segments (so the phantom
+    # panel really came from the renderer), and their bases really are tiny.
+    assert [s for s in series.segments if s.startswith("Ikäryhmät")]
+    assert all(series.base_n[s] < 10 for s in series.segments
+               if s.startswith("Ikäryhmät"))
+
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+    captured = {}
+    real_render_png = bars_mod.render_png
+
+    def _spy(fig):
+        captured["titles"] = [ax.get_title() for ax in fig.axes]
+        return real_render_png(fig)
+
+    monkeypatch.setattr(bars_mod, "render_png", _spy)
+    IMAGE_BUILDERS[chart_type](ctx)
+
+    assert captured["titles"] == ["Sukupuoli"], "the empty panel must not be drawn"
+    assert_single_picture(slide, slot)
+
+
 def _spec(chart_type, **kw) -> ChartSpec:
     base = dict(question_ref="q", chart_type=chart_type, statistic="pct",
                 classifying_var="sex", classifying_var_2="age",
