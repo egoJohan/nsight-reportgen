@@ -759,11 +759,25 @@ function ChartControls({
     [chartTypes]
   );
   const rawSchema = catalog.get(chart.chart_type)?.config ?? [];
-  // A battery is already a single-series chart (one bar per attribute), so a
-  // classifying split doesn't apply — drop that field for battery questions.
   const isBattery = question?.kind === "battery";
+  // The engine DOES split a battery by a classifying variable: `_battery` gives one
+  // bar per statement PER SEGMENT (a concept test comparing two paths on the same
+  // battery), and `_battery_stacked` turns each statement into "<statement> ·
+  // <segment>" bars. So `classifying_var` MUST stay in the schema for a battery —
+  // do not restore a filter that hides it. (stats/engine.py `_battery` /
+  // `_battery_stacked`; tests/suite/unit/stats/test_battery_crosstab.py; 2026-08-02)
+  //
+  // A SECOND classifier and `xtab_layout` are a different story: both battery paths
+  // resolve segments via `_classifier_masks(spec, ...)` called with the PRIMARY
+  // classifier only — `classifying_var_2` and `options.xtab_layout` (the machinery
+  // behind `_separate_masks`, which only `_single`/`_multi`/`_summary` consume) are
+  // never read for a battery. Leaving them selectable would let the author configure
+  // a two-classifier / separate-panels battery that silently renders as an ordinary
+  // one-classifier split — a lie about what's on screen — so both stay filtered out.
   let schema = isBattery
-    ? rawSchema.filter((f) => f.key !== "classifying_var")
+    ? rawSchema.filter(
+        (f) => f.key !== "classifying_var_2" && f.key !== "xtab_layout"
+      )
     : rawSchema;
   // The "Total column" control only makes sense once a classifying variable is
   // chosen — without one there is no Total to toggle. `classifying_var_2` STAYS in
