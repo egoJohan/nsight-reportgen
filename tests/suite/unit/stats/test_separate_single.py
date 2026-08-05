@@ -164,3 +164,59 @@ def test_topbox_sort_pins_each_panels_total_at_the_end_of_that_panel():
         "Ikäryhmät · Vanhat", "Ikäryhmät · Keski", "Ikäryhmät · Nuoret",
         "Ikäryhmät · Total",
     ]
+
+
+def _setup_half_missing():
+    """`q` is MISSING for every "Mies" respondent, so a "Not answered" row has a
+    real, per-segment signal to report: 100 % in the Mies group, 0 % in Nainen,
+    and 50 % in each age group (which straddle both sexes evenly).
+
+    Breaks the intersection every other separate-mode fixture shares — they all
+    run with `show_not_answered` off and no missing data at all, which is exactly
+    what hid the mis-keyed missing counts. (2026-08-04 final review, C2)"""
+    model, question, _ = _setup()
+    df = pd.DataFrame({
+        "q": ([1.0, 2.0, 3.0, 4.0, 5.0] * 12) + ([float("nan")] * 60),
+        "sex": ([1.0] * 60) + ([2.0] * 60),
+        "age": [1.0, 2.0, 3.0] * 40,
+    })
+    return model, question, df
+
+
+def test_not_answered_is_counted_per_separate_segment():
+    """Pre-fix every segment printed 0.0 %: `_missing_counts` was keyed off the
+    primary classifier's RAW CODES ("1", "2") while the segments are named
+    "Sukupuoli · Nainen", so every lookup missed. (2026-08-04 final review, C2)"""
+    model, question, df = _setup_half_missing()
+    r = engine.compute(question, _spec(show_not_answered=True), df, model)
+    na = "Not answered"
+    assert na in r.categories
+    assert r.cell(na, "Sukupuoli · Mies").pct == 100.0
+    assert r.cell(na, "Sukupuoli · Nainen").pct == 0.0
+    for grp in ("Nuoret", "Keski", "Vanhat"):
+        assert r.cell(na, f"Ikäryhmät · {grp}").pct == 50.0
+
+
+def test_not_answered_footer_n_matches_the_crossed_layout():
+    """`base_n["Total"]` is the slide's N footer and is present even though
+    "Total" is not a SEGMENT in separate mode. Pre-fix it fell back to the
+    valid-only base (60) while the crossed version of the same slide printed 120.
+    (2026-08-04 final review, C2 + M8)"""
+    model, question, df = _setup_half_missing()
+    sep = engine.compute(question, _spec(show_not_answered=True), df, model)
+    crossed = engine.compute(
+        question, _spec(show_not_answered=True, options={"xtab_layout": "auto"}),
+        df, model)
+    assert "Total" not in sep.segments, "a bare Total belongs to no panel"
+    assert sep.base_n["Total"] == 120
+    assert sep.base_n["Total"] == crossed.base_n["Total"]
+
+
+def test_segment_bases_include_the_not_answered_rows():
+    """Each segment's own base grows by its missing rows too, exactly as it does
+    in the crossed layout — "Mies" is 60 (all not-answered), not 0."""
+    model, question, df = _setup_half_missing()
+    r = engine.compute(question, _spec(show_not_answered=True), df, model)
+    assert r.base_n["Sukupuoli · Mies"] == 60
+    assert r.base_n["Sukupuoli · Nainen"] == 60
+    assert r.base_n["Ikäryhmät · Nuoret"] == 40

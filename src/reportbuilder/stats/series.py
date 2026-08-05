@@ -20,9 +20,15 @@ class Cell:
 @dataclass(frozen=True)
 class SeriesResult:
     categories: tuple[str, ...]               # row labels, already in final sort order
-    segments: tuple[str, ...]                 # column labels; always includes "Total"
+    # Column labels. Usually ends with a "Total" reference column, but NOT always:
+    # the SEPARATE layout (one panel per classifying variable) emits a per-variable
+    # "<variable> · Total" instead, because a bare overall Total belongs to no panel.
+    # Read a segment's presence, never assume it. (spec 2026-08-04)
+    segments: tuple[str, ...]
     cells: dict[tuple[str, str], Cell]        # (category, segment) -> Cell
-    base_n: dict[str, int]                    # segment -> N  (REQ-C-24h)
+    # segment -> N (REQ-C-24h). "Total" is ALWAYS a key here — the slide's N footer
+    # indexes it directly — even where "Total" is not one of `segments`. (2026-08-04)
+    base_n: dict[str, int]
     statistic: str                            # "pct" | "count" | "mean"
     # Optional caption rendered under the chart — e.g. the endpoint legend of a
     # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)

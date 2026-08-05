@@ -493,18 +493,31 @@ def _effective_missing(spec: ChartSpec, var: Variable) -> set[float]:
 
 def _missing_counts(data: pd.DataFrame, var: Variable, eff: set[float],
                     classifying_var: str | None = None,
-                    *, seg_series: pd.Series | None = None) -> dict[str, int]:
+                    *, seg_series: pd.Series | None = None,
+                    seg_masks: dict[str, pd.Series] | None = None) -> dict[str, int]:
     """Count sysmis + "not answered" rows per segment using the effective set.
 
     Returns a dict of {segment_label: count}. Always includes "Total".
     For segmented data the per-segment count only considers rows whose
     classifying variable has a valid (non-NaN) code — consistent with the
     segment_bases convention. (REQ-D-06, REQ-MV-01, REQ-MV-02)
+
+    `seg_masks` IS the segmentation when given — one boolean mask per segment,
+    mirroring `segment_bases`/`aggregate_counts`, so the keys here match the
+    segment labels those produce. Mask-segmented paths (a banner classifier, the
+    SEPARATE layout) have no classifier COLUMN to coerce: keying off
+    `classifying_var` there either raises (a banner qid is not a column) or
+    returns raw codes ("1", "2") that no segment is named after, so every lookup
+    silently yields 0 and "Not answered" prints 0 % everywhere.
+    (spec 2026-08-04-separate-classifier-panels)
     """
     s = pd.to_numeric(data[var.name], errors="coerce")
     missing_mask = s.isna() | s.isin(eff)
     result: dict[str, int] = {"Total": int(missing_mask.sum())}
-    if seg_series is not None:
+    if seg_masks is not None:
+        for key, m in seg_masks.items():
+            result[str(key)] = int((missing_mask & m).sum())
+    elif seg_series is not None:
         for key in seg_series.dropna().unique():
             result[str(key)] = int((missing_mask & (seg_series == key)).sum())
     elif classifying_var is not None:
@@ -547,12 +560,18 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     banner = None if separate is not None else _banner_masks(spec, data, model)
     seg_series, ordered = ((None, None) if (banner or separate is not None)
                            else _combo_segmentation(spec, data))
+    # The mask set that IS the segmentation, when one is (banner / separate mode).
+    # Every per-segment computation must be given the SAME segmentation, or its keys
+    # don't match the segment labels. (2026-08-04)
+    act_masks: dict[str, pd.Series] | None = None
     if separate is not None:                         # two classifiers SIDE BY SIDE
         sep_masks, sep_primary = separate
+        act_masks = sep_masks
         bases = segment_bases(data, var, missing_override=eff, seg_masks=sep_masks)
         counts = aggregate_counts(data, var.name, seg_masks=sep_masks)
         segments = tuple(sep_masks)                  # no bare "Total": it is no panel
     elif banner is not None:                         # banner: indicator columns
+        act_masks = banner
         bases = segment_bases(data, var, missing_override=eff, seg_masks=banner)
         counts = aggregate_counts(data, var.name, seg_masks=banner)
         segments = (*banner.keys(), "Total")
@@ -578,10 +597,16 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     show_na: bool = getattr(spec, "show_not_answered", False)
     if show_na:
         missing_n = _missing_counts(data, var, eff, spec.classifying_var,
-                                    seg_series=seg_series)
+                                    seg_series=seg_series, seg_masks=act_masks)
         denom = {seg: bases.get(seg, 0) + missing_n.get(seg, 0) for seg in segments}
+        # The N footer reads base_n["Total"] whether or not "Total" is a SEGMENT
+        # (separate mode has none — a bare Total belongs to no panel). It must go
+        # through the same valid+missing arithmetic as the segments, or the same
+        # slide prints a smaller N in separate mode than crossed. (2026-08-04)
+        denom_total = bases.get("Total", 0) + missing_n.get("Total", 0)
     else:
         denom = {seg: bases.get(seg, 0) for seg in segments}
+        denom_total = bases.get("Total", 0)
 
     # Natural ("data order") sorting key. For a RATING SCALE, order by the scale
     # point parsed from the label's leading digit (1..N) — NOT the SAV's stored
@@ -788,7 +813,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             spec, statements, [d for _, d, _ in levels], [c for c, _, _ in levels], cells)
 
     base_n = {s: denom.get(s, 0) for s in segments}
-    base_n.setdefault("Total", bases.get("Total", 0))
+    base_n.setdefault("Total", denom_total)
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
                         base_n=base_n,
                         statistic=spec.statistic, caption=scale_caption,

@@ -147,3 +147,22 @@ def test_percent_base_question_falls_back_for_a_banner():
     for seg in ("Polku 1", "Polku 2"):
         total = sum((r.cell(c, seg).pct or 0) for c in r.categories)
         assert abs(total - 100.0) < 0.5
+
+
+def test_show_not_answered_counts_per_banner_segment():
+    """A banner classifier + `show_not_answered` used to raise KeyError: the
+    per-segment missing counts were keyed off `data[classifying_var]`, and a
+    banner's `classifying_var` is a QID, not a column. Passing the banner's own
+    masks (the same segmentation `segment_bases`/`aggregate_counts` get) both
+    fixes the crash and gives each member its real not-answered share.
+
+    Pre-existing; repaired by the C2 fix, which makes every per-segment
+    computation take the SAME segmentation. (2026-08-04 final review, C2)"""
+    model, q, df = _setup(n=200)
+    df = df.copy()
+    df.loc[df["Polku1"].notna(), "q"] = None      # Polku 1 answered nothing
+    r = engine.compute(q, _spec(show_not_answered=True), df, model)
+    na = "Not answered"
+    assert r.cell(na, "Polku 1").pct == 100.0
+    assert r.cell(na, "Polku 2").pct == 0.0
+    assert r.base_n["Total"] == 200
