@@ -32,9 +32,10 @@ from reportbuilder.render.image._mpl import (
     new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
     place_picture_square, series_values, format_value, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
+    _new_agg_figure, _EMU_PER_IN,
 )
 from reportbuilder.render.house_style import (
-    series_colors, scale_colors, contrast_ink, INK, MUTED, GRIDC,
+    series_colors, scale_colors, contrast_ink, INK, MUTED, GRIDC, register_fonts,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.model.report import default_label
@@ -512,11 +513,91 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     place_picture(ctx, render_png(fig))
 
 
-def _stack_panels(cats: list[str]) -> bool:
-    """True when SEPARATE panels should sit one above the other rather than side by
-    side. Side-by-side halves each panel's width, so the same label pressure
-    _should_orient_horizontal measures decides it. (spec 2026-08-04)"""
-    return len(cats) > 6 or any(len(c) > 14 for c in cats)
+def _measure_max_label_width_in(labels: list[str], fontsize: float, *,
+                                 rotation: float = 0.0, dpi: float = 200.0) -> float:
+    """The widest rendered footprint of `labels` at `fontsize` pt, in INCHES —
+    measured with real matplotlib text layout, not estimated from a character
+    count.
+
+    Builds a throwaway Agg figure (created, measured, and discarded — never
+    saved to a file), places each label as a `Text` artist at `rotation`
+    degrees (matching `Text`'s own rotation convention, so a rotated label's
+    on-screen footprint — including any wrapped newlines — is measured
+    correctly, not just its unrotated string width), reads its true layout
+    box via `text.get_window_extent(renderer)` — matplotlib's own font-metric
+    engine, which accounts for the actual glyphs, kerning, and multi-line
+    extent — and converts the widest box from pixels to inches using `dpi`
+    (the same dpi the real chart is saved at, so the two agree).
+    """
+    if not labels:
+        return 0.0
+    register_fonts()
+    fig = _new_agg_figure(6.0, 4.0, dpi=dpi)
+    renderer = fig.canvas.get_renderer()
+    widest_px = 0.0
+    for label in labels:
+        text = fig.text(0.5, 0.5, label, fontsize=fontsize, rotation=rotation)
+        widest_px = max(widest_px, text.get_window_extent(renderer).width)
+    return float(widest_px) / dpi
+
+
+# Fixed per-panel overhead OUTSIDE the label gutter that a side-by-side panel
+# still needs even after the label block is accounted for: the value-axis
+# spine/tick marks, the gap between the two panels (`subplots_adjust`'s
+# `wspace`), and the outer figure margins. This overhead doesn't scale with
+# label length, so it's subtracted as a flat inches allowance rather than
+# modelled precisely from matplotlib's normalized subplot fractions (which
+# themselves depend on the label width, making an exact closed form circular).
+_PANEL_CHROME_IN: float = 0.6
+# Floor for the width actually left to DRAW bars once a horizontal panel's
+# label gutter and chrome are subtracted from its side-by-side half. A 0-100%
+# value axis needs enough width for bar-length differences of a few points to
+# read as visually distinct; below this floor two side-by-side panels would
+# each be a stamp, so stacking (full width, half height per panel) is the
+# more legible choice. Chosen, not derived: ~1/4 of the 9in figure-width
+# floor, i.e. still noticeably more than a bare tick-label's width (~0.2in).
+_MIN_HGUTTER_PLOT_IN: float = 2.2
+
+
+def _stack_panels(cats: list[str], *, fig_w_in: float, fontsize: float,
+                   vertical: bool, n_panels: int = 2) -> bool:
+    """True when SEPARATE panels should sit one above the other rather than
+    side by side.
+
+    SIDE BY SIDE IS THE DEFAULT. Stacking is the exception, chosen only when
+    `cats` — wrapped exactly as the real chart wraps them (`_wrap_label` for
+    the horizontal left-gutter, `_wrap_xtick_label` + `_XTICK_ROTATION` for
+    the rotated vertical x-axis) and measured at the real `fontsize` via
+    `_measure_max_label_width_in` (actual matplotlib text metrics, not a
+    character count) — demonstrably do not fit `n_panels` panels side by side
+    across a `fig_w_in`-wide figure.
+
+    HORIZONTAL panels: category labels sit in each panel's left gutter. Side
+    by side gives each panel `fig_w_in / n_panels`. The widest measured label
+    block is subtracted from that half, along with the fixed `_PANEL_CHROME_IN`
+    overhead; what's left is the room actually available to draw bars and read
+    the value axis. Below `_MIN_HGUTTER_PLOT_IN` that room is too cramped to be
+    useful, so the panels stack instead.
+
+    VERTICAL panels: category labels sit on the shared x-axis, rotated by
+    `_XTICK_ROTATION`. There is no single gutter here — the binding constraint
+    is `len(cats)` labels arrayed side by side across the panel's width, each
+    getting only `(panel_w - chrome) / len(cats)` of horizontal room. If the
+    widest rotated label footprint exceeds that per-category share, neighbours
+    would overlap, so the panels stack. (This is where category COUNT still
+    matters — but as a divisor against measured width, not a bare `> 6`.)
+    (spec 2026-08-04, revised for runtime measurement 2026-08-06)"""
+    panel_w_in = fig_w_in / max(n_panels, 1)
+    if vertical:
+        wrapped = [_wrap_xtick_label(c) for c in cats]
+        label_w_in = _measure_max_label_width_in(wrapped, fontsize, rotation=_XTICK_ROTATION)
+        plot_w_in = panel_w_in - _PANEL_CHROME_IN
+        per_cat_in = plot_w_in / max(len(cats), 1)
+        return bool(label_w_in > per_cat_in)
+    wrapped = [_wrap_label(c) for c in cats]
+    label_w_in = _measure_max_label_width_in(wrapped, fontsize, rotation=0.0)
+    usable_in = panel_w_in - label_w_in - _PANEL_CHROME_IN
+    return bool(usable_in < _MIN_HGUTTER_PLOT_IN)
 
 
 def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
@@ -535,7 +616,13 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     # its panel is omitted rather than rendered as titled, legended 0 % bars.
     groups = _drawable_panels(_primary_groups(series), data)
     n_cat = len(cats)
-    rows = 2 if _stack_panels(list(cats)) else 1
+    fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    # fontsize matches the ACTUAL y/x-tick label fontsize set below (9.0 for the
+    # horizontal left-gutter, 8.5 for the vertical rotated x-axis) so the fit
+    # test measures the labels at the size they will really be drawn at.
+    panel_fontsize = 8.5 if vertical else 9.0
+    rows = 2 if _stack_panels(list(cats), fig_w_in=fig_w_in, fontsize=panel_fontsize,
+                              vertical=vertical) else 1
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, [])
                 if v is not None]
     max_val = max(all_vals, default=0.0)
@@ -855,7 +942,13 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     # sequence (ValueError). It is omitted instead. (final review I3)
     groups = _drawable_panels(_primary_groups(series), bars_all)
     clrs = scale_colors(len(stack))                 # the stack is the shared scale
-    rows = 2 if _stack_panels([_secondary_tick(s) for _p, segs in groups for s in segs]) else 1
+    fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    bar_labels = [_secondary_tick(s) for _p, segs in groups for s in segs]
+    # This renderer is always the HORIZONTAL panel style (see the docstring
+    # above), and its bar labels are drawn at fontsize=10.5 below — pass both
+    # through so the fit test matches what actually gets rendered.
+    rows = 2 if _stack_panels(bar_labels, fig_w_in=fig_w_in, fontsize=10.5,
+                              vertical=False) else 1
     flat_vals = [v for seg in stack for v in data[seg] if v is not None]
     max_bars = max((len(segs) for _p, segs in groups), default=1)
     # Own budget, not the clustered renderer's: each row here is ONE full-width
