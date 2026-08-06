@@ -631,6 +631,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     scale_entries, scale_caption = _partial_scale(var, data, eff)
     if scale_entries is not None:
         entries = scale_entries
+        is_rating = False  # scale_entries is not None already forces data_order below
     else:
         rating = _rating_scale(var)
         is_rating = len(rating) >= max(3, len(labels) - 1)
@@ -719,9 +720,18 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # basis — a frequency sort would scramble the scale. (REQ-C-24c)
     # A STACKED bar split by a classifier likewise keeps its scale stack in order — the
     # sort there targets the BARS (the classifier segments), reordered further below.
+    # A STACKED bar of a RATING SCALE keeps its scale order too, classifier or not: a
+    # 100%-stack of an ordered scale is only readable in scale order, and the
+    # row-summary column ("Top 2", net) is only checkable by eye when the summed
+    # segments sit next to each other in the stack — a size sort scatters them. A
+    # stacked bar of a plain categorical (no inherent order) still honours the slide's
+    # frequency sort. (defect: mat-erisan var212 legend rendered 4,3,5,2,1 instead of
+    # 1..5, so "Top 2" (4+5) read as the two visually-biggest bands (3+4) instead)
     _bars_are_segments = spec.chart_type in _STACKED_BAR_TYPES and bool(spec.classifying_var)
+    _stacked_rating_scale = spec.chart_type in _STACKED_BAR_TYPES and is_rating
     sort_spec = (SortSpec(basis="data_order")
-                 if (scale_entries is not None or _bars_are_segments) else spec.sort)
+                 if (scale_entries is not None or _bars_are_segments
+                     or _stacked_rating_scale) else spec.sort)
     categories: list[str] = list(sort_categories(rows, sort_spec))
 
     if show_na:
