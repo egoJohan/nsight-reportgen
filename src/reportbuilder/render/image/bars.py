@@ -541,26 +541,83 @@ def _measure_max_label_width_in(labels: list[str], fontsize: float, *,
     return float(widest_px) / dpi
 
 
-# Fixed per-panel overhead OUTSIDE the label gutter that a side-by-side panel
-# still needs even after the label block is accounted for: the value-axis
-# spine/tick marks, the gap between the two panels (`subplots_adjust`'s
-# `wspace`), and the outer figure margins. This overhead doesn't scale with
-# label length, so it's subtracted as a flat inches allowance rather than
-# modelled precisely from matplotlib's normalized subplot fractions (which
-# themselves depend on the label width, making an exact closed form circular).
-_PANEL_CHROME_IN: float = 0.6
+# Small buffer between a measured label block and whatever it sits against
+# (the axis spine/tick mark on one side, the neighbouring axes' edge on the
+# other) so a label doesn't visually kiss the plot or its neighbour even when
+# sized exactly to the label's own measured width.
+_LABEL_PAD_IN: float = 0.12
+# Fixed right-hand figure margin: nothing in this layout draws a label at the
+# figure's right edge (the rightmost panel's value-axis lives INSIDE its own
+# axes), so this only needs to clear the outermost tick mark, not a label.
+_RIGHT_MARGIN_IN: float = 0.15
 # Floor for the width actually left to DRAW bars once a horizontal panel's
-# label gutter and chrome are subtracted from its side-by-side half. A 0-100%
-# value axis needs enough width for bar-length differences of a few points to
-# read as visually distinct; below this floor two side-by-side panels would
-# each be a stamp, so stacking (full width, half height per panel) is the
-# more legible choice. Chosen, not derived: ~1/4 of the 9in figure-width
-# floor, i.e. still noticeably more than a bare tick-label's width (~0.2in).
+# label gutter/gap is subtracted from its side-by-side share. A 0-100% value
+# axis needs enough width for bar-length differences of a few points to read
+# as visually distinct; below this floor two side-by-side panels would each
+# be a stamp, so stacking (full width, half height per panel) is the more
+# legible choice. Chosen, not derived: ~1/4 of the 9in figure-width floor,
+# i.e. still noticeably more than a bare tick-label's width (~0.2in).
 _MIN_HGUTTER_PLOT_IN: float = 2.2
 
 
+def _side_by_side_layout(fig_w_in: float, n_panels: int,
+                          left_label_w_in: float, gap_label_w_in: float
+                          ) -> tuple[float, float, float, float]:
+    """The (left_frac, right_frac, wspace_frac, plot_w_in) matplotlib needs
+    to actually draw `n_panels` EQUAL-width side-by-side axes without any
+    panel's OWN tick labels overflowing onto a neighbour.
+
+    This is the single source of truth for BOTH the side-by-side FIT
+    DECISION (`_stack_panels` and `_render_stacked_variable_panels` compare
+    the returned `plot_w_in` against `_MIN_HGUTTER_PLOT_IN`) and the actual
+    render call's `subplots_adjust(left=..., right=..., wspace=...)` — ALL
+    THREE returned fractions must be passed to that call, not just
+    `left`/`wspace`: `right_frac` is part of the same span arithmetic
+    `wspace_frac` was solved against, and matplotlib's default `right`
+    (0.9) is not it — passing only two of the three silently narrows the
+    real span below what `wspace_frac` assumed, undersizing the very gap
+    this function computed to prevent overlap. (This exact omission was
+    caught in review: `plot_w_in` and `wspace_frac` looked right on paper,
+    but the figure that actually got saved used matplotlib's default
+    `right=0.9` instead of this function's `right_frac`, so the real
+    available span was narrower than what `wspace_frac` was sized for, and
+    a panel's label bled into its neighbour anyway.)
+
+    Matplotlib draws y/x-tick labels OUTSIDE their own axes, extending to
+    the axes' own left: panel 0's own labels land in the figure's `left`
+    margin, and panel 1's own labels land in the GAP between panel 0 and 1
+    (`wspace`) — never inside their own axes' bounding box, so a
+    too-narrow margin/gap lands the label ON TOP OF THE NEIGHBOUR'S bars.
+
+    `left_label_w_in` / `gap_label_w_in` are the pre-measured (already
+    wrapped/rotated exactly as the real chart draws them) max label width
+    for whichever panel draws INTO that margin/gap — 0.0 when that panel
+    draws no label of its own there (e.g. a shared-y-axis clustered
+    renderer, where only panel 0 ever shows a label at all).
+
+    `wspace` is matplotlib's own unit: a fraction of the MEAN AXES WIDTH,
+    not of the figure (`matplotlib.figure.SubplotParams`) — and that axes
+    width is exactly what this function solves for, so it can't be produced
+    by a simple division of a target gap-in-inches. Solved directly instead
+    of iterated: with `n_panels` equal-width axes of width `w` (inches) and
+    `n_panels - 1` gaps of `gap_in` inches between them, the total span
+    available for axes + gaps is `(right_frac - left_frac) * fig_w_in =
+    n_panels * w + (n_panels - 1) * gap_in` — a single division for `w`,
+    no fixed point.
+    """
+    n_panels = max(n_panels, 1)
+    left_frac = (left_label_w_in + _LABEL_PAD_IN) / fig_w_in
+    right_frac = 1.0 - (_RIGHT_MARGIN_IN / fig_w_in)
+    gap_in = (gap_label_w_in + _LABEL_PAD_IN) if n_panels > 1 else 0.0
+    span_in = max(0.0, (right_frac - left_frac) * fig_w_in)
+    plot_w_in = (span_in - (n_panels - 1) * gap_in) / n_panels
+    wspace_frac = (gap_in / plot_w_in) if (n_panels > 1 and plot_w_in > 0) else 0.12
+    return left_frac, right_frac, wspace_frac, plot_w_in
+
+
 def _stack_panels(cats: list[str], *, fig_w_in: float, fontsize: float,
-                   vertical: bool, n_panels: int = 2) -> bool:
+                   vertical: bool, n_panels: int = 2,
+                   shared_labels: bool = True) -> bool:
     """True when SEPARATE panels should sit one above the other rather than
     side by side.
 
@@ -570,34 +627,45 @@ def _stack_panels(cats: list[str], *, fig_w_in: float, fontsize: float,
     the rotated vertical x-axis) and measured at the real `fontsize` via
     `_measure_max_label_width_in` (actual matplotlib text metrics, not a
     character count) — demonstrably do not fit `n_panels` panels side by side
-    across a `fig_w_in`-wide figure.
+    across a `fig_w_in`-wide figure. The room available is computed by
+    `_side_by_side_layout` — the SAME function the render call uses to size
+    `subplots_adjust(left=..., wspace=...)`, so this decision and the actual
+    layout can never disagree.
 
-    HORIZONTAL panels: category labels sit in each panel's left gutter. Side
-    by side gives each panel `fig_w_in / n_panels`. The widest measured label
-    block is subtracted from that half, along with the fixed `_PANEL_CHROME_IN`
-    overhead; what's left is the room actually available to draw bars and read
-    the value axis. Below `_MIN_HGUTTER_PLOT_IN` that room is too cramped to be
-    useful, so the panels stack instead.
+    HORIZONTAL panels: category labels sit in each panel's left gutter.
+    `shared_labels=True` (the default, matching `_render_variable_panels`'s
+    shared-y-axis clustered renderer) means only panel 0 ever draws `cats` as
+    a label, so only the figure's `left` margin needs to fit it — `False`
+    means every panel draws its own copy (not used by any current caller of
+    THIS convenience wrapper; `_render_stacked_variable_panels` has genuinely
+    different per-panel label sets and computes its own layout directly
+    instead, per-panel, rather than through this cats-only entry point).
+    Below `_MIN_HGUTTER_PLOT_IN` of resulting plot width, the panels stack.
 
     VERTICAL panels: category labels sit on the shared x-axis, rotated by
-    `_XTICK_ROTATION`. There is no single gutter here — the binding constraint
-    is `len(cats)` labels arrayed side by side across the panel's width, each
-    getting only `(panel_w - chrome) / len(cats)` of horizontal room. If the
-    widest rotated label footprint exceeds that per-category share, neighbours
-    would overlap, so the panels stack. (This is where category COUNT still
-    matters — but as a divisor against measured width, not a bare `> 6`.)
-    (spec 2026-08-04, revised for runtime measurement 2026-08-06)"""
-    panel_w_in = fig_w_in / max(n_panels, 1)
+    `_XTICK_ROTATION`, and EVERY panel draws its own copy of the same `cats`
+    (so both the left margin and the inter-panel gap need to fit them). The
+    binding constraint is `len(cats)` labels arrayed side by side across the
+    resulting per-panel plot width — if the widest rotated label footprint
+    exceeds `plot_w_in / len(cats)`, neighbouring ticks within one panel
+    would overlap each other, so the panels stack. (This is where category
+    COUNT still matters — but as a divisor against measured plot width, not
+    a bare `> 6`.)
+    (spec 2026-08-04; revised for runtime measurement 2026-08-06; layout
+    unified with `_side_by_side_layout` 2026-08-06)"""
     if vertical:
         wrapped = [_wrap_xtick_label(c) for c in cats]
         label_w_in = _measure_max_label_width_in(wrapped, fontsize, rotation=_XTICK_ROTATION)
-        plot_w_in = panel_w_in - _PANEL_CHROME_IN
+        _left, _right, _wspace, plot_w_in = _side_by_side_layout(
+            fig_w_in, n_panels, label_w_in, label_w_in)
         per_cat_in = plot_w_in / max(len(cats), 1)
         return bool(label_w_in > per_cat_in)
     wrapped = [_wrap_label(c) for c in cats]
     label_w_in = _measure_max_label_width_in(wrapped, fontsize, rotation=0.0)
-    usable_in = panel_w_in - label_w_in - _PANEL_CHROME_IN
-    return bool(usable_in < _MIN_HGUTTER_PLOT_IN)
+    gap_w_in = 0.0 if shared_labels else label_w_in
+    _left, _right, _wspace, plot_w_in = _side_by_side_layout(
+        fig_w_in, n_panels, label_w_in, gap_w_in)
+    return bool(plot_w_in < _MIN_HGUTTER_PLOT_IN)
 
 
 def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
@@ -621,8 +689,34 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     # horizontal left-gutter, 8.5 for the vertical rotated x-axis) so the fit
     # test measures the labels at the size they will really be drawn at.
     panel_fontsize = 8.5 if vertical else 9.0
+    n_candidate = len(groups)
     rows = 2 if _stack_panels(list(cats), fig_w_in=fig_w_in, fontsize=panel_fontsize,
-                              vertical=vertical) else 1
+                              vertical=vertical, n_panels=n_candidate) else 1
+    # `cols` mirrors `new_figure_grid`'s own ceil(n / rows) so the margin/gap
+    # computed below matches the grid that actually gets built.
+    cols = max(1, -(-n_candidate // rows))
+    # The SAME measurement `_stack_panels` used for the fit decision, reused
+    # here (not passed through — `_stack_panels` stays a cats-in/bool-out
+    # unit so its existing tests keep working) to size the ACTUAL
+    # `subplots_adjust` margins via `_side_by_side_layout` — the fit decision
+    # and the space allocation must agree, or a panel measured as "fits" can
+    # still render with a too-narrow margin and overflow onto its neighbour.
+    if vertical:
+        panel_label_w_in = _measure_max_label_width_in(
+            [_wrap_xtick_label(c) for c in cats], panel_fontsize, rotation=_XTICK_ROTATION)
+        # Every panel draws its OWN copy of the same rotated `cats` (no
+        # shared axis on the x-side), so both the left margin and the
+        # inter-panel gap need to fit it.
+        gap_label_w_in = panel_label_w_in
+    else:
+        panel_label_w_in = _measure_max_label_width_in(
+            [_wrap_label(c) for c in cats], panel_fontsize, rotation=0.0)
+        # sharey=True means only the leftmost panel of each row ever DISPLAYS
+        # a label (see `first_in_row` below) — no other panel draws one, so
+        # no inter-panel gap needs to accommodate one.
+        gap_label_w_in = 0.0
+    left_frac, right_frac, wspace_frac, _plot_w_in = _side_by_side_layout(
+        fig_w_in, cols, panel_label_w_in, gap_label_w_in)
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, [])
                 if v is not None]
     max_val = max(all_vals, default=0.0)
@@ -693,8 +787,8 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
             ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
                       ncol=min(len(names), 4), frameon=False, fontsize=9)
 
-    fig.subplots_adjust(bottom=0.24, wspace=0.12, hspace=0.45, top=0.9,
-                        left=0.12 if vertical else 0.2)
+    fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
+                        left=left_frac, right=right_frac)
     place_picture(ctx, render_png(fig))
 
 
@@ -943,12 +1037,37 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     groups = _drawable_panels(_primary_groups(series), bars_all)
     clrs = scale_colors(len(stack))                 # the stack is the shared scale
     fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    bar_labels = [_secondary_tick(s) for _p, segs in groups for s in segs]
-    # This renderer is always the HORIZONTAL panel style (see the docstring
-    # above), and its bar labels are drawn at fontsize=10.5 below — pass both
-    # through so the fit test matches what actually gets rendered.
-    rows = 2 if _stack_panels(bar_labels, fig_w_in=fig_w_in, fontsize=10.5,
-                              vertical=False) else 1
+    # Each panel's OWN bar labels (the classifier's own group names, via
+    # `_secondary_tick`), measured PER PANEL rather than flattened into one
+    # global list: panel 0's labels only need to fit the figure's LEFT
+    # margin, panel 1's only need to fit the GAP between panel 0 and 1 (see
+    # `_side_by_side_layout`) — sharey=False means every panel draws its own
+    # labels, unlike the clustered renderer's shared y-axis. Measured at
+    # fontsize=10.5 to match the real `ax.set_yticklabels(...)` call below.
+    panel_label_w_in = [
+        _measure_max_label_width_in(
+            [_wrap_label(_secondary_tick(b)) for b in bars], 10.5)
+        for _p, bars in groups
+    ]
+    n_candidate = len(groups)
+    left0_w_in = panel_label_w_in[0] if panel_label_w_in else 0.0
+    gap1_w_in = panel_label_w_in[1] if n_candidate > 1 else 0.0
+    _left_sbs, _right_sbs, _wspace_sbs, plot_w_in = _side_by_side_layout(
+        fig_w_in, n_candidate, left0_w_in, gap1_w_in)
+    rows = 2 if plot_w_in < _MIN_HGUTTER_PLOT_IN else 1
+    # `cols` mirrors `new_figure_grid`'s own ceil(n / rows).
+    cols = max(1, -(-n_candidate // rows))
+    if cols > 1:
+        left_frac, right_frac, wspace_frac, _plot_w = _side_by_side_layout(
+            fig_w_in, cols, left0_w_in, gap1_w_in)
+    else:
+        # One column: every row draws its OWN labels, but `subplots_adjust`'s
+        # `left` is a single figure-wide margin shared by every row — so it
+        # must fit the WIDEST label across ALL panels, not just panel 0's.
+        # No inter-panel gap exists (one column), so wspace is unused.
+        widest_w_in = max(panel_label_w_in, default=0.0)
+        left_frac, right_frac, wspace_frac, _plot_w = _side_by_side_layout(
+            fig_w_in, 1, widest_w_in, 0.0)
     flat_vals = [v for seg in stack for v in data[seg] if v is not None]
     max_bars = max((len(segs) for _p, segs in groups), default=1)
     # Own budget, not the clustered renderer's: each row here is ONE full-width
@@ -984,7 +1103,8 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
 
     if ctx.spec.elements.legend and len(stack) > 1:
         _legend_below(axes[-1], len(stack))
-    fig.subplots_adjust(bottom=0.24, wspace=0.18, hspace=0.45, top=0.9, left=0.2)
+    fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
+                        left=left_frac, right=right_frac)
     place_picture(ctx, render_png(fig))
 
 

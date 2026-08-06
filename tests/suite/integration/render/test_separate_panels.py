@@ -34,33 +34,56 @@ def _setup():
     return model, question, df
 
 
+# Two deliberately pathological, unbroken 40-character tokens — never real
+# survey text, chosen purely to force each character's full glyph width onto
+# a single wrapped line (`_wrap_label`'s `force_break_token` caps any line at
+# `_LABEL_WRAP_WIDTH`==30 chars, so this is close to the WIDEST a single
+# label block can physically measure). See `_setup_wide_bar_labels`.
+_PATHOLOGICAL_LABEL_1 = "M" * 40
+_PATHOLOGICAL_LABEL_2 = "W" * 40
+
+
 def _setup_wide_bar_labels():
-    """Like `_setup`, but Sukupuoli's own value labels are long sentences
-    ("Naiset ja muunsukupuoliset" / "Miehet ja muut vastaajat", 24-26 chars)
-    instead of "Nainen"/"Mies".
+    """Like `_setup`, but BOTH Sukupuoli's and Ikäryhmät's own value labels
+    are pathologically wide unbroken tokens instead of "Nainen"/"Mies"/
+    "Nuoret"/"Keski"/"Vanhat".
 
     For `test_stacked_separate_panels_grow_figure_height_with_rows`: the
-    STACKED panel renderer's `_stack_panels` call measures the BAR labels
-    (the classifier's own group names — these), not the answer categories, so
-    `_setup`'s short "Nainen"/"Mies"/"Nuoret"/"Keski"/"Vanhat" no longer trips
-    stacking under the measured rule (they fit a half-width gutter easily).
-    These sentence-length labels genuinely don't — they alone push the
-    measured label block past `_MIN_HGUTTER_PLOT_IN`'s usable-plot floor,
-    the same shape `_setup_stale_second` uses for its STACKED-type coverage.
-    `age`'s groups stay short/unchanged, so the group SIZES driving
-    `max_bars` (3 for Sukupuoli+Total, 4 for Ikäryhmät+Total) are identical
-    to `_setup`'s — only the label WIDTH that decides `rows` changes.
-    (re-expressed 2026-08-06 for the measured rule)"""
+    STACKED panel renderer measures each panel's OWN bar labels (the
+    classifier's own group names — these), PER PANEL — panel 0's own label
+    block only has to fit the figure's LEFT margin, and panel 1's only the
+    GAP between panel 0 and 1 (see `_side_by_side_layout`). That per-panel
+    costing turned out to be much more forgiving than a first-draft flat
+    approximation assumed: realistic Finnish sentence-length labels (even a
+    30-character single line, e.g. "Naiset ja muunsukupuoliset vastaajat")
+    top out around 1.8-2.0in at fontsize 10.5 and do NOT force stacking,
+    because only the panel that actually OWNS a wide label pays for it —
+    a short second panel doesn't inflate the shared cost. Forcing `rows ==
+    2` genuinely requires BOTH panels to carry a near-worst-case label (see
+    the arithmetic in `_side_by_side_layout`'s docstring: with two 9in-floor
+    panels, `_MIN_HGUTTER_PLOT_IN` is only undercut once both panels' widest
+    label exceeds ~2.1in — unreachable by realistic wrapped Finnish text
+    alone). Hence the two synthetic pathological tokens here, one for each
+    variable, rather than natural wording — this test now exists to prove
+    the ROWS==2 height-scaling *mechanism* still works, not to model a
+    plausible customer shape (that's `test_customer_scale_stays_side_by_side`
+    and `test_labels_that_genuinely_cannot_fit_still_stack`'s job).
+    `age` keeps a normal-length "Keski" alongside its own pathological entry
+    so the group SIZES driving `max_bars` (3 for Sukupuoli+Total, 4 for
+    Ikäryhmät+Total) stay identical to `_setup`'s — only label WIDTH changes.
+    (re-expressed 2026-08-06 for the measured rule; widened again 2026-08-06
+    once panel margins were split from a flat approximation to genuine
+    per-panel costing — see the coordinator finding in the task report)"""
     q = Variable(name="q", label="Suhtautuminen", measurement="scale",
                  value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 6)),
                  missing_values=frozenset())
     sex = Variable(name="sex", label="Sukupuoli", measurement="categorical",
-                   value_labels=(ValueLabel(1.0, "Naiset ja muunsukupuoliset"),
-                                 ValueLabel(2.0, "Miehet ja muut vastaajat")),
+                   value_labels=(ValueLabel(1.0, _PATHOLOGICAL_LABEL_1),
+                                 ValueLabel(2.0, _PATHOLOGICAL_LABEL_2)),
                    missing_values=frozenset())
     age = Variable(name="age", label="Ikäryhmät", measurement="categorical",
-                   value_labels=(ValueLabel(1.0, "Nuoret"), ValueLabel(2.0, "Keski"),
-                                 ValueLabel(3.0, "Vanhat")),
+                   value_labels=(ValueLabel(1.0, _PATHOLOGICAL_LABEL_1), ValueLabel(2.0, "Keski"),
+                                 ValueLabel(3.0, _PATHOLOGICAL_LABEL_2)),
                    missing_values=frozenset())
     model = QuestionModel(variables={"q": q, "sex": sex, "age": age}, questions=[])
     question = Question(qid="q", kind="single", variables=("q",), text="Suhtautuminen")
@@ -68,6 +91,44 @@ def _setup_wide_bar_labels():
         "q": [1.0, 2.0, 3.0, 4.0, 5.0] * 24,
         "sex": ([1.0] * 60) + ([2.0] * 60),
         "age": [1.0, 2.0, 3.0] * 40,
+    })
+    return model, question, df
+
+
+def _setup_realistic_classifier_labels():
+    """Mirrors the actual customer render that surfaced the overlap bug:
+    `var4`-style gender labels ("Naiseksi"/"Mieheksi", 8 chars) and
+    `var5`-style age-band labels ("18-24-vuotias" etc., ~13 chars, SIX
+    groups) — genuinely realistic survey text, not pathological, and (per
+    `_setup_wide_bar_labels`'s finding) comfortably narrow enough that
+    `_stack_panels`/`_side_by_side_layout` choose SIDE BY SIDE. That is
+    exactly the shape that exposed the bug: a fixed `subplots_adjust(left=,
+    wspace=)` doesn't care whether the decision was "fits" — it overflows
+    regardless of what the fit test concluded, unless the space allocation is
+    ALSO driven by the same measurement. Six age groups (not three) also
+    matches the real render's taller per-panel bar count."""
+    q = Variable(name="q", label="Suhtautuminen", measurement="scale",
+                 value_labels=tuple(ValueLabel(float(i), str(i)) for i in range(1, 6)),
+                 missing_values=frozenset())
+    sex = Variable(name="sex", label="Sukupuoli", measurement="categorical",
+                   value_labels=(ValueLabel(1.0, "Naiseksi"), ValueLabel(2.0, "Mieheksi")),
+                   missing_values=frozenset())
+    age = Variable(name="age", label="Ikä", measurement="categorical",
+                   value_labels=(
+                       ValueLabel(1.0, "18–24-vuotias"),
+                       ValueLabel(2.0, "25–34-vuotias"),
+                       ValueLabel(3.0, "35–44-vuotias"),
+                       ValueLabel(4.0, "45–54-vuotias"),
+                       ValueLabel(5.0, "55–64-vuotias"),
+                       ValueLabel(6.0, "65–69-vuotias"),
+                   ),
+                   missing_values=frozenset())
+    model = QuestionModel(variables={"q": q, "sex": sex, "age": age}, questions=[])
+    question = Question(qid="q", kind="single", variables=("q",), text="Suhtautuminen")
+    df = pd.DataFrame({
+        "q": [1.0, 2.0, 3.0, 4.0, 5.0] * 60,
+        "sex": ([1.0] * 150) + ([2.0] * 150),
+        "age": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] * 50,
     })
     return model, question, df
 
@@ -319,18 +380,41 @@ def test_labels_that_genuinely_cannot_fit_still_stack():
     """Guard against over-correcting to 'always side by side': labels that
     demonstrably cannot fit a half-width panel must still choose STACKED.
 
-    Horizontal: a single long, unhyphenated Finnish compound word (plausible
-    survey text — Finnish forms long compounds routinely) wraps to a first
-    line still too wide for a side-by-side gutter. Vertical: a dozen
-    ordinarily-worded categories (not pathologically long, just numerous)
-    crowd out the per-category width a rotated panel can spare."""
-    long_word = "Yhteiskuntavastuullisuusasenneindeksimittaristo"
-    assert _stack_panels(["a", long_word], fig_w_in=9.0, fontsize=9.0,
-                          vertical=False) is True
+    Vertical: a dozen ordinarily-worded categories (not pathologically long,
+    just numerous) crowd out the per-category width a rotated panel can
+    spare — realistic text, no exaggeration needed.
 
+    Horizontal (`shared_labels=False` — the STACKED panel renderer's real
+    per-panel geometry, where EVERY panel draws its OWN labels, unlike the
+    shared-axis clustered renderer default): two pathologically wide,
+    unbroken 40-character tokens, one per (synthetic) panel. This had to get
+    more extreme than a first draft of this test used (a single long, real
+    Finnish compound word) once the layout moved from a flat per-panel
+    approximation to genuine per-panel costing — seeing `_side_by_side_layout`'s
+    docstring, forcing `rows == 2` at the 9in figure-width floor requires
+    BOTH panels' own widest label to individually exceed ~2.1in, and
+    `_wrap_label`'s 30-character line cap keeps even long real Finnish
+    sentences under ~2.0in. So a real single long word is NOT actually a
+    case that fails to fit any more (see the shared-axis assertion below,
+    which is the shape `_render_variable_panels`'s clustered renderer
+    actually uses) — only a synthetic worst-case token pair demonstrates the
+    per-panel branch can still stack at all."""
     many_cats = [f"Kategoria {i}" for i in range(1, 13)]
     assert _stack_panels(many_cats, fig_w_in=9.0, fontsize=8.5,
                           vertical=True) is True
+
+    wide1, wide2 = "M" * 40, "W" * 40
+    assert _stack_panels([wide1, wide2], fig_w_in=9.0, fontsize=10.5,
+                          vertical=False, shared_labels=False) is True
+
+    # By contrast: a single long real Finnish compound word, measured against
+    # the SHARED-axis geometry `_render_variable_panels`'s horizontal branch
+    # actually uses (only one panel ever draws a label at all), does NOT
+    # stack — proving this isn't a case that quietly "always stacks now
+    # anyway" but a genuine, geometry-dependent difference.
+    long_word = "Yhteiskuntavastuullisuusasenneindeksimittaristo"
+    assert _stack_panels(["a", long_word], fig_w_in=9.0, fontsize=9.0,
+                          vertical=False, shared_labels=True) is False
 
 
 @pytest.mark.parametrize("chart_type", ["horizontal_bar", "vertical_bar"])
@@ -517,23 +601,19 @@ def test_stacked_separate_panels_render_two_axes_titled_by_variable(chart_type, 
 def test_stacked_separate_panels_grow_figure_height_with_rows(monkeypatch):
     """Regression-shaped test for the stacked panel renderer's own height budget.
 
-    Uses `_setup_wide_bar_labels` (Sukupuoli's own value labels are long
-    sentences, not "Nainen"/"Mies") rather than `_setup`: `_setup`'s short
-    classifier labels no longer trip `_stack_panels` under the measured rule
-    (they fit a half-width gutter easily — count alone, without width, is no
-    longer sufficient). The wide labels alone push the measured block past
-    `_MIN_HGUTTER_PLOT_IN`'s usable-plot floor. The engine still appends a
-    per-group reference "Total" bar for stacked chart types (see
-    `_stacked_layout`'s docstring) regardless of label text, so Sukupuoli's
-    panel still has 3 bars (2 groups + Total) and Ikäryhmät's still has 4
-    (3 groups + Total) — the SAME group sizes `_setup` produces, so the
-    max_bars(4)-derived height formula below is unaffected by the fixture
-    swap. That makes this the stacked-rows path the earlier clustered-panel
-    regression warns about, and it needs its OWN fixture-independent,
-    machine-verifiable assertion (font-metric-dependent overlap checks are
-    not) — the figure height computed from the fixed constants
-    `_render_stacked_variable_panels` documents: max_bars(4) *
-    `_HBAR_ROW_IN`(0.52) + 2.0, all * rows(2) = 8.16in.
+    Uses `_setup_wide_bar_labels` (see its docstring for why BOTH panels now
+    need a pathologically wide label, not just one, to force `rows == 2`
+    under the per-panel-costed layout). The engine still appends a per-group
+    reference "Total" bar for stacked chart types (see `_stacked_layout`'s
+    docstring) regardless of label text, so Sukupuoli's panel still has 3
+    bars (2 groups + Total) and Ikäryhmät's still has 4 (3 groups + Total) —
+    the SAME group sizes `_setup` produces, so the max_bars(4)-derived height
+    formula below is unaffected by the fixture's label content. That makes
+    this the stacked-rows path the earlier clustered-panel regression warns
+    about, and it needs its OWN fixture-independent, machine-verifiable
+    assertion (font-metric-dependent overlap checks are not) — the figure
+    height computed from the fixed constants `_render_stacked_variable_panels`
+    documents: max_bars(4) * `_HBAR_ROW_IN`(0.52) + 2.0, all * rows(2) = 8.16in.
     """
     import reportbuilder.render.image.bars as bars_mod
 
@@ -545,15 +625,27 @@ def test_stacked_separate_panels_grow_figure_height_with_rows(monkeypatch):
 
     # Independently confirm the fixture really does trip rows == 2 and max_bars == 4
     # before trusting the height computed from them (a wrong premise would make the
-    # height assertion pass for the wrong reason).
+    # height assertion pass for the wrong reason). Mirrors the PER-PANEL costing
+    # `_render_stacked_variable_panels` itself now uses (see
+    # `_side_by_side_layout`) rather than the single-flattened-list `_stack_panels`
+    # convenience wrapper, which no longer represents this call site's real
+    # (per-panel, not shared) label geometry.
     groups = bars_mod._primary_groups(series)
     assert [len(segs) for _p, segs in groups] == [3, 4]
     bars_all, _stack, _data = bars_mod._stacked_layout(series)
     drawable = bars_mod._drawable_panels(groups, bars_all)
-    flat = [bars_mod._secondary_tick(s) for _p, segs in drawable for s in segs]
+    panel_label_w_in = [
+        bars_mod._measure_max_label_width_in(
+            [bars_mod._wrap_label(bars_mod._secondary_tick(b)) for b in bars], 10.5)
+        for _p, bars in drawable
+    ]
     fig_w_in = max(9.0, slot.width / bars_mod._EMU_PER_IN)
-    assert bars_mod._stack_panels(flat, fig_w_in=fig_w_in, fontsize=10.5,
-                                  vertical=False) is True
+    _left, _right, _wspace, plot_w_in = bars_mod._side_by_side_layout(
+        fig_w_in, len(drawable), panel_label_w_in[0], panel_label_w_in[1])
+    assert plot_w_in < bars_mod._MIN_HGUTTER_PLOT_IN, (
+        f"premise: side-by-side plot width {plot_w_in}in should be below the "
+        f"{bars_mod._MIN_HGUTTER_PLOT_IN}in floor for this fixture"
+    )
 
     captured = {}
     real_render_png = bars_mod.render_png
@@ -570,3 +662,109 @@ def test_stacked_separate_panels_grow_figure_height_with_rows(monkeypatch):
         f"expected {expected}in from the documented max_bars*_HBAR_ROW_IN+2.0 * "
         f"rows budget, got {captured['h_in']}in"
     )
+
+
+# ---------------------------------------------------------------------------
+# Overlap regression: a fit DECISION alone proves nothing about the actual
+# picture — the arrangement can be measured as "fits side by side" and still
+# render with a label from one panel drawn on top of ANOTHER panel's bars if
+# the space allocation (`subplots_adjust`) isn't driven by the same
+# measurement. Caught by inspection of a real render (a fixed `left`/`wspace`
+# regardless of label width): `_render_stacked_variable_panels` used to end
+# with `subplots_adjust(..., wspace=0.18, left=0.2)` no matter what the fit
+# test had just decided. Checked here with matplotlib's OWN rendered
+# geometry (`get_window_extent`) against the actual figure that gets saved —
+# not source-level assertions about the formula, which cannot catch a
+# call site that computed the right numbers but forgot to use them.
+# ---------------------------------------------------------------------------
+
+def _assert_no_tick_label_overlaps_other_axes(fig) -> None:
+    """No axis's own tick label may overlap a DIFFERENT axis's plot area.
+
+    Matplotlib draws tick labels OUTSIDE their own axes' bounding box, so a
+    label legitimately extends past its own axes' edge into the figure
+    margin or inter-panel gap — that's expected and fine. What must never
+    happen is that extension reaching far enough to land inside a *different*
+    axes' own bounding box, which visually reads as text drawn over that
+    other panel's bars. `get_window_extent` gives both the label's and the
+    axes' TRUE rendered pixel geometry (post-layout, post-rotation), so this
+    checks the actual picture, not the subplots_adjust numbers that produced
+    it.
+    """
+    renderer = fig.canvas.get_renderer()
+    axes = list(fig.axes)
+    axes_bboxes = [(ax, ax.get_window_extent(renderer)) for ax in axes]
+    for ax in axes:
+        labels = list(ax.get_yticklabels()) + list(ax.get_xticklabels())
+        for label in labels:
+            if not label.get_visible() or not label.get_text():
+                continue
+            lbox = label.get_window_extent(renderer)
+            for other_ax, obox in axes_bboxes:
+                if other_ax is ax:
+                    continue
+                assert not lbox.overlaps(obox), (
+                    f"tick label {label.get_text()!r} (belonging to one panel) "
+                    "overlaps a DIFFERENT panel's plot area"
+                )
+
+
+@pytest.mark.parametrize("chart_type", ["stacked_horizontal_bar", "stacked_vertical_bar"])
+def test_stacked_panel_labels_never_overlap_a_neighbouring_panel(chart_type, monkeypatch):
+    """Direct regression for the reviewer-caught bug: with realistic (not
+    pathological) classifier labels that measure as fitting SIDE BY SIDE,
+    the right panel's own row labels must not be drawn on top of the left
+    panel's bars — and vice versa. Pre-fix, `_render_stacked_variable_panels`
+    ended with a FIXED `subplots_adjust(left=0.2, wspace=0.18)` regardless of
+    what `_stack_panels` had just measured, so a label wider than that fixed
+    budget silently overflowed into the neighbouring axes; this is exactly
+    what happened on the customer's real slide."""
+    import reportbuilder.render.image.bars as bars_mod
+
+    model, question, df = _setup_realistic_classifier_labels()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type), df, model)
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+
+    captured = {}
+    real_render_png = bars_mod.render_png
+
+    def _spy(fig):
+        captured["fig"] = fig
+        _assert_no_tick_label_overlaps_other_axes(fig)
+        return real_render_png(fig)
+
+    monkeypatch.setattr(bars_mod, "render_png", _spy)
+    IMAGE_BUILDERS[chart_type](ctx)
+    assert "fig" in captured, "render_png was never called"
+
+
+@pytest.mark.parametrize("chart_type", ["horizontal_bar", "vertical_bar"])
+def test_clustered_panel_labels_never_overlap_a_neighbouring_panel(chart_type, monkeypatch):
+    """Same check for `_render_variable_panels` (the clustered renderer):
+    even though its shared y-axis (sharey=True) meant it was never observed
+    to exhibit the reviewer-caught bug in practice (only the leftmost panel
+    of a row ever draws a label at all), it went through the same
+    `subplots_adjust` rewrite in this fix, so it gets the same direct,
+    pixel-level regression coverage rather than relying on that structural
+    argument alone."""
+    import reportbuilder.render.image.bars as bars_mod
+
+    model, question, df = _setup_realistic_classifier_labels()
+    spec_kw = dict(classifying_var="sex", classifying_var_2="age",
+                   options={"xtab_layout": "separate"})
+    series = compute(question, _spec(chart_type), df, model)
+    _prs, slide, slot, ctx = make_ctx(chart_type, series, **spec_kw)
+
+    captured = {}
+    real_render_png = bars_mod.render_png
+
+    def _spy(fig):
+        captured["fig"] = fig
+        _assert_no_tick_label_overlaps_other_axes(fig)
+        return real_render_png(fig)
+
+    monkeypatch.setattr(bars_mod, "render_png", _spy)
+    IMAGE_BUILDERS[chart_type](ctx)
+    assert "fig" in captured, "render_png was never called"
