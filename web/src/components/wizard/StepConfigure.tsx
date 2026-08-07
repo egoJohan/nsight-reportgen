@@ -779,6 +779,31 @@ function ChartControls({
         (f) => f.key !== "classifying_var_2" && f.key !== "xtab_layout"
       )
     : rawSchema;
+  // A multi-response question has no scale to take a "top N" of — its options are
+  // unordered categories, not points on a scale, so "Top 3" would just mean
+  // "whichever 3 options happen to sort last." Worse, a respondent can pick
+  // several options, so the option percentages OVERLAP: on the customer's own
+  // var7 slide the visible segments already sum to 465%, not 100%, so a "Sum of
+  // selected" or "Net" column would double-count respondents rather than
+  // summarize them. The engine reflects this: `row_summary` is only computed in
+  // `_single` (stats/engine.py:832) and `_battery_stacked` (:1608) — `_multi`
+  // never computes it, so picking a function here silently no-ops. Strip the
+  // whole row-summary group for a multi rather than teach `_multi` to compute a
+  // number that would be meaningless anyway; this must apply even to a chart
+  // that already has a stored `row_summary_fn` (e.g. from before this fix, or a
+  // question re-typed to multi) — a stored value stays inert, do not resurrect
+  // the control to "match" it. (2026-08-07)
+  const isMulti = question?.kind === "multi";
+  if (isMulti) {
+    schema = schema.filter(
+      (f) =>
+        f.key !== "row_summary_fn" &&
+        f.key !== "row_summary_label" &&
+        f.key !== "row_summary_codes" &&
+        f.key !== "row_summary_pos_codes" &&
+        f.key !== "row_summary_neg_codes"
+    );
+  }
   // The "Total column" control only makes sense once a classifying variable is
   // chosen — without one there is no Total to toggle. `classifying_var_2` STAYS in
   // the schema without a primary — ClassifyingVarWidget renders it disabled with a
