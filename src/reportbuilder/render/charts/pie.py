@@ -36,12 +36,15 @@ from reportbuilder.render.config_schema import single_series_schema
 from reportbuilder.render.shape import ADDITIVE_STATISTICS, SeriesShape
 from reportbuilder.render.image.pie import build_image_pie
 from reportbuilder.render.native.pie import build_pie
+from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 
 # Percent-of-base shortfall a pie/doughnut still tolerates (see module
 # docstring): comfortably above the ~2% worst case observed in legitimate
 # single-choice data, nowhere near the 100+ percentage points genuine
-# multi-response overlap produces.
-_UNDERSHOOT_TOL_PCT = 3.0
+# multi-response overlap produces. Defined once next to `is_partition` itself
+# (stats/series.py) — the stacked-bar renderer reads the SAME constant, so the
+# two never drift apart.
+_UNDERSHOOT_TOL_PCT = PARTITION_UNDERSHOOT_TOL_PCT
 
 
 def _is_parts_of_whole(question, series) -> bool:

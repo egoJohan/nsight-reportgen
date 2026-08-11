@@ -17,6 +17,18 @@ class Cell:
         return dict(self.extra).get(stat)
 
 
+# The ONE asymmetric partition allowance, shared by every caller that must decide
+# "do these categories really partition the base?" on real survey data rather than
+# assert an exact shape: a percent-of-base SHORTFALL up to this much is ordinary
+# (a small "no answer"/other slice counted in the base but not named among the
+# categories — an audit of the store's saved charts found ~50 legitimate
+# single-choice questions at 98-99.8% of base), while OVERSHOOT gets no slack at
+# all (see `is_partition`). Kept here, next to the predicate, so the offering side
+# (`render/charts/pie.py`) and the renderer (`render/image/bars.py`) cannot drift
+# into two differently-tuned rules for the same question.
+PARTITION_UNDERSHOOT_TOL_PCT = 3.0
+
+
 @dataclass(frozen=True)
 class SeriesResult:
     categories: tuple[str, ...]               # row labels, already in final sort order

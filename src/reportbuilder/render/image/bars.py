@@ -38,6 +38,7 @@ from reportbuilder.render.house_style import (
     series_colors, scale_colors, contrast_ink, INK, MUTED, GRIDC, register_fonts,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
+from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 from reportbuilder.model.report import default_label
 
 
@@ -69,10 +70,15 @@ def _row_summary_by_bar(series, bars) -> list[float | None]:
     return [by_key.get(b) for b in bars]
 
 
-def _draw_row_summary(ctx, ax, y, bars) -> None:
+def _draw_row_summary(ctx, ax, y, bars, axis_max: float = 100.0) -> None:
     """Right-hand per-row summary column (row_summary feature): a header above the
     top bar and one value per bar, aligned to `y`. No-op when the series carries no
-    row_summaries. (spec 2026-07-07-row-summary-column)"""
+    row_summaries. (spec 2026-07-07-row-summary-column)
+
+    `axis_max` is the value the bars are drawn against — 100 for a 100%-stacked
+    chart, the real maximum for one drawn at TRUE widths (see `_stack_scaling`).
+    The strip is placed proportionally to it, so it stays just off the right end
+    of the bars either way instead of landing inside a 0-465 plot."""
     if len(y) == 0:
         # No bars to summarise — `min(y)`/`max(y)` below would raise on an empty
         # sequence. Callers omit an empty panel, so this is belt-and-braces for any
@@ -84,9 +90,11 @@ def _draw_row_summary(ctx, ax, y, bars) -> None:
     fn = ctx.spec.row_summary_fn
     nf = ctx.spec.number_format
     header = ctx.spec.row_summary_label or default_label(fn)
-    ax.set_xlim(0, 118)                                   # reserve ~15% strip on the right
+    # Written as `x * axis_max / 100` (not `x * factor`) so the 100%-stacked case
+    # lands on EXACTLY the historical 118 / 109 — no float drift.
+    ax.set_xlim(0, 118.0 * axis_max / 100.0)              # reserve ~15% strip on the right
     ax.set_ylim(min(y) - 0.7, max(y) + 1.2)               # room for the header row
-    col_x = 109.0
+    col_x = 109.0 * axis_max / 100.0
     ax.text(col_x, max(y) + 0.9, header, ha="center", va="center",
             fontsize=9.0, fontweight="bold", color=MUTED, zorder=6)
     for yi, val in zip(y, vals):
@@ -189,8 +197,15 @@ def _value_axis(max_val: float, statistic: str) -> tuple[float, list[float]]:
     and means have no 100 cap — the axis scales to the data with ~5 "nice" ticks,
     otherwise a count of e.g. 600 would overflow a 0..100 axis and its data
     labels (placed at x=value) would blow up the tight bounding box, shrinking
-    the whole chart to a stamp."""
-    if statistic == "pct":
+    the whole chart to a stamp.
+
+    A percentage above 100 is not a rounding artefact to be clipped: it is a
+    stacked chart whose segments genuinely overlap (a multi-response question,
+    shares summing to e.g. 465%) drawn at its TRUE widths (`_stack_scaling`).
+    Capping that at 100 would push most of every bar off the axis — precisely
+    the dishonesty this axis exists to avoid — so it falls through to the
+    nice-tick branch and the axis reads to the real maximum."""
+    if statistic == "pct" and max_val <= 100.0:
         ax_max = min(100.0, max(max_val * 1.15, 10.0))
         return ax_max, [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
     # count / mean: nice round ticks covering the data range.
@@ -990,10 +1005,13 @@ def _stacked_layout(series):
     """Decompose a segmented series into a clean 100%-stacked layout.
 
     A stacked bar compares composition: each BAR is a classifying-variable
-    segment and the STACK is the question's answer categories. The engine's
-    per-segment percentages sum to 100 within a segment (column %), so each bar
-    fills exactly 100% — no overshoot, no floating 'Total'. Returns
-    (bars, stack, data) where data[stack_member] = [value per bar].
+    segment and the STACK is the question's answer categories. For a single-choice
+    question the engine's per-segment percentages sum to 100 within a segment
+    (column %), so each bar fills exactly 100% — no floating 'Total'. A
+    multi-response question does NOT: its option shares overlap and sum far past
+    100, which is why the drawing step asks `_stack_scaling` whether it may
+    normalise at all. Returns (bars, stack, data) where
+    data[stack_member] = [value per bar].
 
     With no classifier (segments == ('Total',)) there is nothing to split by, so
     the single 'Total' column IS the one bar and the answer categories become its
@@ -1018,10 +1036,65 @@ def _stacked_layout(series):
     return bars, stack, new_data
 
 
+def _bar_is_measurable(series, bar) -> bool:
+    """Whether `is_partition` can actually JUDGE this bar, i.e. whether a False
+    from it would be evidence of overlap rather than of missing information.
+
+    It needs a non-zero base and, for every category, a cell carrying a count or
+    a percentage. A mean-statistic stack (cells hold only `mean`), a zero base or
+    a hole in the cell grid says nothing about overlap, so such a bar must not be
+    the reason a whole chart abandons the 100% reading."""
+    if not series.base_n.get(bar):
+        return False
+    cells = [series.cells.get((c, bar)) for c in series.categories]
+    if not cells or any(c is None for c in cells):
+        return False
+    return (all(c.count is not None for c in cells)
+            or all(c.pct is not None for c in cells))
+
+
+def _stack_scaling(series, bars, stack, data) -> tuple[bool, float]:
+    """Decide, ONCE PER CHART, how a stacked chart's bars are scaled. Returns
+    (normalise, axis_max).
+
+    normalise=True — each bar's segments are scaled to fill exactly 100 (the
+    100%-stacked reading) against a 0-100 value axis. Honest only where the stack
+    really partitions each bar's base: then normalising just absorbs the ±1 of
+    rounding, and the drawn shape agrees with the printed numbers.
+
+    normalise=False — the TRUE values are drawn and the value axis carries the
+    real maximum. This is the multi-response case: respondents pick several
+    options, so the shares sum to far more than 100 (mat-erisan2/var7: 465%) and
+    normalising would draw a segment LABELLED "85 %" at 18% of the bar. The
+    printed number would be true and the picture false; a plain stacked bar is
+    the honest reading of the same data (and is what the native export already
+    emits — BAR_STACKED, not BAR_STACKED_100).
+
+    Per CHART, not per bar: mixing a normalised bar with a true-width one in the
+    same axes makes the two incomparable, which is worse than either alone. One
+    measurable bar that materially overshoots therefore draws every bar true.
+
+    The predicate is `SeriesResult.is_partition` with the SAME asymmetric
+    allowance the offering side gives a pie (`PARTITION_UNDERSHOOT_TOL_PCT`):
+    falling a couple of points short of 100 is a small unnamed "no answer" slice
+    and keeps normalising exactly as before; overshoot is overlap and gets no
+    slack. Bars `is_partition` cannot judge (see `_bar_is_measurable`) keep the
+    100% reading."""
+    normalise = all(
+        series.is_partition(b, undershoot_tol=PARTITION_UNDERSHOOT_TOL_PCT)
+        for b in bars if _bar_is_measurable(series, b)
+    )
+    if normalise:
+        return True, 100.0
+    totals = [sum(data[s][i] or 0.0 for s in stack) for i in range(len(bars))]
+    return False, max(totals, default=0.0)
+
+
 def _render_stacked_variable_panels(ctx, cats) -> None:
-    """SEPARATE layout for the stacked types: one 100%-stacked panel per classifying
-    VARIABLE. The stacked builders have no panel path of their own — they only draw
-    the grouped/rotated-primary layout — so this is the panel equivalent.
+    """SEPARATE layout for the stacked types: one stacked panel per classifying
+    VARIABLE (100%-stacked where the data allows it — see `_stack_scaling`). The
+    stacked builders have no panel path of their own — they only draw the
+    grouped/rotated-primary layout — so this is the panel equivalent.
 
     Decision, not an oversight: `build_image_column_stacked` (the VERTICAL 100%-
     stacked type) also calls this HORIZONTAL panel renderer. A 100% stack reads the
@@ -1031,6 +1104,10 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     """
     series = ctx.series
     bars_all, stack, data = _stacked_layout(series)
+    # Decided across ALL panels' bars, and the axis maximum shared by every panel:
+    # panels of one chart are read against each other, so they must not scale
+    # independently. (See `_stack_scaling`.)
+    normalise, axis_max = _stack_scaling(series, bars_all, stack, data)
     # `bars_all` is base-filtered; a variable whose every group is near-empty keeps
     # no bar at all, and a panel with no bars used to reach `min(y)` on an empty
     # sequence (ValueError). It is omitted instead. (final review I3)
@@ -1091,15 +1168,17 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
         idx = [bars_all.index(b) for b in bars]
         panel = {s: [data[s][i] for i in idx] for s in stack}
         y = np.arange(len(bars))[::-1]
-        _draw_stacked_panel(ax, bars, stack, panel, clrs, ctx, y, flat_vals)
+        _draw_stacked_panel(ax, bars, stack, panel, clrs, ctx, y, flat_vals,
+                            normalise=normalise, axis_max=axis_max)
         ax.set_yticks(y)
         ax.set_yticklabels([_wrap_label(_secondary_tick(b)) for b in bars],
                            fontsize=10.5, color=INK)
         ax.tick_params(axis="y", labelleft=True)
         ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-        _apply_bar_style(ax, 100.0)
+        _apply_bar_style(ax, axis_max, "pct" if normalise else series.statistic)
         ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
-        _draw_row_summary(ctx, ax, y, bars)         # per panel, keyed by bar
+        # per panel, keyed by bar — placed against the axis the bars were drawn on
+        _draw_row_summary(ctx, ax, y, bars, ax.get_xlim()[1])
 
     if ctx.spec.elements.legend and len(stack) > 1:
         _legend_below(axes[-1], len(stack))
@@ -1109,8 +1188,10 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
 
 
 def build_image_column_stacked(ctx) -> None:
-    """Stacked vertical (100%) bar chart: bars = classifier segments, stack =
-    answer categories (house style)."""
+    """Stacked vertical bar chart: bars = classifier segments, stack = answer
+    categories (house style). Normalised to 100% per column where the stack really
+    partitions the column's base, otherwise drawn at true heights
+    (`_stack_scaling`) — the horizontal builder's rule, applied to columns."""
     cats, segs, data = _stacked_layout(ctx.series)
     if _resolve_xtab_layout(ctx) == "separate":
         # Reuses the horizontal panel renderer — see the comment on
@@ -1129,9 +1210,14 @@ def build_image_column_stacked(ctx) -> None:
 
     # 100%-stacked: every column must reach exactly 100. Normalise each column's
     # segment HEIGHTS to its own total (rounded percentages sum to 99–101) so the
-    # tops align, while the data LABELS still show the original percentages.
+    # tops align, while the data LABELS still show the original percentages. Only
+    # where the stack genuinely partitions the column's base — otherwise the true
+    # heights are drawn and the axis carries the real maximum (`_stack_scaling`).
+    normalise, axis_max = _stack_scaling(ctx.series, cats, segs, data)
     totals = np.array([sum(data[s][i] or 0.0 for s in segs) for i in range(len(cats))])
-    norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    norm = (np.where(totals > 0, 100.0 / totals, 1.0) if normalise
+            else np.ones(len(cats)))
+    label_min = axis_max / 100.0    # "too thin to label" = 1% of the value axis
     bottoms = np.zeros(len(cats))
 
     for i, seg in enumerate(segs):
@@ -1142,7 +1228,7 @@ def build_image_column_stacked(ctx) -> None:
         bars = ax.bar(x, heights, bottom=bottoms, label=seg, color=bar_clrs,
                       edgecolor="none", zorder=3)
         for bar, ov, b, h in zip(bars, orig, bottoms, heights):
-            if h > 1:   # skip label if segment is too thin
+            if h > label_min:   # skip label if segment is too thin
                 ax.text(
                     bar.get_x() + bar.get_width() / 2, b + h / 2,
                     format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
@@ -1166,7 +1252,9 @@ def build_image_column_stacked(ctx) -> None:
             [_wrap_xtick_label(c) for c in cats], fontsize=10.5, color=INK,
             rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
         )
-    _apply_column_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
+    # Normalised → the axis IS the 0-100 composition scale, whatever statistic the
+    # columns carry. True heights → the axis must read the data's own statistic.
+    _apply_column_style(ax, axis_max, "pct" if normalise else ctx.series.statistic)
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))
@@ -1179,15 +1267,29 @@ def build_image_column_stacked(ctx) -> None:
 # build_image_bar_stacked
 # ---------------------------------------------------------------------------
 
-def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals) -> None:
-    """Draw ONE 100%-stacked horizontal panel onto `ax`.
+def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
+                        normalise: bool = True, axis_max: float = 100.0) -> None:
+    """Draw ONE stacked horizontal panel onto `ax`.
 
-    Shared by the single-axes builder and the SEPARATE panel renderer. Each bar's
-    segment WIDTHS are normalised to its own total so the right edges align, while
-    the LABELS keep the original rounded percentages. (spec 2026-08-04)"""
+    Shared by the single-axes builder and the SEPARATE panel renderer — so both
+    get the same honesty treatment.
+
+    `normalise` (decided per chart by `_stack_scaling`): when True each bar's
+    segment WIDTHS are scaled to its own total so the right edges align at 100,
+    while the LABELS keep the original rounded percentages (spec 2026-08-04) —
+    the 100%-stacked reading. When False the TRUE widths are drawn against an
+    axis reaching `axis_max`, because the segments overlap and do not partition
+    the bar (see `_stack_scaling`)."""
     n_bars = len(bars)
     totals = np.array([sum(data[s][i] or 0.0 for s in stack) for i in range(n_bars)])
-    norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    if normalise:
+        norm = np.where(totals > 0, 100.0 / totals, 1.0)
+    else:
+        norm = np.ones(n_bars)
+    # "Too thin to label" is 1% of the value axis, not a fixed 1 unit: on a
+    # true-width 0-465 axis a 1-unit sliver is invisible but would still be
+    # labelled, and the labels would pile up on each other.
+    label_min = axis_max / 100.0
     lefts = np.zeros(n_bars)
     for i, seg in enumerate(stack):
         orig = np.array([data[seg][j] or 0.0 for j in range(n_bars)])
@@ -1197,7 +1299,7 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals) -> None:
         ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
                 edgecolor="none", zorder=3)
         for yi, ov, l, w, bc in zip(y, orig, lefts, widths, bar_clrs):
-            if w > 1:
+            if w > label_min:
                 ax.text(l + w / 2, yi,
                         format_value(ov, ctx.series.statistic, ctx.spec.number_format,
                                      flat_vals),
@@ -1207,8 +1309,9 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals) -> None:
 
 
 def build_image_bar_stacked(ctx) -> None:
-    """Stacked horizontal (100%) bar chart: bars = classifier segments, stack =
-    answer categories (house style)."""
+    """Stacked horizontal bar chart: bars = classifier segments, stack = answer
+    categories (house style). Normalised to 100% per bar where the stack really
+    partitions the bar's base, otherwise drawn at true widths (`_stack_scaling`)."""
     cats, segs, data = _stacked_layout(ctx.series)
     if _resolve_xtab_layout(ctx) == "separate":
         _render_stacked_variable_panels(ctx, cats)
@@ -1227,7 +1330,9 @@ def build_image_bar_stacked(ctx) -> None:
         y = np.arange(n_cats)[::-1]
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
 
-    _draw_stacked_panel(ax, cats, segs, data, clrs, ctx, y, flat_vals)
+    normalise, axis_max = _stack_scaling(ctx.series, cats, segs, data)
+    _draw_stacked_panel(ax, cats, segs, data, clrs, ctx, y, flat_vals,
+                        normalise=normalise, axis_max=axis_max)
 
     ax.set_yticks(y)
     if grouped:
@@ -1241,8 +1346,11 @@ def build_image_bar_stacked(ctx) -> None:
         # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
         ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=INK)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-    _apply_bar_style(ax, 100.0)   # 100%-stacked → fixed 0–100 axis
-    _draw_row_summary(ctx, ax, y, cats)  # right-hand per-row column (if configured)
+    # Normalised → the axis IS the 0-100 composition scale, whatever statistic the
+    # bars carry. True widths → the axis must read the data's own statistic.
+    _apply_bar_style(ax, axis_max, "pct" if normalise else ctx.series.statistic)
+    # right-hand per-row column (if configured), against the axis just applied
+    _draw_row_summary(ctx, ax, y, cats, ax.get_xlim()[1])
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs))
