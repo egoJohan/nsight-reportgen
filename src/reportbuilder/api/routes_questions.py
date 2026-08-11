@@ -88,13 +88,59 @@ def list_chart_types() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _quick_series(question, model: QuestionModel) -> SeriesResult:
+def _multi_quick_counts(question, model: QuestionModel, df) -> tuple[list[int], int] | None:
+    """The TRUE per-member selection counts + multi base for a multi question,
+    read directly off the member columns — cheap (one vectorized pass per
+    member column, no missing-value/segment/formatting work), unlike a
+    full `compute()`.
+
+    This exists to make `_quick_series`'s `is_partition()` truthful for multi
+    questions: the fabricated series used to give every question a count of
+    10 per category summing exactly to a fabricated base, so a genuinely
+    overlapping multi-response question (respondents pick several options,
+    e.g. "Valitse kaikki sopivat") looked like a partition and was wrongly
+    offered a pie/doughnut (renormalised %, every slice wrong). Returns None
+    — caller falls back to the old fabricated (assumed-partition) shape —
+    when the real columns aren't available (e.g. a model-only test double).
+    """
+    import pandas as pd
+
+    try:
+        vars_ = [model.variables[v] for v in question.variables]
+    except KeyError:
+        return None
+    if df is None or any(v.name not in getattr(df, "columns", ()) for v in vars_):
+        return None
+    try:
+        # One pass per member column (matches base_rules.multi_base's own
+        # "valid AND selected" test) — reused for both the per-category count
+        # and the OR-reduced base, instead of converting each column twice.
+        selected_masks = []
+        for v in vars_:
+            s = pd.to_numeric(df[v.name], errors="coerce")
+            selected_masks.append(s.notna() & ~s.isin(v.missing_values) & (s == 1.0))
+        counts = [int(m.sum()) for m in selected_masks]
+        answered = selected_masks[0]
+        for m in selected_masks[1:]:
+            answered = answered | m
+        base = int(answered.sum())
+    except Exception:
+        return None
+    return counts, base
+
+
+def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
     """Build a minimal SeriesResult from the question's value-label shape.
 
-    Used exclusively by suggest_chart_type so no real survey data is needed.
-    For single questions: categories come from non-missing value labels.
-    For multi questions: categories are the member-variable labels.
-    (REQ-C-13)
+    Used exclusively by suggest_chart_type/_compatible_chart_types so no full
+    per-question `compute()` is needed for the browse-questions list (a
+    material can hold 200+ questions). For single questions: categories come
+    from non-missing value labels. For multi questions: categories are the
+    member-variable labels.
+
+    `df`, when given, is used ONLY to make a multi question's counts truthful
+    for the partition check (see `_multi_quick_counts`) — everything else
+    here stays synthetic/cheap. (REQ-C-13)
     """
     # multi + battery: one category per member variable (its rewritten label).
     if question.kind in ("multi", "battery"):
@@ -113,6 +159,24 @@ def _quick_series(question, model: QuestionModel) -> SeriesResult:
     # synthetic shape uses the mean statistic — keeps pie/doughnut out and
     # picks a bar default.
     is_battery = question.kind == "battery"
+
+    if question.kind == "multi" and cats:
+        real = _multi_quick_counts(question, model, df)
+        if real is not None:
+            counts, base = real
+            if base > 0:
+                cells = {
+                    (cat, "Total"): Cell(pct=c / base * 100.0, count=float(c))
+                    for cat, c in zip(cats, counts)
+                }
+                return SeriesResult(
+                    categories=cats,
+                    segments=("Total",),
+                    cells=cells,
+                    base_n={"Total": base},
+                    statistic="pct",
+                )
+
     segments = ("Total",)
     cells: dict[tuple[str, str], Cell] = {
         (cat, "Total"): Cell(pct=None if is_battery else 50.0, count=10.0,
@@ -538,7 +602,7 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
                 suggested = "themes"
                 compatible = ["themes", "wordcloud"]
         else:
-            series = _quick_series(q, model)
+            series = _quick_series(q, model, _df_or_none())
             suggested = suggest_chart_type(q, series)
             # Non-text questions never offer wordcloud (its suitability is None).
             compatible = _compatible_chart_types(q, series)

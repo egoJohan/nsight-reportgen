@@ -56,7 +56,8 @@ class SeriesResult:
         """Number of segments (series). 1 = a single overall series."""
         return len(self.segments)
 
-    def is_partition(self, segment: str | None = None, *, tol: float = 1.0) -> bool:
+    def is_partition(self, segment: str | None = None, *, tol: float = 1.0,
+                     undershoot_tol: float | None = None) -> bool:
         """True when *segment*'s categories partition its base: every counted
         unit falls in exactly one category (mutually exclusive AND exhaustive).
 
@@ -69,7 +70,27 @@ class SeriesResult:
 
         Prefers exact integer counts; falls back to the percentage shares
         (sum ~= 100%) when counts are absent.  ``tol`` absorbs float/rounding
-        noise only — it is not slack for genuine overlap.
+        noise only on BOTH sides — it is not slack for genuine overlap — and is
+        the only check that runs when ``undershoot_tol`` is left at its default
+        (None): the strict, symmetric predicate every caller gets unless it
+        explicitly opts into the asymmetric one below.
+
+        ``undershoot_tol``, when given, is a SEPARATE, wider allowance for
+        shortfall only (the sum falling below the base / 100%), expressed as
+        "percent of the base" so it means the same thing whether the check is
+        running on raw counts or on percentages. Real single-choice survey
+        data commonly excludes a small "no answer"/other slice from the named
+        categories while still counting those respondents in the base — a
+        shortfall of a few tenths of a percent up to ~2% is ordinary and,
+        once a pie/doughnut renormalises to fill the circle, invisible. It
+        deliberately does NOT loosen the overshoot side (still bound by
+        ``tol``): overshoot is exactly what flags genuine multi-response
+        overlap (a real defect — a pie would double-count / silently
+        renormalise the true numbers away), so widening it would hide the
+        thing this check exists to catch. Callers that offer a chart type
+        rather than assert an exact shape (e.g. ``render/charts/pie.py``)
+        should pass this explicitly, with a comment — never rely on a change
+        to this method's default to get it.
         """
         seg = segment if segment is not None else (
             self.segments[0] if self.segments else None
@@ -87,8 +108,17 @@ class SeriesResult:
                 return False
             counts.append(cell.count)
             pcts.append(cell.pct)
+
+        def _within(total: float, whole: float) -> bool:
+            diff = total - whole  # > 0 overshoot (overlap); < 0 undershoot
+            if diff > tol:
+                return False
+            if undershoot_tol is not None:
+                return diff >= -(undershoot_tol / 100.0) * whole
+            return diff >= -tol
+
         if counts and all(c is not None for c in counts):
-            return abs(sum(counts) - base) <= tol  # type: ignore[arg-type]
+            return _within(float(sum(counts)), float(base))  # type: ignore[arg-type]
         if pcts and all(p is not None for p in pcts):
-            return abs(sum(pcts) - 100.0) <= tol  # type: ignore[arg-type]
+            return _within(float(sum(pcts)), 100.0)  # type: ignore[arg-type]
         return False

@@ -77,6 +77,44 @@ def test_doughnut_matches_pie_suitability():
     assert plugin("doughnut").suitability(B.q(), B.mean_series()) is None
 
 
+# ---- pie/doughnut offering-side undershoot tolerance ------------------------
+#
+# An audit of the store's saved partition-assuming charts found three real
+# populations behind a not-strictly-100% pie/doughnut. The gate must separate
+# them: harmless shortfall keeps pie, overshoot (genuine overlap, or two
+# codes merged onto one label) loses it. See render/charts/pie.py.
+
+def test_pie_kept_for_single_choice_with_small_no_answer_shortfall():
+    """Population 3 (~50 real slides): a few non-respondents excluded from
+    the named categories but still counted in the base -> 98-99.8% of base."""
+    s = B.build_series(("A", "B", "C"), statistic="pct", base=1000,
+                       pct={"A": 500 / 10, "B": 300 / 10, "C": 182 / 10},
+                       count={"A": 500.0, "B": 300.0, "C": 182.0})  # 98.2% of base
+    assert plugin("pie").suitability(B.q(), s) is not None
+    assert plugin("doughnut").suitability(B.q(), s) is not None
+
+
+def test_pie_dropped_for_merged_label_overshoot():
+    """Population 2 (1 real slide): two answer codes merged onto one display
+    label -> shares sum to 104% of base. Still not a partition."""
+    s = B.build_series(("A", "B"), statistic="pct", base=100,
+                       pct={"A": 60.0, "B": 44.0},
+                       count={"A": 60.0, "B": 44.0})
+    assert plugin("pie").suitability(B.q(), s) is None
+    assert plugin("doughnut").suitability(B.q(), s) is None
+
+
+def test_pie_dropped_for_genuine_multi_response_overlap():
+    """Population 1 (2 real slides, the root-cause defect): shares sum to
+    462%/800% of base -> real respondent overlap, not offered."""
+    for total_pct in (462.0, 800.0):
+        s = B.build_series(("A", "B"), statistic="pct", base=100,
+                           pct={"A": total_pct / 2, "B": total_pct / 2},
+                           count={"A": total_pct / 2, "B": total_pct / 2})
+        assert plugin("pie").suitability(B.q("multi"), s) is None, total_pct
+        assert plugin("doughnut").suitability(B.q("multi"), s) is None, total_pct
+
+
 # ---- scatter / wordcloud always None ---------------------------------------
 
 @pytest.mark.parametrize("cid", ["scatter", "wordcloud"])

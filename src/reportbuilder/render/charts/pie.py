@@ -15,6 +15,19 @@ data, so:
 A pie also needs an additive statistic (percentage/count, never a mean) and a
 single series (a classifying variable splits the data into several series, which
 a single pie cannot show).
+
+OFFERING-side tolerance (this module only — NOT a change to `is_partition()`'s
+own default): real single-choice survey data routinely excludes a small "no
+answer"/other slice from the named categories while still counting it in the
+base, so the shares land a bit short of 100% (an audit of the store's saved
+partition-assuming charts found this on ~50 legitimate single-choice slides,
+shortfalls of 0.2-2%, invisible once the pie renormalises to fill the circle).
+That shortfall must NOT cost those questions their pie. Overshoot gets no such
+slack: it's exactly what a genuinely overlapping multi-response set produces
+(two real slides in that same audit summed to 462% and 800%), so it stays
+bound by `is_partition()`'s own strict, float-noise-only `tol`. Hence we call
+`series.is_partition(..., undershoot_tol=_UNDERSHOOT_TOL_PCT)` here rather than
+reading the (deliberately strict) `SeriesShape.is_partition` field.
 """
 from __future__ import annotations
 
@@ -24,21 +37,27 @@ from reportbuilder.render.shape import ADDITIVE_STATISTICS, SeriesShape
 from reportbuilder.render.image.pie import build_image_pie
 from reportbuilder.render.native.pie import build_pie
 
+# Percent-of-base shortfall a pie/doughnut still tolerates (see module
+# docstring): comfortably above the ~2% worst case observed in legitimate
+# single-choice data, nowhere near the 100+ percentage points genuine
+# multi-response overlap produces.
+_UNDERSHOOT_TOL_PCT = 3.0
 
-def _is_parts_of_whole(s: SeriesShape) -> bool:
+
+def _is_parts_of_whole(question, series) -> bool:
     """The structural precondition shared by pie and doughnut."""
-    return (
-        s.n_series == 1
-        and s.statistic in ADDITIVE_STATISTICS
-        and s.is_partition
-    )
+    s = SeriesShape.of(question, series)
+    if s.n_series != 1 or s.statistic not in ADDITIVE_STATISTICS:
+        return False
+    seg = series.segments[0] if series.segments else None
+    return series.is_partition(seg, undershoot_tol=_UNDERSHOOT_TOL_PCT)
 
 
 def pie_suitability(question, series) -> float | None:
     """None (hidden) unless the data is a single-series partition of a whole."""
-    s = SeriesShape.of(question, series)
-    if not _is_parts_of_whole(s):
+    if not _is_parts_of_whole(question, series):
         return None
+    s = SeriesShape.of(question, series)
     return 0.75 if s.n_categories <= 6 else 0.50
 
 
@@ -60,9 +79,9 @@ def pie_suggest(question, series) -> float | None:
     """Default for NOMINAL parts-of-whole (unordered groups, few slices) — a pie
     reads a composition better than a bar there. Ordered scales (Likert, age
     bands) keep bars. A very small partition (<=4) defaults to pie regardless."""
-    s = SeriesShape.of(question, series)
-    if not _is_parts_of_whole(s):
+    if not _is_parts_of_whole(question, series):
         return None
+    s = SeriesShape.of(question, series)
     if s.n_categories <= 6 and not _looks_ordinal(series):
         return 0.95  # nominal parts-of-whole → pie is the natural default
     if s.n_categories <= 4:
