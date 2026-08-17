@@ -9,3 +9,9 @@ __pycache__/
 # Local-only client SAV copies for demo-group e2e (IPR — never commit)
 # Ignore the binaries but keep the README that explains how to populate them.
 tests/rb/e2e/data/sav/
+
+# Local credentials (API keys/tokens) — never commit.
+.local.env
+*.local.env
+.env
+.env.local
