@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, Link, useSearchParams } from "react-router-dom";
 import { PlusIcon, FolderIcon, ArrowRightIcon, ChevronLeftIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,22 @@ export default function CustomerCasesPage() {
   const { data: customer } = useCustomer(customerId);
   const { data: cases, isLoading, isError } = useCustomerCases(customerId);
   const createCase = useCreateCustomerCase(customerId);
-  const [open, setOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
+
+  // Reached from the sidebar's per-customer "Uusi case" link.
+  const open = searchParams.get("new") === "case";
+  function setOpen(next: boolean) {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next) p.set("new", "case");
+        else p.delete("new");
+        return p;
+      },
+      { replace: true }
+    );
+  }
 
   async function submit() {
     const trimmed = name.trim();

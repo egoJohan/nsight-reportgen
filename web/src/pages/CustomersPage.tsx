@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PlusIcon, Building2Icon, ArrowRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,23 @@ export default function CustomersPage() {
   const navigate = useNavigate();
   const { data: customers, isLoading, isError } = useCustomers();
   const createCustomer = useCreateCustomer();
-  const [open, setOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
+
+  // The sidebar links to /?new=customer rather than reaching into this page's
+  // state, so the action works from anywhere in the app.
+  const open = searchParams.get("new") === "customer";
+  function setOpen(next: boolean) {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next) p.set("new", "customer");
+        else p.delete("new");
+        return p;
+      },
+      { replace: true }
+    );
+  }
 
   async function submit() {
     const trimmed = name.trim();

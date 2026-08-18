@@ -18,51 +18,119 @@ import {
   SidebarMenuButton,
   SidebarInset,
   SidebarTrigger,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { useCases } from "@/lib/queries";
+import { useCases, useCustomers, useCustomerCases } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
-import NewCaseDialog from "@/components/NewCaseDialog";
 import ChatPanel from "@/components/ChatPanel";
 import {
   PlusIcon,
   FolderOpenIcon,
+  Building2Icon,
+  ChevronRightIcon,
   SettingsIcon,
   XIcon,
   MessageSquareTextIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-function CasesNav() {
-  const { data: cases } = useCases();
-  const { id: activeId } = useParams();
+/** One customer's cases, fetched only while the group is open so opening the
+ *  sidebar does not fan out a request per customer. */
+function CustomerCases({ customerId }: { customerId: string }) {
+  const { data: cases, isLoading } = useCustomerCases(customerId);
+  const { id: activeCaseId } = useParams();
 
-  // The active case (e.g. one just created) may be far down a long list —
-  // scroll it into view so it's visibly selected, not hidden below the fold.
+  if (isLoading) {
+    return (
+      <SidebarMenuSub>
+        <SidebarMenuSubItem>
+          <span className="px-2 text-xs text-muted-foreground">Ladataan…</span>
+        </SidebarMenuSubItem>
+      </SidebarMenuSub>
+    );
+  }
+
+  return (
+    <SidebarMenuSub>
+      {cases?.map((k) => (
+        <SidebarMenuSubItem key={k.id}>
+          <SidebarMenuSubButton
+            render={<NavLink to={`/cases/${k.id}`} />}
+            isActive={activeCaseId === k.id}
+          >
+            <FolderOpenIcon className="size-4" />
+            <span className="truncate">{k.name}</span>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+      ))}
+
+      {cases?.length === 0 && (
+        <SidebarMenuSubItem>
+          <span className="px-2 text-xs text-muted-foreground">Ei vielä caseja</span>
+        </SidebarMenuSubItem>
+      )}
+
+      {/* Adding a case belongs to the customer it lands under, so the action
+          lives inside the group rather than as a global button. */}
+      <SidebarMenuSubItem>
+        <SidebarMenuSubButton
+          render={<NavLink to={`/customers/${customerId}?new=case`} />}
+          className="text-primary"
+        >
+          <PlusIcon className="size-4" />
+          <span>Uusi case</span>
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+    </SidebarMenuSub>
+  );
+}
+
+/** Asiakas -> Case tree. The menu mirrors the hierarchy: a case is only
+ *  reachable through the customer that owns it. */
+function CustomersNav() {
+  const { data: customers } = useCustomers();
+  const { customerId: routeCustomerId } = useParams();
+  const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
+
+  // Browsing a customer expands it, so the tree agrees with the page.
   useEffect(() => {
-    if (!activeId) return;
-    const el = document.querySelector(`a[href="/cases/${activeId}"]`);
-    el?.scrollIntoView({ block: "nearest" });
-  }, [activeId, cases]);
+    if (routeCustomerId) setOpenIds((prev) => ({ ...prev, [routeCustomerId]: true }));
+  }, [routeCustomerId]);
 
-  // Newest case first (descending): the backend returns cases in creation
-  // order, so reverse to put the most recent at the top.
-  const ordered = (cases ?? []).slice().reverse();
+  function toggle(id: string) {
+    setOpenIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
 
   return (
     <SidebarMenu>
-      {ordered.map((c) => (
-        <SidebarMenuItem key={c.id}>
-          <SidebarMenuButton
-            render={<NavLink to={`/cases/${c.id}`} />}
-            isActive={activeId === c.id}
-            tooltip={c.name}
-          >
-            <FolderOpenIcon className="size-4" />
-            <span className="truncate">{c.name}</span>
-          </SidebarMenuButton>
+      {customers?.map((c) => {
+        const open = !!openIds[c.id];
+        return (
+          <SidebarMenuItem key={c.id}>
+            <SidebarMenuButton
+              onClick={() => toggle(c.id)}
+              isActive={routeCustomerId === c.id}
+              tooltip={c.name}
+            >
+              <ChevronRightIcon
+                className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+              />
+              <Building2Icon className="size-4" />
+              <span className="truncate">{c.name}</span>
+            </SidebarMenuButton>
+            {open && <CustomerCases customerId={c.id} />}
+          </SidebarMenuItem>
+        );
+      })}
+
+      {customers?.length === 0 && (
+        <SidebarMenuItem>
+          <span className="px-2 text-xs text-muted-foreground">Ei vielä asiakkaita</span>
         </SidebarMenuItem>
-      ))}
+      )}
     </SidebarMenu>
   );
 }
@@ -70,16 +138,24 @@ function CasesNav() {
 function Breadcrumb() {
   const location = useLocation();
   const { data: cases } = useCases();
-  const { id } = useParams();
+  const { data: customers } = useCustomers();
+  const { id, customerId } = useParams();
 
   const currentCase = id ? cases?.find((c) => c.id === id) : null;
+  const currentCustomer = customerId ? customers?.find((c) => c.id === customerId) : null;
   const onCasePage = location.pathname.startsWith("/cases/");
 
   return (
     <nav className="flex items-center gap-1 text-sm text-muted-foreground">
       <NavLink to="/" className="hover:text-foreground transition-colors">
-        Cases
+        Asiakkaat
       </NavLink>
+      {currentCustomer && (
+        <>
+          <span className="text-muted-foreground/50 mx-0.5">/</span>
+          <span className="text-foreground font-medium">{currentCustomer.name}</span>
+        </>
+      )}
       {onCasePage && currentCase && (
         <>
           <span className="text-muted-foreground/50 mx-0.5">/</span>
@@ -147,7 +223,6 @@ function CloseReportButton() {
 }
 
 export default function AppShell() {
-  const [newCaseOpen, setNewCaseOpen] = useState(false);
   return (
     <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon">
@@ -162,29 +237,30 @@ export default function AppShell() {
         </SidebarHeader>
 
         <SidebarContent>
-          {/* New case — opens the upload dialog (creation = upload). */}
+          {/* A case is created under a customer, so the top-level action is
+              adding a CUSTOMER; "Uusi case" lives inside each customer group. */}
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    onClick={() => setNewCaseOpen(true)}
-                    tooltip="New case"
+                    render={<NavLink to="/?new=customer" />}
+                    tooltip="Uusi asiakas"
                     className="font-medium text-primary"
                   >
                     <PlusIcon className="size-4" />
-                    <span>New case</span>
+                    <span>Uusi asiakas</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Cases list — own scroll region (visible scrollbar) so a long list
-              is reachable while "New case" stays pinned above. */}
+          {/* Asiakas -> Case tree — own scroll region so a long list stays
+              reachable while "Uusi asiakas" stays pinned above. */}
           <SidebarGroup className="min-h-0 flex-1 overflow-y-auto group-data-[collapsible=icon]:hidden">
             <SidebarGroupContent>
-              <CasesNav />
+              <CustomersNav />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
@@ -224,7 +300,6 @@ export default function AppShell() {
         </main>
       </SidebarInset>
 
-      <NewCaseDialog open={newCaseOpen} onOpenChange={setNewCaseOpen} />
     </SidebarProvider>
   );
 }
