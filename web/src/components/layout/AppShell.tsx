@@ -208,7 +208,7 @@ function Breadcrumb() {
   const path = location.pathname;
 
   if (path === "/") {
-    crumbs.push({ label: "Viimeisimmät" });
+    crumbs.push({ label: "Etusivu" });
   } else if (path.startsWith("/customers")) {
     crumbs.push({ label: "Asiakkaat", to: customerId ? "/customers" : undefined });
     const c = customers?.find((x) => x.id === customerId);
@@ -329,9 +329,9 @@ export default function AppShell() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Viimeisimmät">
+                  <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Etusivu">
                     <ClockIcon className="size-4" />
-                    <span>Viimeisimmät</span>
+                    <span>Etusivu</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
