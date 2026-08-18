@@ -6,6 +6,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     {asiakas}/customer.json                          nsight:customer
     {asiakas}/{case}/case.json                       nsight:case
     {asiakas}/{case}/report/{report_id}              nsight:report
+    {asiakas}/{case}/report/{report_id}.meta         nsight:report-meta
     {asiakas}/{case}/material/{material_id}          nsight:material
     {asiakas}/{case}/material/{material_id}.config   nsight:config
     {asiakas}/template/{template_id}                 nsight:template
@@ -30,6 +31,7 @@ LABEL_ROOT = "nsight"
 LABEL_CUSTOMER = "nsight:customer"
 LABEL_CASE = "nsight:case"
 LABEL_REPORT = "nsight:report"
+LABEL_REPORT_META = "nsight:report-meta"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"
 LABEL_TEMPLATE = "nsight:template"
@@ -87,6 +89,20 @@ def case_prefix(asiakas: str, case: str) -> str:
 
 def report_path(asiakas: str, case: str, report_id: str) -> str:
     return f"{case_prefix(asiakas, case)}report/{_seg(report_id, 'report_id')}"
+
+
+def report_meta_path(asiakas: str, case: str, report_id: str) -> str:
+    """Name and modification time for a report.
+
+    A sidecar rather than fields inside the report JSON, because that JSON must
+    round-trip byte-exact — injecting a timestamp would break
+    report_from_json(report_to_json(r)) == r.
+
+    It exists at all because datahive records no modification time: the object
+    listing returns path/size/content_type/etag/labels and the GET carries no
+    Last-Modified. Verified 2026-08-18.
+    """
+    return f"{report_path(asiakas, case, report_id)}.meta"
 
 
 def reports_prefix(asiakas: str, case: str) -> str:

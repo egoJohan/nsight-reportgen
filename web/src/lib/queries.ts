@@ -39,6 +39,13 @@ export function useCaseReports(caseId: string | null) {
 
 // ---- Hooks ----
 
+export function useRecentReports(limit = 10) {
+  return useQuery({
+    queryKey: ["reports", "recent", limit],
+    queryFn: () => api.customers.recentReports(limit),
+  });
+}
+
 export function useCustomers() {
   return useQuery({ queryKey: ["customers"], queryFn: api.customers.list });
 }

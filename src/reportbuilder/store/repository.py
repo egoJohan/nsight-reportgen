@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Sequence
 
 from reportbuilder.store import paths as P
@@ -47,6 +48,11 @@ class ReportRef:
     case_id: str
     customer_id: str
     name: str
+    modified_at: str = ""
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _new_id(prefix: str) -> str:
@@ -145,15 +151,22 @@ class Repository:
         model is deliberately normalised to preserve.
         """
         rid = report_id or _new_id("rep")
-        path = P.report_path(customer_id, case_id, rid)
-        self.store.put(auth, path, report_json.encode("utf-8"), _JSON,
-                       labels=[P.LABEL_REPORT])
+        self.store.put(auth, P.report_path(customer_id, case_id, rid),
+                       report_json.encode("utf-8"), _JSON, labels=[P.LABEL_REPORT])
         name = ""
         try:
-            name = json.loads(report_json).get("name", "")
+            name = json.loads(report_json).get("name", "") or ""
         except (ValueError, AttributeError):
             pass
-        return ReportRef(id=rid, case_id=case_id, customer_id=customer_id, name=name)
+        modified_at = _now()
+        # The sidecar is what listings read, so a list never has to fetch a
+        # 30 KB report body just to learn its name.
+        self._write_json(auth, P.report_meta_path(customer_id, case_id, rid),
+                         {"id": rid, "case_id": case_id, "customer_id": customer_id,
+                          "name": name, "modified_at": modified_at},
+                         [P.LABEL_REPORT_META])
+        return ReportRef(id=rid, case_id=case_id, customer_id=customer_id,
+                         name=name, modified_at=modified_at)
 
     def load_report(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str) -> str:
@@ -163,26 +176,46 @@ class Repository:
 
     def list_reports(self, auth: AuthContext, customer_id: str,
                      case_id: str) -> list[ReportRef]:
-        """Names come from each report's own JSON.
+        """Newest first — reads sidecars, never report bodies."""
+        refs = [
+            self._ref_from_meta(auth, info.path)
+            for info in self.store.list(auth,
+                                        P.reports_prefix(customer_id, case_id),
+                                        labels=[P.LABEL_REPORT_META])
+        ]
+        return sorted([r for r in refs if r], key=lambda r: r.modified_at, reverse=True)
 
-        That means one fetch per report instead of a metadata sidecar. A sidecar
-        would halve the reads but double every write and add a second thing to
-        keep consistent; at a handful of reports per case the fetch is cheaper
-        than the drift.
+    def recent_reports(self, auth: AuthContext, limit: int = 10) -> list[ReportRef]:
+        """The caller's most recently modified reports, across every customer.
+
+        No path prefix: the listing is already restricted to paths this caller
+        may see, so "accessible to this person" is the store's answer rather
+        than a filter applied here.
+
+        Cost note: this reads one sidecar per accessible report. They are ~100
+        bytes each and today's corpus is tens of reports, so it is a fine trade
+        for having no denormalised index to drift. If report counts reach the
+        thousands, the fix is a per-customer recents index, not a bigger fetch.
         """
-        out = []
-        for info in self.store.list(auth, P.reports_prefix(customer_id, case_id),
-                                    labels=[P.LABEL_REPORT]):
-            rid = info.path.rsplit("/", 1)[-1]
-            name = rid
-            try:
-                name = json.loads(self.store.get(auth, info.path).decode("utf-8")
-                                  ).get("name") or rid
-            except (ValueError, UnicodeDecodeError, NotFound):
-                pass
-            out.append(ReportRef(id=rid, case_id=case_id, customer_id=customer_id,
-                                 name=name))
-        return sorted(out, key=lambda r: r.name.lower())
+        refs = [
+            self._ref_from_meta(auth, info.path)
+            for info in self.store.list(auth, "", labels=[P.LABEL_REPORT_META])
+        ]
+        ordered = sorted([r for r in refs if r],
+                         key=lambda r: r.modified_at, reverse=True)
+        return ordered[:limit]
+
+    def _ref_from_meta(self, auth: AuthContext, path: str) -> "ReportRef | None":
+        """A sidecar may vanish between listing and read (another session
+        deleting the report), which is ordinary rather than exceptional."""
+        try:
+            d = self._read_json(auth, path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        return ReportRef(id=d.get("id", ""), case_id=d.get("case_id", ""),
+                         customer_id=d.get("customer_id", ""),
+                         name=d.get("name") or d.get("id", ""),
+                         modified_at=d.get("modified_at", ""))
 
     def duplicate_report(self, auth: AuthContext, customer_id: str, case_id: str,
                          report_id: str, new_name: str) -> ReportRef:

@@ -148,7 +148,7 @@ function Breadcrumb() {
 
   return (
     <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-      <NavLink to="/" className="hover:text-foreground transition-colors">
+      <NavLink to="/customers" className="hover:text-foreground transition-colors">
         Asiakkaat
       </NavLink>
       {currentCustomer && (
@@ -245,7 +245,7 @@ export default function AppShell() {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    render={<NavLink to="/?new=customer" />}
+                    render={<NavLink to="/customers?new=customer" />}
                     tooltip="Uusi asiakas"
                     className="font-medium text-primary"
                   >

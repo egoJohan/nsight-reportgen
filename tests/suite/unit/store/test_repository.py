@@ -142,3 +142,84 @@ class TestPermissionScoping:
         store.caveats["only-acme"] = [P.customer_prefix(a.id)]
         with pytest.raises(NotFound):
             repo.load_report(scoped, b.id, kb.id, r.id)
+
+
+class TestRecentReports:
+    """Front page: the caller's 10 most recently modified reports, newest first.
+
+    Modification time is nSight's own record — datahive exposes none (no field
+    in the listing, no Last-Modified on the GET, verified 2026-08-18).
+    """
+
+    def _report(self, repo, auth, cust, case, name, when):
+        r = repo.save_report(auth, cust, case, json.dumps({"name": name}))
+        # Rewrite the sidecar's timestamp so ordering is deterministic rather
+        # than dependent on how fast the test machine runs.
+        meta = P.report_meta_path(cust, case, r.id)
+        d = json.loads(repo.store.get(auth, meta).decode())
+        d["modified_at"] = when
+        repo.store.put(auth, meta, json.dumps(d).encode(), "application/json",
+                       labels=[P.LABEL_REPORT_META])
+        return r
+
+    def test_newest_first_across_every_customer(self, repo, auth):
+        a = repo.create_customer(auth, "Acme")
+        b = repo.create_customer(auth, "Beta")
+        ka = repo.create_case(auth, a.id, "A")
+        kb = repo.create_case(auth, b.id, "B")
+        self._report(repo, auth, a.id, ka.id, "vanhin", "2026-01-01T00:00:00+00:00")
+        self._report(repo, auth, b.id, kb.id, "uusin", "2026-08-18T00:00:00+00:00")
+        self._report(repo, auth, a.id, ka.id, "keskimm", "2026-05-05T00:00:00+00:00")
+
+        assert [r.name for r in repo.recent_reports(auth)] == ["uusin", "keskimm", "vanhin"]
+
+    def test_limited_to_ten_by_default(self, repo, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Case")
+        for i in range(14):
+            self._report(repo, auth, c.id, k.id, f"R{i:02d}",
+                         f"2026-08-{i + 1:02d}T00:00:00+00:00")
+        recents = repo.recent_reports(auth)
+        assert len(recents) == 10
+        assert recents[0].name == "R13"  # newest kept, oldest dropped
+
+    def test_only_reports_the_caller_may_see(self, repo, store, auth):
+        a = repo.create_customer(auth, "Acme")
+        b = repo.create_customer(auth, "Beta")
+        ka = repo.create_case(auth, a.id, "A")
+        kb = repo.create_case(auth, b.id, "B")
+        self._report(repo, auth, a.id, ka.id, "mine", "2026-01-01T00:00:00+00:00")
+        self._report(repo, auth, b.id, kb.id, "theirs", "2026-08-18T00:00:00+00:00")
+
+        scoped = AuthContext(token="only-acme")
+        store.caveats["only-acme"] = [P.customer_prefix(a.id)]
+        # "theirs" is newer, so it would lead the list if scoping were ignored.
+        assert [r.name for r in repo.recent_reports(scoped)] == ["mine"]
+
+    def test_a_listed_report_that_vanishes_is_skipped_not_fatal(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Case")
+        r = self._report(repo, auth, c.id, k.id, "doomed", "2026-08-01T00:00:00+00:00")
+        self._report(repo, auth, c.id, k.id, "kept", "2026-08-02T00:00:00+00:00")
+        # Another session deletes it between our listing and our read.
+        del store.objects[P.report_meta_path(c.id, k.id, r.id)]
+        assert [x.name for x in repo.recent_reports(auth)] == ["kept"]
+
+
+class TestReportListingUsesSidecars:
+    def test_listing_a_case_never_reads_a_report_body(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Case")
+        repo.save_report(auth, c.id, k.id, json.dumps({"name": "Iso raportti"}))
+
+        body = P.report_path(c.id, k.id, repo.list_reports(auth, c.id, k.id)[0].id)
+        reads: list[str] = []
+        original = store.get
+        store.get = lambda a, p: (reads.append(p), original(a, p))[1]
+        try:
+            names = [r.name for r in repo.list_reports(auth, c.id, k.id)]
+        finally:
+            store.get = original
+
+        assert names == ["Iso raportti"]
+        assert body not in reads, "listing must not fetch the report body"

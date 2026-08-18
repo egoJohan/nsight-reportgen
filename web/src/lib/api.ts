@@ -419,6 +419,14 @@ export interface CaseReportInfo {
   name: string;
 }
 
+export interface RecentReport {
+  id: string;
+  case_id: string;
+  customer_id: string;
+  name: string;
+  modified_at: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -470,6 +478,11 @@ export const api = {
     createCase: (customerId: string, name: string): Promise<CustomerCase> =>
       fetch(`${API_BASE}/customers/${customerId}/cases`, jsonPost({ name })).then((r) =>
         json<CustomerCase>(r)
+      ),
+
+    recentReports: (limit = 10): Promise<RecentReport[]> =>
+      fetch(`${API_BASE}/reports/recent?limit=${limit}`).then((r) =>
+        json<RecentReport[]>(r)
       ),
 
     renameCase: (

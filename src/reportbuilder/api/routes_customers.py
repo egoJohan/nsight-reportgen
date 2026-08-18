@@ -7,7 +7,7 @@ never learns what an asiakas is (floor rule 6).
 Trello: Asiakkuuden hallinta. Speksi 2 P-O-01. Additive — the existing
 `/cases/*` surface is untouched while the UI moves over.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from reportbuilder.api.deps_store import get_auth, get_repository
@@ -101,3 +101,19 @@ def rename_case(customer_id: str, case_id: str, body: NameBody,
     except NotFound:
         raise HTTPException(404, f"Case '{case_id}' not found") from None
     return {"id": k.id, "customer_id": k.customer_id, "name": k.name}
+
+
+@customers_router.get("/reports/recent")
+def recent_reports(limit: int = Query(default=10, ge=1, le=50),
+                   auth: AuthContext = Depends(get_auth),
+                   repo: Repository = Depends(get_repository)) -> list[dict]:
+    """The caller's most recently modified reports, newest first.
+
+    "Accessible to this person" is the store's answer, not a filter applied
+    here: the underlying listing only returns paths this caller may read.
+    """
+    return [
+        {"id": r.id, "case_id": r.case_id, "customer_id": r.customer_id,
+         "name": r.name, "modified_at": r.modified_at}
+        for r in repo.recent_reports(auth, limit=limit)
+    ]
