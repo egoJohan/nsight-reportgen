@@ -1,362 +1,312 @@
 # What nSight needs from datahive — API contract
 
-_Date: 2026-08-17 · Status: draft for review · Card:
-[Datahive ainoaksi tallennuskerrokseksi](https://trello.com/c/nUI0ZnYY)_
+_Date: 2026-08-17, revised 2026-08-18 · Status: draft, **not yet verified against a live
+hive** · Card: [Datahive ainoaksi tallennuskerrokseksi](https://trello.com/c/nUI0ZnYY)_
 
-Companion: `2026-08-12-production-spec-requirements.md` (the Speksi 2 requirements this
-serves).
+Companion documents:
+- `2026-08-12-production-spec-requirements.md` — the Speksi 2 requirements this serves
+- `../notes/2026-08-18-datahive-label-inconsistency.md` — a datahive change request this
+  design deliberately does not block on
+
+> **Verification status.** Everything below was established by *reading datahive source*
+> at `master` `19742f55`. No claim here has been exercised against a running hive. That
+> is the next step, and it matters: the existing `datahive_client.py` was written against
+> an *assumed* contract nobody ever exercised, and five of its fourteen operations turned
+> out to be broken.
 
 ## 1. The constraint that shapes everything
 
-**No nSight-specific code may go into datahive.** That is datahive's floor rule 6 —
-*"apps/integrations are DETACHED from core, BIDIRECTIONALLY … Before adding anything to
-core, answer 'which extension does this belong to?'"*
+**No nSight-specific code may go into datahive** — floor rule 6, *"apps/integrations are
+DETACHED from core, BIDIRECTIONALLY."*
 
-So nSight gets no endpoints of its own. Every nSight concept — Asiakas, Case, Report,
-Template, user, grant — must map onto a **generic** datahive primitive, and nSight's
-domain model lives as *data inside those primitives*, never as datahive schema.
-
-This is a stronger constraint than it first appears, and it turns out to be a
-simplification: once the hierarchy is data, most of what looked like missing datahive
-features stops being needed at all.
+So nSight gets no endpoints of its own. Every nSight concept must map onto a generic
+datahive primitive. This turned out to be a simplification rather than an obstacle: three
+successive passes over this document each *removed* invention, and what remains is
+smaller than what nSight has today.
 
 ## 2. Integration shape
 
-nSight talks to datahive over **HTTP REST only** — an `httpx` client against
-`{base_url}/api/v1/…` with `Authorization: Bearer <macaroon>`, configured by
-`NSIGHT_DATAHIVE_URL` / `_TOKEN` / `_TENANT`. It does not import datahive, share its
-process, or touch its Postgres.
+HTTP REST only, `{base_url}/api/v1/…`, `Authorization: Bearer <macaroon>`. nSight does not
+import datahive, share its process, or touch its Postgres. The entire coupling lives in
+one file: `src/reportbuilder/store/datahive_client.py`.
 
-The entire coupling lives in one file: `src/reportbuilder/store/datahive_client.py`.
-Nothing else in nSight knows datahive exists.
+**nSight calls datahive as the logged-in user, not as a service** (decision, johan
+2026-08-18). Every store call carries the caller's macaroon, so datahive itself enforces
+what that user may read and write. nSight's own authorization code stops being the only
+thing keeping customers apart, and floor rule 2 — *"ALL rights resolved live in DataHive,
+never from a token or a frozen cache"* — is honoured by construction.
 
-## 3. The four primitives nSight requires
+The practical consequence: **the store seam takes an auth context on every call.** That is
+cheap to design in now and expensive to retrofit, which is why it was settled first.
+
+## 3. The primitives nSight requires
 
 | # | Primitive | Surface | State |
 |---|---|---|---|
-| P1 | Verbatim keyed documents | `/api/v1/projects/{ns}/docs` | ✅ complete |
-| P2 | Keyed binary blobs | `/api/v1/projects/{ns}/blobs` | ⚠️ no DELETE |
-| P3 | Groups and membership | `/api/v1/groups` | ✅ complete |
-| P4 | Interactive human login | `/api/v1/ui/*` | ✅ complete |
+| P1 | Path-addressed object store | `/api/v1/objects` | ✅ complete |
+| P2 | Groups, membership, invites | `/api/v1/groups`, `/api/v1/hive_invite` | ✅ complete |
+| P3 | Interactive human login | `/api/v1/ui/*` | ✅ complete, see §7.1 |
+| P4 | Labels on stored things | — | ❌ deferred, see §8 |
 
-**P1 — documents.** `POST /{ns}/docs` is documented as *"Attach a verbatim,
-reference_id-addressable raw-doc"*: opaque text under a caller-chosen key, with a
-`label` type tag. `GET /{ns}/docs?label=…` lists with **server-side** label filtering;
-`GET`/`DELETE /{ns}/docs/{reference_id}` read and remove. "Verbatim" is the property
-§8.2 depends on.
+### P1 — the object store is the whole storage requirement
 
-**P2 — blobs.** `POST /{ns}/blobs` (multipart, caller-chosen `reference_id`) and
-`GET /blobs/{reference_id}` → raw bytes. No delete, and no listing.
-
-**P3 — groups.** Create/list groups, add/remove/list members (members are identity
-strings), lookup by name. All routes `require_admin`. Group *names are data* —
-`hive_service.py:1419`: *"the group names are DATA, never code"* — so nSight-meaningful
-group names introduce nothing nSight-specific into datahive.
-
-**P4 — login.** See §5.
-
-## 4. Mapping nSight's model onto the primitives
-
-| nSight concept | Representation | Needs datahive work? |
-|---|---|---|
-| Customer (Asiakas) | doc, `label="customer"` | No |
-| Case | doc, `label="case"`, carrying its customer ref | No |
-| Report | doc, `label="report"` — already stored this way | No |
-| Material | blob (the `.sav` bytes) + doc `label="material"` carrying name, blob ref **and its config** | No |
-| Template | blob (the `.pptx`) + doc `label="template"` | Delete only |
-| User | membership of an nSight-named group | No |
-| Access grant | that same membership — see §6 | No |
-
-Because Case is a document, `rename_case` and `delete_case` become an ordinary re-POST
-and delete. Because material config rides *inside* the material doc, the missing
-`/blobs/{id}/config` endpoint is not needed. Because materials are listed by
-`?label=material`, the missing blob listing is not needed either.
-
-**Every gap identified on 2026-08-17 except one disappears under this mapping.**
-
-## 5. Authentication — nSight builds none
-
-Datahive already has a complete interactive login system, and nSight's login page
-consumes it rather than implementing one:
-
-| Step | Endpoint | Purpose |
-|---|---|---|
-| 1 | `GET /api/v1/ui/config` | **Public, pre-auth.** Returns `login_oidc_issuer`, `hive_name`, `hive_slug`, `env`, and `providers` as `{id,label}` — exactly what a login screen needs, and no secrets |
-| 2 | `GET /api/v1/ui/oidc/login` | Redirects to the hive's configured IdP; the callback mints a browser session |
-| 3 | — | Session = short-TTL (600 s) access macaroon held in memory + **HttpOnly** refresh cookie + JS-readable CSRF cookie |
-| 4 | `GET /api/v1/ui/session` | Whoami → `{identity, is_admin, tenant_id}`; `401` when anonymous |
-| 5 | `POST /api/v1/ui/refresh` | Rotating refresh, triple-gated: `SameSite=Strict` + Origin/Referer match + double-submit CSRF |
-| 6 | `POST /api/v1/ui/logout` | Clears cookies, revokes the refresh-token family |
-
-**Consequence: no passwords exist anywhere in nSight.** Credentials live with the OIDC
-provider. nSight never stores, hashes, resets or transmits a password — which removes an
-entire class of security work and liability from this project.
-
-**OIDC is not optional.** `POST /api/v1/ui/login` (the token-paste fallback) validates a
-macaroon and then requires `is_admin_identity` — it is an **admin-only** path. So
-ordinary nSight analysts have exactly one way in: the OIDC flow. If the nSight hive has
-no `login_oidc_issuer` configured, `/oidc/login` returns 404 and **there is no
-ordinary-user login at all**. See §11.2.
-
-### 5.1 Provisioning is separate from authentication — and already built
-
-The model: **an admin sets up which usernames may have access; the IdP proves who
-someone is.** Datahive implements exactly this split, so nSight builds none of it.
-
-| Step | Endpoint / mechanism | Who |
-|---|---|---|
-| Invite an email to a group | `POST /api/v1/hive_invite` — `{email, group="tenant_members", ttl_days=7 (1–90)}` | admin only |
-| List invites | `GET /api/v1/hive_invite` — `{id, email, group, status, expires_at, created_at, accepted_at}` | admin only |
-| Revoke | `POST /api/v1/hive_invite/{id}/revoke` | admin only |
-| Authenticate | Google OIDC-RP — entirely separate, no invite knowledge | the IdP |
-| Admit | `admit_via_invite` in the OIDC callback: the **verified** email is matched to a pending invite, which is consumed and the group membership added | datahive |
-
-Properties worth relying on:
-
-- **Un-invited means locked out.** A valid Google account with no matching invite gets a
-  branded 403 — *"You need an invite to join"* — with no session minted and no redirect
-  back to the client, audited as `oauth.oidc_rp.invite_denied`.
-- **Invites cannot escalate.** `_PRIVILEGED_INVITE_GROUPS = ADMIN_GROUPS | {"hive-admin"}`
-  is refused at create time, so nobody becomes an admin via an emailed link.
-- **Revoke deprovisions.** Revoking an *accepted* invite also removes the granted group
-  membership ("M6 teardown"), so revocation is the single offboarding action.
-- **Invites expire** (1–90 days, default 7), so a forgotten invite does not linger as a
-  permanent open door — or a permanent seat.
-- **Optional domain auto-join.** `auto_join_domain` admits a whole verified email domain
-  without individual invites, checked before the invite gate — useful if a customer wants
-  everyone at their domain to have access.
-
-**Consequence for the Käyttäjähallinta ticket:** "admin voi lisätä ja poistaa käyttäjiä ja
-näiden oikeuksia" needs no user-management backend. It is an admin UI over
-`hive_invite` + `groups`, plus nSight's own finer-grained customer/case authorization
-(§6).
-
-## 6. Authorization — membership is the single source of truth
-
-Datahive's authority model, from `domain/admin_identity.py`:
-
-> `ADMIN_GROUPS = {tenant_admins, owner}`. A caller is an admin iff their **OIDC-verified
-> `subject_identity`** is a member of an admin group **in the store** — *"NEVER from the
-> self-appendable `scope.groups` macaroon caveat, which a native holder can append at
-> will to self-grant admin."* Fail-closed: no scope, no subject, no store, no tenant, or
-> no membership all return `False`.
-
-nSight adopts the same pattern rather than inventing one. That satisfies floor rule 2
-(*"ALL rights resolved live in DataHive, never from a token or a frozen cache"*).
-
-**The design rule that matters: membership *is* the access grant, not a mirror of it.**
-
-nSight must not keep its own user list and *also* register members in datahive for
-billing — the two would drift, and a user nSight forgot to register would have access
-while generating no charge. Instead nSight resolves rights by asking datahive, so an
-unprovisioned user simply has no access. Access control and the billing count become the
-same fact and cannot diverge.
-
-Requirements this must express (Käyttäjähallinta card + Speksi 2 P-O-05/06/07):
-
-- A customer has an owner — its creator — with permanent read+write.
-- Users and groups can hold read+write on a **customer**, inheriting to its cases and reports.
-- A user may hold a grant on a **single case** without any grant on its customer (P-O-06/07).
-- Effective right = own grant **OR** inherited from the parent customer **OR** ownership
-  **OR** membership of a granted group.
-
-## 7. Billing — seats are countable and audited
-
-egoiq bills **50 €/user/month**, so the count must come from the platform, not be
-self-reported by the billed application. Two calls:
+`datahive/api/routers/objects.py`, described in its own docstring as a *"Tenant- and
+path-scoped OBJECT STORE (non-indexing file storage) … store a file and hand it back —
+raw blob storage + retrieval, WITHOUT RAG indexing."*
 
 ```
-GET /api/v1/groups/by-name/{group}   ->  {id, …}
-GET /api/v1/groups/{id}/members      ->  ["identity", …]      # accepted seats
-GET /api/v1/hive_invite              ->  [{email, status, expires_at, …}]
+PUT    /api/v1/objects              multipart: file, path, content_type
+GET    /api/v1/objects?path=...     (or /{object_id})
+GET    /api/v1/objects/list?path_prefix=...
+DELETE /api/v1/objects?path=...
 ```
 
-Group membership is the settled seat list: §5.1's admission adds a member on accept, and
-revocation removes one, so the ledger maintains itself with no separate bookkeeping. The
-invite list adds the not-yet-accepted cases — see §11.4 for whether those count.
+Why this store and not the alternatives:
 
-Both are `require_admin`, so only egoiq can read them — nSight's customers can neither
-inspect nor alter their own seat count.
+- **not `items`** — items always chunk and embed (`_get_item_per_chunk`, Qdrant chunks,
+  *"no general download surface"*). Report JSON must round-trip byte-exact, so a chunking
+  knowledge store is disqualifying. Objects are explicitly `indexed=false`.
+- **not `projects`/docs** — project docs are verbatim and would work, but a project
+  carries workflow machinery nSight never uses (`/advance`, `/rules`,
+  `template_ref="wftemplate:dataset-report-study"`), gives a flat space rather than a
+  hierarchy, and has no delete for its blobs.
 
-**Better than a snapshot: it is audited.** `create_group`, `add_member` and
-`remove_member` each `append_audit` with the actor, the action (`groups.add_member`), the
-target group and `scope={"identity": …}`. So a billing period can be reconstructed and
-*proved*, not merely observed — you can see when each seat appeared and disappeared.
+Properties this design relies on:
 
-**Later automation** (explicitly a later step) is a scheduled job over those two
-endpoints, diffed against the audit log. Nothing further is needed from datahive.
+| Property | Mechanism |
+|---|---|
+| Verbatim | not chunked, embedded or classified — `indexed=false` |
+| Text **and** binary in one primitive | report JSON, `.sav`, `.pptx` are all objects |
+| Path-level ABAC | `scope.path_matches` over the caller's macaroon caveat |
+| Workspace ("box") boundary | `_box_admits_read` / `box_write_allowed` |
+| Prefix listing, ABAC-filtered | `/objects/list?path_prefix=`, *"never leak existence of an out-of-scope path"* |
+| Change detection | `etag` on every object |
+| Provenance | `owner_subject` from the caller's **verified** `subject_identity` |
+| Encrypted at rest | AES-GCM under the tenant DEK |
+| Audited | every write, read and delete |
+| Blessed cross-app surface | its stated consumer is egoHive's `datahive_object_store` StorageBackend, server-to-server over this same API |
 
-**What counts as a billable user — SETTLED 2026-08-18 (johan): anyone who can log in to
-nSight Studio.**
+Stored metadata is exactly: `record_id, path, size, content_type, etag, workspace_uuid`,
+plus `owner_subject`. **No labels** — see §8.
 
-This is the simplest possible rule and it collapses the implementation: **one group whose
-membership means "may log in to nSight Studio".** Its member count *is* the invoice line.
+## 4. Mapping nSight's model
 
-- No read-only vs read+write distinction to track — if you can log in, you are billable.
-- No per-case or per-customer weighting — access *scope* is a separate, finer-grained
-  concern inside nSight and has no billing effect.
-- nSight's own administrators are billable, since they can log in.
-- Counting is a single call, so the later automation is trivial.
+| nSight concept | Representation |
+|---|---|
+| Customer (Asiakas) | a datahive **workspace** — carries `owner_subject`, `group_id`/`group_level`, `others_level` (fail-closed to `none`) |
+| Case | a **path segment** inside that workspace |
+| Report | an object — the definition JSON |
+| Material | an object — the `.sav` bytes |
+| Material config | an object — grouping overrides, word merges, label overrides |
+| Template | an object — the `.pptx` |
+| User | a group membership, provisioned by invite (§7.2) |
+| Access grant | workspace access + the macaroon's path caveat (§7.3) |
 
-Which makes the login gate and the seat ledger literally the same list, extending §6's
-rule: membership is the access grant, and now also the invoice.
+The workspace access model matches the Käyttäjähallinta card almost line for line:
+*"Asiakkaalle liitetään aina omistaja, joka on oletukselta sen luoja"* → `owner_subject`;
+*"voidaan liittää käyttäjätilejä tai -ryhmiä luku+kirjoitusoikeuksin"* → `group_id` +
+`group_level`; *"Luonnin jälkeen asiakkaaseen pääsee vain hän käsiksi"* → `others_level`
+defaulting to `none`. One constraint: `group_id` is singular — **one** group per
+workspace.
 
-One wrinkle to decide before invoicing: **egoiq staff who log in for support would count
-as seats under this rule.** Either accept that, or keep support access in a separate,
-excluded group. See §11.4.
+## 5. The store seam
 
-## 8. Cross-cutting requirements
+The refactor target. Domain logic (customer/case/report/template) moves *up* into a
+repository layer; only the bottom layer changes at cutover.
 
-Where a storage backend most easily betrays its caller.
+```
+routes  ->  repository (nSight domain)  ->  store seam (4 methods)  ->  backend
+```
 
-### 8.1 Error semantics
+```python
+put_object(auth, path, data, content_type, labels=None) -> id
+get_object(auth, path) -> bytes
+list_objects(auth, path_prefix) -> [{path, size, content_type, etag}]
+delete_object(auth, path) -> None
+```
 
-nSight's `app.py` passes `400, 401, 403, 404, 409, 422` through to the UI and collapses
-everything else to `502`. So datahive must distinguish:
+`labels` is an **optional passthrough**: ignored today, filtering when §8 lands, with no
+call-site changes.
 
-- **401** — no/invalid token → the UI shows the login page
-- **403** — authenticated but not permitted → "no access"
-- **404** — absent, or not visible to this caller
-- **409** — conflict, e.g. a uniqueness violation
+This replaces 12 entity-specific methods (`create_case`, `save_report`,
+`attach_material`, `load_material_config`, …) across ~20 call sites in 7 files. It also
+removes the `report_migration.py:104` → `client._save()` leak, which reaches into a
+private method of the JSON store, by construction.
 
-Collapsing 403 into 404 is fine (it avoids leaking existence). Collapsing **401 into 403
-is not** — the UI cannot then tell "log in" from "you may not".
+## 6. Path grammar — OPEN, decide before writing data
 
-### 8.2 Verbatim, byte-exact round-trip
+Paths are stored workspace-first and returned workspace-stripped, so within an Asiakas
+workspace nSight addresses logical paths. **Because the object store has no labels
+(§8), the path is currently the only organising axis** — it must carry both *where a
+thing belongs* and *what it is*.
 
-Report JSON and material config must return **byte-identical**. This is not
-fastidiousness: nSight's serde tests rest on `report_from_json(report_to_json(r)) == r`,
-and the report model carries deliberate normalisation (a default `grouping` dict, an
-unbackfilled `slide_id`) specifically to keep that equality true. A store that
-reformats JSON, reorders keys or coerces numbers breaks report loading outright.
+Sketch, not settled:
 
-`.sav` and `.pptx` bytes likewise — nSight re-parses the `.sav` on every case open.
+```
+case/<case_id>/report/<report_id>        report definition JSON
+case/<case_id>/material/<mat_id>         the .sav bytes
+case/<case_id>/material/<mat_id>.config  curation JSON
+template/<template_id>                   customer-level .pptx
+```
 
-P1's documented "verbatim" contract is what makes this safe; it must stay true.
+The tension to resolve: **prefix listing returns everything below the prefix.** So
+"list this case's reports" is clean (`case/<id>/report/`), but "list all cases" over
+`case/` also returns every report and material underneath. Options: a separate index
+prefix, a suffix convention filtered client-side, or waiting for §8 and filtering by
+label. Renaming a path means physically moving the object, so this is worth settling
+before there is data.
 
-### 8.3 Deletes must state their cascade
+## 7. Identity
 
-Every delete needs one of two documented behaviours, never an implicit third: **refuse
-with 409** while dependents exist, or **cascade atomically**.
+### 7.1 Login — nSight builds none
 
-Dependency edges: customer → cases → (materials, reports); material → reports built on
-it; template → reports referencing it. The material case is sharpest — deleting a `.sav`
-that reports depend on leaves reports that cannot render. The store audit already found
-**4 orphan reports** belonging to no case, so this failure mode is not hypothetical.
+| Step | Endpoint |
+|---|---|
+| Pre-auth discovery (public) | `GET /api/v1/ui/config` → `login_oidc_issuer`, `hive_name`, `providers` |
+| SSO | `GET /api/v1/ui/oidc/login` |
+| Session | short-TTL (600 s) access macaroon in memory + HttpOnly refresh cookie + CSRF cookie |
+| Whoami | `GET /api/v1/ui/session` → `{identity, is_admin, tenant_id}`; 401 anonymous |
+| Refresh | `POST /api/v1/ui/refresh` — rotating, `SameSite=Strict` + Origin/Referer + double-submit CSRF |
+| Logout | `POST /api/v1/ui/logout` — revokes the refresh family |
 
-### 8.4 Listings filtered server-side
+**No password exists anywhere in nSight.** Credentials belong to the IdP.
 
-Every list returns only what the caller may see. nSight must never receive a full list
-and filter client-side — that leaks other customers' case names and makes the UI the
-security boundary.
+**OIDC is not optional:** `POST /api/v1/ui/login` (token-paste) requires
+`is_admin_identity`, so it is admin-only. Without `login_oidc_issuer` configured there is
+no ordinary-user login at all. See §9.2.
 
-### 8.5 Capability discovery, not runtime 501s
+### 7.2 Provisioning — admin sets who may enter, already built
 
-nSight must be able to determine at startup what the connected hive supports, so an
-unsupported operation fails loudly then rather than mid-session. The current
-`getattr(client, "rename_case", None)` → 501 pattern in `routes_cases.py` is precisely
-the anti-pattern to remove: it converts a missing backend capability into a runtime
-surprise for the user.
+`/api/v1/hive_invite`, admin-only: `POST ""` (`{email, group, ttl_days 1–90}`),
+`GET ""`, `POST /{id}/revoke`. The OIDC callback runs `admit_via_invite`, matching the
+**verified** email to a pending invite, consuming it and adding group membership.
 
-### 8.6 Concurrency
+- Un-invited → branded 403, no session minted, audited `oauth.oidc_rp.invite_denied`.
+- Invites cannot confer a privileged group (`ADMIN_GROUPS | {"hive-admin"}` refused at
+  create) — no self-escalation via an emailed link.
+- Revoking an *accepted* invite also removes the group membership, so revocation is the
+  single offboarding action.
+- Optional `auto_join_domain` admits a whole verified email domain.
 
-Two analysts editing different reports in one case must not clobber each other. Report
-save is a versioned replace keyed by `reference_id`; concurrent replaces of the *same*
-report should be last-write-wins without corruption, or `409`. The store nSight runs on
-today is single-process and cannot honour this — part of why this migration exists.
+So *"admin voi lisätä ja poistaa käyttäjiä"* needs no backend — only an admin UI over
+`hive_invite` + `groups`.
 
-## 9. The only gap: DELETE on a blob
+### 7.3 Authorization
 
-Under §4's mapping, one capability remains genuinely missing: removing a stored blob.
-Required by P-C-01 (delete a dataset) and TE-4 (delete a template).
+Datahive's own model, from `domain/admin_identity.py`: authority is the **OIDC-verified
+`subject_identity` ∩ the group-membership store**, *"NEVER from the self-appendable
+`scope.groups` macaroon caveat"*. Fail-closed. nSight adopts the same pattern.
 
-`references.py`'s `DELETE /{ref_id}` does not help — it removes knowledge-graph
-reference triples (`ConceptReferenceRow`), not blobs.
+Speksi 2's two levels land natively:
 
-This is a **generic** capability: anyone attaching blobs needs to detach them, and its
-absence reads as an oversight rather than a missing feature. It introduces no
-nSight-specific concept, so floor rule 6 does not bar it from core.
+| Requirement | Mechanism |
+|---|---|
+| P-O-05 — access to a customer | workspace access / `_box_admits_read` |
+| P-O-06/07 — access to a single case | the macaroon's path caveat over `case/<id>/**` |
+
+**Membership is the access grant, not a mirror of it.** nSight must not keep its own user
+list alongside datahive's — they would drift, and a user nSight forgot to register would
+have access while generating no charge.
+
+**The one piece with real design work left:** turning a logged-in session into a macaroon
+whose path caveats match that user's customers and cases.
+
+### 7.4 Billing
+
+**A billable user is anyone who can log in to nSight Studio** (johan, 2026-08-18) — one
+group whose membership means "may log in"; its member count is the invoice, at 50 €/user/
+month.
+
+```
+GET /api/v1/groups/by-name/{group}  ->  GET /api/v1/groups/{id}/members  ->  count
+```
+
+Both `require_admin`, so only egoiq can read them. Every membership change calls
+`append_audit` with actor, action and `scope={"identity": …}`, so a period can be
+*proved*, not merely observed. Later automation is a scheduled job over those two calls.
+
+Sub-decisions still open: whether egoiq's own support logins count as seats, and whether
+a pending invite counts before first login (recommend billing on accepted membership).
+
+## 8. Deferred: labels
+
+The object store has no labels, and its docstring advertises a `labels` parameter
+`put_object` does not accept. Full analysis and proposal:
+`../notes/2026-08-18-datahive-label-inconsistency.md`.
+
+nSight does not block on it. `labels` rides the seam as an optional passthrough; until it
+lands, §6's path grammar carries the type axis alone.
+
+## 9. Open decisions
+
+**9.1 Will `/api/v1/ui/*` be kept stable for nSight?** Those six login endpoints were
+built to serve datahive's own admin SPA. If they change for the SPA's convenience,
+nSight's *login* breaks with no workaround. Options: publish them as API (recommended,
+plus a contract test so a break fails CI), re-expose the flow at a stable public path, or
+don't depend on them (not viable — no login). Note the object store does **not** have this
+problem: it is already a server-to-server surface for another product.
+
+**9.2 Is an OIDC issuer configured for the nSight hive, and which IdP?** Per §7.1 this
+gates any login work at all.
+
+**9.3 Do nSight administrators become datahive `tenant_admins`?** Every `/groups` and
+`/hive_invite` route is `require_admin`, so "nSight admins add and remove users" means
+real datahive admin authority over that hive.
+
+**9.4 Path grammar** — §6.
+
+**9.5 Speksi 2 wording.** The spec requires managing *"sen salasanaa"*; nSight never
+handles passwords. A question for nSight, not egoiq; does not block implementation.
 
 ## 10. Explicitly not required
 
-Aggregation — **verified 2026-08-17: `client.aggregate()` is called only from tests,
-never from product code.** nSight parses the `.sav` in-process via `read_sav` and
-computes every percentage, count, mean and cross-tab locally in `reportbuilder/stats/`.
-Datahive is a store and an identity provider, not a compute engine. The client method is
-a deletion candidate.
+**Aggregation** — verified 2026-08-17: `client.aggregate()` is called only from tests.
+nSight parses the `.sav` in-process via `read_sav` and computes every statistic locally in
+`reportbuilder/stats/`. Datahive is a store and an identity provider, not a compute
+engine; the client method is a deletion candidate.
 
-Also unused: rendering, PII/classification, enrichment, scheduling, connectors, gdrive.
-Changes there cannot affect nSight.
+Also unused: `items`/RAG, `projects`, rendering, PII/classification, enrichment,
+scheduling, connectors, gdrive.
 
-## 11. Open decisions
+## 11. Cross-cutting requirements
 
-### 11.1 Will the login endpoints be kept stable for nSight?
+Where a storage backend most easily betrays its caller. These survive unchanged from the
+first draft and are what §12's verification must actually test.
 
-The six login endpoints in §5 were built to serve **datahive's own admin web UI** — they
-sit under `/api/v1/ui/` and the code describes them as the *"Admin SPA backend"*.
+**11.1 Error semantics.** nSight's `app.py` passes `400/401/403/404/409/422` through and
+collapses the rest to `502`. Collapsing 403 into 404 is fine (hides existence);
+collapsing **401 into 403 is not** — the UI cannot then tell "log in" from "you may not".
 
-The risk is ordinary: endpoints written for one known caller get changed whenever that
-caller needs something different — a renamed field, a different cookie, a changed
-response. That is normal and harmless while datahive's SPA is the only consumer. But
-nSight would become a second consumer nobody is thinking about, and its **login** breaks
-on a datahive release, with no warning and no workaround (per §5, OIDC through these
-endpoints is the only ordinary-user path in).
+**11.2 Byte-exact round-trip.** Report JSON must return byte-identical: the serde tests
+rest on `report_from_json(report_to_json(r)) == r`, and the model carries deliberate
+normalisation to keep that true. `.sav` and `.pptx` likewise — nSight re-parses the `.sav`
+on every case open.
 
-So the decision is a commitment, not an analysis:
+**11.3 Deletes state their cascade.** Refuse with `409` while dependents exist, or cascade
+atomically — never an implicit third thing. Edges: customer → cases → (materials,
+reports); material → reports built on it; template → reports referencing it. The audit
+already found **4 orphan reports**, so this is not hypothetical.
 
-1. **Treat them as published API.** Free today; requires that datahive not change them
-   without considering nSight. Worth pinning with a contract test in datahive so a
-   breaking change fails CI rather than production.
-2. **Give the session flow a stable home** — e.g. re-expose it under `/api/v1/auth/*`
-   as explicitly public, leaving `/api/v1/ui/*` free to churn for the SPA's needs. A
-   small, generic datahive change; no nSight-specific concept enters core.
-3. **Don't depend on them** — not viable: there would be no ordinary-user login.
+**11.4 Listings filtered server-side.** nSight must never receive a full list and filter
+client-side — that leaks other customers' names and makes the UI the security boundary.
 
-Recommendation: **1 plus the contract test.** It costs nothing now and converts a silent
-production break into a failing build.
+**11.5 Capability discovery, not runtime 501s.** The current
+`getattr(client, "rename_case", None)` → 501 pattern converts a missing backend capability
+into a mid-session surprise. Fail loudly at startup instead.
 
-### 11.2 Is an OIDC issuer configured for the nSight hive?
+**11.6 Concurrency.** Two analysts editing different reports in one case must not clobber
+each other; `etag` is the natural basis. Today's single-process JSON store cannot honour
+this, which is part of why the migration exists.
 
-Per §5 this is not optional: the token-paste fallback is admin-only, so without
-`login_oidc_issuer` there is no ordinary-user login. Which IdP, and who administers it?
+## 12. Next step: verify against a live hive
 
-### 11.3 Do nSight administrators become datahive `tenant_admins`?
+Before any of this is built on, bring up a local datahive and exercise P1:
 
-Every `/api/v1/groups` route is `require_admin`, and `ADMIN_GROUPS = {tenant_admins,
-owner}`. So "nSight's administrators can add and remove users" means they hold real
-datahive admin authority over that hive. Bounded by the hive being nSight-dedicated, but
-it is more than user management strictly needs.
+1. `PUT` then `GET` an object — is it **byte-identical**? (11.2)
+2. `list?path_prefix=` — does it behave as read, and what exactly comes back?
+3. Does `scope.path_matches` actually refuse an out-of-scope path? (7.3)
+4. `DELETE ?path=` — and what happens to a prefix with children? (11.3)
+5. What does minting a per-user macaroon with path caveats look like in practice? (7.3)
 
-### 11.4 What is a billable user? — SETTLED
-
-**Anyone who can log in to nSight Studio** (johan, 2026-08-18). Implemented as one group
-gating login; its member count is the invoice. See §7.
-
-Two remaining sub-decisions, both cheap now and awkward to retrofit once invoicing runs:
-
-1. **egoiq's own staff.** Under the stated rule, support logins are seats. If that is not
-   intended, support accounts need their own group, excluded from the count.
-2. **Pending invites.** An invited person who has never logged in *can* log in, so the
-   literal rule makes them billable from the moment of invitation rather than first
-   login. Expired and revoked invites are plainly not billable. Recommend billing on
-   **accepted group membership** — it is the unambiguous list, it self-maintains
-   (§5.1), and it cannot charge for an invitation that was never taken up.
-
-### 11.5 Speksi 2 deviation to confirm with nSight
-
-Speksi 2 requires managing *"yksittäistä käyttäjätunnusta, **sen salasanaa** ja sen
-käyttöoikeuksia"*. Under this design **nSight never handles passwords** — identity is the
-IdP's, so "change my password" happens there. This is a better outcome (no credential
-handling in nSight) but it is a literal deviation from the spec text.
-
-**Status: not a decision for egoiq — it is a question for nSight.** Parked here so it is
-raised at the next requirements discussion rather than discovered during acceptance. It
-does not block implementation: the design is sound either way, and only the wording of
-the requirement is at issue.
-
-## 12. What this contract does not cover
-
-The implementation order: which of these the current datahive rework satisfies, and in
-what sequence nSight adopts them. Approach A — close each gap one capability at a time,
-each verified against a live hive, then a single data cutover — is agreed and unaffected
-by which specific gaps remain.
+Approach A — close each gap one capability at a time, each verified live, then a single
+data cutover — is agreed and unchanged.
