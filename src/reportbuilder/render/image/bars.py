@@ -40,6 +40,7 @@ from reportbuilder.render.house_style import (
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 from reportbuilder.model.report import default_label
+from reportbuilder.render.image._mpl import template_palette
 
 
 def _format_summary(val: float, fn: str, nf) -> str:
@@ -477,7 +478,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     _c, _s, data = series_values(series)
     n_cat = len(cats)
     n_sec = max((len(segs) for _p, segs in groups), default=1)
-    clrs = series_colors(n_sec)
+    clrs = series_colors(n_sec, palette=template_palette(ctx))
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
     max_val = max(all_vals, default=0.0)
 
@@ -754,7 +755,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
 
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
-        clrs = series_colors(n)
+        clrs = series_colors(n, palette=template_palette(ctx))
         if vertical:
             x = np.arange(n_cat)
             w = 0.82 / n if n > 1 else 0.6
@@ -842,7 +843,7 @@ def build_image_column(ctx) -> None:
 def _render_column_v(ctx, cats, segs, data) -> None:
     """Internal vertical-bar renderer."""
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs))
+    clrs = series_colors(len(segs), palette=template_palette(ctx))
 
     n_cats = len(cats)
     n_segs = len(segs)
@@ -927,7 +928,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # slide) over shrinking the font or truncating.
     row_in = label_lines * 0.18 + 0.16
     fig, ax = new_tall_figure(ctx, n_cats * row_in + 1.2)
-    clrs = series_colors(len(segs))
+    clrs = series_colors(len(segs), palette=template_palette(ctx))
 
     n_segs = len(segs)
     y = np.arange(n_cats)[::-1]   # top category at top of plot

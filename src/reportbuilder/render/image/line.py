@@ -14,6 +14,7 @@ from reportbuilder.render.image._mpl import (
 from reportbuilder.render.house_style import (
     series_colors, INK, MUTED, GRIDC, CREAM,
 )
+from reportbuilder.render.image._mpl import template_palette
 
 
 def build_image_line(ctx) -> None:
@@ -27,7 +28,7 @@ def build_image_line(ctx) -> None:
     """
     cats, segs, data = series_values(ctx.series)
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs))
+    clrs = series_colors(len(segs), palette=template_palette(ctx))
 
     x = list(range(len(cats)))
 

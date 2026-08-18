@@ -247,6 +247,24 @@ def series_values(series):
     return cats, segs, data
 
 
+def template_palette(ctx) -> list[str] | None:
+    """The client template's accent colours, or None when no template applies.
+
+    Keyed on chart_layout_index because that is set only by load_style_spec on a
+    real .pptx — the base StyleSpec carries matplotlib's default blue/orange,
+    which would be worse than the house ramp. The house DEFAULT template also
+    goes through load_style_spec, so its teal-led theme arrives by the same
+    path and there is no "is this a template" branch anywhere else.
+    """
+    if getattr(ctx.style, "chart_layout_index", None) is None:
+        return None
+    try:
+        palette = [f"#{ctx.style.color_for(i)}" for i in range(6)]
+    except Exception:  # noqa: BLE001 — styling must not break a render
+        return None
+    return palette or None
+
+
 def colors(ctx, n: int) -> list[str]:
     """Return n matplotlib hex color strings from ctx.style (prepend '#').
 

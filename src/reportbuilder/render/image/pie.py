@@ -37,6 +37,7 @@ from reportbuilder.render.house_style import (
     register_fonts, series_colors, contrast_ink, INK, MUTED, CREAM, GRIDC,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
+from reportbuilder.render.image._mpl import template_palette
 
 _EMU_PER_IN = 914400.0
 
@@ -97,7 +98,7 @@ def _render_pie(ctx, *, donut: bool) -> None:
     """Shared pie/doughnut renderer — circular, fully contained, labels never overlap."""
     cats, segs, data = series_values(ctx.series)
     vals = data[segs[0]]
-    clrs = series_colors(len(cats))
+    clrs = series_colors(len(cats), palette=template_palette(ctx))
     # R4.2: override "Not answered" slice colour with MUTED grey.
     clrs = [MUTED if c == NOT_ANSWERED_LABEL else clr for c, clr in zip(cats, clrs)]
 

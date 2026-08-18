@@ -130,8 +130,14 @@ def contrast_ink(color) -> str:
     return "#FFFFFF" if lum < 0.55 else INK
 
 
-def series_colors(n: int) -> list[str]:
+def series_colors(n: int, palette: list[str] | None = None) -> list[str]:
     """Return *n* distinct hex colour strings for CATEGORICAL series (REQ-C-27a).
+
+    *palette* is the template's own accent colours when one is in play, so a
+    deck built on Attendo's template gets Attendo's navy and green rather than
+    nSight teal. accent1-6 is what PowerPoint's own charts use for series, so
+    taking them in order matches what the client sees elsewhere in their deck.
+    Without a palette the house ramps below apply unchanged.
 
     Single series → darkest TEAL (most prominent).
     2–4 series → spread across the teal ramp, darkest last (= current wave).
@@ -139,6 +145,13 @@ def series_colors(n: int) -> list[str]:
     light→dark ramp) so no colour repeats (was: cycled the 4-colour ramp → duplicate
     colours for different labels).
     """
+    if palette:
+        if n <= len(palette):
+            return list(palette[:n])
+        # More series than the template declares: repeat the accents rather than
+        # mixing in house colours, which would look like a rendering error on a
+        # branded deck.
+        return [palette[i % len(palette)] for i in range(n)]
     if n == 1:
         return [TEAL]
     ramp = _TEAL_RAMP

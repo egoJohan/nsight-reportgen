@@ -27,6 +27,7 @@ from reportbuilder.render.image._mpl import (
 from reportbuilder.render.house_style import (
     register_fonts, series_colors, CREAM, INK, MUTED, GRIDC,
 )
+from reportbuilder.render.image._mpl import template_palette
 
 _EMU_PER_IN = 914400.0
 
@@ -41,7 +42,7 @@ def build_image_radar(ctx) -> None:
     """
     register_fonts()
     cats, segs, data = series_values(ctx.series)
-    clrs = series_colors(len(segs))
+    clrs = series_colors(len(segs), palette=template_palette(ctx))
 
     # Square figure: min slot dimension → circular polar axes, not oval
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
