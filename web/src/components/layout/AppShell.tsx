@@ -71,7 +71,7 @@ function CustomerCases({ customerId }: { customerId: string }) {
           className="text-primary"
         >
           <PlusIcon className="size-4" />
-          <span>Uusi case</span>
+          <span>Uusi tutkimus</span>
         </SidebarMenuSubButton>
       </SidebarMenuSubItem>
 
@@ -89,7 +89,7 @@ function CustomerCases({ customerId }: { customerId: string }) {
 
       {cases?.length === 0 && (
         <SidebarMenuSubItem>
-          <span className="px-2 text-xs text-muted-foreground">Ei vielä caseja</span>
+          <span className="px-2 text-xs text-muted-foreground">Ei vielä tutkimuksia</span>
         </SidebarMenuSubItem>
       )}
     </SidebarMenuSub>

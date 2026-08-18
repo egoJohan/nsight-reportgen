@@ -62,7 +62,7 @@ export default function RecentReportsPage() {
           <div className="rounded-lg border border-dashed bg-card/60 p-10 text-center">
             <FileTextIcon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">
-              Ei vielä raportteja. Aloita valitsemalla asiakas ja case.
+              Ei vielä raportteja. Aloita valitsemalla asiakas ja tutkimus.
             </p>
             <Button className="mt-4" onClick={() => navigate("/customers")}>
               Asiakkaat

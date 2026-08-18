@@ -53,7 +53,7 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Asiakkaat</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Jokainen case kuuluu yhteen asiakkaaseen.
+            Jokainen tutkimus kuuluu yhteen asiakkaaseen.
           </p>
         </div>
         <Button onClick={() => setOpen(true)}>

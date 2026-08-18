@@ -91,7 +91,7 @@ function CaseHeading({
           setDraft(name);
           setEditing(true);
         }}
-        title="Rename case"
+        title="Muuta tutkimuksen nimeä"
       >
         <PencilIcon className="size-4" />
       </Button>
@@ -140,7 +140,7 @@ export default function CaseDetailPage() {
     deleteCase.mutate(id, {
       onSuccess: () => {
         clearWorkspace(id);
-        toast.success("Case deleted");
+        toast.success("Tutkimus poistettu");
         navigate("/");
       },
       onError: (e) => toast.error(`Delete failed: ${e.message}`),
@@ -184,7 +184,7 @@ export default function CaseDetailPage() {
           onClick={() => setConfirmDelete(true)}
         >
           <Trash2Icon className="size-4" />
-          Delete case
+          Poista tutkimus
         </Button>
       </div>
 
@@ -206,10 +206,10 @@ export default function CaseDetailPage() {
       <Dialog open={confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(false)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete this case?</DialogTitle>
+            <DialogTitle>Poistetaanko tutkimus?</DialogTitle>
             <DialogDescription>
-              This permanently removes “{caseName || id}”, its uploaded
-              data, and its reports. This cannot be undone.
+              Tämä poistaa pysyvästi tutkimuksen “{caseName || id}”, sen ladatun
+              datan ja sen raportit. Toimintoa ei voi perua.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -222,7 +222,7 @@ export default function CaseDetailPage() {
               disabled={deleteCase.isPending}
             >
               {deleteCase.isPending && <Loader2Icon className="size-4 animate-spin" />}
-              Delete case
+              Poista tutkimus
             </Button>
           </DialogFooter>
         </DialogContent>

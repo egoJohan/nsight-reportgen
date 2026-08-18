@@ -72,7 +72,7 @@ export default function NewCaseDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New case</DialogTitle>
+          <DialogTitle>Uusi tutkimus</DialogTitle>
           <DialogDescription>
             Upload an SPSS file — it becomes a new case, named from the survey's
             title. You can rename it later.

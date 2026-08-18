@@ -43,7 +43,7 @@ export default function CustomerCasesPage() {
       setName("");
       navigate(`/cases/${created.id}`);
     } catch {
-      toast.error("Casen luonti epäonnistui");
+      toast.error("Tutkimuksen luonti epäonnistui");
     }
   }
 
@@ -63,12 +63,12 @@ export default function CustomerCasesPage() {
             {customer?.name ?? "…"}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Casen oletusnimi on aineiston tiedostonimi.
+            Oletusnimenä on tiedoston nimi.
           </p>
         </div>
         <Button onClick={() => setOpen(true)}>
           <PlusIcon className="mr-2 size-4" />
-          Uusi case
+          Uusi tutkimus
         </Button>
       </div>
 
@@ -77,7 +77,7 @@ export default function CustomerCasesPage() {
 
         {isError && (
           <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
-            Caselistan haku epäonnistui.
+            Tutkimusten haku epäonnistui.
           </p>
         )}
 
@@ -85,7 +85,7 @@ export default function CustomerCasesPage() {
           <div className="rounded-lg border border-dashed p-10 text-center">
             <FolderIcon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">
-              Tällä asiakkaalla ei ole vielä caseja.
+              Tällä asiakkaalla ei ole vielä tutkimuksia.
             </p>
           </div>
         )}
@@ -108,15 +108,15 @@ export default function CustomerCasesPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Uusi case</DialogTitle>
+            <DialogTitle>Uusi tutkimus</DialogTitle>
             <DialogDescription>
-              Case kuuluu asiakkaaseen {customer?.name}.
+              Tutkimus kuuluu asiakkaaseen {customer?.name}.
             </DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={name}
-            placeholder="Casen nimi"
+            placeholder="Tutkimuksen nimi"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
