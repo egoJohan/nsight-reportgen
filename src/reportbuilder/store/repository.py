@@ -54,6 +54,17 @@ class Material:
 
 
 @dataclass(frozen=True)
+class Template:
+    id: str
+    customer_id: str
+    name: str
+    size: int = 0
+    layout_name: str = ""
+    palette: tuple[str, ...] = ()
+    heading_font: str = ""
+
+
+@dataclass(frozen=True)
 class ReportRef:
     id: str
     case_id: str
@@ -394,6 +405,91 @@ class Repository:
         return self._delete_prefix(auth, P.customer_prefix(customer_id))
 
     # -- Presentation templates -------------------------------------------
+
+    def upload_template(self, auth: AuthContext, customer_id: str, name: str,
+                        pptx: bytes, summary: dict | None = None) -> Template:
+        """Store a customer's .pptx. *summary* is template_check's findings.
+
+        The summary is recorded rather than recomputed on every read: opening a
+        PowerPoint file to answer "what is this template called" would make a
+        list of six templates six file parses.
+        """
+        tid = _new_id("tpl")
+        self.store.put(auth, P.template_path(customer_id, tid), pptx, _PPTX,
+                       labels=[P.LABEL_TEMPLATE])
+        meta = {"id": tid, "customer_id": customer_id, "name": name,
+                "size": len(pptx), **(summary or {})}
+        self._write_json(auth, P.template_meta_path(customer_id, tid), meta,
+                         [P.LABEL_TEMPLATE_META])
+        return self._template_from(meta)
+
+    def list_templates(self, auth: AuthContext, customer_id: str) -> list[Template]:
+        out = []
+        for info in self.store.list(auth, P.templates_prefix(customer_id),
+                                    labels=[P.LABEL_TEMPLATE_META]):
+            try:
+                out.append(self._template_from(self._read_json(auth, info.path)))
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+        return sorted(out, key=lambda t: t.name.lower())
+
+    def get_template_bytes(self, auth: AuthContext, customer_id: str,
+                           template_id: str) -> bytes:
+        return self.store.get(auth, P.template_path(customer_id, template_id))
+
+    def delete_template(self, auth: AuthContext, customer_id: str,
+                        template_id: str) -> int:
+        removed = 0
+        for path in (P.template_path(customer_id, template_id),
+                     P.template_meta_path(customer_id, template_id)):
+            try:
+                self.store.delete(auth, path)
+                removed += 1
+            except NotFound:
+                pass
+        return removed
+
+    def ensure_default_template(self, auth: AuthContext, pptx: bytes) -> None:
+        """Seed the house-style default if it is not there yet.
+
+        Written once and left alone: overwriting on every boot would discard a
+        deliberately customised default, and the bytes are deterministic anyway.
+        """
+        try:
+            self.store.get(auth, P.default_template_path())
+            return
+        except NotFound:
+            pass
+        self.store.put(auth, P.default_template_path(), pptx, _PPTX,
+                       labels=[P.LABEL_TEMPLATE])
+
+    def template_bytes_for_report(self, auth: AuthContext, customer_id: str,
+                                  case_id: str, report_id: str) -> bytes | None:
+        """The .pptx this report should render into, following the chain.
+
+        None means "not available" — a binding pointing at a deleted template,
+        or no default seeded — and the caller falls back to a blank deck rather
+        than failing a render over styling.
+        """
+        template_id, _level = self.resolve_template(auth, customer_id, case_id,
+                                                    report_id)
+        try:
+            if template_id:
+                return self.get_template_bytes(auth, customer_id, template_id)
+            return self.store.get(auth, P.default_template_path())
+        except NotFound:
+            return None
+
+    @staticmethod
+    def _template_from(meta: dict) -> Template:
+        return Template(
+            id=meta.get("id", ""), customer_id=meta.get("customer_id", ""),
+            name=meta.get("name") or meta.get("id", ""),
+            size=int(meta.get("size") or 0),
+            layout_name=meta.get("layout_name", ""),
+            palette=tuple(meta.get("palette") or ()),
+            heading_font=meta.get("heading_font", ""),
+        )
 
     def set_template(self, auth: AuthContext, template_id: str | None, *,
                      customer_id: str, case_id: str | None = None) -> None:

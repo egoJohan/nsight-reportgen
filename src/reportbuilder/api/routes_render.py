@@ -63,6 +63,7 @@ def orchestrate_render(
     view: str = "slides",
     out_dir: str | None = None,
     cancel_check=None,
+    template_path: str | None = None,
 ) -> dict:
     """Load the report + the material's data, build the deck, convert to PDF, rasterize a preview.
     Returns {"pptx": <path>, "pdf": <path>, "preview": [<png paths>]}.
@@ -87,7 +88,21 @@ def orchestrate_render(
     uid = uuid.uuid4().hex[:8]
     work_pptx = os.path.join(str(out_dir), f"deck.{uid}.pptx")
     try:
-        build_pptx(report, model, df, work_pptx, cancel_check=cancel_check)
+        # The client's template, when one resolved. load_style_spec reads its
+        # slots and fonts, and deck.py opens it as the base Presentation — so
+        # the deck inherits the client's masters, theme and page size instead of
+        # being a blank deck wearing nSight's colours.
+        style = None
+        if template_path:
+            try:
+                from reportbuilder.render.style_spec import load_style_spec
+                style = load_style_spec(template_path)
+            except Exception:  # noqa: BLE001
+                # An unreadable template must not fail the render; the deck
+                # falls back to the generic style it used before templates.
+                style = None
+        build_pptx(report, model, df, work_pptx, style=style,
+                   cancel_check=cancel_check)
     except ValueError as exc:
         # Surface chart-level errors (e.g. scatter with null scatter_xy) as a
         # clean 422 instead of an unhandled 500. (FIX-3)
@@ -115,6 +130,39 @@ def orchestrate_render(
 
     # 7. Return artifact paths
     return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
+
+
+def _template_for(repo: Repository, auth: AuthContext, case_id: str,
+                  report_id: str, out_dir: pathlib.Path) -> str | None:
+    """Put the report's resolved template on disk and return its path.
+
+    Resolution is report -> pinned -> tutkimus -> asiakas -> house default
+    (Repository.resolve_template). Returns None when nothing is available, and
+    the renderer falls back to a blank deck — a missing template is a styling
+    problem, not a reason to fail a render the analyst is waiting on.
+
+    Pins the resolved template onto the report, so changing the asiakas's
+    template later restyles new reports and leaves this one as delivered.
+    """
+    k = repo.find_case(auth, case_id)
+    if k is None:
+        return None
+    try:
+        template_id, _level = repo.resolve_template(auth, k.customer_id, k.id, report_id)
+        blob = repo.template_bytes_for_report(auth, k.customer_id, k.id, report_id)
+    except Exception:  # noqa: BLE001 — styling must not break rendering
+        return None
+    if not blob:
+        return None
+
+    path = out_dir / "template.pptx"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(blob)
+    try:
+        repo.pin_template(auth, k.customer_id, k.id, report_id, template_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return str(path)
 
 
 def _persist_deck(repo: Repository, auth: AuthContext, case_id: str,
@@ -216,6 +264,10 @@ async def render_report(
         except asyncio.CancelledError:
             pass
 
+    # Resolved before the render so the deck is built INTO the client's
+    # template rather than styled afterwards.
+    template_path = _template_for(repo, auth, case_id, report_id, out_dir)
+
     watcher = asyncio.create_task(_watch_disconnect())
     try:
         result = await asyncio.get_event_loop().run_in_executor(
@@ -223,6 +275,7 @@ async def render_report(
             lambda: orchestrate_render(
                 case_id, report_id, body.material_id, client,
                 view=body.view, out_dir=str(out_dir), cancel_check=cancel.is_set,
+                template_path=template_path,
             ),
         )
     except RenderCancelled:

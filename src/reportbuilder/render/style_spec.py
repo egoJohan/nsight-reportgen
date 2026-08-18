@@ -18,6 +18,12 @@ _DEFAULT_PALETTE = ["1F77B4", "FF7F0E", "2CA02C", "D62728", "9467BD", "8C564B", 
 
 
 class TemplateStyleSpec(StyleSpec):
+    # Which layout new chart slides are built from, and where the chart goes on
+    # it. None means "no usable layout found" and the renderer synthesises a
+    # slide instead — the pre-template behaviour.
+    chart_layout_index: int | None = None
+    chart_slot: Slot | None = None
+
     def __init__(self, slide_width, slide_height, slots, fonts, palette, spec_source="generic"):
         self.slide_width = slide_width
         self.slide_height = slide_height
@@ -58,7 +64,49 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
                     fonts[cls] = (fn, sz)
                 except (AttributeError, IndexError):
                     pass
-    return TemplateStyleSpec(prs.slide_width, prs.slide_height, slots, fonts, list(_DEFAULT_PALETTE), spec_source=str(template_path))
+    spec = TemplateStyleSpec(prs.slide_width, prs.slide_height, slots, fonts,
+                             list(_DEFAULT_PALETTE), spec_source=str(template_path))
+
+    # The layout a chart slide should be BUILT FROM, rather than a blank one we
+    # then guess geometry on. The client's designer already decided where a
+    # title and a content area belong on their slide; template_check finds that
+    # layout by the size of its content placeholder, which survives the fact
+    # that the same layout is called "1 layout area", "Innehåll" and "Title and
+    # Content" in three real client decks.
+    from reportbuilder.render.template_check import inspect_template
+
+    report = inspect_template(str(template_path))
+    if report.best is not None:
+        spec.chart_layout_index = report.best.index
+        layout = prs.slide_layouts[report.best.index]
+        content = _largest_content_placeholder(layout)
+        if content is not None:
+            spec.chart_slot = Slot(
+                slide_index=-1,  # -1: a slide is added per chart, not reused
+                left=int(content.left or 0), top=int(content.top or 0),
+                width=int(content.width or 0), height=int(content.height or 0),
+                name="chart")
+        # The template's own theme colours beat our defaults: accent1-6 is what
+        # PowerPoint's charts use for series, so a deck in Attendo's template
+        # gets Attendo's palette rather than nSight teal.
+        if report.theme.palette:
+            spec._palette = list(report.theme.palette)
+    return spec
+
+
+def _largest_content_placeholder(layout):
+    """The placeholder a chart should occupy: the biggest content area."""
+    from pptx.enum.shapes import PP_PLACEHOLDER
+
+    wanted = {PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.BODY}
+    best, area = None, 0
+    for ph in layout.placeholders:
+        if ph.placeholder_format.type not in wanted:
+            continue
+        size = int(ph.width or 0) * int(ph.height or 0)
+        if size > area:
+            best, area = ph, size
+    return best
 
 
 def attendo_interim_spec() -> TemplateStyleSpec:

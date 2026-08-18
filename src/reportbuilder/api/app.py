@@ -11,6 +11,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_ai import ai_router
 from reportbuilder.api.routes_cases import cases_router
 from reportbuilder.api.routes_customers import customers_router
+from reportbuilder.api.routes_templates import templates_router
 from reportbuilder.api.routes_materials import materials_router
 from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
@@ -77,6 +78,7 @@ def create_app(client=None) -> FastAPI:
 
     # Include routers
     app.include_router(customers_router)
+    app.include_router(templates_router)
     app.include_router(cases_router)
     app.include_router(materials_router)
     app.include_router(questions_router)

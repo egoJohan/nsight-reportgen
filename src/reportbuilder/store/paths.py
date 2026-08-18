@@ -11,6 +11,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     {asiakas}/{case}/material/{material_id}          nsight:material
     {asiakas}/{case}/material/{material_id}.config   nsight:config
     {asiakas}/template/{template_id}                 nsight:template
+    {asiakas}/template/{template_id}.meta            nsight:template-meta
     settings/{key}                                   nsight:settings
     settings/template/default.pptx                   nsight:template
 
@@ -38,6 +39,7 @@ LABEL_RENDER = "nsight:render"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"
 LABEL_TEMPLATE = "nsight:template"
+LABEL_TEMPLATE_META = "nsight:template-meta"
 LABEL_SETTINGS = "nsight:settings"
 
 SETTINGS_ROOT = "settings"
@@ -147,6 +149,12 @@ def template_path(asiakas: str, template_id: str) -> str:
     binds a template per asiakas/case/report with the lowest level winning, so a
     template must outlive any single case."""
     return f"{customer_prefix(asiakas)}template/{_seg(template_id, 'template_id')}"
+
+
+def template_meta_path(asiakas: str, template_id: str) -> str:
+    """Name and validation summary for a template. A sibling, like a material's
+    config, because the .pptx cannot carry them."""
+    return f"{template_path(asiakas, template_id)}.meta"
 
 
 def templates_prefix(asiakas: str) -> str:

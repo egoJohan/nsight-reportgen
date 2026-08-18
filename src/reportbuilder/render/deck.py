@@ -35,6 +35,70 @@ class NativePurityError(Exception):
     """A native-mode report has a picture shape in a chart slot (REQ-C-23a)."""
 
 
+def _content_placeholders():
+    """Placeholder types a chart occupies — imported lazily so this module keeps
+    its light import cost."""
+    from pptx.enum.shapes import PP_PLACEHOLDER
+    return {PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.BODY}
+
+
+def _blank_layout(prs):
+    """The emptiest layout in this presentation.
+
+    `slide_layouts[6]` is blank only in python-pptx's OWN default template. In
+    Attendo's it is "1 layoutarea + 1/3 image", whose picture placeholder lands
+    on every synthesised slide — 6 charts produced 11 pictures and the
+    completeness guard rejected the deck.
+
+    So pick by inspection, and rank on the DECORATION a layout carries rather
+    than on its placeholders. "End slide Thank You" declares zero placeholders
+    yet holds four artwork shapes including a logo PICTURE — it won an earlier
+    version of this ranking and would have stamped that logo on every chart
+    slide. An unfilled placeholder is invisible in the export; a picture on the
+    layout is not.
+
+    Order: no real picture first, then least non-placeholder artwork, then
+    fewest shapes overall.
+    """
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    best, best_key = None, None
+    for layout in prs.slide_layouts:
+        try:
+            artwork = [sh for sh in layout.shapes if not sh.is_placeholder]
+            has_picture = any(sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+                              for sh in artwork)
+            key = (has_picture, len(artwork), len(layout.shapes))
+        except Exception:  # noqa: BLE001 — a malformed layout is simply not chosen
+            continue
+        if best_key is None or key < best_key:
+            best, best_key = layout, key
+    # A presentation with no layouts at all cannot happen via python-pptx, but
+    # index 6 is the historical behaviour and a safe last resort.
+    return best if best is not None else prs.slide_layouts[6]
+
+
+def _strip_slides(prs) -> int:
+    """Remove every pre-existing slide from an opened template. Returns the count.
+
+    Keeps masters, layouts and theme — everything that defines the look — and
+    discards the example or finished slides that came with the file.
+    """
+    slide_ids = prs.slides._sldIdLst
+    removed = 0
+    for sld in list(slide_ids):
+        rid = sld.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        slide_ids.remove(sld)
+        if rid:
+            try:
+                prs.part.drop_rel(rid)
+            except KeyError:
+                pass
+        removed += 1
+    return removed
+
+
 def _count_chart_shapes(prs: Presentation) -> tuple[int, int]:
     """Return (chart_count, picture_count) across all slides in *prs*."""
     charts = sum(
@@ -127,6 +191,17 @@ def render_report(
             prs = Presentation(spec_source)
         except (FileNotFoundError, PackageNotFoundError):
             prs = None
+        if prs is not None:
+            # A client "template" is usually a FINISHED deck — Attendo's is 56
+            # slides of last year's report. Using their template means
+            # inheriting their look, not their content, so the slides go while
+            # the masters, layouts, theme, fonts and page size stay.
+            #
+            # Dropping the relationship as well as the sldIdLst entry matters:
+            # left related, the slide parts survive the save and every generated
+            # deck would carry megabytes of somebody else's finished report.
+            _strip_slides(prs)
+
     if prs is None:
         # Wizard/generic reports render on a blank deck at 16:9 (13.333"×7.5"), the
         # modern presentation standard. Template-based decks keep their own size.
@@ -245,8 +320,26 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
     except (KeyError, AttributeError):
         pass
 
+    # Preferred: build the slide from the template's OWN chart layout, using the
+    # content placeholder the client's designer positioned. Only when a template
+    # supplies neither do we fall back to a blank slide with guessed geometry.
+    chart_layout = getattr(style, "chart_layout_index", None)
+    chart_slot = getattr(style, "chart_slot", None)
+    if chart_layout is not None and chart_slot is not None:
+        slide = prs.slides.add_slide(prs.slide_layouts[chart_layout])
+        # The content placeholder has given us its rectangle; leaving it on the
+        # slide would show PowerPoint's "Click to add text" prompt behind the
+        # chart, so it is removed once its geometry is taken.
+        for shape in list(slide.shapes):
+            if shape.is_placeholder and shape.has_text_frame and not shape.text_frame.text:
+                if shape.placeholder_format.type in _content_placeholders():
+                    shape._element.getparent().remove(shape._element)
+        return Slot(slide_index=len(prs.slides) - 1, left=chart_slot.left,
+                    top=chart_slot.top, width=chart_slot.width,
+                    height=chart_slot.height, name=slot_name)
+
     # Fallback: add a new blank slide and synthesise a slot covering most of it
-    layout = prs.slide_layouts[6]  # blank layout
+    layout = _blank_layout(prs)  # emptiest layout in THIS template
     slide = prs.slides.add_slide(layout)
     slide_index = len(prs.slides) - 1
 
