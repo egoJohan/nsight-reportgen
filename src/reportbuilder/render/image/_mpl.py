@@ -187,6 +187,8 @@ def render_png(fig) -> str:
 
     The figure is an OO Agg Figure (not pyplot-managed), so there is no global
     registry entry to close — clearing it just releases its artists/memory."""
+    # Deleted by place_picture_square once python-pptx has embedded it; the
+    # caller is not expected to clean up.
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04)
@@ -374,7 +376,20 @@ def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
         top = ctx.slot.top
     else:
         top = ctx.slot.top + (slot_h - disp_h) // 2
-    ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h)
+    try:
+        ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h)
+    finally:
+        # render_png() mkstemp'd this file and nothing else owns it: python-pptx
+        # has copied the bytes into the package by now, so the temp copy is
+        # dead weight. Without this every chart ever rendered leaks a PNG into
+        # /tmp — 1572 of them had accumulated on this machine, and a
+        # long-running container would eventually fill its disk.
+        # finally, not a plain call: a failed add_picture must not leak either.
+        try:
+            os.unlink(png_path)
+        except OSError:
+            # Already gone, or a read-only temp dir. Not worth failing a render.
+            pass
 
 
 def style_legend(ax, loc: str = "best") -> None:
