@@ -350,6 +350,49 @@ class Repository:
             pass
         return self.save_report(auth, customer_id, case_id, raw)
 
+    # -- Deletion ---------------------------------------------------------
+
+    def _delete_prefix(self, auth: AuthContext, prefix: str) -> int:
+        """Remove every object under *prefix*; return how many went.
+
+        ConsentRequired is deliberately NOT caught. datahive gates destructive
+        operations behind human approval (floor rule 4), and swallowing that
+        here would either silently do nothing or force nSight to auto-approve
+        the destruction of somebody's work. The caller surfaces the approval and
+        retries; each retry makes progress, because approved objects are gone by
+        then.
+        """
+        removed = 0
+        for info in self.store.list(auth, prefix):
+            self.store.delete(auth, info.path)
+            removed += 1
+        return removed
+
+    def delete_report(self, auth: AuthContext, customer_id: str, case_id: str,
+                      report_id: str) -> int:
+        """The report, its sidecar and any cached render — a report whose meta
+        outlived it would keep appearing in listings and recents."""
+        removed = 0
+        for path in (P.report_path(customer_id, case_id, report_id),
+                     P.report_meta_path(customer_id, case_id, report_id),
+                     P.report_render_path(customer_id, case_id, report_id)):
+            try:
+                self.store.delete(auth, path)
+                removed += 1
+            except NotFound:
+                pass  # a report may never have been rendered
+        return removed
+
+    def delete_case(self, auth: AuthContext, customer_id: str, case_id: str) -> int:
+        """The tutkimus and everything in it: materials, curation, reports,
+        renders. Cascade rather than refusal, because a tutkimus with no
+        material and no reports is not a thing a user would want kept."""
+        return self._delete_prefix(auth, P.case_prefix(customer_id, case_id))
+
+    def delete_customer(self, auth: AuthContext, customer_id: str) -> int:
+        """The customer and every tutkimus under it."""
+        return self._delete_prefix(auth, P.customer_prefix(customer_id))
+
     # -- Rendered deck (a cache, in the store) ----------------------------
 
     def render_key(self, auth: AuthContext, customer_id: str, case_id: str,

@@ -10,10 +10,10 @@ from reportbuilder.api.routes_materials import materials_router
 from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
-from reportbuilder.store.datahive_client import DataHiveClient, DataHiveError
+from reportbuilder.store.datahive_client import DataHiveError
 
 
-def create_app(client: DataHiveClient | None = None) -> FastAPI:
+def create_app(client=None) -> FastAPI:
     """Build the FastAPI app. If `client` is given (a DataHiveClient or a mock), it becomes the
     instance returned by the get_client dependency — this is how tests inject a mock without a
     live datahive. If None, get_client falls back to constructing a real DataHiveClient.

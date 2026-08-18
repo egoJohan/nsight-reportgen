@@ -11,7 +11,7 @@ import pytest
 from reportbuilder.store import paths as P
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
-from reportbuilder.store.seam import AuthContext, NotFound
+from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 
 
 @pytest.fixture
@@ -395,3 +395,66 @@ class TestRenderCache:
         repo.save_render(auth, cid, kid, rid, b"PPTX",
                          repo.render_key(auth, cid, kid, rid, mid))
         assert [r.name for r in repo.list_reports(auth, cid, kid)] == ["R"]
+
+
+class TestDeletion:
+    """datahive gates destructive operations behind human approval, so these
+    tests drive the consent flow rather than pretending it does not exist."""
+
+    def _approve_all(self, store, auth, fn):
+        """Run *fn*, approving each consent request until it completes."""
+        for _ in range(50):
+            try:
+                return fn()
+            except ConsentRequired as exc:
+                store.approve(exc.request_id)
+        raise AssertionError("consent loop did not converge")
+
+    def test_deleting_a_report_takes_its_sidecar_and_render(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "s.sav", b"sav")
+        r = repo.save_report(auth, c.id, k.id, json.dumps({"name": "R"}))
+        repo.save_render(auth, c.id, k.id, r.id, b"PPTX",
+                         repo.render_key(auth, c.id, k.id, r.id, m.id))
+
+        self._approve_all(store, auth,
+                          lambda: repo.delete_report(auth, c.id, k.id, r.id))
+
+        # A sidecar outliving its report would keep it in listings and recents.
+        assert repo.list_reports(auth, c.id, k.id) == []
+        assert repo.recent_reports(auth) == []
+
+    def test_deleting_a_tutkimus_takes_its_material_and_reports(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        repo.attach_material(auth, c.id, k.id, "s.sav", b"sav")
+        repo.save_report(auth, c.id, k.id, json.dumps({"name": "R"}))
+
+        self._approve_all(store, auth, lambda: repo.delete_case(auth, c.id, k.id))
+
+        assert repo.list_cases(auth, c.id) == []
+        assert repo.list_materials(auth, c.id, k.id) == []
+        assert repo.list_reports(auth, c.id, k.id) == []
+
+    def test_deleting_a_customer_takes_every_tutkimus(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        keep = repo.create_customer(auth, "Beta")
+        repo.create_case(auth, c.id, "T1")
+        repo.create_case(auth, c.id, "T2")
+        kb = repo.create_case(auth, keep.id, "Beta T")
+
+        self._approve_all(store, auth, lambda: repo.delete_customer(auth, c.id))
+
+        assert [x.id for x in repo.list_customers(auth)] == [keep.id]
+        assert [x.id for x in repo.list_cases(auth, keep.id)] == [kb.id]
+
+    def test_delete_demands_consent_before_it_removes_anything(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        r = repo.save_report(auth, c.id, k.id, json.dumps({"name": "R"}))
+
+        with pytest.raises(ConsentRequired):
+            repo.delete_report(auth, c.id, k.id, r.id)
+        # Nothing went before approval — the gate is real, not advisory.
+        assert [x.id for x in repo.list_reports(auth, c.id, k.id)] == [r.id]
