@@ -13,6 +13,7 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -23,7 +24,12 @@ import {
   SidebarMenuSubButton,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { useCases, useCustomers, useCustomerCases } from "@/lib/queries";
+import {
+  useCases,
+  useCustomers,
+  useCustomerCases,
+  useResolvedCase,
+} from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import ChatPanel from "@/components/ChatPanel";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
@@ -32,6 +38,7 @@ import {
   FolderOpenIcon,
   Building2Icon,
   ChevronRightIcon,
+  ClockIcon,
   SettingsIcon,
   XIcon,
   MessageSquareTextIcon,
@@ -56,6 +63,18 @@ function CustomerCases({ customerId }: { customerId: string }) {
 
   return (
     <SidebarMenuSub>
+      {/* First, not last: the action that creates the thing this group lists
+          should not move down the page as the list grows. */}
+      <SidebarMenuSubItem>
+        <SidebarMenuSubButton
+          render={<NavLink to={`/customers/${customerId}?new=case`} />}
+          className="text-primary"
+        >
+          <PlusIcon className="size-4" />
+          <span>Uusi case</span>
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+
       {cases?.map((k) => (
         <SidebarMenuSubItem key={k.id}>
           <SidebarMenuSubButton
@@ -73,19 +92,45 @@ function CustomerCases({ customerId }: { customerId: string }) {
           <span className="px-2 text-xs text-muted-foreground">Ei vielä caseja</span>
         </SidebarMenuSubItem>
       )}
-
-      {/* Adding a case belongs to the customer it lands under, so the action
-          lives inside the group rather than as a global button. */}
-      <SidebarMenuSubItem>
-        <SidebarMenuSubButton
-          render={<NavLink to={`/customers/${customerId}?new=case`} />}
-          className="text-primary"
-        >
-          <PlusIcon className="size-4" />
-          <span>Uusi case</span>
-        </SidebarMenuSubButton>
-      </SidebarMenuSubItem>
     </SidebarMenuSub>
+  );
+}
+
+/** Cases created before the hierarchy existed. They belong to no customer, so
+ *  they get their own group rather than a separate page — one navigation
+ *  surface instead of two. Disappears once they are backfilled. */
+function LegacyCasesGroup() {
+  const { data: cases } = useCases();
+  const { id: activeCaseId } = useParams();
+  const [open, setOpen] = useState(false);
+
+  if (!cases?.length) return null;
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton onClick={() => setOpen((v) => !v)} tooltip="Ilman asiakasta">
+        <ChevronRightIcon
+          className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <FolderOpenIcon className="size-4" />
+        <span className="truncate text-muted-foreground">Ilman asiakasta</span>
+      </SidebarMenuButton>
+      {open && (
+        <SidebarMenuSub>
+          {cases.map((c) => (
+            <SidebarMenuSubItem key={c.id}>
+              <SidebarMenuSubButton
+                render={<NavLink to={`/cases/${c.id}`} />}
+                isActive={activeCaseId === c.id}
+              >
+                <FolderOpenIcon className="size-4" />
+                <span className="truncate">{c.name}</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          ))}
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
   );
 }
 
@@ -127,42 +172,74 @@ function CustomersNav() {
         );
       })}
 
-      {customers?.length === 0 && (
-        <SidebarMenuItem>
-          <span className="px-2 text-xs text-muted-foreground">Ei vielä asiakkaita</span>
-        </SidebarMenuItem>
-      )}
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          render={<NavLink to="/customers?new=customer" />}
+          tooltip="Uusi asiakas"
+          className="text-primary"
+        >
+          <PlusIcon className="size-4" />
+          <span>Uusi asiakas</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+
+      <LegacyCasesGroup />
     </SidebarMenu>
   );
 }
 
+/** Where you actually are.
+ *
+ *  Derived from the route rather than hardcoded: the previous version always
+ *  began with "Asiakkaat", which was a lie on the front page and on any page
+ *  outside the customer tree. */
 function Breadcrumb() {
   const location = useLocation();
-  const { data: cases } = useCases();
-  const { data: customers } = useCustomers();
   const { id, customerId } = useParams();
+  const [searchParams] = useSearchParams();
+  const { data: customers } = useCustomers();
+  const { data: resolved } = useResolvedCase(id);
+  const { data: legacyCases } = useCases();
 
-  const currentCase = id ? cases?.find((c) => c.id === id) : null;
-  const currentCustomer = customerId ? customers?.find((c) => c.id === customerId) : null;
-  const onCasePage = location.pathname.startsWith("/cases/");
+  const crumbs: { label: string; to?: string }[] = [];
+  const path = location.pathname;
+
+  if (path === "/") {
+    crumbs.push({ label: "Viimeisimmät" });
+  } else if (path.startsWith("/customers")) {
+    crumbs.push({ label: "Asiakkaat", to: customerId ? "/customers" : undefined });
+    const c = customers?.find((x) => x.id === customerId);
+    if (c) crumbs.push({ label: c.name });
+  } else if (path.startsWith("/cases/") && id) {
+    crumbs.push({ label: "Asiakkaat", to: "/customers" });
+    if (resolved) {
+      crumbs.push({ label: resolved.customer_name, to: `/customers/${resolved.customer_id}` });
+      crumbs.push({ label: resolved.name });
+    } else {
+      // A legacy case has no customer; say so rather than inventing one.
+      crumbs.push({ label: "Ilman asiakasta" });
+      crumbs.push({
+        label: legacyCases?.find((c) => c.id === id)?.name ?? id,
+      });
+    }
+    const openReport = searchParams.get("report");
+    if (openReport) crumbs.push({ label: "Raportti" });
+  }
 
   return (
-    <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-      <NavLink to="/customers" className="hover:text-foreground transition-colors">
-        Asiakkaat
-      </NavLink>
-      {currentCustomer && (
-        <>
-          <span className="text-muted-foreground/50 mx-0.5">/</span>
-          <span className="text-foreground font-medium">{currentCustomer.name}</span>
-        </>
-      )}
-      {onCasePage && currentCase && (
-        <>
-          <span className="text-muted-foreground/50 mx-0.5">/</span>
-          <span className="text-foreground font-medium">{currentCase.name}</span>
-        </>
-      )}
+    <nav className="flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
+      {crumbs.map((c, i) => (
+        <span key={`${c.label}-${i}`} className="flex min-w-0 items-center gap-1">
+          {i > 0 && <span className="text-muted-foreground/50 mx-0.5">/</span>}
+          {c.to ? (
+            <NavLink to={c.to} className="truncate transition-colors hover:text-foreground">
+              {c.label}
+            </NavLink>
+          ) : (
+            <span className="truncate font-medium text-foreground">{c.label}</span>
+          )}
+        </span>
+      ))}
     </nav>
   );
 }
@@ -238,28 +315,29 @@ export default function AppShell() {
         </SidebarHeader>
 
         <SidebarContent>
-          {/* A case is created under a customer, so the top-level action is
-              adding a CUSTOMER; "Uusi case" lives inside each customer group. */}
+          {/* The front page is a destination like any other, so it lives in the
+              nav rather than being reachable only via the logo. */}
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton
-                    render={<NavLink to="/customers?new=customer" />}
-                    tooltip="Uusi asiakas"
-                    className="font-medium text-primary"
-                  >
-                    <PlusIcon className="size-4" />
-                    <span>Uusi asiakas</span>
+                  <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Viimeisimmät">
+                    <ClockIcon className="size-4" />
+                    <span>Viimeisimmät</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
 
-          {/* Asiakas -> Case tree — own scroll region so a long list stays
-              reachable while "Uusi asiakas" stays pinned above. */}
+          {/* The one place customers are listed. The label links to the
+              management page; the tree is for getting somewhere. */}
           <SidebarGroup className="min-h-0 flex-1 overflow-y-auto group-data-[collapsible=icon]:hidden">
+            <SidebarGroupLabel>
+              <NavLink to="/customers" className="transition-colors hover:text-foreground">
+                Asiakkaat
+              </NavLink>
+            </SidebarGroupLabel>
             <SidebarGroupContent>
               <CustomersNav />
             </SidebarGroupContent>
