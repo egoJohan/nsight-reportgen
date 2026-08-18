@@ -61,7 +61,23 @@ def memory_hive(tmp_path) -> InMemoryDataHiveClient:
 
 @pytest.fixture
 def client_memory(memory_hive) -> TestClient:
-    return TestClient(create_app(client=memory_hive))
+    """App wired to the in-memory stores.
+
+    Also overrides the repository and auth dependencies: the render routes now
+    reach the object store directly, to persist a finished deck and to fetch it
+    back when /tmp no longer has it. Without these the routes fail closed with
+    401, which is the correct production behaviour and useless in a test.
+    """
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.store.memory_objects import InMemoryObjectStore
+    from reportbuilder.store.repository import Repository
+    from reportbuilder.store.seam import AuthContext
+
+    app = create_app(client=memory_hive)
+    repo = Repository(InMemoryObjectStore())
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_auth] = lambda: AuthContext(token="test")
+    return TestClient(app)
 
 
 # ---- Agentic seam ----------------------------------------------------------

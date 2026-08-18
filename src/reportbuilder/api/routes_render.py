@@ -21,6 +21,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.store.repository import Repository
+from reportbuilder.store.seam import AuthContext
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
@@ -114,6 +117,58 @@ def orchestrate_render(
     return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
 
 
+def _persist_deck(repo: Repository, auth: AuthContext, case_id: str,
+                  report_id: str, material_id: str, pptx_path: str) -> None:
+    """Copy the finished deck into datahive so it outlives /tmp.
+
+    The deck is the DELIVERABLE — the thing the analyst hands to a client — so
+    it must not depend on a directory the OS is free to empty. The PDF and the
+    page rasters are not copied: both derive from this file, so a wiped /tmp
+    costs one LibreOffice conversion rather than a full re-render (fetch the
+    .sav, re-parse, recompute every statistic, redraw every chart).
+
+    Best-effort: a storage failure must not fail a render the user is watching.
+    They still get their deck; it just is not cached.
+    """
+    k = repo.find_case(auth, case_id)
+    if k is None:
+        return
+    try:
+        key = repo.render_key(auth, k.customer_id, k.id, report_id, material_id)
+        repo.save_render(auth, k.customer_id, k.id, report_id,
+                         pathlib.Path(pptx_path).read_bytes(), key)
+    except Exception:  # noqa: BLE001 — see docstring
+        log = __import__("logging").getLogger(__name__)
+        log.warning("could not persist deck for %s/%s", case_id, report_id,
+                    exc_info=True)
+
+
+def _restore_deck(repo: Repository, auth: AuthContext, case_id: str,
+                  report_id: str, out_dir: pathlib.Path) -> bool:
+    """Put a stored deck back on disk when /tmp no longer has it.
+
+    Returns False when there is nothing usable — no stored deck, or one whose
+    key no longer matches the report and material, in which case serving it
+    would hand the user a deck that disagrees with its own data.
+    """
+    k = repo.find_case(auth, case_id)
+    if k is None:
+        return False
+    materials = repo.list_materials(auth, k.customer_id, k.id)
+    if not materials:
+        return False
+    try:
+        key = repo.render_key(auth, k.customer_id, k.id, report_id, materials[0].id)
+        blob = repo.load_render(auth, k.customer_id, k.id, report_id, key)
+    except Exception:  # noqa: BLE001
+        return False
+    if not blob:
+        return False
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "deck.pptx").write_bytes(blob)
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Request body model
 # ---------------------------------------------------------------------------
@@ -138,6 +193,8 @@ async def render_report(
     body: RenderRequest,
     request: Request,
     client: DataHiveClient = Depends(get_client),
+    auth: AuthContext = Depends(get_auth),
+    repo: Repository = Depends(get_repository),
 ) -> dict:
     """Orchestrate PPTX build, PDF conversion, and preview rasterization for a report.
     Writes artifacts to a deterministic per-report dir so the preview PDF is fetchable.
@@ -175,16 +232,31 @@ async def render_report(
         cancel.set()
         watcher.cancel()
 
+    # The deck outlives /tmp from here on. Done after the render rather than
+    # inside it so a storage problem cannot cancel work the user just waited for.
+    _persist_deck(repo, auth, case_id, report_id, body.material_id, result["pptx"])
+
     result["pdf_url"] = f"/cases/{case_id}/reports/{report_id}/preview.pdf"
     return result
 
 
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pdf")
-def get_preview_pdf(case_id: str, report_id: str) -> FileResponse:
+def get_preview_pdf(case_id: str, report_id: str,
+                    auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository)) -> FileResponse:
     """Stream the rendered PDF for a report to the client browser. (REQ-C-19, REQ-C-21)"""
     # pptx_to_pdf produces <stem>.pdf; since we write deck.pptx the output is deck.pdf
-    pdf = render_output_dir(case_id, report_id) / "deck.pdf"
+    out = render_output_dir(case_id, report_id)
+    pdf = out / "deck.pdf"
     if not pdf.exists():
+        # Regenerate from the stored deck rather than giving up: the PDF is
+        # derived, so a wiped /tmp should cost a conversion, not a re-render.
+        if _restore_deck(repo, auth, case_id, report_id, out):
+            pptx_to_pdf(str(out / "deck.pptx"), str(out))
+            recovered = out / "deck.pdf"
+            if recovered.exists():
+                return FileResponse(str(recovered), media_type="application/pdf",
+                                    filename="preview.pdf")
         raise HTTPException(status_code=404, detail="not rendered yet")
     return FileResponse(str(pdf), media_type="application/pdf", filename="preview.pdf")
 
@@ -193,10 +265,16 @@ _PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml
 
 
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pptx")
-def get_preview_pptx(case_id: str, report_id: str) -> FileResponse:
+def get_preview_pptx(case_id: str, report_id: str,
+                     auth: AuthContext = Depends(get_auth),
+                     repo: Repository = Depends(get_repository)) -> FileResponse:
     """Stream the rendered PowerPoint deck for a report to the client browser.
-    Returns 404 when the report has not been rendered yet."""
-    pptx = render_output_dir(case_id, report_id) / "deck.pptx"
-    if not pptx.exists():
+
+    The deck is the deliverable, so /tmp is a cache and datahive is the record:
+    if the local copy is gone, fetch the stored one back before giving up."""
+    out = render_output_dir(case_id, report_id)
+    pptx = out / "deck.pptx"
+    if not pptx.exists() and not _restore_deck(repo, auth, case_id, report_id, out):
+        raise HTTPException(status_code=404, detail="not rendered yet")
         raise HTTPException(status_code=404, detail="not rendered yet")
     return FileResponse(str(pptx), media_type=_PPTX_MEDIA_TYPE, filename="preview.pptx")
