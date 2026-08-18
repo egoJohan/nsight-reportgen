@@ -77,3 +77,20 @@ class TestLabels:
         for lbl in (P.LABEL_REPORT, P.LABEL_MATERIAL, P.LABEL_CONFIG,
                     P.LABEL_TEMPLATE, P.LABEL_SETTINGS):
             assert lbl.startswith(P.LABEL_ROOT + ":")
+
+
+class TestMetadataObjects:
+    """Container entities keep their name in a sidecar, because the path segment
+    is an id — a name in the path would make a rename a data migration."""
+
+    def test_customer_meta_sits_at_the_customer_root(self):
+        assert P.customer_meta_path("acme") == "acme/customer.json"
+
+    def test_case_meta_sits_at_the_case_root(self):
+        assert P.case_meta_path("acme", "case-1") == "acme/case-1/case.json"
+
+    def test_metadata_is_inside_the_grant_scope_it_describes(self):
+        # A customer grant must cover that customer's own metadata, or the UI
+        # could not render the name of a customer the user can otherwise read.
+        assert P.customer_meta_path("acme").startswith(P.customer_prefix("acme"))
+        assert P.case_meta_path("acme", "c1").startswith(P.case_prefix("acme", "c1"))

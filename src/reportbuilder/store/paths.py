@@ -3,6 +3,8 @@
 Path carries HIERARCHY, labels carry TYPE (design
 `docs/superpowers/specs/2026-08-17-datahive-api-contract.md` §4/§6):
 
+    {asiakas}/customer.json                          nsight:customer
+    {asiakas}/{case}/case.json                       nsight:case
     {asiakas}/{case}/report/{report_id}              nsight:report
     {asiakas}/{case}/material/{material_id}          nsight:material
     {asiakas}/{case}/material/{material_id}.config   nsight:config
@@ -25,6 +27,8 @@ from __future__ import annotations
 # Label vocabulary. Hierarchical: writing "nsight:report" stores
 # ["nsight", "nsight:report"], so ?label=nsight matches everything we own.
 LABEL_ROOT = "nsight"
+LABEL_CUSTOMER = "nsight:customer"
+LABEL_CASE = "nsight:case"
 LABEL_REPORT = "nsight:report"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"
@@ -53,6 +57,22 @@ def _seg(value: str, what: str) -> str:
     if v in (".", ".."):
         raise PathError(f"{what} must not be a relative path segment: {value!r}")
     return v
+
+
+def customer_meta_path(asiakas: str) -> str:
+    """Where a customer's name lives.
+
+    The path segment is an id, not a name — a name in the path would make
+    renaming a customer a data migration. So each container entity keeps a small
+    JSON sidecar, and "list every customer" is `?label=nsight:customer` with no
+    prefix: server-side, permission-filtered, and no directory concept needed.
+    """
+    return f"{customer_prefix(asiakas)}customer.json"
+
+
+def case_meta_path(asiakas: str, case: str) -> str:
+    """Where a case's name lives. Same reasoning as customer_meta_path."""
+    return f"{case_prefix(asiakas, case)}case.json"
 
 
 def customer_prefix(asiakas: str) -> str:
