@@ -33,7 +33,6 @@ import {
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import ChatPanel from "@/components/ChatPanel";
-import TiledBackdrop from "@/components/layout/TiledBackdrop";
 import {
   PlusIcon,
   FolderOpenIcon,
@@ -369,11 +368,7 @@ export default function AppShell() {
         </div>
       </Sidebar>
 
-      <SidebarInset className="isolate">
-        {/* Behind every page. `isolate` above keeps the -z layer from sliding
-            behind an opaque ancestor. */}
-        <TiledBackdrop />
-
+      <SidebarInset>
         {/* Top bar */}
         <header className="flex h-14 items-center gap-3 border-b bg-background px-4 shrink-0">
           <SidebarTrigger className="-ml-1" />

@@ -1,14 +1,12 @@
 /**
  * The tiled analytics-doodle backdrop, behind every page.
  *
- * Rendered once inside SidebarInset rather than per page: it sits in the
- * non-scrolling content area, so it stays put while a long page scrolls over
- * it instead of sliding away with the content.
+ * Landing page only. On a working page it competes with tables, charts and
+ * forms; on the landing page it is the sole decoration and fights nothing.
  *
- * The parent needs `isolate`. SidebarInset paints an opaque `bg-background`,
- * and while a negative-z child does paint above its OWN parent's background,
- * without a new stacking context it would slide behind an opaque ancestor
- * further up and vanish.
+ * The parent needs `relative isolate`. A negative-z child paints above its own
+ * parent's background, but without a new stacking context it slides behind an
+ * opaque ancestor further up and vanishes.
  */
 export default function TiledBackdrop() {
   return (

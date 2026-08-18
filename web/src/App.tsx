@@ -3,7 +3,6 @@ import AppShell from "@/components/layout/AppShell";
 import RecentReportsPage from "@/pages/RecentReportsPage";
 import CustomersPage from "@/pages/CustomersPage";
 import CustomerCasesPage from "@/pages/CustomerCasesPage";
-import CasesPage from "@/pages/CasesPage";
 import CaseDetailPage from "@/pages/CaseDetailPage";
 
 export default function App() {
@@ -15,9 +14,8 @@ export default function App() {
         <Route index element={<RecentReportsPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/customers/:customerId" element={<CustomerCasesPage />} />
-        {/* Kept while the pre-hierarchy cases are backfilled under a customer,
-            so existing links and those 37 cases still resolve. */}
-        <Route path="/cases" element={<CasesPage />} />
+        {/* Pre-hierarchy cases are reachable from the sidebar's "Ilman
+            asiakasta" group; only the detail route is still needed. */}
         <Route path="/cases/:id" element={<CaseDetailPage />} />
       </Route>
     </Routes>

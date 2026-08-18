@@ -1,13 +1,14 @@
 import { useNavigate } from "react-router-dom";
-import { FileTextIcon, ArrowRightIcon, Building2Icon } from "lucide-react";
+import { FileTextIcon, ArrowRightIcon, PlusIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useRecentReports, useCustomers } from "@/lib/queries";
 import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
+import TiledBackdrop from "@/components/layout/TiledBackdrop";
 
-/** Relative time, in Finnish, at the granularity a report list actually needs.
- *  An exact timestamp is noise here — "3 päivää sitten" answers the question
- *  the list is asked ("what was I last working on?"). */
+/** Relative time at the granularity a report list actually needs. An exact
+ *  timestamp is noise here — "3 pv sitten" answers "what was I last working
+ *  on?", which is the only question this list is asked. */
 function since(iso: string): string {
   if (!iso) return "";
   const then = new Date(iso).getTime();
@@ -22,11 +23,11 @@ function since(iso: string): string {
   return new Date(iso).toLocaleDateString("fi-FI");
 }
 
-/** The landing page: what you were last working on.
+/** The welcome page: brand, then what you were last working on.
  *
- *  Reports rather than customers, because a customer list is navigation and
- *  the front page should answer "where was I?". Customers stay one click away
- *  in the sidebar tree. */
+ *  The tiled backdrop lives HERE rather than in the shell. On a working page it
+ *  competes with tables, charts and forms for attention; on the landing page it
+ *  is the only decoration and has nothing to fight with. */
 export default function RecentReportsPage() {
   const navigate = useNavigate();
   const { data: reports, isLoading, isError } = useRecentReports(10);
@@ -36,62 +37,81 @@ export default function RecentReportsPage() {
     customers?.find((c) => c.id === id)?.name ?? "";
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-12">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Viimeisimmät raportit</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Kymmenen viimeksi muokattua raporttia, uusin ensin.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => navigate("/customers")}>
-          <Building2Icon className="mr-2 size-4" />
-          Asiakkaat
-        </Button>
-      </div>
+    <div className="relative isolate min-h-full">
+      <TiledBackdrop />
 
-      <div className="mt-8 space-y-2">
-        {isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
-
-        {isError && (
-          <p className={ERROR}>
-            Raporttien haku epäonnistui.
-          </p>
-        )}
-
-        {reports?.length === 0 && (
-          <div className={EMPTY}>
-            <FileTextIcon className="mx-auto size-8 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              Ei vielä raportteja. Aloita valitsemalla asiakas ja tutkimus.
-            </p>
-            <Button className="mt-4" onClick={() => navigate("/customers")}>
-              Asiakkaat
-            </Button>
+      <div className="mx-auto w-full max-w-4xl px-6 py-16">
+        {/* Welcome hero */}
+        <div className="flex flex-col items-center text-center">
+          <div className="flex items-center justify-center rounded-2xl bg-primary px-7 py-5 shadow-sm">
+            <img src="/nsight-logo.svg" alt="nSight" className="h-12 w-auto" />
           </div>
-        )}
-
-        {reports?.map((r) => (
-          <button
-            key={`${r.case_id}/${r.id}`}
-            onClick={() => navigate(`/cases/${r.case_id}?report=${r.id}`)}
-            className={ROW}
+          <h1 className="mt-7 text-3xl font-semibold tracking-tight">
+            Tervetuloa nSight Studioon
+          </h1>
+          <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+            Muunna SPSS-kyselydata viimeistellyiksi raporteiksi. Luo asiakas, tuo
+            sille tutkimus ja rakenna raportit sen kysymyksistä.
+          </p>
+          {/* A tutkimus needs a customer to belong to, so from an empty start
+              the first real action is creating one. */}
+          <Button
+            className="mt-7"
+            size="lg"
+            onClick={() => navigate("/customers?new=customer")}
           >
-            <span className="flex min-w-0 items-center gap-3">
-              <FileTextIcon className="size-5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0">
-                <span className="block truncate font-medium">{r.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {customerName(r.customer_id)}
+            <PlusIcon className="size-4" />
+            Uusi asiakas
+          </Button>
+        </div>
+
+        {/* Recent reports */}
+        <div className="mt-16">
+          <h2 className="mb-3 text-sm font-medium tracking-wide text-muted-foreground uppercase">
+            Viimeisimmät raportit
+          </h2>
+
+          <div className="space-y-2">
+            {isLoading &&
+              [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
+
+            {isError && <p className={ERROR}>Raporttien haku epäonnistui.</p>}
+
+            {reports?.length === 0 && (
+              <div className={EMPTY}>
+                <FileTextIcon className="mx-auto size-7 text-muted-foreground/50" />
+                <p className="mt-3 text-sm font-medium">Ei vielä raportteja</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Aloita luomalla asiakas ja tuomalla sille tutkimus.
+                </p>
+              </div>
+            )}
+
+            {reports?.map((r) => (
+              <button
+                key={`${r.case_id}/${r.id}`}
+                onClick={() => navigate(`/cases/${r.case_id}?report=${r.id}`)}
+                className={ROW}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <FileTextIcon className="size-5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{r.name}</span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {customerName(r.customer_id)}
+                    </span>
+                  </span>
                 </span>
-              </span>
-            </span>
-            <span className="ml-4 flex shrink-0 items-center gap-3">
-              <span className="text-xs text-muted-foreground">{since(r.modified_at)}</span>
-              <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-            </span>
-          </button>
-        ))}
+                <span className="ml-4 flex shrink-0 items-center gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    {since(r.modified_at)}
+                  </span>
+                  <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
