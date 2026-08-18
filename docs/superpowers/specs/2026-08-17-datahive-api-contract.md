@@ -8,11 +8,16 @@ Companion documents:
 - `../notes/2026-08-18-datahive-label-inconsistency.md` — a datahive change request this
   design deliberately does not block on
 
-> **Verification status.** Everything below was established by *reading datahive source*
-> at `master` `19742f55`. No claim here has been exercised against a running hive. That
-> is the next step, and it matters: the existing `datahive_client.py` was written against
-> an *assumed* contract nobody ever exercised, and five of its fourteen operations turned
-> out to be broken.
+> **Verification status — VERIFIED LIVE 2026-08-18** against a purpose-built local hive
+> (`nsight-dev`, port 7910, datahive `c88e1c84`, v0.2.4) and the local egohive
+> (`43e84c8f`). Results in §13. Verifying mattered: it produced one finding that would
+> have broken in production (§13.2, the consent gate on deletes) and one that removes a
+> constraint the design had been working around (§13.3, labels now exist on objects).
+>
+> Baseline note: the first draft was read from source at `19742f55`. datahive has since
+> moved ~30 commits; `groups.py`, `hive_invite.py`, `ui_api.py`, `workspaces.py` and
+> `admin_identity.py` are **unchanged**, so the login, invite, groups and workspace-access
+> findings carry over intact.
 
 ## 1. The constraint that shapes everything
 
@@ -46,7 +51,7 @@ cheap to design in now and expensive to retrofit, which is why it was settled fi
 | P1 | Path-addressed object store | `/api/v1/objects` | ✅ complete |
 | P2 | Groups, membership, invites | `/api/v1/groups`, `/api/v1/hive_invite` | ✅ complete |
 | P3 | Interactive human login | `/api/v1/ui/*` | ✅ complete, see §7.1 |
-| P4 | Labels on stored things | — | ❌ deferred, see §8 |
+| P4 | Labels on stored things | `?label=` on every store | ✅ landed 2026-08-18 (`7ac9eaa3`), see §13.3 |
 
 ### P1 — the object store is the whole storage requirement
 
@@ -149,12 +154,15 @@ case/<case_id>/material/<mat_id>.config  curation JSON
 template/<template_id>                   customer-level .pptx
 ```
 
-The tension to resolve: **prefix listing returns everything below the prefix.** So
-"list this case's reports" is clean (`case/<id>/report/`), but "list all cases" over
-`case/` also returns every report and material underneath. Options: a separate index
-prefix, a suffix convention filtered client-side, or waiting for §8 and filtering by
-label. Renaming a path means physically moving the object, so this is worth settling
-before there is data.
+The tension: **prefix listing returns everything below the prefix.** So "list this
+case's reports" is clean (`case/<id>/report/`), but "list all cases" over `case/` also
+returns every report and material underneath.
+
+**§8 resolves this.** Labels landed on 2026-08-18, so the query is
+`?path_prefix=case/&label=nsight:case` — path scopes, label selects. Path no longer has
+to carry the type axis, which makes the grammar far less load-bearing. It still matters
+(renaming a path moves the object), but a mistake is now recoverable by relabelling
+rather than by moving data.
 
 ## 7. Identity
 
@@ -228,14 +236,28 @@ Both `require_admin`, so only egoiq can read them. Every membership change calls
 Sub-decisions still open: whether egoiq's own support logins count as seats, and whether
 a pending invite counts before first login (recommend billing on accepted membership).
 
-## 8. Deferred: labels
+## 8. Labels — RESOLVED
 
-The object store has no labels, and its docstring advertises a `labels` parameter
-`put_object` does not accept. Full analysis and proposal:
-`../notes/2026-08-18-datahive-label-inconsistency.md`.
+datahive commit `7ac9eaa3` *"feat(labels): one label model for every store, instead of
+three"* landed on 2026-08-18, adding `datahive/domain/labels.py` as the single
+implementation, with an architecture test that fails if a store hand-rolls its own.
 
-nSight does not block on it. `labels` rides the seam as an optional passthrough; until it
-lands, §6's path grammar carries the type axis alone.
+For nSight this means **path and type are separate axes**:
+
+```
+path:    <workspace>/case/<case_id>/...     where it belongs
+labels:  nsight:report | nsight:material     what it is
+```
+
+Labels are hierarchical — writing `nsight:report` stores `["nsight", "nsight:report"]`
+(verified §13.3) — so `?label=nsight` returns everything nSight owns.
+
+`pinned_labels` were deliberately *not* generalised: they claim "the OWNER affixed this"
+and are consumed by ABAC as `pinned_labels_required`, so they are an authorization input
+rather than an organising axis. nSight does not need them.
+
+Historical note: `../notes/2026-08-18-datahive-label-inconsistency.md` describes the
+problem this fixed.
 
 ## 9. Open decisions
 
@@ -246,8 +268,17 @@ plus a contract test so a break fails CI), re-expose the flow at a stable public
 don't depend on them (not viable — no login). Note the object store does **not** have this
 problem: it is already a server-to-server surface for another product.
 
-**9.2 Is an OIDC issuer configured for the nSight hive, and which IdP?** Per §7.1 this
-gates any login work at all.
+**9.2 Which IdP? — ANSWERED: egoHive.** The local egohive serves
+`/.well-known/openid-configuration` with `issuer=http://localhost:8000`,
+`authorization_endpoint=/api/v1/auth/oidc/authorize`, `token_endpoint=/api/v1/auth/oidc/token`,
+`jwks_uri=/api/v1/auth/oidc/jwks.json`, EdDSA-signed. datahive's own `init` names it:
+`--oidc-issuer  Trusted OIDC issuer (e.g. egohive) to accept JWT bearers from`. egohive
+also exposes `/datahive/jwks.json` — *"the service-signing JWKS a DataHive instance
+fetches to verify egoHive's data-path service tokens"*.
+
+Remaining sub-task: the `nsight-dev` hive was initialised **without** OIDC
+(`login_oidc_issuer: null`), so it must be re-initialised or reconfigured with
+`--oidc-issuer` / `--oidc-jwks-url` pointing at egohive before login work starts.
 
 **9.3 Do nSight administrators become datahive `tenant_admins`?** Every `/groups` and
 `/hive_invite` route is `require_admin`, so "nSight admins add and remove users" means
@@ -310,3 +341,68 @@ Before any of this is built on, bring up a local datahive and exercise P1:
 
 Approach A — close each gap one capability at a time, each verified live, then a single
 data cutover — is agreed and unchanged.
+
+## 13. Live verification results (2026-08-18)
+
+Run against `nsight-dev` (port 7910, datahive `c88e1c84`), with three CLI-minted bearers:
+unrestricted, path-caveated to `nsight-probe/allowed`, and read-only. All probe objects
+were removed afterwards.
+
+### 13.1 Confirmed
+
+| Claim | Result |
+|---|---|
+| **Byte-exact round-trip (§11.2)** | ✅ A payload of NULs, `0xFF`, CRLF and the full 0–255 byte range returned **byte-identical**, as did UTF-8 JSON. This is the claim the report serde tests rest on. |
+| **Path-scope enforcement (§7.3)** | ✅ The path-caveated token got **404** on an out-of-caveat path, **200** writing inside its caveat, and its listing showed 1 of 3 objects — datahive genuinely forces per-path permissions. |
+| **Read-only tokens** | ✅ `PUT` with a `--read-only` bearer → **403**. |
+| **Prefix listing (§11.4)** | ✅ Returns `object_id, path, size, content_type, etag, workspace_uuid, labels` — richer than the source implied, and ABAC-filtered. |
+| **`/api/v1/ui/config` is public (§7.1)** | ✅ 200 with no token. |
+
+### 13.2 NEW — destructive operations require consent elevation
+
+`DELETE /api/v1/objects` returns **403** even for an unrestricted bearer:
+
+```json
+{"error": "consent_required",
+ "consent": {"request_id": "cr_…", "reason": "object.delete is a destructive operation",
+             "action": "object.delete", "target_kind": "path",
+             "target_pattern": "nsight-probe/**",
+             "desired_lifetime": {"kind": "one_shot"},
+             "approval_urls": {"rest": "/api/v1/consent/requests/{id}/approve",
+                               "cli": "datahive consent approve {id}",
+                               "web": "/ui/consent/{id}"}}}
+```
+
+This is floor rule 4 — *"irreversible/destructive ops need explicit human approval"* — and
+it applies to **every nSight delete**: dataset (P-C-01), template (TE-4), report, case.
+
+**Design consequence.** nSight cannot treat delete as a plain call. Its UI must catch
+`consent_required` and drive an approval — which is arguably the correct UX for
+destroying an analyst's work anyway, but it is a flow that must be *designed*, not
+discovered. The approve-then-retry cycle was verified working via the CLI route.
+Whether nSight can hold a standing elevation instead of a one-shot per delete is an open
+question.
+
+### 13.3 NEW — labels landed, and work
+
+Verified on the live hive: `PUT` with `labels=nsight:report` stored
+`["nsight", "nsight:report"]` — hierarchical expansion applied — and
+`GET /objects/list?label=nsight:report` filtered **server-side**, returning exactly the
+matching object. See §8.
+
+### 13.4 Environment
+
+- **datahive `nsight-dev`** — port 7910, tenant `048a48ee-540a-467c-8c55-b925ec5447dd`,
+  config `~/.local/share/datahive/nsight-dev/`, against the shared postgres :5433 and
+  qdrant :6336. Health reports `postgres: true, qdrant: true, can_recall: true`.
+  Note `datahive init` needs `--kms-profile dev` (default `prod` forbids FileKMS) and a
+  `--qdrant-api-key`.
+- **egohive** — already running on :8000, healthy; the stored `work/egohive_creds.json`
+  still authenticates.
+- Bearers for the dev hive are in `work/datahive_creds.json` (gitignored, mode 600).
+
+### 13.5 Still unverified
+
+The seam's remaining unknown: minting a **per-user** macaroon whose path caveats match
+that user's customers and cases, from an egohive OIDC session rather than the CLI. The
+CLI path (`datahive auth grant --paths`) is proven; the session-to-caveat path is not.

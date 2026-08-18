@@ -1,5 +1,12 @@
 # Labels in datahive are inconsistent across stores
 
+> **RESOLVED 2026-08-18** by datahive commit `7ac9eaa3` — *"feat(labels): one label
+> model for every store, instead of three"*. `datahive/domain/labels.py` is now the single
+> implementation, with an architecture test that fails if a store hand-rolls its own, and
+> `pinned_labels` deliberately left out as an authorization input rather than an organising
+> axis. Verified working on a live hive: `labels=nsight:report` stores
+> `["nsight", "nsight:report"]` and `?label=` filters server-side. Kept for the record.
+
 _Date: 2026-08-18 · For a datahive session · Found while specifying nSight's storage
 contract (`docs/superpowers/specs/2026-08-17-datahive-api-contract.md`)_
 
