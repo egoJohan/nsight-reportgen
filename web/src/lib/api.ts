@@ -419,7 +419,70 @@ export interface CaseReportInfo {
   name: string;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+}
+
+/** A case now belongs to exactly one customer, so its id alone is no longer a
+ *  complete address — every customer-scoped call carries both. */
+export interface CustomerCase {
+  id: string;
+  customer_id: string;
+  name: string;
+}
+
+const jsonPost = (body: unknown) => ({
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+const jsonPatch = (body: unknown) => ({
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 export const api = {
+  /** Asiakas -> Case. The server filters these lists to what the caller may
+   *  see, so the UI must never widen them by filtering a broader response. */
+  customers: {
+    list: (): Promise<Customer[]> =>
+      fetch(`${API_BASE}/customers`).then((r) => json<Customer[]>(r)),
+
+    get: (customerId: string): Promise<Customer> =>
+      fetch(`${API_BASE}/customers/${customerId}`).then((r) => json<Customer>(r)),
+
+    create: (name: string): Promise<Customer> =>
+      fetch(`${API_BASE}/customers`, jsonPost({ name })).then((r) => json<Customer>(r)),
+
+    rename: (customerId: string, name: string): Promise<Customer> =>
+      fetch(`${API_BASE}/customers/${customerId}`, jsonPatch({ name })).then((r) =>
+        json<Customer>(r)
+      ),
+
+    listCases: (customerId: string): Promise<CustomerCase[]> =>
+      fetch(`${API_BASE}/customers/${customerId}/cases`).then((r) =>
+        json<CustomerCase[]>(r)
+      ),
+
+    createCase: (customerId: string, name: string): Promise<CustomerCase> =>
+      fetch(`${API_BASE}/customers/${customerId}/cases`, jsonPost({ name })).then((r) =>
+        json<CustomerCase>(r)
+      ),
+
+    renameCase: (
+      customerId: string,
+      caseId: string,
+      name: string
+    ): Promise<CustomerCase> =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/cases/${caseId}`,
+        jsonPatch({ name })
+      ).then((r) => json<CustomerCase>(r)),
+  },
+
   cases: {
     list: (): Promise<Case[]> =>
       fetch(`${API_BASE}/cases`).then((r) => json<Case[]>(r)),

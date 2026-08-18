@@ -39,6 +39,43 @@ export function useCaseReports(caseId: string | null) {
 
 // ---- Hooks ----
 
+export function useCustomers() {
+  return useQuery({ queryKey: ["customers"], queryFn: api.customers.list });
+}
+
+export function useCustomer(customerId: string | undefined) {
+  return useQuery({
+    queryKey: ["customer", customerId],
+    queryFn: () => api.customers.get(customerId!),
+    enabled: !!customerId,
+  });
+}
+
+export function useCustomerCases(customerId: string | undefined) {
+  return useQuery({
+    queryKey: ["customer", customerId, "cases"],
+    queryFn: () => api.customers.listCases(customerId!),
+    enabled: !!customerId,
+  });
+}
+
+export function useCreateCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.customers.create(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+
+export function useCreateCustomerCase(customerId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.customers.createCase(customerId!, name),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["customer", customerId, "cases"] }),
+  });
+}
+
 export function useCases() {
   return useQuery({ queryKey: qk.cases(), queryFn: api.cases.list });
 }
