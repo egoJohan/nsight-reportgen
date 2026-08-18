@@ -119,8 +119,12 @@ def new_figure(ctx):
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
     ax = fig.subplots()
-    fig.patch.set_facecolor(CREAM)
-    ax.set_facecolor(CREAM)
+    # The template's own background, so the chart does not sit on a cream
+    # rectangle in the middle of a white deck. Falls back to house cream when no
+    # template applies.
+    bg = chart_background(ctx)
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
     return fig, ax
 
 
@@ -177,8 +181,12 @@ def new_tall_figure(ctx, h_in: float):
     h_in = max(h_in, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
     ax = fig.subplots()
-    fig.patch.set_facecolor(CREAM)
-    ax.set_facecolor(CREAM)
+    # The template's own background, so the chart does not sit on a cream
+    # rectangle in the middle of a white deck. Falls back to house cream when no
+    # template applies.
+    bg = chart_background(ctx)
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
     return fig, ax
 
 
@@ -245,6 +253,18 @@ def series_values(series):
         for seg in segs
     }
     return cats, segs, data
+
+
+def chart_background(ctx) -> str:
+    """The colour a chart paints onto: the template's lt1, else house cream."""
+    value = getattr(ctx.style, "background", "") or ""
+    return f"#{value}" if value else CREAM
+
+
+def chart_ink(ctx) -> str:
+    """Body-text colour: the template's dk1, else house ink."""
+    value = getattr(ctx.style, "ink", "") or ""
+    return f"#{value}" if value else INK
 
 
 def template_palette(ctx) -> list[str] | None:

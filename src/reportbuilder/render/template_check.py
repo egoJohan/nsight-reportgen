@@ -60,6 +60,11 @@ class TemplateTheme:
     palette: list[str] = field(default_factory=list)
     heading_font: str = ""
     body_font: str = ""
+    # lt1 / dk1 — the template's own light and dark, i.e. what its slides use
+    # as background and body text. Charts paint onto these so a chart does not
+    # sit on a cream rectangle in the middle of a white deck.
+    background: str = ""
+    ink: str = ""
 
 
 @dataclass
@@ -107,6 +112,17 @@ def _theme(prs) -> TemplateTheme:
             sysc.get("lastClr") if sysc is not None else None)
         if value:
             theme.palette.append(value.upper())
+
+    for tag, attr in (("lt1", "background"), ("dk1", "ink")):
+        el = root.find(f".//a:clrScheme/a:{tag}", _A)
+        if el is None:
+            continue
+        srgb = el.find("a:srgbClr", _A)
+        sysc = el.find("a:sysClr", _A)
+        value = srgb.get("val") if srgb is not None else (
+            sysc.get("lastClr") if sysc is not None else None)
+        if value:
+            setattr(theme, attr, value.upper())
 
     for kind, attr in (("major", "heading_font"), ("minor", "body_font")):
         el = root.find(f".//a:fontScheme/a:{kind}Font/a:latin", _A)

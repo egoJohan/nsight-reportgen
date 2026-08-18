@@ -23,6 +23,36 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
+
+
+def _rgb(hex6: str):
+    """'122D49' -> RGBColor. Empty/short input returns None."""
+    from pptx.dml.color import RGBColor
+    if not hex6 or len(hex6) != 6:
+        return None
+    try:
+        return RGBColor(int(hex6[0:2], 16), int(hex6[2:4], 16), int(hex6[4:6], 16))
+    except ValueError:
+        return None
+
+
+def _theme_colours(ctx):
+    """(background, ink, accent) for this slide, preferring the template's own.
+
+    A deck built on the client's template should not carry nSight's cream ground
+    and teal accent bar. Anything the template does not state falls back to the
+    house value, so a template with a partial theme still renders.
+    """
+    style = getattr(ctx, "style", None)
+    bg = _rgb(getattr(style, "background", "") or "") or PX_CREAM
+    ink = _rgb(getattr(style, "ink", "") or "") or PX_INK
+    accent = PX_TEAL
+    try:
+        if getattr(style, "chart_layout_index", None) is not None:
+            accent = _rgb(style.color_for(0)) or PX_TEAL
+    except Exception:  # noqa: BLE001 — styling must not break a render
+        pass
+    return bg, ink, accent
 from reportbuilder.stats.engine import scale_endpoint_gloss
 
 _FONT = "Liberation Sans"
@@ -113,7 +143,8 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # 1 — Cream background (full slide, added first → sits at bottom of z-order)
     bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
     bg.fill.solid()
-    bg.fill.fore_color.rgb = PX_CREAM
+    _bg, _ink, _accent = _theme_colours(ctx)
+    bg.fill.fore_color.rgb = _bg
     bg.line.fill.background()
     bg.shadow.inherit = False
 
@@ -165,7 +196,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
         )
         acc.fill.solid()
-        acc.fill.fore_color.rgb = PX_TEAL
+        acc.fill.fore_color.rgb = _accent
         acc.line.fill.background()
         acc.shadow.inherit = False
 
@@ -180,7 +211,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 slide,
                 Inches(0.80), Inches(0.42),
                 sw - Inches(1.0), Inches(1.30),
-                [(title, t_size, PX_INK, True)],
+                [(title, t_size, _ink, True)],
             )
         if secondary:
             # The question subtitle binds to the CHART: its box bottom sits just

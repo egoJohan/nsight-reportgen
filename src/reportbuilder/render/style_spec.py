@@ -23,6 +23,10 @@ class TemplateStyleSpec(StyleSpec):
     # slide instead — the pre-template behaviour.
     chart_layout_index: int | None = None
     chart_slot: Slot | None = None
+    # Hex, no leading '#'. Empty means "no template opinion", and the house
+    # cream/ink apply.
+    background: str = ""
+    ink: str = ""
 
     def __init__(self, slide_width, slide_height, slots, fonts, palette, spec_source="generic"):
         self.slide_width = slide_width
@@ -91,6 +95,8 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
         # gets Attendo's palette rather than nSight teal.
         if report.theme.palette:
             spec._palette = list(report.theme.palette)
+        spec.background = report.theme.background
+        spec.ink = report.theme.ink
     return spec
 
 
