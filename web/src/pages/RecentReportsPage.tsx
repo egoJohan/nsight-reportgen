@@ -1,4 +1,4 @@
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { FileTextIcon, ArrowRightIcon, Building2Icon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,7 @@ export default function RecentReportsPage() {
             Kymmenen viimeksi muokattua raporttia, uusin ensin.
           </p>
         </div>
-        <Button variant="outline" render={<Link to="/customers" />}>
+        <Button variant="outline" onClick={() => navigate("/customers")}>
           <Building2Icon className="mr-2 size-4" />
           Asiakkaat
         </Button>
@@ -64,7 +64,7 @@ export default function RecentReportsPage() {
             <p className="mt-3 text-sm text-muted-foreground">
               Ei vielä raportteja. Aloita valitsemalla asiakas ja case.
             </p>
-            <Button className="mt-4" render={<Link to="/customers" />}>
+            <Button className="mt-4" onClick={() => navigate("/customers")}>
               Asiakkaat
             </Button>
           </div>
