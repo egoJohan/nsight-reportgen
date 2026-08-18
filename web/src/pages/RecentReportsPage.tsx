@@ -42,10 +42,7 @@ export default function RecentReportsPage() {
       <div className="mx-auto w-full max-w-4xl px-6 py-16">
         {/* Welcome hero */}
         <div className="flex flex-col items-center text-center">
-          <div className="flex items-center justify-center rounded-2xl bg-primary px-7 py-5 shadow-sm">
-            <img src="/nsight-logo.svg" alt="nSight" className="h-12 w-auto" />
-          </div>
-          <h1 className="mt-7 text-3xl font-semibold tracking-tight">
+          <h1 className="text-3xl font-semibold tracking-tight">
             Tervetuloa nSight Studioon
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
