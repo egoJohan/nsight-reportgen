@@ -96,7 +96,7 @@ entire class of security work and liability from this project.
 macaroon and then requires `is_admin_identity` — it is an **admin-only** path. So
 ordinary nSight analysts have exactly one way in: the OIDC flow. If the nSight hive has
 no `login_oidc_issuer` configured, `/oidc/login` returns 404 and **there is no
-ordinary-user login at all**. See §10.2.
+ordinary-user login at all**. See §11.2.
 
 ## 6. Authorization — membership is the single source of truth
 
@@ -148,8 +148,24 @@ target group and `scope={"identity": …}`. So a billing period can be reconstru
 **Later automation** (explicitly a later step) is a scheduled job over those two
 endpoints, diffed against the audit log. Nothing further is needed from datahive.
 
-**Open: what counts as a billable user.** See §10.4 — this is a pricing decision, not a
-technical one, and it determines what the job counts.
+**What counts as a billable user — SETTLED 2026-08-18 (johan): anyone who can log in to
+nSight Studio.**
+
+This is the simplest possible rule and it collapses the implementation: **one group whose
+membership means "may log in to nSight Studio".** Its member count *is* the invoice line.
+
+- No read-only vs read+write distinction to track — if you can log in, you are billable.
+- No per-case or per-customer weighting — access *scope* is a separate, finer-grained
+  concern inside nSight and has no billing effect.
+- nSight's own administrators are billable, since they can log in.
+- Counting is a single call, so the later automation is trivial.
+
+Which makes the login gate and the seat ledger literally the same list, extending §6's
+rule: membership is the access grant, and now also the invoice.
+
+One wrinkle to decide before invoicing: **egoiq staff who log in for support would count
+as seats under this rule.** Either accept that, or keep support access in a separate,
+excluded group. See §11.4.
 
 ## 8. Cross-cutting requirements
 
@@ -236,13 +252,30 @@ Changes there cannot affect nSight.
 
 ## 11. Open decisions
 
-### 11.1 Is `/api/v1/ui/*` a supported cross-app surface?
+### 11.1 Will the login endpoints be kept stable for nSight?
 
-Its own docstring calls it the *"Admin SPA backend"*. nSight consuming it is reuse of a
-generic capability, but if that surface is considered internal to datahive's own SPA it
-could change without notice — nSight's login would break on a datahive release. **This is
-the main coupling risk in this contract.** Either it is blessed as public API, or the
-session flow needs a stable home.
+The six login endpoints in §5 were built to serve **datahive's own admin web UI** — they
+sit under `/api/v1/ui/` and the code describes them as the *"Admin SPA backend"*.
+
+The risk is ordinary: endpoints written for one known caller get changed whenever that
+caller needs something different — a renamed field, a different cookie, a changed
+response. That is normal and harmless while datahive's SPA is the only consumer. But
+nSight would become a second consumer nobody is thinking about, and its **login** breaks
+on a datahive release, with no warning and no workaround (per §5, OIDC through these
+endpoints is the only ordinary-user path in).
+
+So the decision is a commitment, not an analysis:
+
+1. **Treat them as published API.** Free today; requires that datahive not change them
+   without considering nSight. Worth pinning with a contract test in datahive so a
+   breaking change fails CI rather than production.
+2. **Give the session flow a stable home** — e.g. re-expose it under `/api/v1/auth/*`
+   as explicitly public, leaving `/api/v1/ui/*` free to churn for the SPA's needs. A
+   small, generic datahive change; no nSight-specific concept enters core.
+3. **Don't depend on them** — not viable: there would be no ordinary-user login.
+
+Recommendation: **1 plus the contract test.** It costs nothing now and converts a silent
+production break into a failing build.
 
 ### 11.2 Is an OIDC issuer configured for the nSight hive?
 
@@ -256,19 +289,27 @@ owner}`. So "nSight's administrators can add and remove users" means they hold r
 datahive admin authority over that hive. Bounded by the hive being nSight-dedicated, but
 it is more than user management strictly needs.
 
-### 11.4 What is a billable user?
+### 11.4 What is a billable user? — SETTLED
 
-At 50 €/user/month the rule must be explicit: does a **read-only** user count? A user
-granted access to a **single case**? nSight's own administrators? egoiq staff with access
-for support? The answer defines which group memberships the counting job sums.
+**Anyone who can log in to nSight Studio** (johan, 2026-08-18). Implemented as one group
+gating login; its member count is the invoice. See §7.
+
+Remaining sub-decision: whether **egoiq's own staff** count as seats when they log in for
+support. Under the stated rule they do. If not intended, support accounts need their own
+group, excluded from the count — cheap to arrange now, awkward to retrofit once invoicing
+has started.
 
 ### 11.5 Speksi 2 deviation to confirm with nSight
 
 Speksi 2 requires managing *"yksittäistä käyttäjätunnusta, **sen salasanaa** ja sen
 käyttöoikeuksia"*. Under this design **nSight never handles passwords** — identity is the
 IdP's, so "change my password" happens there. This is a better outcome (no credential
-handling in nSight) but it is a literal deviation from the spec text and should be
-confirmed rather than assumed.
+handling in nSight) but it is a literal deviation from the spec text.
+
+**Status: not a decision for egoiq — it is a question for nSight.** Parked here so it is
+raised at the next requirements discussion rather than discovered during acceptance. It
+does not block implementation: the design is sound either way, and only the wording of
+the requirement is at issue.
 
 ## 12. What this contract does not cover
 
