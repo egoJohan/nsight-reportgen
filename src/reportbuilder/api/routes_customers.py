@@ -117,3 +117,24 @@ def recent_reports(limit: int = Query(default=10, ge=1, le=50),
          "name": r.name, "modified_at": r.modified_at}
         for r in repo.recent_reports(auth, limit=limit)
     ]
+
+
+@customers_router.get("/cases/{case_id}/resolve")
+def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
+                 repo: Repository = Depends(get_repository)) -> dict:
+    """Resolve a bare case id to its case and owning customer.
+
+    The UI holds case ids in URLs that predate the hierarchy, so it needs a way
+    to ask "which customer does this belong to, and what is it called?" without
+    already knowing the answer.
+    """
+    k = repo.find_case(auth, case_id)
+    if k is None:
+        raise HTTPException(404, f"Case '{case_id}' not found")
+    customer_name = ""
+    try:
+        customer_name = repo.get_customer(auth, k.customer_id).name
+    except NotFound:
+        pass
+    return {"id": k.id, "name": k.name, "customer_id": k.customer_id,
+            "customer_name": customer_name}

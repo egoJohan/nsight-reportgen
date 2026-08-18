@@ -223,3 +223,35 @@ class TestReportListingUsesSidecars:
 
         assert names == ["Iso raportti"]
         assert body not in reads, "listing must not fetch the report body"
+
+
+class TestFindCase:
+    """The URL surface is still case-rooted, so the app often holds only a case
+    id and must resolve the rest."""
+
+    def test_finds_a_case_and_its_customer(self, repo, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Testcase 1")
+        found = repo.find_case(auth, k.id)
+        assert found is not None
+        assert found.name == "Testcase 1" and found.customer_id == c.id
+
+    def test_unknown_case_returns_none(self, repo, auth):
+        assert repo.find_case(auth, "case-nope") is None
+
+    def test_a_case_outside_the_caller_scope_is_indistinguishable_from_absent(
+            self, repo, store, auth):
+        a = repo.create_customer(auth, "Acme")
+        b = repo.create_customer(auth, "Beta")
+        hidden = repo.create_case(auth, b.id, "Not yours")
+        scoped = AuthContext(token="only-acme")
+        store.caveats["only-acme"] = [P.customer_prefix(a.id)]
+        assert repo.find_case(scoped, hidden.id) is None
+
+    def test_does_not_confuse_a_case_id_appearing_elsewhere_in_a_path(self, repo, auth):
+        # The case id is matched at its own path position, not by substring:
+        # a customer id that happens to contain it must not match.
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Real")
+        assert repo.find_case(auth, c.id) is None  # a customer id is not a case id
+        assert repo.find_case(auth, k.id).name == "Real"

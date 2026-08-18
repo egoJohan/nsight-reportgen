@@ -122,6 +122,26 @@ class Repository:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))
         return Case(id=d["id"], customer_id=customer_id, name=d.get("name", d["id"]))
 
+    def find_case(self, auth: AuthContext, case_id: str) -> Case | None:
+        """Locate a case by id alone, without knowing its customer.
+
+        The URL surface is still case-rooted (`/cases/{id}/...`) from before the
+        hierarchy existed, so the app frequently holds a case id and nothing
+        else. One listing answers it: labels select the case metadata objects,
+        the store has already restricted them to what this caller may read, and
+        the customer is the first path segment.
+
+        Returns None rather than raising — "no such case, or not yours" is an
+        ordinary answer here, and the two must stay indistinguishable.
+        """
+        for info in self.store.list(auth, "", labels=[P.LABEL_CASE]):
+            segments = info.path.split("/")
+            if len(segments) >= 2 and segments[1] == case_id:
+                d = self._read_json(auth, info.path)
+                return Case(id=d["id"], customer_id=segments[0],
+                            name=d.get("name", d["id"]))
+        return None
+
     def rename_case(self, auth: AuthContext, customer_id: str, case_id: str,
                     name: str) -> Case:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))

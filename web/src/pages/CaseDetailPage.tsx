@@ -18,13 +18,24 @@ import ReportWizard from "@/components/wizard/ReportWizard";
 import {
   useCases,
   useRenameCase,
+  useResolvedCase,
+  useRenameCustomerCase,
   useDeleteCase,
   useCaseMaterials,
 } from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
 
-function CaseHeading({ caseId, name }: { caseId: string; name: string }) {
+function CaseHeading({
+  caseId,
+  name,
+  customerId,
+}: {
+  caseId: string;
+  name: string;
+  customerId?: string;
+}) {
   const rename = useRenameCase();
+  const renameInCustomer = useRenameCustomerCase(customerId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
 
@@ -34,7 +45,10 @@ function CaseHeading({ caseId, name }: { caseId: string; name: string }) {
       setEditing(false);
       return;
     }
-    rename.mutate(
+    // A case under a customer lives in the hierarchy store; the legacy rename
+    // route would not find it.
+    const mutation = customerId ? renameInCustomer : rename;
+    mutation.mutate(
       { caseId, name: next },
       {
         onSuccess: () => setEditing(false),
@@ -56,7 +70,7 @@ function CaseHeading({ caseId, name }: { caseId: string; name: string }) {
           }}
           className="h-10 max-w-md text-lg font-semibold"
         />
-        <Button size="icon-sm" onClick={save} disabled={rename.isPending}>
+        <Button size="icon-sm" onClick={save} disabled={rename.isPending || renameInCustomer.isPending}>
           <CheckIcon className="size-4" />
         </Button>
         <Button size="icon-sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -89,7 +103,11 @@ export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: cases } = useCases();
-  const currentCase = cases?.find((c) => c.id === id);
+  // A case under a customer is not in the legacy /cases list, so resolve it by
+  // id; without this the heading fell back to rendering the raw case id.
+  const { data: resolved } = useResolvedCase(id);
+  const legacyCase = cases?.find((c) => c.id === id);
+  const caseName = resolved?.name ?? legacyCase?.name ?? "";
   const { workspace, removeReport } = useWorkspace(id ?? "");
   // The case→material link is server-side; fall back to it when this browser has
   // no local pointer (e.g. the case was created by someone else / another device).
@@ -156,7 +174,7 @@ export default function CaseDetailPage() {
       {/* Heading + delete */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <CaseHeading caseId={id} name={currentCase?.name ?? id} />
+          <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
         <Button
@@ -190,7 +208,7 @@ export default function CaseDetailPage() {
           <DialogHeader>
             <DialogTitle>Delete this case?</DialogTitle>
             <DialogDescription>
-              This permanently removes “{currentCase?.name ?? id}”, its uploaded
+              This permanently removes “{caseName || id}”, its uploaded
               data, and its reports. This cannot be undone.
             </DialogDescription>
           </DialogHeader>

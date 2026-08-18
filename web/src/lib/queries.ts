@@ -39,6 +39,29 @@ export function useCaseReports(caseId: string | null) {
 
 // ---- Hooks ----
 
+export function useRenameCustomerCase(customerId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, name }: { caseId: string; name: string }) =>
+      api.customers.renameCase(customerId!, caseId, name),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["customer", customerId, "cases"] });
+      qc.invalidateQueries({ queryKey: ["case", v.caseId, "resolve"] });
+    },
+  });
+}
+
+export function useResolvedCase(caseId: string | undefined) {
+  return useQuery({
+    queryKey: ["case", caseId, "resolve"],
+    queryFn: () => api.customers.resolveCase(caseId!),
+    enabled: !!caseId,
+    // A legacy case has no customer, so a 404 here is expected, not an error
+    // worth retrying.
+    retry: false,
+  });
+}
+
 export function useRecentReports(limit = 10) {
   return useQuery({
     queryKey: ["reports", "recent", limit],

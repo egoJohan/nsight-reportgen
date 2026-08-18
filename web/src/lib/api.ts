@@ -427,6 +427,13 @@ export interface RecentReport {
   modified_at: string;
 }
 
+export interface ResolvedCase {
+  id: string;
+  name: string;
+  customer_id: string;
+  customer_name: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -479,6 +486,11 @@ export const api = {
       fetch(`${API_BASE}/customers/${customerId}/cases`, jsonPost({ name })).then((r) =>
         json<CustomerCase>(r)
       ),
+
+    /** A case id alone -> its name and owning customer. The URL surface is
+     *  still case-rooted from before the hierarchy existed. */
+    resolveCase: (caseId: string): Promise<ResolvedCase> =>
+      fetch(`${API_BASE}/cases/${caseId}/resolve`).then((r) => json<ResolvedCase>(r)),
 
     recentReports: (limit = 10): Promise<RecentReport[]> =>
       fetch(`${API_BASE}/reports/recent?limit=${limit}`).then((r) =>
