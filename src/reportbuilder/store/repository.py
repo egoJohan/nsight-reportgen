@@ -393,6 +393,93 @@ class Repository:
         """The customer and every tutkimus under it."""
         return self._delete_prefix(auth, P.customer_prefix(customer_id))
 
+    # -- Presentation templates -------------------------------------------
+
+    def set_template(self, auth: AuthContext, template_id: str | None, *,
+                     customer_id: str, case_id: str | None = None) -> None:
+        """Bind a template to a customer or a tutkimus. None clears the binding.
+
+        Stored on the container's own metadata rather than in a separate table:
+        the binding IS a property of the customer or tutkimus, and keeping it
+        there means one read to resolve it and nothing to keep in step.
+        """
+        path = (P.case_meta_path(customer_id, case_id) if case_id
+                else P.customer_meta_path(customer_id))
+        label = P.LABEL_CASE if case_id else P.LABEL_CUSTOMER
+        d = self._read_json(auth, path)
+        if template_id:
+            d["template_id"] = template_id
+        else:
+            d.pop("template_id", None)
+        self._write_json(auth, path, d, [label])
+
+    def resolve_template(self, auth: AuthContext, customer_id: str, case_id: str,
+                         report_id: str) -> tuple[str, str]:
+        """Which template does this report render with, and where did it come from?
+
+        Order, lowest wins: the report's own explicit choice, then the template
+        it last rendered with, then its tutkimus, then its customer, then the
+        house default.
+
+        The second step is the card's rule that an existing report must not
+        change under its author: *"Jo luotujen raporttien pohja ei muutoksessa
+        automaattisesti päivity, vaan päivitys pitää erikseen pyytää."* Once a
+        report has rendered, the template it used is pinned, so changing the
+        customer's template re-styles new reports and leaves delivered ones
+        alone. `clear_pinned_template` is the explicit request to move it on.
+
+        Returns (template_id, level) where level is one of
+        "report" | "pinned" | "case" | "customer" | "default". An empty
+        template_id means the house default.
+        """
+        try:
+            report = json.loads(self.load_report(auth, customer_id, case_id, report_id))
+            if report.get("template_ref"):
+                return report["template_ref"], "report"
+        except (NotFound, ValueError, UnicodeDecodeError):
+            pass
+
+        try:
+            meta = self._read_json(
+                auth, P.report_meta_path(customer_id, case_id, report_id))
+            if meta.get("pinned_template"):
+                return meta["pinned_template"], "pinned"
+        except (NotFound, ValueError, UnicodeDecodeError):
+            meta = None
+
+        for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
+                            (P.customer_meta_path(customer_id), "customer")):
+            try:
+                d = self._read_json(auth, path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            if d.get("template_id"):
+                return d["template_id"], level
+        return "", "default"
+
+    def pin_template(self, auth: AuthContext, customer_id: str, case_id: str,
+                     report_id: str, template_id: str) -> None:
+        """Record what a report rendered with, so a later change upstream does
+        not silently restyle it."""
+        path = P.report_meta_path(customer_id, case_id, report_id)
+        try:
+            d = self._read_json(auth, path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
+        d["pinned_template"] = template_id
+        self._write_json(auth, path, d, [P.LABEL_REPORT_META])
+
+    def clear_pinned_template(self, auth: AuthContext, customer_id: str,
+                              case_id: str, report_id: str) -> None:
+        """The explicit "update this report to the current template" request."""
+        path = P.report_meta_path(customer_id, case_id, report_id)
+        try:
+            d = self._read_json(auth, path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return
+        d.pop("pinned_template", None)
+        self._write_json(auth, path, d, [P.LABEL_REPORT_META])
+
     # -- Rendered deck (a cache, in the store) ----------------------------
 
     def render_key(self, auth: AuthContext, customer_id: str, case_id: str,

@@ -12,6 +12,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     {asiakas}/{case}/material/{material_id}.config   nsight:config
     {asiakas}/template/{template_id}                 nsight:template
     settings/{key}                                   nsight:settings
+    settings/template/default.pptx                   nsight:template
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -150,6 +151,16 @@ def template_path(asiakas: str, template_id: str) -> str:
 
 def templates_prefix(asiakas: str) -> str:
     return f"{customer_prefix(asiakas)}template/"
+
+
+def default_template_path() -> str:
+    """The house-style template every level falls back to.
+
+    Under settings/ rather than a customer, because it belongs to nSight and is
+    shared by every asiakas — a customer-scoped copy would drift per customer
+    and defeat the point of a default.
+    """
+    return f"{SETTINGS_ROOT}/template/default.pptx"
 
 
 def settings_path(key: str) -> str:

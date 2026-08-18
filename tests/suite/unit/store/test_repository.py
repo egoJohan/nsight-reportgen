@@ -458,3 +458,86 @@ class TestDeletion:
             repo.delete_report(auth, c.id, k.id, r.id)
         # Nothing went before approval — the gate is real, not advisory.
         assert [x.id for x in repo.list_reports(auth, c.id, k.id)] == [r.id]
+
+
+class TestTemplateResolution:
+    """Presentaatiopohjat: a template can be set per asiakas, per tutkimus and
+    per report, the lower always winning — and an already-delivered report must
+    not restyle itself when someone changes the level above it."""
+
+    def _tree(self, repo, auth):
+        c = repo.create_customer(auth, "Attendo")
+        k = repo.create_case(auth, c.id, "Brändi")
+        r = repo.save_report(auth, c.id, k.id,
+                             json.dumps({"name": "R", "template_ref": ""}))
+        return c.id, k.id, r.id
+
+    def test_with_nothing_set_the_house_default_is_used(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("", "default")
+
+    def test_a_customer_template_reaches_its_reports(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        repo.set_template(auth, "tpl-attendo", customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-attendo", "customer")
+
+    def test_a_tutkimus_template_overrides_its_customer(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        repo.set_template(auth, "tpl-customer", customer_id=cid)
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+
+    def test_a_report_template_overrides_everything(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        repo.set_template(auth, "tpl-customer", customer_id=cid)
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        repo.save_report(auth, cid, kid,
+                         json.dumps({"name": "R", "template_ref": "tpl-report"}),
+                         report_id=rid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-report", "report")
+
+    def test_clearing_a_binding_falls_back_up_the_chain(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        repo.set_template(auth, "tpl-customer", customer_id=cid)
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        repo.set_template(auth, None, customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-customer", "customer")
+
+
+class TestTemplatePinning:
+    """"Jo luotujen raporttien pohja ei muutoksessa automaattisesti päivity,
+    vaan päivitys pitää erikseen pyytää." A report already delivered to a client
+    must look the same tomorrow."""
+
+    def _rendered(self, repo, auth):
+        c = repo.create_customer(auth, "Attendo")
+        k = repo.create_case(auth, c.id, "Brändi")
+        r = repo.save_report(auth, c.id, k.id,
+                             json.dumps({"name": "R", "template_ref": ""}))
+        repo.set_template(auth, "tpl-v1", customer_id=c.id)
+        repo.pin_template(auth, c.id, k.id, r.id, "tpl-v1")
+        return c.id, k.id, r.id
+
+    def test_changing_the_customer_template_leaves_a_delivered_report_alone(
+            self, repo, auth):
+        cid, kid, rid = self._rendered(repo, auth)
+        repo.set_template(auth, "tpl-v2", customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-v1", "pinned")
+
+    def test_a_new_report_picks_up_the_new_template(self, repo, auth):
+        cid, kid, _ = self._rendered(repo, auth)
+        repo.set_template(auth, "tpl-v2", customer_id=cid)
+        fresh = repo.save_report(auth, cid, kid,
+                                 json.dumps({"name": "New", "template_ref": ""}))
+        assert repo.resolve_template(auth, cid, kid, fresh.id) == ("tpl-v2", "customer")
+
+    def test_requesting_the_update_moves_the_report_on(self, repo, auth):
+        cid, kid, rid = self._rendered(repo, auth)
+        repo.set_template(auth, "tpl-v2", customer_id=cid)
+        repo.clear_pinned_template(auth, cid, kid, rid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-v2", "customer")
+
+    def test_pinning_does_not_disturb_the_report_name(self, repo, auth):
+        # The pin lives in the same sidecar the listing reads its name from.
+        cid, kid, rid = self._rendered(repo, auth)
+        assert [r.name for r in repo.list_reports(auth, cid, kid)] == ["R"]
