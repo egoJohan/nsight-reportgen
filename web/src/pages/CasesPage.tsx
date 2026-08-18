@@ -14,18 +14,8 @@ export default function CasesPage() {
   const recent = (cases ?? []).slice(-6).reverse();
 
   return (
-    <div className="relative isolate min-h-full">
-      {/* Subtle tiled analytics-doodle backdrop (its own stacking context via
-          `isolate` so the -z layer isn't hidden behind an opaque ancestor). */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 opacity-[0.22]"
-        style={{
-          backgroundImage: "url(/nsight-background.jpeg)",
-          backgroundRepeat: "repeat",
-          backgroundSize: "620px auto",
-        }}
-      />
+    <div className="min-h-full">
+      {/* Backdrop now lives in AppShell, behind every page. */}
 
       <div className="mx-auto w-full max-w-4xl px-6 py-16">
         {/* Welcome hero */}
