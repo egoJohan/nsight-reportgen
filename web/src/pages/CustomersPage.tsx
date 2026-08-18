@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useCustomers, useCreateCustomer } from "@/lib/queries";
+import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,
  *  so this sits above the case list rather than beside it. */
@@ -66,13 +67,13 @@ export default function CustomersPage() {
         {isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p className={ERROR}>
             Asiakaslistan haku epäonnistui.
           </p>
         )}
 
         {customers?.length === 0 && (
-          <div className="rounded-lg border border-dashed p-10 text-center">
+          <div className={EMPTY}>
             <Building2Icon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">
               Ei vielä asiakkaita. Luo ensimmäinen aloittaaksesi.
@@ -88,7 +89,7 @@ export default function CustomersPage() {
           <button
             key={c.id}
             onClick={() => navigate(`/customers/${c.id}`)}
-            className="group flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
+            className={ROW}
           >
             <span className="flex items-center gap-3">
               <Building2Icon className="size-5 text-muted-foreground" />

@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useCustomer, useCustomerCases, useCreateCustomerCase } from "@/lib/queries";
+import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
@@ -76,13 +77,13 @@ export default function CustomerCasesPage() {
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p className={ERROR}>
             Tutkimusten haku epäonnistui.
           </p>
         )}
 
         {cases?.length === 0 && (
-          <div className="rounded-lg border border-dashed p-10 text-center">
+          <div className={EMPTY}>
             <FolderIcon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">
               Tällä asiakkaalla ei ole vielä tutkimuksia.
@@ -94,7 +95,7 @@ export default function CustomerCasesPage() {
           <button
             key={k.id}
             onClick={() => navigate(`/cases/${k.id}`)}
-            className="group flex w-full items-center justify-between rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent"
+            className={ROW}
           >
             <span className="flex items-center gap-3">
               <FolderIcon className="size-5 text-muted-foreground" />

@@ -3,6 +3,7 @@ import { FileTextIcon, ArrowRightIcon, Building2Icon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useRecentReports, useCustomers } from "@/lib/queries";
+import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
 
 /** Relative time, in Finnish, at the granularity a report list actually needs.
  *  An exact timestamp is noise here — "3 päivää sitten" answers the question
@@ -53,13 +54,13 @@ export default function RecentReportsPage() {
         {isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
-          <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p className={ERROR}>
             Raporttien haku epäonnistui.
           </p>
         )}
 
         {reports?.length === 0 && (
-          <div className="rounded-lg border border-dashed bg-card/60 p-10 text-center">
+          <div className={EMPTY}>
             <FileTextIcon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">
               Ei vielä raportteja. Aloita valitsemalla asiakas ja tutkimus.
@@ -74,7 +75,7 @@ export default function RecentReportsPage() {
           <button
             key={`${r.case_id}/${r.id}`}
             onClick={() => navigate(`/cases/${r.case_id}?report=${r.id}`)}
-            className="group flex w-full items-center justify-between rounded-lg border bg-card/80 p-4 text-left backdrop-blur-sm transition-colors hover:bg-accent"
+            className={ROW}
           >
             <span className="flex min-w-0 items-center gap-3">
               <FileTextIcon className="size-5 shrink-0 text-muted-foreground" />

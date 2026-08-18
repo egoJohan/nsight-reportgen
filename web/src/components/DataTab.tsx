@@ -38,6 +38,7 @@ import {
 import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
+import { PANEL, ERROR } from "@/lib/surfaces";
 
 // ---- Sort options ----
 type SortKey = "default" | "text_asc" | "text_desc" | "kind";
@@ -141,7 +142,7 @@ function QuestionTable({
 
   if (isError || !questions) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-4 text-sm text-destructive mt-4">
+      <div className={`mt-4 flex items-center gap-2 ${ERROR} text-destructive`}>
         <AlertCircleIcon className="size-4 shrink-0" />
         Failed to load questions.
       </div>
@@ -196,7 +197,7 @@ function QuestionTable({
           No questions match your search.
         </div>
       ) : (
-        <div className="rounded-xl border overflow-hidden">
+        <div className={PANEL}>
           {/* table-fixed + real column widths so the question text WRAPS within its
               column (to 2 clamped lines) instead of collapsing to one clipped line. */}
           <Table className="table-fixed">

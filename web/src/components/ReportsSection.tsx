@@ -23,6 +23,7 @@ import {
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import { formatReportDate } from "@/lib/utils";
+import { PANEL } from "@/lib/surfaces";
 
 // One report row — fetches the report doc to show its status + statistics.
 function ReportRow({
@@ -171,7 +172,7 @@ export default function ReportsSection({
         </p>
       </div>
 
-      <div className="divide-y overflow-hidden rounded-xl border">
+      <div className={`divide-y ${PANEL}`}>
         {/* Topmost row: create a new report */}
         <button
           type="button"
