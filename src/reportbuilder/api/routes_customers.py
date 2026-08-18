@@ -7,7 +7,7 @@ never learns what an asiakas is (floor rule 6).
 Trello: Asiakkuuden hallinta. Speksi 2 P-O-01. Additive — the existing
 `/cases/*` surface is untouched while the UI moves over.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from reportbuilder.api.deps_store import get_auth, get_repository
@@ -138,3 +138,63 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
         pass
     return {"id": k.id, "name": k.name, "customer_id": k.customer_id,
             "customer_name": customer_name}
+
+
+def _case_name_from_filename(filename: str) -> str:
+    """Casen default nimi on materiaalin tiedostonimi (Asiakkuuden hallinta).
+
+    Strips the extension only — the rest of the name is the analyst's, and
+    second-guessing it produces worse titles than leaving it alone.
+    """
+    stem = (filename or "").rsplit("/", 1)[-1]
+    if "." in stem:
+        stem = stem.rsplit(".", 1)[0]
+    return stem.strip() or "Uusi tutkimus"
+
+
+@customers_router.post("/customers/{customer_id}/cases/from-material", status_code=201)
+async def create_case_from_material(
+    customer_id: str,
+    file: UploadFile = File(...),
+    auth: AuthContext = Depends(get_auth),
+    repo: Repository = Depends(get_repository),
+) -> dict:
+    """Create a tutkimus from an uploaded .sav, in one step.
+
+    A tutkimus corresponds to a material, so creating one without data leaves an
+    empty shell the user then has to fill. Uploading IS the creation.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "Empty file")
+    try:
+        k = repo.create_case(auth, customer_id, _case_name_from_filename(file.filename))
+    except NotFound:
+        raise HTTPException(404, f"Customer '{customer_id}' not found") from None
+    m = repo.attach_material(auth, customer_id, k.id, file.filename or k.name, data)
+    return {"id": k.id, "customer_id": customer_id, "name": k.name,
+            "material_id": m.id, "material_name": m.name, "size": m.size}
+
+
+@customers_router.get("/customers/{customer_id}/cases/{case_id}/materials")
+def list_case_materials(customer_id: str, case_id: str,
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository)) -> list[dict]:
+    return [{"id": m.id, "name": m.name, "size": m.size}
+            for m in repo.list_materials(auth, customer_id, case_id)]
+
+
+@customers_router.get("/materials/{material_id}/locate")
+def locate_material(material_id: str, auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository)) -> dict:
+    """Resolve a bare material id to its case and customer.
+
+    The question, preview and render routes are all keyed by material id from
+    before the hierarchy existed; this lets them keep working while the storage
+    moves underneath them.
+    """
+    m = repo.find_material(auth, material_id)
+    if m is None:
+        raise HTTPException(404, f"Material '{material_id}' not found")
+    return {"id": m.id, "name": m.name, "size": m.size,
+            "case_id": m.case_id, "customer_id": m.customer_id}

@@ -43,6 +43,15 @@ class Case:
 
 
 @dataclass(frozen=True)
+class Material:
+    id: str
+    case_id: str
+    customer_id: str
+    name: str
+    size: int = 0
+
+
+@dataclass(frozen=True)
 class ReportRef:
     id: str
     case_id: str
@@ -148,6 +157,96 @@ class Repository:
         d["name"] = name
         self._write_json(auth, P.case_meta_path(customer_id, case_id), d, [P.LABEL_CASE])
         return Case(id=case_id, customer_id=customer_id, name=name)
+
+    # -- Aineisto (material) ---------------------------------------------
+
+    def attach_material(self, auth: AuthContext, customer_id: str, case_id: str,
+                        name: str, data: bytes) -> Material:
+        """Store a .sav under a case. Returns the material.
+
+        Two objects: the bytes, and a sidecar. The bytes cannot carry a name —
+        they are an SPSS file — and the sidecar is also where per-material
+        curation lives (grouping overrides, word merges, label edits), which is
+        rewritten far more often than the .sav it describes.
+        """
+        mid = _new_id("mat")
+        self.store.put(auth, P.material_path(customer_id, case_id, mid), data,
+                       "application/octet-stream", labels=[P.LABEL_MATERIAL])
+        self._write_json(auth, P.material_config_path(customer_id, case_id, mid),
+                         {"id": mid, "case_id": case_id, "customer_id": customer_id,
+                          "name": name, "size": len(data), "config": {}},
+                         [P.LABEL_CONFIG])
+        return Material(id=mid, case_id=case_id, customer_id=customer_id,
+                        name=name, size=len(data))
+
+    def get_material(self, auth: AuthContext, customer_id: str, case_id: str,
+                     material_id: str) -> bytes:
+        """The raw .sav bytes, byte-exact — nSight re-parses these on every open."""
+        return self.store.get(auth, P.material_path(customer_id, case_id, material_id))
+
+    def list_materials(self, auth: AuthContext, customer_id: str,
+                       case_id: str) -> list[Material]:
+        """Reads sidecars, not .sav bodies — a listing must never pull megabytes."""
+        out = []
+        for info in self.store.list(auth, P.materials_prefix(customer_id, case_id),
+                                    labels=[P.LABEL_CONFIG]):
+            try:
+                d = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            out.append(Material(id=d.get("id", ""), case_id=case_id,
+                                customer_id=customer_id,
+                                name=d.get("name") or d.get("id", ""),
+                                size=int(d.get("size") or 0)))
+        return sorted(out, key=lambda m: m.name.lower())
+
+    def load_material_config(self, auth: AuthContext, customer_id: str, case_id: str,
+                             material_id: str) -> dict:
+        """Curation for a material. Absent config is an empty dict, not an error:
+        a freshly uploaded material legitimately has none."""
+        try:
+            return self._read_json(
+                auth, P.material_config_path(customer_id, case_id, material_id)
+            ).get("config") or {}
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return {}
+
+    def save_material_config(self, auth: AuthContext, customer_id: str, case_id: str,
+                             material_id: str, config: dict) -> None:
+        """Replace the curation, preserving the name and size beside it.
+
+        Read-modify-write rather than a blind overwrite: the sidecar holds the
+        material's identity too, and losing that would orphan the .sav.
+        """
+        path = P.material_config_path(customer_id, case_id, material_id)
+        try:
+            d = self._read_json(auth, path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            d = {"id": material_id, "case_id": case_id, "customer_id": customer_id}
+        d["config"] = config
+        self._write_json(auth, path, d, [P.LABEL_CONFIG])
+
+    def find_material(self, auth: AuthContext, material_id: str) -> Material | None:
+        """Locate a material by id alone, without its customer or case.
+
+        The question/preview/render routes are all keyed by a bare material id
+        from before the hierarchy existed. Rather than rewrite every one of them
+        and the UI that calls them, this resolves the path the same way
+        find_case does — one labelled listing, already permission-filtered.
+        """
+        for info in self.store.list(auth, "", labels=[P.LABEL_CONFIG]):
+            segments = info.path.split("/")
+            # {asiakas}/{case}/material/{id}.config
+            if len(segments) == 4 and segments[3] == f"{material_id}.config":
+                try:
+                    d = self._read_json(auth, info.path)
+                except (NotFound, ValueError, UnicodeDecodeError):
+                    return None
+                return Material(id=material_id, case_id=segments[1],
+                                customer_id=segments[0],
+                                name=d.get("name") or material_id,
+                                size=int(d.get("size") or 0))
+        return None
 
     # -- Raportti ---------------------------------------------------------
 

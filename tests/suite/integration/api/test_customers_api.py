@@ -120,3 +120,68 @@ class TestAuthRequired:
         app.dependency_overrides[get_repository] = lambda: Repository(store)
         # get_auth deliberately NOT overridden — exercise the real dependency.
         assert TestClient(app).get("/customers").status_code == 401
+
+
+class TestCreateTutkimusFromMaterial:
+    """Uploading IS the creation: a tutkimus corresponds to a material, so
+    creating one without data leaves an empty shell (Asiakkuuden hallinta)."""
+
+    SAV = bytes([0, 255, 26]) + b"$FL2@(#) SPSS DATA FILE\x00" + bytes(range(64))
+
+    def test_upload_creates_the_tutkimus_named_from_the_file(self, client):
+        c = _customer(client)
+        r = client.post(f"/customers/{c['id']}/cases/from-material",
+                        files={"file": ("Brändiseuranta 2026.sav", self.SAV,
+                                        "application/octet-stream")})
+        assert r.status_code == 201, r.text
+        body = r.json()
+        # Extension stripped, the rest left alone — it is the analyst's name.
+        assert body["name"] == "Brändiseuranta 2026"
+        assert body["customer_id"] == c["id"] and body["material_id"]
+
+    def test_the_material_is_attached_to_that_tutkimus(self, client):
+        c = _customer(client)
+        created = client.post(f"/customers/{c['id']}/cases/from-material",
+                              files={"file": ("s.sav", self.SAV,
+                                              "application/octet-stream")}).json()
+        mats = client.get(
+            f"/customers/{c['id']}/cases/{created['id']}/materials").json()
+        assert [m["id"] for m in mats] == [created["material_id"]]
+        assert mats[0]["size"] == len(self.SAV)
+
+    def test_the_tutkimus_appears_under_its_customer(self, client):
+        c = _customer(client)
+        created = client.post(f"/customers/{c['id']}/cases/from-material",
+                              files={"file": ("x.sav", self.SAV,
+                                              "application/octet-stream")}).json()
+        assert [k["id"] for k in client.get(f"/customers/{c['id']}/cases").json()] \
+            == [created["id"]]
+
+    def test_an_empty_upload_is_refused(self, client):
+        c = _customer(client)
+        r = client.post(f"/customers/{c['id']}/cases/from-material",
+                        files={"file": ("empty.sav", b"", "application/octet-stream")})
+        assert r.status_code == 422
+
+    def test_upload_under_an_unknown_customer_is_404(self, client):
+        r = client.post("/customers/cust-nope/cases/from-material",
+                        files={"file": ("x.sav", self.SAV, "application/octet-stream")})
+        assert r.status_code == 404
+
+
+class TestLocateMaterial:
+    """The question/preview/render routes are keyed by a bare material id from
+    before the hierarchy; they resolve the rest through this."""
+
+    def test_locate_returns_the_owning_case_and_customer(self, client):
+        c = _customer(client)
+        created = client.post(f"/customers/{c['id']}/cases/from-material",
+                              files={"file": ("data.sav", b"\x00\x01sav",
+                                              "application/octet-stream")}).json()
+        found = client.get(f"/materials/{created['material_id']}/locate").json()
+        assert found["case_id"] == created["id"]
+        assert found["customer_id"] == c["id"]
+        assert found["name"] == "data.sav"
+
+    def test_unknown_material_is_404(self, client):
+        assert client.get("/materials/mat-nope/locate").status_code == 404

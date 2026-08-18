@@ -255,3 +255,76 @@ class TestFindCase:
         k = repo.create_case(auth, c.id, "Real")
         assert repo.find_case(auth, c.id) is None  # a customer id is not a case id
         assert repo.find_case(auth, k.id).name == "Real"
+
+
+class TestMaterials:
+    """Aineisto: the .sav a tutkimus is built from, plus its curation sidecar."""
+
+    SAV = bytes([0, 255, 26]) + b"\r\n$FL2@(#) SPSS DATA FILE\x00" + bytes(range(256))
+
+    def test_bytes_round_trip_exactly(self, repo, auth):
+        # nSight re-parses the .sav on every open, so one altered byte is a
+        # corrupted dataset.
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "survey.sav", self.SAV)
+        assert repo.get_material(auth, c.id, k.id, m.id) == self.SAV
+
+    def test_listing_reads_sidecars_not_sav_bodies(self, repo, store, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "iso.sav", self.SAV)
+        body = P.material_path(c.id, k.id, m.id)
+
+        reads: list[str] = []
+        original = store.get
+        store.get = lambda a, p: (reads.append(p), original(a, p))[1]
+        try:
+            names = [x.name for x in repo.list_materials(auth, c.id, k.id)]
+        finally:
+            store.get = original
+
+        assert names == ["iso.sav"]
+        assert body not in reads, "a listing must not pull the .sav body"
+
+    def test_config_starts_empty_and_survives_a_round_trip(self, repo, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "s.sav", self.SAV)
+        # A freshly uploaded material has no curation; that is not an error.
+        assert repo.load_material_config(auth, c.id, k.id, m.id) == {}
+
+        curation = {"groups": [{"name": "Battery", "members": ["q1", "q2"]}],
+                    "word_merges": {"esper": "esperi"}}
+        repo.save_material_config(auth, c.id, k.id, m.id, curation)
+        assert repo.load_material_config(auth, c.id, k.id, m.id) == curation
+
+    def test_saving_config_does_not_orphan_the_sav(self, repo, auth):
+        # The sidecar carries the material's identity as well as its curation;
+        # a blind overwrite would leave the .sav unreachable.
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "nimetty.sav", self.SAV)
+        repo.save_material_config(auth, c.id, k.id, m.id, {"groups": []})
+        [listed] = repo.list_materials(auth, c.id, k.id)
+        assert listed.name == "nimetty.sav" and listed.id == m.id
+
+    def test_materials_do_not_leak_between_tutkimukset(self, repo, auth):
+        c = repo.create_customer(auth, "Acme")
+        k1 = repo.create_case(auth, c.id, "T1")
+        k2 = repo.create_case(auth, c.id, "T2")
+        repo.attach_material(auth, c.id, k1.id, "a.sav", self.SAV)
+        assert len(repo.list_materials(auth, c.id, k1.id)) == 1
+        assert repo.list_materials(auth, c.id, k2.id) == []
+
+    def test_a_scoped_caller_cannot_read_another_customer_material(
+            self, repo, store, auth):
+        a = repo.create_customer(auth, "Acme")
+        b = repo.create_customer(auth, "Beta")
+        kb = repo.create_case(auth, b.id, "Beta T")
+        m = repo.attach_material(auth, b.id, kb.id, "salainen.sav", self.SAV)
+
+        scoped = AuthContext(token="only-acme")
+        store.caveats["only-acme"] = [P.customer_prefix(a.id)]
+        with pytest.raises(NotFound):
+            repo.get_material(scoped, b.id, kb.id, m.id)
