@@ -7,6 +7,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     {asiakas}/{case}/case.json                       nsight:case
     {asiakas}/{case}/report/{report_id}              nsight:report
     {asiakas}/{case}/report/{report_id}.meta         nsight:report-meta
+    {asiakas}/{case}/report/{report_id}.pptx         nsight:render
     {asiakas}/{case}/material/{material_id}          nsight:material
     {asiakas}/{case}/material/{material_id}.config   nsight:config
     {asiakas}/template/{template_id}                 nsight:template
@@ -32,6 +33,7 @@ LABEL_CUSTOMER = "nsight:customer"
 LABEL_CASE = "nsight:case"
 LABEL_REPORT = "nsight:report"
 LABEL_REPORT_META = "nsight:report-meta"
+LABEL_RENDER = "nsight:render"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"
 LABEL_TEMPLATE = "nsight:template"
@@ -103,6 +105,18 @@ def report_meta_path(asiakas: str, case: str, report_id: str) -> str:
     Last-Modified. Verified 2026-08-18.
     """
     return f"{report_path(asiakas, case, report_id)}.meta"
+
+
+def report_render_path(asiakas: str, case: str, report_id: str) -> str:
+    """The rendered deck for a report.
+
+    Stored rather than left in a temp dir because a render is expensive
+    (LibreOffice per PDF) and the temp dir dies with the process — staging loses
+    every deck on deploy. It is still a CACHE: derived from the report, the
+    material and the material's curation, so it is served only when a
+    fingerprint of those still matches (see Repository.render_key).
+    """
+    return f"{report_path(asiakas, case, report_id)}.pptx"
 
 
 def reports_prefix(asiakas: str, case: str) -> str:

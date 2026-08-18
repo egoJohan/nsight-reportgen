@@ -17,6 +17,7 @@ per container (`customer.json`, `case.json`).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from reportbuilder.store import paths as P
 from reportbuilder.store.seam import AuthContext, NotFound, ObjectStore
 
 _JSON = "application/json"
+_PPTX = ("application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
 
 @dataclass(frozen=True)
@@ -347,6 +349,64 @@ class Repository:
         except ValueError:
             pass
         return self.save_report(auth, customer_id, case_id, raw)
+
+    # -- Rendered deck (a cache, in the store) ----------------------------
+
+    def render_key(self, auth: AuthContext, customer_id: str, case_id: str,
+                   report_id: str, material_id: str) -> str:
+        """Fingerprint of everything a render depends on.
+
+        Not just the report: orchestrate_render builds the question model from
+        the material AND the report's grouping, and the material's curation
+        (word merges, label overrides) changes the charts. A cache keyed on the
+        report alone would serve a deck that silently disagrees with the data.
+
+        The material bytes are excluded deliberately — a re-upload mints a new
+        material id, so identity already covers them.
+        """
+        h = hashlib.sha256()
+        for part in (
+            self.load_report(auth, customer_id, case_id, report_id),
+            json.dumps(self.load_material_config(auth, customer_id, case_id,
+                                                 material_id), sort_keys=True),
+            material_id,
+        ):
+            h.update(part.encode("utf-8"))
+            h.update(b"\x00")
+        return h.hexdigest()
+
+    def save_render(self, auth: AuthContext, customer_id: str, case_id: str,
+                    report_id: str, pptx: bytes, key: str) -> None:
+        """Store a rendered deck and stamp the key it was rendered from."""
+        self.store.put(auth, P.report_render_path(customer_id, case_id, report_id),
+                       pptx, _PPTX, labels=[P.LABEL_RENDER])
+        meta_path = P.report_meta_path(customer_id, case_id, report_id)
+        try:
+            d = self._read_json(auth, meta_path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
+        d["render_key"] = key
+        self._write_json(auth, meta_path, d, [P.LABEL_REPORT_META])
+
+    def load_render(self, auth: AuthContext, customer_id: str, case_id: str,
+                    report_id: str, key: str) -> bytes | None:
+        """The stored deck, or None when it is missing or stale.
+
+        Returning None for stale rather than serving it is the whole point: a
+        deck that no longer matches its data is worse than no deck, because
+        nobody can tell by looking.
+        """
+        try:
+            d = self._read_json(auth, P.report_meta_path(customer_id, case_id, report_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        if d.get("render_key") != key:
+            return None
+        try:
+            return self.store.get(
+                auth, P.report_render_path(customer_id, case_id, report_id))
+        except NotFound:
+            return None
 
     # -- helpers ----------------------------------------------------------
 

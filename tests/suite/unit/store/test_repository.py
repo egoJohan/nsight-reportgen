@@ -328,3 +328,70 @@ class TestMaterials:
         store.caveats["only-acme"] = [P.customer_prefix(a.id)]
         with pytest.raises(NotFound):
             repo.get_material(scoped, b.id, kb.id, m.id)
+
+
+class TestRenderCache:
+    """A rendered deck stored in datahive, keyed by everything it derives from.
+
+    Stored because rendering is expensive (LibreOffice per PDF) and the temp dir
+    dies with the process — staging loses every deck on deploy. Keyed because a
+    deck that silently disagrees with its data is worse than no deck.
+    """
+
+    def _setup(self, repo, auth):
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "T1")
+        m = repo.attach_material(auth, c.id, k.id, "s.sav", b"savbytes")
+        r = repo.save_report(auth, c.id, k.id, json.dumps({"name": "R", "charts": []}))
+        return c.id, k.id, m.id, r.id
+
+    def test_a_stored_deck_is_served_when_nothing_changed(self, repo, auth):
+        cid, kid, mid, rid = self._setup(repo, auth)
+        key = repo.render_key(auth, cid, kid, rid, mid)
+        repo.save_render(auth, cid, kid, rid, b"PPTX-v1", key)
+        assert repo.load_render(auth, cid, kid, rid, key) == b"PPTX-v1"
+
+    def test_editing_the_report_invalidates_it(self, repo, auth):
+        cid, kid, mid, rid = self._setup(repo, auth)
+        key = repo.render_key(auth, cid, kid, rid, mid)
+        repo.save_render(auth, cid, kid, rid, b"PPTX-v1", key)
+
+        repo.save_report(auth, cid, kid, json.dumps({"name": "R", "charts": [1]}),
+                         report_id=rid)
+        assert repo.load_render(auth, cid, kid, rid,
+                                repo.render_key(auth, cid, kid, rid, mid)) is None
+
+    def test_editing_the_material_curation_invalidates_it(self, repo, auth):
+        """The one a report-only key would miss: word merges and label overrides
+        change the charts without touching the report definition."""
+        cid, kid, mid, rid = self._setup(repo, auth)
+        key = repo.render_key(auth, cid, kid, rid, mid)
+        repo.save_render(auth, cid, kid, rid, b"PPTX-v1", key)
+
+        repo.save_material_config(auth, cid, kid, mid, {"word_merges": {"esper": "esperi"}})
+        assert repo.load_render(auth, cid, kid, rid,
+                                repo.render_key(auth, cid, kid, rid, mid)) is None
+
+    def test_a_never_rendered_report_is_a_miss_not_an_error(self, repo, auth):
+        cid, kid, mid, rid = self._setup(repo, auth)
+        assert repo.load_render(auth, cid, kid, rid,
+                                repo.render_key(auth, cid, kid, rid, mid)) is None
+
+    def test_re_rendering_replaces_the_stored_deck(self, repo, auth):
+        cid, kid, mid, rid = self._setup(repo, auth)
+        k1 = repo.render_key(auth, cid, kid, rid, mid)
+        repo.save_render(auth, cid, kid, rid, b"PPTX-v1", k1)
+        repo.save_material_config(auth, cid, kid, mid, {"x": 1})
+        k2 = repo.render_key(auth, cid, kid, rid, mid)
+        repo.save_render(auth, cid, kid, rid, b"PPTX-v2", k2)
+
+        assert repo.load_render(auth, cid, kid, rid, k2) == b"PPTX-v2"
+        assert repo.load_render(auth, cid, kid, rid, k1) is None
+
+    def test_storing_a_render_keeps_the_report_name(self, repo, auth):
+        # The key is stamped into the report's own sidecar, so it must not
+        # clobber the name the listing reads from there.
+        cid, kid, mid, rid = self._setup(repo, auth)
+        repo.save_render(auth, cid, kid, rid, b"PPTX",
+                         repo.render_key(auth, cid, kid, rid, mid))
+        assert [r.name for r in repo.list_reports(auth, cid, kid)] == ["R"]
