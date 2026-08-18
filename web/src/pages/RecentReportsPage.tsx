@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
-import { FileTextIcon, ArrowRightIcon, PlusIcon } from "lucide-react";
+import { FileTextIcon, ArrowRightIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
 import { useRecentReports, useCustomers } from "@/lib/queries";
 import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
@@ -53,16 +52,6 @@ export default function RecentReportsPage() {
             Muunna SPSS-kyselydata viimeistellyiksi raporteiksi. Luo asiakas, tuo
             sille tutkimus ja rakenna raportit sen kysymyksistä.
           </p>
-          {/* A tutkimus needs a customer to belong to, so from an empty start
-              the first real action is creating one. */}
-          <Button
-            className="mt-7"
-            size="lg"
-            onClick={() => navigate("/customers?new=customer")}
-          >
-            <PlusIcon className="size-4" />
-            Uusi asiakas
-          </Button>
         </div>
 
         {/* Recent reports */}
