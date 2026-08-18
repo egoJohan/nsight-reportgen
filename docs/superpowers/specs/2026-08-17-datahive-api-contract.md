@@ -94,25 +94,32 @@ Properties this design relies on:
 Stored metadata is exactly: `record_id, path, size, content_type, etag, workspace_uuid`,
 plus `owner_subject`. **No labels** — see §8.
 
-## 4. Mapping nSight's model
+## 4. Mapping nSight's model — paths
+
+Everything is an object at a path. Path carries **hierarchy**; labels carry **type**.
+
+```
+{asiakas}/{case}/report/{report_id}              label nsight:report
+{asiakas}/{case}/material/{material_id}          label nsight:material   (.sav bytes)
+{asiakas}/{case}/material/{material_id}.config   label nsight:config     (curation JSON)
+{asiakas}/template/{template_id}                 label nsight:template   (.pptx)
+settings/...                                     label nsight:settings
+```
 
 | nSight concept | Representation |
 |---|---|
-| Customer (Asiakas) | a datahive **workspace** — carries `owner_subject`, `group_id`/`group_level`, `others_level` (fail-closed to `none`) |
-| Case | a **path segment** inside that workspace |
-| Report | an object — the definition JSON |
-| Material | an object — the `.sav` bytes |
-| Material config | an object — grouping overrides, word merges, label overrides |
-| Template | an object — the `.pptx` |
-| User | a group membership, provisioned by invite (§7.2) |
-| Access grant | workspace access + the macaroon's path caveat (§7.3) |
+| Customer (Asiakas) | the first path segment |
+| Case | the second path segment |
+| Report / Material / Template / Settings | objects, typed by label |
 
-The workspace access model matches the Käyttäjähallinta card almost line for line:
-*"Asiakkaalle liitetään aina omistaja, joka on oletukselta sen luoja"* → `owner_subject`;
-*"voidaan liittää käyttäjätilejä tai -ryhmiä luku+kirjoitusoikeuksin"* → `group_id` +
-`group_level`; *"Luonnin jälkeen asiakkaaseen pääsee vain hän käsiksi"* → `others_level`
-defaulting to `none`. One constraint: `group_id` is singular — **one** group per
-workspace.
+Listing is `?path_prefix=` for hierarchy and `?label=` for type, combinable — so "this
+case's reports" is `path_prefix={asiakas}/{case}/report/`, and "every template this
+customer has" is `path_prefix={asiakas}/&label=nsight:template`.
+
+**No workspace concept is involved.** An earlier draft mapped Asiakas onto a datahive
+workspace; that was wrong — it reached for a single-active-workspace mechanism that no
+longer exists (`_resolve_box`'s docstring still refers to "the legacy single workspace").
+Paths do the job, and paths are what the verification in §13 actually exercised.
 
 ## 5. The store seam
 
@@ -138,31 +145,16 @@ This replaces 12 entity-specific methods (`create_case`, `save_report`,
 removes the `report_migration.py:104` → `client._save()` leak, which reaches into a
 private method of the JSON store, by construction.
 
-## 6. Path grammar — OPEN, decide before writing data
+## 6. Path grammar — SETTLED
 
-Paths are stored workspace-first and returned workspace-stripped, so within an Asiakas
-workspace nSight addresses logical paths. **Because the object store has no labels
-(§8), the path is currently the only organising axis** — it must carry both *where a
-thing belongs* and *what it is*.
+The grammar is §4. Two properties make it work, both verified live (§13):
 
-Sketch, not settled:
+- **Prefix listing** scopes to a subtree, so hierarchy queries are server-side.
+- **Labels** give the type axis, so a path never has to encode *what* a thing is. This
+  matters because renaming a path physically moves the object — with labels carrying
+  type, a mis-shaped path is recoverable by relabelling rather than by moving data.
 
-```
-case/<case_id>/report/<report_id>        report definition JSON
-case/<case_id>/material/<mat_id>         the .sav bytes
-case/<case_id>/material/<mat_id>.config  curation JSON
-template/<template_id>                   customer-level .pptx
-```
-
-The tension: **prefix listing returns everything below the prefix.** So "list this
-case's reports" is clean (`case/<id>/report/`), but "list all cases" over `case/` also
-returns every report and material underneath.
-
-**§8 resolves this.** Labels landed on 2026-08-18, so the query is
-`?path_prefix=case/&label=nsight:case` — path scopes, label selects. Path no longer has
-to carry the type axis, which makes the grammar far less load-bearing. It still matters
-(renaming a path moves the object), but a mistake is now recoverable by relabelling
-rather than by moving data.
+Access control is the same axis: a token's path caveat *is* the grant (§7.3).
 
 ## 7. Identity
 
@@ -205,12 +197,13 @@ Datahive's own model, from `domain/admin_identity.py`: authority is the **OIDC-v
 `subject_identity` ∩ the group-membership store**, *"NEVER from the self-appendable
 `scope.groups` macaroon caveat"*. Fail-closed. nSight adopts the same pattern.
 
-Speksi 2's two levels land natively:
+Speksi 2's two levels are both path caveats on the user's token — verified enforcing in
+§13.1 (out-of-caveat read → 404, listings filtered to admitted paths only):
 
-| Requirement | Mechanism |
+| Requirement | Token caveat |
 |---|---|
-| P-O-05 — access to a customer | workspace access / `_box_admits_read` |
-| P-O-06/07 — access to a single case | the macaroon's path caveat over `case/<id>/**` |
+| P-O-05 — access to a customer | `{asiakas}/**` |
+| P-O-06/07 — access to a single case, without the customer | `{asiakas}/{case}/**` |
 
 **Membership is the access grant, not a mirror of it.** nSight must not keep its own user
 list alongside datahive's — they would drift, and a user nSight forgot to register would
