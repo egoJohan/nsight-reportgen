@@ -152,6 +152,19 @@ function CustomersNav() {
 
   return (
     <SidebarMenu>
+      {/* First, like "Uusi tutkimus" one level down: a create action should not
+          drift down the page as the list it feeds grows. */}
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          render={<NavLink to="/customers?new=customer" />}
+          tooltip="Uusi asiakas"
+          className="text-primary"
+        >
+          <PlusIcon className="size-4" />
+          <span>Uusi asiakas</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+
       {customers?.map((c) => {
         const open = !!openIds[c.id];
         return (
@@ -171,17 +184,6 @@ function CustomersNav() {
           </SidebarMenuItem>
         );
       })}
-
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          render={<NavLink to="/customers?new=customer" />}
-          tooltip="Uusi asiakas"
-          className="text-primary"
-        >
-          <PlusIcon className="size-4" />
-          <span>Uusi asiakas</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
 
       <LegacyCasesGroup />
     </SidebarMenu>
