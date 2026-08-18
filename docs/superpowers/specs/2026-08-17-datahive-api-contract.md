@@ -98,6 +98,39 @@ ordinary nSight analysts have exactly one way in: the OIDC flow. If the nSight h
 no `login_oidc_issuer` configured, `/oidc/login` returns 404 and **there is no
 ordinary-user login at all**. See §11.2.
 
+### 5.1 Provisioning is separate from authentication — and already built
+
+The model: **an admin sets up which usernames may have access; the IdP proves who
+someone is.** Datahive implements exactly this split, so nSight builds none of it.
+
+| Step | Endpoint / mechanism | Who |
+|---|---|---|
+| Invite an email to a group | `POST /api/v1/hive_invite` — `{email, group="tenant_members", ttl_days=7 (1–90)}` | admin only |
+| List invites | `GET /api/v1/hive_invite` — `{id, email, group, status, expires_at, created_at, accepted_at}` | admin only |
+| Revoke | `POST /api/v1/hive_invite/{id}/revoke` | admin only |
+| Authenticate | Google OIDC-RP — entirely separate, no invite knowledge | the IdP |
+| Admit | `admit_via_invite` in the OIDC callback: the **verified** email is matched to a pending invite, which is consumed and the group membership added | datahive |
+
+Properties worth relying on:
+
+- **Un-invited means locked out.** A valid Google account with no matching invite gets a
+  branded 403 — *"You need an invite to join"* — with no session minted and no redirect
+  back to the client, audited as `oauth.oidc_rp.invite_denied`.
+- **Invites cannot escalate.** `_PRIVILEGED_INVITE_GROUPS = ADMIN_GROUPS | {"hive-admin"}`
+  is refused at create time, so nobody becomes an admin via an emailed link.
+- **Revoke deprovisions.** Revoking an *accepted* invite also removes the granted group
+  membership ("M6 teardown"), so revocation is the single offboarding action.
+- **Invites expire** (1–90 days, default 7), so a forgotten invite does not linger as a
+  permanent open door — or a permanent seat.
+- **Optional domain auto-join.** `auto_join_domain` admits a whole verified email domain
+  without individual invites, checked before the invite gate — useful if a customer wants
+  everyone at their domain to have access.
+
+**Consequence for the Käyttäjähallinta ticket:** "admin voi lisätä ja poistaa käyttäjiä ja
+näiden oikeuksia" needs no user-management backend. It is an admin UI over
+`hive_invite` + `groups`, plus nSight's own finer-grained customer/case authorization
+(§6).
+
 ## 6. Authorization — membership is the single source of truth
 
 Datahive's authority model, from `domain/admin_identity.py`:
@@ -134,8 +167,13 @@ self-reported by the billed application. Two calls:
 
 ```
 GET /api/v1/groups/by-name/{group}   ->  {id, …}
-GET /api/v1/groups/{id}/members      ->  ["identity", …]      # length = seats
+GET /api/v1/groups/{id}/members      ->  ["identity", …]      # accepted seats
+GET /api/v1/hive_invite              ->  [{email, status, expires_at, …}]
 ```
+
+Group membership is the settled seat list: §5.1's admission adds a member on accept, and
+revocation removes one, so the ledger maintains itself with no separate bookkeeping. The
+invite list adds the not-yet-accepted cases — see §11.4 for whether those count.
 
 Both are `require_admin`, so only egoiq can read them — nSight's customers can neither
 inspect nor alter their own seat count.
@@ -294,10 +332,15 @@ it is more than user management strictly needs.
 **Anyone who can log in to nSight Studio** (johan, 2026-08-18). Implemented as one group
 gating login; its member count is the invoice. See §7.
 
-Remaining sub-decision: whether **egoiq's own staff** count as seats when they log in for
-support. Under the stated rule they do. If not intended, support accounts need their own
-group, excluded from the count — cheap to arrange now, awkward to retrofit once invoicing
-has started.
+Two remaining sub-decisions, both cheap now and awkward to retrofit once invoicing runs:
+
+1. **egoiq's own staff.** Under the stated rule, support logins are seats. If that is not
+   intended, support accounts need their own group, excluded from the count.
+2. **Pending invites.** An invited person who has never logged in *can* log in, so the
+   literal rule makes them billable from the moment of invitation rather than first
+   login. Expired and revoked invites are plainly not billable. Recommend billing on
+   **accepted group membership** — it is the unambiguous list, it self-maintains
+   (§5.1), and it cannot charge for an invitation that was never taken up.
 
 ### 11.5 Speksi 2 deviation to confirm with nSight
 
