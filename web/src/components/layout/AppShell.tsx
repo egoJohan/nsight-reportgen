@@ -29,6 +29,7 @@ import {
   useCustomers,
   useCustomerCases,
   useResolvedCase,
+  useCaseReports,
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import ChatPanel from "@/components/ChatPanel";
@@ -202,6 +203,7 @@ function Breadcrumb() {
   const { data: customers } = useCustomers();
   const { data: resolved } = useResolvedCase(id);
   const { data: legacyCases } = useCases();
+  const { data: caseReports } = useCaseReports(id ?? null);
 
   const crumbs: { label: string; to?: string }[] = [];
   const path = location.pathname;
@@ -224,8 +226,13 @@ function Breadcrumb() {
         label: legacyCases?.find((c) => c.id === id)?.name ?? id,
       });
     }
+    // The open report's own name, not the literal word: the crumb has to say
+    // WHICH report, the same way the case crumb says which case.
     const openReport = searchParams.get("report");
-    if (openReport) crumbs.push({ label: "Raportti" });
+    if (openReport) {
+      const name = caseReports?.reports?.find((r) => r.report_id === openReport)?.name;
+      crumbs.push({ label: name || "Raportti" });
+    }
   }
 
   return (
