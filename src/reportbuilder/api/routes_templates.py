@@ -44,6 +44,34 @@ def _as_dict(t) -> dict:
     return d
 
 
+def _live_font_status(stored: list[dict], families: list[str]) -> list[dict]:
+    """Re-check *families* against the host as it is RIGHT NOW.
+
+    The stored record is what was true at upload. It cannot know about a font
+    installed since, or a stand-in chosen a minute ago, so a template row would
+    keep saying "Fontti puuttuu" after the admin had already dealt with it.
+
+    Where a font is still unresolved the STORED reason wins: it explains the
+    licence ("Monotypen fontti, ei voi asentaa automaattisesti"), while a
+    network-free re-check can only say it is absent. Cheap enough for a list —
+    no network, and fontconfig's family list is cached in-process.
+    """
+    from reportbuilder.render.fonts import check_template_fonts
+
+    by_family = {f.get("family"): f for f in stored if isinstance(f, dict)}
+    try:
+        live = check_template_fonts(families, allow_network=False)
+    except Exception:  # noqa: BLE001 — fall back to what we recorded
+        return stored
+    out = []
+    for st in live:
+        if st.ok:
+            out.append(st.as_dict())
+        else:
+            out.append(by_family.get(st.family) or st.as_dict())
+    return out
+
+
 def _resolve_template_fonts(theme) -> list[dict]:  # theme OR Template record
     """Install the fonts this template names, or record why we cannot.
 
@@ -125,6 +153,9 @@ def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
     pause is acceptable and a network round trip during a render is not. It
     happens once per template; the result is stored.
     """
+    from reportbuilder.api.routes_settings import load_substitutions
+
+    load_substitutions(repo, auth)
     out = []
     for t in repo.list_templates(auth, customer_id):
         if not t.fonts and t.heading_font:
@@ -135,6 +166,10 @@ def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
                 except Exception:  # noqa: BLE001 — a cache miss, not a failure
                     pass
                 t = replace(t, fonts=tuple(fonts))
+        # Re-checked against the host as it is now, so installing a font or
+        # choosing a stand-in clears the row instead of leaving it stale.
+        families = [f for f in (t.heading_font, t.body_font) if f]
+        t = replace(t, fonts=tuple(_live_font_status(list(t.fonts), families)))
         out.append(_as_dict(t))
     return out
 
@@ -159,8 +194,7 @@ def template_detail(customer_id: str, template_id: str,
         load_substitutions(repo, auth)
         families = [f for f in (t.heading_font, t.body_font) if f]
         # allow_network=False: opening a dialog must not wait on Google Fonts.
-        live = [st.as_dict() for st in
-                F.check_template_fonts(families, allow_network=False)]
+        live = _live_font_status(list(t.fonts), families)
         return {**_as_dict(t), "body_font": t.body_font, "fonts": live,
                 "fonts_ok": all(f["ok"] for f in live) if live else True,
                 "available_fonts": H.available_chart_fonts()}

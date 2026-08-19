@@ -300,8 +300,14 @@ def apply_substitutions(mapping: dict[str, str]) -> dict[str, str]:
                        for k, v in sorted(clean.items()))
         SUBSTITUTION_FILE.write_text(_SUB_HEADER + body + "</fontconfig>\n",
                                      encoding="utf-8")
-    _refresh_font_cache()
-    installed_families(refresh=True)
+    # No fc-cache here, deliberately. A conf.d rule is read when a process
+    # starts, so LibreOffice picks it up on the next render with no cache
+    # rebuild — and `fc-cache -f` costs ~2s, which was the whole delay between
+    # choosing a stand-in and seeing it. Verified both ways: writing the file
+    # changes fc-match immediately, and deleting it reverts immediately.
+    #
+    # installed_families is untouched for the same reason: an alias redirects a
+    # lookup, it does not add a family to fc-list.
     _substitutions = clean
     return clean
 

@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, setActivePreviewKey } from "./api";
+import type { Substitutions } from "./api";
 import type { ChartSpec, ReportDoc, GroupingOverride, WordMerge } from "./api";
 
 // ---- Query keys ----
@@ -93,9 +94,28 @@ export function useSubstitutions() {
   });
   const save = useMutation({
     mutationFn: api.settings.setSubstitutions,
-    onSuccess: () => {
+    // Applied to the cache before the request goes out. The dropdown is bound
+    // to this query, so without it the control keeps showing the OLD font
+    // until the round trip returns — which reads as the control being broken
+    // rather than as the save being slow.
+    onMutate: async (map) => {
+      const key = ["settings", "substitutions"];
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<Substitutions>(key);
+      if (previous) qc.setQueryData<Substitutions>(key, { ...previous, map });
+      return { previous };
+    },
+    onError: (_e, _map, ctx) => {
+      // Put the real state back: the select must never keep showing a choice
+      // the server rejected.
+      if (ctx?.previous) {
+        qc.setQueryData(["settings", "substitutions"], ctx.previous);
+      }
+    },
+    onSettled: () => {
       // A stand-in changes what every template resolves to and what every
-      // rendered preview looks like.
+      // rendered preview looks like. These refetch in the background; the
+      // control is already correct.
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["template-detail"] });
       qc.invalidateQueries({ queryKey: ["templates"] });
