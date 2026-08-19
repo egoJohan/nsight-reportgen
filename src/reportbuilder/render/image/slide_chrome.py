@@ -200,7 +200,7 @@ def harvested_title_box(profile, text: str) -> tuple[int, int, int, int]:
     # Holiday Club's is `cap="all"` — measure it as if it were a size larger.
     measured = size * 1.12 if st.caps else size
     lines = wrapped_line_count(text, int(st.width), int(measured))
-    height = max(int(st.height), lines * int(Pt(size * 1.25)))
+    height = max(int(st.height), lines * int(Pt(size * (st.line_spacing or 1.25))))
     return int(st.left), int(st.top), int(st.width), height
 
 

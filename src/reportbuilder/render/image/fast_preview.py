@@ -126,7 +126,8 @@ def _house_ground(slide, sw: int, sh: int, style) -> None:
     shape.shadow.inherit = False
 
 
-def _font(family: str, size_px: int):
+def _font(family: str, size_px: float, *, bold: bool = False,
+          italic: bool = False):
     """A PIL font for *family*, resolved the way THIS HOST would render it.
 
     Through the configured substitutions first: a template naming Calibri on a
@@ -141,22 +142,30 @@ def _font(family: str, size_px: int):
         wanted = F.substitutions().get(wanted, wanted)
     except Exception:  # noqa: BLE001
         pass
-    path = _font_file(wanted)
+    path = _font_file(wanted, bold=bold, italic=italic)
     if path:
         try:
+            # A FRACTIONAL size, deliberately: 11pt at 110 dpi is 16.81px, and
+            # rounding that to 17 stretches every glyph by 1.2% — which is
+            # invisible on one word and several pixels of drift by the end of a
+            # long subtitle line.
             return ImageFont.truetype(path, size_px)
-        except OSError:
+        except (OSError, TypeError):
             pass
+    try:
+        return ImageFont.truetype(path, int(round(size_px)))
+    except (OSError, TypeError, ValueError):
+        pass
     try:
         return ImageFont.load_default(size_px)
     except TypeError:
         return ImageFont.load_default()
 
 
-_FONT_FILES: dict[str, str] = {}
+_FONT_FILES: dict[tuple, str] = {}
 
 
-def _font_file(family: str) -> str:
+def _font_file(family: str, *, bold: bool = False, italic: bool = False) -> str:
     """The font file this host would actually use for *family*.
 
     fontconfig, because that is who LibreOffice asks: on a host without Calibri,
@@ -164,11 +173,17 @@ def _font_file(family: str) -> str:
     Sans, while matplotlib's own fallback would have said DejaVu — a preview in a
     different typeface from the deck it is previewing.
     """
-    if family in _FONT_FILES:
-        return _FONT_FILES[family]
+    cache_key = (family, bold, italic)
+    if cache_key in _FONT_FILES:
+        return _FONT_FILES[cache_key]
     path = ""
     try:
-        out = subprocess.run(["fc-match", "-f", "%{file}", family or "sans-serif"],
+        pattern = family or "sans-serif"
+        if bold:
+            pattern += ":bold"
+        if italic:
+            pattern += ":italic"
+        out = subprocess.run(["fc-match", "-f", "%{file}", pattern],
                              capture_output=True, text=True, timeout=5)
         path = out.stdout.strip() if out.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
@@ -182,7 +197,7 @@ def _font_file(family: str) -> str:
                 fallback_to_default=True)
         except Exception:  # noqa: BLE001
             path = ""
-    _FONT_FILES[family] = path
+    _FONT_FILES[cache_key] = path
     return path
 
 
@@ -217,7 +232,7 @@ def compose_from_slide(style, slide, dpi: int = 110):
             if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 _paste_picture(image, shape, to_px)
             elif shape.has_text_frame and (shape.text_frame.text or "").strip():
-                _draw_text(draw, shape, to_px, dpi, image.width)
+                _draw_text(draw, shape, to_px, dpi, style)
         except Exception:  # noqa: BLE001 — one shape must not lose the preview
             log.warning("preview: could not draw %s", getattr(shape, "name", "?"),
                         exc_info=True)
@@ -236,29 +251,200 @@ def _paste_picture(image, shape, to_px) -> None:
                 resized)
 
 
-def _draw_text(draw, shape, to_px, dpi: int, image_width: int) -> None:
-    """A textbox the renderer added — the footer, a caption, a subtitle."""
-    from pptx.enum.text import PP_ALIGN
+def _line_step(shape, style) -> float:
+    """Line pitch as a multiple of the type size.
+
+    1.25 is what nSight's own textboxes are laid out on. A title PLACEHOLDER
+    follows the master instead — Attendo's and Holiday Club's both set 90% — and
+    at 1.25 a two-line title drifts visibly below the real slide's second line.
+    """
+    if shape.is_placeholder:
+        title = getattr(getattr(style, "profile", None), "title", None)
+        if title is not None and title.line_spacing:
+            return title.line_spacing
+    return 1.25
+
+
+_A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+
+def _caps(shape, run, style) -> bool:
+    """Does this run render upper-case whatever was typed?
+
+    `cap="all"` is a rendering instruction, not stored text: Holiday Club's
+    title carries it, so LibreOffice prints the headline in capitals while the
+    .pptx still holds mixed case. Drawing what the XML says instead of what
+    PowerPoint shows made every Holiday Club preview visibly wrong.
+    """
+    rpr = run._r.find(f"{_A_NS}rPr")
+    if rpr is not None and rpr.get("cap"):
+        return rpr.get("cap") == "all"
+    if shape.is_placeholder:
+        title = getattr(getattr(style, "profile", None), "title", None)
+        if title is not None:
+            return bool(title.caps)
+    return False
+
+
+def _run_style(shape, para, run, style):
+    """(family, size_pt, colour, bold, italic) for one RUN.
+
+    Per run, not per paragraph: a bullet line is a teal glyph followed by ink
+    body text, and colouring the whole line from the first run painted the body
+    teal. A title PLACEHOLDER states nothing and inherits from the layout and
+    master — which is what the template profile already read off the template.
+    """
+    family = run.font.name or ""
+    size_pt = float(run.font.size.pt) if run.font.size is not None else 0.0
+    bold = bool(run.font.bold)
+    italic = bool(run.font.italic)
+    colour = ""
+    try:
+        if run.font.color is not None and run.font.color.type is not None:
+            colour = str(run.font.color.rgb)
+    except (AttributeError, ValueError):
+        pass
+    if not (family and size_pt and colour) and shape.is_placeholder:
+        title = getattr(getattr(style, "profile", None), "title", None)
+        if title is not None:
+            family = family or title.font
+            size_pt = size_pt or title.size_pt
+            colour = colour or title.colour
+            if run.font.bold is None:
+                bold = bool(title.bold)
+    return family, size_pt or 11.0, colour or "2B2B2B", bold, italic
+
+
+def _indents(para, to_px) -> tuple[int, int]:
+    """(first-line x, wrapped-line x) offsets from the shape's left edge.
+
+    A bullet paragraph sets `marL` (where the text sits) and a negative `indent`
+    (how far back the glyph hangs). Without them every bullet drew flush left and
+    the nesting levels collapsed onto each other.
+    """
+    ppr = para._p.find(
+        "{http://schemas.openxmlformats.org/drawingml/2006/main}pPr")
+    if ppr is None:
+        return 0, 0
+    try:
+        mar_l = int(ppr.get("marL") or 0)
+        indent = int(ppr.get("indent") or 0)
+    except ValueError:
+        return 0, 0
+    return to_px(mar_l + indent), to_px(mar_l)
+
+
+def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
+    """A text shape on the slide — a title, a subtitle, a footer, a bullet list.
+
+    Drawn run by run and line by line, so a paragraph made of several runs (a
+    coloured bullet glyph then ink body text) keeps each run's own font, weight
+    and colour, and a hanging indent puts the glyph where PowerPoint puts it.
+    """
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 
     frame = shape.text_frame
+    left_emu, top_emu = int(shape.left or 0), int(shape.top or 0)
+    width_px = max(1, to_px(int(shape.width or 0)))
+    height_px = max(1, to_px(int(shape.height or 0)))
+    y = to_px(top_emu)
+
+    lines: list[tuple[list, object, int, int, bool]] = []
+    line_steps: list[int] = []
     for para in frame.paragraphs:
-        text = "".join(r.text for r in para.runs).strip()
-        if not text:
+        runs = [r for r in para.runs if r.text]
+        if not runs:
             continue
-        run = para.runs[0]
-        size_pt = float(run.font.size.pt) if run.font.size is not None else 11.0
-        colour = "666666"
-        try:
-            if run.font.color is not None and run.font.color.type is not None:
-                colour = str(run.font.color.rgb)
-        except (AttributeError, ValueError):
-            pass
-        font = _font(run.font.name or "", max(6, int(round(size_pt * dpi / 72))))
-        left, top = to_px(int(shape.left or 0)), to_px(int(shape.top or 0))
-        if para.alignment == PP_ALIGN.RIGHT:
-            width = draw.textlength(text, font=font)
-            left = to_px(int(shape.left or 0) + int(shape.width or 0)) - int(width)
-        draw.text((left, top), text, font=font, fill=f"#{colour}")
-        # One paragraph per box is what the renderer writes; a second would need
-        # line metrics we do not have here.
-        break
+        first_x, wrap_x = _indents(para, to_px)
+        step, para_lines = 0, []
+        # One drawable segment per run: (text, font, colour).
+        segments = []
+        for run in runs:
+            family, size_pt, colour, bold, italic = _run_style(shape, para, run, style)
+            font = _font(family, max(6.0, size_pt * dpi / 72), bold=bold, italic=italic)
+            step = max(step, int(round(size_pt * _line_step(shape, style) * dpi / 72)))
+            text = run.text.replace("\t", "  ")
+            if _caps(shape, run, style):
+                text = text.upper()
+            segments.append((text, font, colour))
+        avail = width_px - first_x
+        for i, chunk in enumerate(_wrap_segments(draw, segments, avail,
+                                                 width_px - wrap_x)
+                                  if frame.word_wrap is not False else [segments]):
+            para_lines.append((chunk, para.alignment, first_x, wrap_x, i == 0))
+        lines.extend(para_lines)
+        line_steps.extend(step for _ in para_lines)
+
+    if not lines:
+        return
+    if frame.vertical_anchor == MSO_ANCHOR.BOTTOM:
+        y = to_px(top_emu) + height_px - sum(line_steps)
+    for (segments, alignment, first_x, wrap_x, is_first), step in zip(lines, line_steps):
+        x = to_px(left_emu) + (first_x if is_first else wrap_x)
+        if alignment in (PP_ALIGN.RIGHT, PP_ALIGN.CENTER):
+            width = sum(draw.textlength(t, font=f) for t, f, _c in segments)
+            if alignment == PP_ALIGN.RIGHT:
+                x = to_px(left_emu + int(shape.width or 0)) - int(width)
+            else:
+                x = to_px(left_emu) + (width_px - int(width)) // 2
+        for text, font, colour in segments:
+            draw.text((x, y), text, font=font, fill=f"#{colour}")
+            x += int(round(draw.textlength(text, font=font)))
+        y += step
+
+
+def _wrap_segments(draw, segments, first_width: int, wrap_width: int) -> list[list]:
+    """Break a run-styled paragraph into lines, keeping each run's styling.
+
+    Wrapping happens across the whole paragraph, not per run, because a line
+    break can fall in the middle of a run — which is what makes this different
+    from wrapping a plain string.
+    """
+    out: list[list] = []
+    current: list = []
+    used = 0.0
+    limit = first_width
+    for text, font, colour in segments:
+        for word in _tokens(text):
+            w = draw.textlength(word, font=font)
+            if current and used + w > limit and word.strip():
+                out.append(current)
+                current, used, limit = [], 0.0, wrap_width
+            if current and current[-1][1] is font and current[-1][2] == colour:
+                current[-1] = (current[-1][0] + word, font, colour)
+            else:
+                current.append((word, font, colour))
+            used += w
+    if current:
+        out.append(current)
+    return out or [[]]
+
+
+def _tokens(text: str) -> list[str]:
+    """Words with their trailing spaces kept, so re-joining preserves spacing."""
+    out, buf = [], ""
+    for ch in text:
+        buf += ch
+        if ch == " ":
+            out.append(buf)
+            buf = ""
+    if buf:
+        out.append(buf)
+    return out
+
+
+    if not lines:
+        return
+    if frame.vertical_anchor == MSO_ANCHOR.BOTTOM:
+        y = to_px(top_emu) + height_px - sum(step for _, step in line_steps)
+    for (segments, alignment, first_x, wrap_x, is_first), step in zip(lines, [s for _, s in line_steps]):
+        x = to_px(left_emu) + (first_x if is_first else wrap_x)
+        if alignment in (PP_ALIGN.RIGHT, PP_ALIGN.CENTER):
+            width = sum(draw.textlength(t, font=f) for t, f, _c in segments)
+            edge = to_px(left_emu + int(shape.width or 0))
+            x = edge - int(width) if alignment == PP_ALIGN.RIGHT else \
+                to_px(left_emu) + (width_px - int(width)) // 2
+        for text, font, colour in segments:
+            draw.text((x, y), text, font=font, fill=f"#{colour}")
+            x += int(round(draw.textlength(text, font=font)))
+        y += step

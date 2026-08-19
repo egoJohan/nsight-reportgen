@@ -68,6 +68,10 @@ class TextStyle:
     #: PowerPoint's `cap="all"`: the text renders upper-case whatever we type,
     #: which makes a line about a tenth wider than the same string in mixed case.
     caps: bool = False
+    #: `lnSpc` as a multiple of single spacing. Attendo's master sets 90%, and a
+    #: two-line title drawn at 100% sits a few pixels low against the real slide.
+    #: 0.0 means "not stated"; _title_style settles it at 1.0 once it has looked.
+    line_spacing: float = 0.0
     colour: str = ""          # hex, no '#'
     left: int = 0
     top: int = 0
@@ -131,6 +135,7 @@ class TemplateProfile:
                 "title_box_in": [round(Emu(v).inches, 2) for v in
                                  (self.title.left, self.title.top,
                                   self.title.width, self.title.height)],
+                "title_line_spacing": self.title.line_spacing,
                 "subtitle_font": self.subtitle_font,
                 "background": self.background, "accent": self.accent,
                 "furniture_shapes": len(self.furniture)}
@@ -246,6 +251,19 @@ def _style_of(shape) -> TextStyle:
     return st
 
 
+def _line_spacing(ppr) -> float:
+    """`lnSpc` on a paragraph properties element, as a multiple of single."""
+    if ppr is None:
+        return 0.0
+    pct = ppr.find("a:lnSpc/a:spcPct", _A)
+    if pct is not None and pct.get("val"):
+        try:
+            return int(pct.get("val")) / 100000.0
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 def _from_rpr(rpr, brand: _Brand) -> TextStyle:
     """The style a `<a:defRPr>` or `<a:rPr>` element states."""
     st = TextStyle()
@@ -358,8 +376,16 @@ def _title_style(prs, shape, brand: _Brand) -> TextStyle:
     st = _merge(st, _from_rpr(_own_list_style(shape), brand))
     if _looks_like_title(shape):
         st = _merge(st, _from_rpr(_master_title_rpr(prs), brand))
+        try:
+            st.line_spacing = st.line_spacing or _line_spacing(
+                prs.slide_master._element.find(
+                    "./p:txStyles/p:titleStyle/a:lvl1pPr", _P))
+        except AttributeError:
+            pass
     if not st.font:
         st.font = brand.font("+mj-lt")
+    if not st.line_spacing:
+        st.line_spacing = 1.0
     return st
 
 
