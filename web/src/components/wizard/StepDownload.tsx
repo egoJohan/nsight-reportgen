@@ -13,6 +13,7 @@ import type { Question, ReportDoc } from "@/lib/api";
 import { useRegroupedQuestions, useRenderReport } from "@/lib/queries";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { SlideGrid } from "@/components/wizard/SlideGrid";
+import { PANEL_TITLE } from "@/lib/surfaces";
 
 export default function StepDownload({
   caseId,
@@ -148,7 +149,7 @@ export default function StepDownload({
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold">Luo esitys</h3>
+          <h3 className={PANEL_TITLE}>Luo esitys</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Assemble {deckCharts.length}{" "}
             {deckCharts.length === 1 ? "slide" : "slides"} into a PowerPoint
@@ -197,7 +198,7 @@ export default function StepDownload({
           edit it. Adding / removing / reordering lives in the Select step. */}
       {!noCharts && (
         <div className="rounded-xl border bg-card p-4">
-          <h3 className="mb-3 text-base font-semibold">
+          <h3 className={`${PANEL_TITLE} mb-3`}>
             All slides ({deckCharts.length})
           </h3>
           <SlideGrid

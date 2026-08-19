@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { PAGE, PAGE_HEADER } from "@/lib/surfaces";
+import { PAGE, PAGE_HEADER, PAGE_TITLE } from "@/lib/surfaces";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -85,7 +85,7 @@ function CaseHeading({
 
   return (
     <div className="group flex items-center gap-2">
-      <h1 className="text-2xl font-semibold tracking-tight">{name}</h1>
+      <h1 className={PAGE_TITLE}>{name}</h1>
       <Button
         size="icon-sm"
         variant="ghost"

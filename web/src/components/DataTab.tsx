@@ -38,7 +38,7 @@ import {
 import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
-import { PANEL, ERROR } from "@/lib/surfaces";
+import { ERROR, PANEL, PANEL_TITLE } from "@/lib/surfaces";
 
 // ---- Sort options ----
 type SortKey = "default" | "text_asc" | "text_desc" | "kind";
@@ -339,7 +339,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
       {!materialId || replacing ? (
         <>
           <div className="mb-6">
-            <h3 className="text-base font-semibold">Tietolähde</h3>
+            <h3 className={PANEL_TITLE}>Tietolähde</h3>
             <p className="mt-1 text-sm text-muted-foreground">
               Upload an SPSS file to extract and browse the curated questions.
             </p>
@@ -357,7 +357,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
         <>
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h3 className="text-base font-semibold">Kysymykset</h3>
+              <h3 className={PANEL_TITLE}>Kysymykset</h3>
               <p className="mt-0.5 text-sm text-muted-foreground flex items-center gap-1.5">
                 <DatabaseIcon className="size-3.5" />
                 <span className="font-mono text-xs">{materialId}</span>

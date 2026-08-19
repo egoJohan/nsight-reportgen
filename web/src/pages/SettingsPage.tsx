@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { EMPTY, PAGE, PAGE_TITLE, PANEL, ROW } from "@/lib/surfaces";
+import { EMPTY, PAGE, PAGE_TITLE, PANEL, PANEL_TITLE, ROW } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
 } from "@/lib/queries";
@@ -32,7 +32,7 @@ function MissingFonts({ missing }: { missing: MissingFont[] }) {
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
       <div className="flex items-center gap-2">
         <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
-        <h3 className="text-sm font-semibold">Puuttuvat fontit</h3>
+        <h3 className={PANEL_TITLE}>Puuttuvat fontit</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         Nämä fontit puuttuvat palvelimelta. PowerPoint-tiedosto viittaa silti
@@ -112,7 +112,7 @@ function ChartFontSetting() {
 
   return (
     <div className={`${PANEL} p-4`}>
-      <h3 className="text-sm font-semibold">Kuvaajien fontti</h3>
+      <h3 className={PANEL_TITLE}>Kuvaajien fontti</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         Kuvaajien teksti piirretään tällä fontilla. Se on tarkoituksella eri
         asetus kuin esityspohjan fontti: kapeampi fontti mahtuu paremmin pitkiin
@@ -173,7 +173,7 @@ function FontsTab() {
       <ChartFontSetting />
 
       <div className={`${PANEL} p-4`}>
-        <h3 className="text-sm font-semibold">Asennetut fontit</h3>
+        <h3 className={PANEL_TITLE}>Asennetut fontit</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           nSight asentaa avoimen lisenssin fontit automaattisesti Google
           Fontsista. Kaupallisia fontteja (esim. Century Gothic, Calibri,

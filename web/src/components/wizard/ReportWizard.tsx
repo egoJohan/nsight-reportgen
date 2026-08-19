@@ -33,6 +33,7 @@ import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepDownload from "./StepDownload";
 import TemplateButton from "@/components/wizard/TemplateButton";
+import { PAGE_TITLE, PANEL_TITLE } from "@/lib/surfaces";
 
 /** Move an item within an array, returning a new array. */
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -918,7 +919,7 @@ export default function ReportWizard({
         <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted">
           <FileXIcon className="size-7 text-muted-foreground" />
         </div>
-        <h3 className="text-lg font-semibold tracking-tight">
+        <h3 className={PANEL_TITLE}>
           Report unavailable
         </h3>
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
@@ -970,7 +971,7 @@ export default function ReportWizard({
             </div>
           ) : (
             <div className="group flex items-center gap-2">
-              <h2 className="truncate text-base font-semibold">{draft.name}</h2>
+              <h1 className={`${PAGE_TITLE} truncate`}>{draft.name}</h1>
               <Button
                 size="icon-sm"
                 variant="ghost"

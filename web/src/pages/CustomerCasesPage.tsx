@@ -15,7 +15,7 @@ import {
   useTemplateActions,
 } from "@/lib/queries";
 import TemplatePicker from "@/components/TemplatePicker";
-import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
+import { EMPTY, ERROR, OVERLINE, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
@@ -87,7 +87,7 @@ export default function CustomerCasesPage() {
 
       {/* The template panel sits between the header and the list, so the list
           needs its own heading to stay recognisable as the page's content. */}
-      <h2 className="mt-8 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+      <h2 className={`${OVERLINE} mt-8`}>
         Tutkimukset
       </h2>
 

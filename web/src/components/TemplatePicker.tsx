@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { PANEL } from "@/lib/surfaces";
+import { PANEL, PANEL_TITLE } from "@/lib/surfaces";
 import { useTemplates, useTemplateActions } from "@/lib/queries";
 import TemplateSettingsDialog from "@/components/TemplateSettingsDialog";
 import type { Template, TemplateFont } from "@/lib/api";
@@ -73,7 +73,7 @@ export default function TemplatePicker({
     <div className={`${PANEL} px-3 py-2.5`}>
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold">Esityspohja</h3>
+          <h3 className={PANEL_TITLE}>Esityspohja</h3>
           {/* Only says something when the pohja is NOT set here: where it IS
               set, the panel's own position already says so. */}
           {!currentId && (

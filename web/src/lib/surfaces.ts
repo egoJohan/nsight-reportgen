@@ -22,9 +22,23 @@
  */
 export const PAGE = "mx-auto w-full max-w-6xl px-6 py-8";
 
-/** A page-level heading. Pairs with PAGE_SUB for the line underneath. */
+/** The heading scale. Three levels, one definition each.
+ *
+ * There were eleven variants across the app — h1 at both 2xl and 3xl, and the
+ * same kind of section heading at text-base in one panel and text-sm in the
+ * next — so two pages showing the same kind of thing did not look related.
+ *
+ * PAGE_TITLE names what you are looking at (a customer, a tutkimus, a report).
+ * SECTION_TITLE divides a page into parts. PANEL_TITLE labels one control
+ * group inside a panel. OVERLINE is for the small muted labels inside dialogs,
+ * which are labels rather than headings.
+ */
 export const PAGE_TITLE = "text-2xl font-semibold tracking-tight";
 export const PAGE_SUB = "mt-1 text-sm text-muted-foreground";
+export const SECTION_TITLE = "text-base font-semibold tracking-tight";
+export const PANEL_TITLE = "text-sm font-semibold";
+export const OVERLINE =
+  "text-xs font-medium uppercase tracking-wide text-muted-foreground";
 
 /** The header block: title on the left, actions on the right, one gap below.
  *  Matches the tutkimus page, which is the layout the others are aligned to. */

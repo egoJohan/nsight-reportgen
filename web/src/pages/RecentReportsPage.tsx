@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { FileTextIcon, ArrowRightIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRecentReports, useCustomers } from "@/lib/queries";
-import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
+import { EMPTY, ERROR, OVERLINE, PAGE_TITLE, ROW } from "@/lib/surfaces";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
 
 /** Relative time at the granularity a report list actually needs. An exact
@@ -42,7 +42,7 @@ export default function RecentReportsPage() {
       <div className="mx-auto w-full max-w-4xl px-6 py-16">
         {/* Welcome hero */}
         <div className="flex flex-col items-center text-center">
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className={PAGE_TITLE}>
             Tervetuloa nSight Studioon
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
@@ -53,7 +53,7 @@ export default function RecentReportsPage() {
 
         {/* Recent reports */}
         <div className="mt-16">
-          <h2 className="mb-3 text-sm font-medium tracking-wide text-muted-foreground uppercase">
+          <h2 className={`${OVERLINE} mb-3`}>
             Viimeisimmät raportit
           </h2>
 

@@ -3,6 +3,7 @@ import { SendIcon, XIcon, Loader2Icon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { SECTION_TITLE } from "@/lib/surfaces";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -78,7 +79,7 @@ export default function ChatPanel({
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <SparklesIcon className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold">Keskustele datasta</h2>
+            <h2 className={SECTION_TITLE}>Keskustele datasta</h2>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Sulje">
             <XIcon className="size-4" />

@@ -23,7 +23,7 @@ import {
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import { formatReportDate } from "@/lib/utils";
-import { PANEL } from "@/lib/surfaces";
+import { PANEL, SECTION_TITLE } from "@/lib/surfaces";
 
 // One report row — fetches the report doc to show its status + statistics.
 function ReportRow({
@@ -166,7 +166,7 @@ export default function ReportsSection({
   return (
     <section>
       <div className="mb-3">
-        <h2 className="text-base font-semibold">Raportit</h2>
+        <h2 className={SECTION_TITLE}>Raportit</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           Build chart reports from this case's survey data.
         </p>
