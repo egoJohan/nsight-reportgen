@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -297,6 +297,7 @@ async def render_report(
     report_id: str,
     body: RenderRequest,
     request: Request,
+    background: BackgroundTasks,
     client: DataHiveClient = Depends(get_client),
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
@@ -347,8 +348,12 @@ async def render_report(
         watcher.cancel()
 
     # The deck outlives /tmp from here on. Done after the render rather than
-    # inside it so a storage problem cannot cancel work the user just waited for.
-    _persist_deck(repo, auth, case_id, report_id, body.material_id, result["pptx"])
+    # inside it so a storage problem cannot cancel work the user just waited for
+    # — and AFTER the response, because uploading a 2.5 MB deck to the store is
+    # two more seconds of an analyst watching a spinner for a file that is
+    # already on disk and already servable.
+    background.add_task(_persist_deck, repo, auth, case_id, report_id,
+                        body.material_id, result["pptx"])
 
     result["pdf_url"] = f"/cases/{case_id}/reports/{report_id}/preview.pdf"
     # A font the host cannot supply does not fail the render — LibreOffice
