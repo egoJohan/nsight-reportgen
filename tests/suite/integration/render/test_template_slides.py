@@ -1,0 +1,170 @@
+"""Rendering a slide into a customer's template.
+
+Johan's rule: the TITLE follows the template — its font, size, colour and box —
+and the furniture that repeats on every slide comes with it. nSight positions
+everything else. There are two ways a template states its design, and a deck has
+to come out right from both:
+
+  * Attendo and Holiday Club keep it in a LAYOUT their own slides are built on,
+    so a slide built from that layout inherits it.
+  * Synsam and the agent deck draw it on the SLIDES (98 of 147 on "Tom"; all 20
+    on `Blank`), so it is harvested and redrawn.
+
+Real client files, like test_template_check and test_template_profile: the
+difficulty is entirely in what real templates do.
+"""
+from __future__ import annotations
+
+import dataclasses
+import pathlib
+
+import pytest
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Inches
+
+from reportbuilder.render.deck import render_report
+from reportbuilder.render.image.slide_chrome import content_floor
+from reportbuilder.render.style_spec import load_style_spec
+from reportbuilder.testing.fixtures import one_chart_report, known_series
+
+_TEMPLATES = {
+    "attendo": "input/Attendo Bränditutkimus Marraskuu 2025.pptx",
+    "synsam": "input/Synsam_Segmentointitutkimus_30.4.2025_nSight.pptx",
+    "holidayclub": "input/Holiday Club_Loyalty tutkimus_raportti_19.2.2026.pptx",
+    "agent_deck": "work/attendo_agent_deck.pptx",   # not in git; skipped if absent
+}
+
+_LONG = ("Attendo liitetään vahvimmin attribuutteihin luotettava ja "
+         "ammattitaitoinen")
+
+
+def _render(name, title=_LONG):
+    path = pathlib.Path(_TEMPLATES[name])
+    if not path.exists():
+        pytest.skip(f"{path} not available locally")
+    style = load_style_spec(str(path))
+    report = dataclasses.replace(one_chart_report(), render_mode="image")
+    prs = render_report(report, {"q1": known_series()}, style, titles={"q1": title})
+    return style, prs, prs.slides[0]
+
+
+def _picture(slide):
+    pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 1
+    return pics[0]
+
+
+def _title_shape(slide, text):
+    for shape in slide.shapes:
+        if shape.has_text_frame and shape.text_frame.text.strip() == text:
+            return shape
+    return None
+
+
+class TestWhichWayTheSlideIsBuilt:
+    @pytest.mark.parametrize("name", ["attendo", "holidayclub"])
+    def test_a_layout_template_builds_from_its_own_layout(self, name):
+        style, _prs, slide = _render(name)
+        assert style.chart_layout_index is not None
+        assert slide.slide_layout.name == style.profile.source.split(":", 1)[1]
+
+    @pytest.mark.parametrize("name", ["synsam", "agent_deck"])
+    def test_a_hand_drawn_template_is_not_built_from_a_layout(self, name):
+        """Its layouts are stock — Office's `Blank`, `Title and Content` — and
+        building on them is what made a client deck come out looking like plain
+        PowerPoint. The design is harvested off a slide instead."""
+        style, _prs, _slide = _render(name)
+        assert style.chart_layout_index is None
+        assert style.profile.source.startswith("slide:")
+
+    def test_the_clients_palette_survives_either_way(self):
+        """Chart colours follow the template whichever way its design is
+        stated. They used to be keyed on there being a layout to build from."""
+        style, _prs, _slide = _render("synsam")
+        assert style.from_template
+        assert style.color_for(0) == "FF5000"
+
+
+class TestTheTitleFollowsTheTemplate:
+    def test_a_harvested_title_sits_in_the_templates_own_box(self):
+        style, _prs, slide = _render("synsam")
+        title = _title_shape(slide, _LONG)
+        assert title is not None
+        assert title.left == style.profile.title.left
+        assert title.top == style.profile.title.top
+        run = title.text_frame.paragraphs[0].runs[0]
+        assert run.font.name == "Avenir Next LT Pro Demi"
+        assert run.font.size.pt == 22.0
+
+    def test_a_layout_title_goes_in_the_placeholder_and_inherits(self):
+        """Nothing is set but the text: size, font and colour stay the
+        customer's, which is the whole point of using their layout."""
+        _style, _prs, slide = _render("attendo")
+        assert slide.shapes.title is not None
+        assert slide.shapes.title.text_frame.text == _LONG
+        run = slide.shapes.title.text_frame.paragraphs[0].runs[0]
+        assert run.font.size is None
+
+
+class TestWhereEverythingElseGoes:
+    @pytest.mark.parametrize("name", sorted(_TEMPLATES))
+    def test_the_chart_starts_below_the_title(self, name):
+        """Holiday Club's title box holds one line of the headline THEY wrote;
+        ours ran to two and printed straight through the subtitle below it."""
+        style, _prs, slide = _render(name)
+        st = style.profile.title
+        assert _picture(slide).top >= st.top + st.height
+
+    def test_nothing_of_ours_lands_on_the_templates_own_footer(self):
+        """Synsam's master puts its logo at 6.73in on a 7.5in slide, exactly
+        where the "N = ..." line goes."""
+        _style, prs, slide = _render("synsam")
+        floor = content_floor(slide, int(prs.slide_width), int(prs.slide_height))
+        assert floor < int(prs.slide_height)      # the logo was found
+        pic = _picture(slide)
+        assert pic.top + pic.height <= floor
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape.text_frame.text.startswith("N ="):
+                assert shape.top < floor
+
+    def test_the_chart_keeps_the_templates_side_margin(self):
+        style, _prs, slide = _render("synsam")
+        assert _picture(slide).left >= style.profile.title.left
+
+
+class TestFurniture:
+    def test_repeating_graphics_are_redrawn_on_a_harvested_slide(self):
+        """The rule under Synsam's title is on every one of its chart slides."""
+        _style, _prs, slide = _render("synsam")
+        assert any(s.shape_type == MSO_SHAPE_TYPE.LINE for s in slide.shapes)
+
+    def test_a_layout_slide_clones_nothing(self):
+        """Its furniture is inherited; cloning would draw the logo twice."""
+        style, _prs, _slide = _render("attendo")
+        assert style.profile.furniture == []
+
+    @pytest.mark.parametrize("name", ["synsam", "attendo"])
+    def test_the_house_background_is_not_painted_over_the_clients(self, name):
+        """A full-slide cream rectangle would cover whatever the customer's
+        design puts behind the chart. (The agent deck ends up with one because
+        ITS design is a full-slide rectangle — cloned from its own slides.)"""
+        _style, prs, slide = _render(name)
+        full = [s for s in slide.shapes
+                if int(s.width or 0) >= int(prs.slide_width) * 0.99
+                and int(s.height or 0) >= int(prs.slide_height) * 0.99]
+        assert full == []
+
+
+def test_a_deck_with_no_template_is_unchanged():
+    """The house style is what a wizard report without a template still gets:
+    cream ground, teal bar, our own title box."""
+    from reportbuilder.render.base import StyleSpec
+
+    report = dataclasses.replace(one_chart_report(), render_mode="image")
+    prs = render_report(report, {"q1": known_series()}, StyleSpec(), titles={"q1": "T"})
+    slide = prs.slides[0]
+    bg = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
+    assert len(bg) == 2                                   # background + accent bar
+    assert bg[0].width == int(prs.slide_width)
+    assert _title_shape(slide, "T") is not None
+    assert _title_shape(slide, "T").left == Inches(0.80)

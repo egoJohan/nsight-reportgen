@@ -16,7 +16,10 @@ from pptx.util import Inches
 from reportbuilder.model.report import Report, is_demographics_grid, renders_as_bullets
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.elements import apply_elements, add_n_annotation, add_filter_annotation
-from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
+from reportbuilder.render.image.slide_chrome import (
+    add_image_slide_chrome, content_floor, harvested_chart_box, harvested_profile,
+    harvested_title_box, slide_headline,
+)
 from reportbuilder.render.image.special_slide import render_special_slide
 from reportbuilder.render.image.demographics_grid import render_demographics_grid
 from reportbuilder.render.image._mpl import render_empty_chart, series_is_empty
@@ -218,7 +221,11 @@ def render_report(
         if cancel_check is not None and cancel_check():
             raise RenderCancelled()
         # --- Resolve slot and slide ---
-        slot = _resolve_slot(prs, style, spec.template_slot, report.render_mode)
+        # The headline is passed in because a harvested slide's chart starts
+        # under the title, and how far down that is depends on how many lines
+        # the title wraps to.
+        slot = _resolve_slot(prs, style, spec.template_slot, report.render_mode,
+                             title=slide_headline(spec, _titles.get(spec.question_ref, "")))
         # slide_index may reference an existing slide or was just appended
         slide = prs.slides[slot.slide_index]
 
@@ -305,7 +312,7 @@ def render_to_file(
 # ---------------------------------------------------------------------------
 
 def _resolve_slot(prs: Presentation, style, slot_name: str,
-                  render_mode: str = "native") -> Slot:
+                  render_mode: str = "native", title: str = "") -> Slot:
     """Return a Slot for *slot_name*, falling back to a new blank slide.
 
     Tries style.slot(slot_name) first.  If that raises KeyError (slot not in
@@ -334,9 +341,22 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
             if shape.is_placeholder and shape.has_text_frame and not shape.text_frame.text:
                 if shape.placeholder_format.type in _content_placeholders():
                     shape._element.getparent().remove(shape._element)
+        # The layout's content area starts right under the title box the
+        # customer drew for the headline THEY wrote. A question runs longer, and
+        # the subtitle has to go somewhere, so the chart starts below whichever
+        # is lower — the placeholder or the title as it actually falls. Its
+        # bottom edge does not move, so the customer's margin is kept.
+        top, height = int(chart_slot.top), int(chart_slot.height)
+        profile = getattr(style, "profile", None)
+        if profile is not None and profile.title.positioned:
+            _l, t_top, _w, t_height = harvested_title_box(profile, title)
+            wanted = t_top + t_height + int(Inches(0.70))
+            if wanted > top:
+                height -= wanted - top
+                top = wanted
         return Slot(slide_index=len(prs.slides) - 1, left=chart_slot.left,
-                    top=chart_slot.top, width=chart_slot.width,
-                    height=chart_slot.height, name=slot_name)
+                    top=top, width=chart_slot.width,
+                    height=max(int(Inches(1.0)), height), name=slot_name)
 
     # Fallback: add a new blank slide and synthesise a slot covering most of it
     layout = _blank_layout(prs)  # emptiest layout in THIS template
@@ -346,6 +366,15 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
     # Slots scale to the slide so they fill it at any aspect (4:3 or 16:9): fixed
     # side margins + top chrome, the rest of the width/height is the content area.
     sw, sh = int(prs.slide_width), int(prs.slide_height)
+    # A template whose design lives on its slides gives us the title's box, so
+    # the chart can start under the customer's title instead of at a guessed
+    # 1.9in — and sit inside their side margins rather than ours.
+    profile = harvested_profile(style)
+    if render_mode == "image" and profile is not None and profile.title.positioned:
+        left, top, width, height = harvested_chart_box(
+            profile, title, sw, sh, floor=content_floor(slide, sw, sh))
+        return Slot(slide_index=slide_index, left=left, top=top,
+                    width=width, height=height, name=slot_name)
     if render_mode == "image":
         # Leave ~1.9" at top for house-style title chrome (REQ-C-24a, REQ-D-04)
         return Slot(

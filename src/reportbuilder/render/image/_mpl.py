@@ -277,13 +277,17 @@ def chart_ink(ctx) -> str:
 def template_palette(ctx) -> list[str] | None:
     """The client template's accent colours, or None when no template applies.
 
-    Keyed on chart_layout_index because that is set only by load_style_spec on a
+    Keyed on from_template because that is set only by load_style_spec on a
     real .pptx — the base StyleSpec carries matplotlib's default blue/orange,
     which would be worse than the house ramp. The house DEFAULT template also
     goes through load_style_spec, so its teal-led theme arrives by the same
     path and there is no "is this a template" branch anywhere else.
+
+    It used to key on chart_layout_index, which stopped meaning "a template" the
+    moment a template whose design lives on its slides was given no layout to
+    build from — a client deck would have lost the client's chart colours.
     """
-    if getattr(ctx.style, "chart_layout_index", None) is None:
+    if not getattr(ctx.style, "from_template", False):
         return None
     try:
         palette = [f"#{ctx.style.color_for(i)}" for i in range(6)]

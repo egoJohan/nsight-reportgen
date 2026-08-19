@@ -28,6 +28,7 @@ see `layout_index`.
 """
 from __future__ import annotations
 
+import io
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -64,6 +65,9 @@ class TextStyle:
     font: str = ""
     size_pt: float = 0.0
     bold: bool | None = None
+    #: PowerPoint's `cap="all"`: the text renders upper-case whatever we type,
+    #: which makes a line about a tenth wider than the same string in mixed case.
+    caps: bool = False
     colour: str = ""          # hex, no '#'
     left: int = 0
     top: int = 0
@@ -73,6 +77,21 @@ class TextStyle:
     @property
     def positioned(self) -> bool:
         return self.width > 0 and self.height > 0
+
+
+@dataclass
+class Furniture:
+    """One borrowed shape, in a form that survives the move to another deck.
+
+    A shape's XML is only half of it: a picture's `r:embed` points at an image
+    part of the slide it came from, and that part goes when render_report strips
+    the template's slides. So a picture travels as bytes and is redrawn, while
+    everything else — bands, rules, backdrops — travels as XML.
+    """
+
+    element: object | None = None
+    image: bytes = b""
+    box: tuple = (0, 0, 0, 0)
 
 
 @dataclass
@@ -205,6 +224,12 @@ def _style_of(shape) -> TextStyle:
         st.size_pt = float(holder.size.pt)
     st.bold = holder.bold
     try:
+        rpr = (run if run is not None else para)._rPr if run is not None else None
+        if rpr is not None:
+            st.caps = rpr.get("cap") == "all"
+    except AttributeError:
+        pass
+    try:
         # An explicit RGB only. A theme-colour reference is resolved from the
         # XML below, where the scheme name is still readable.
         if holder.color is not None and holder.color.type is not None:
@@ -226,6 +251,7 @@ def _from_rpr(rpr, brand: _Brand) -> TextStyle:
             pass
     if rpr.get("b") is not None:
         st.bold = rpr.get("b") in ("1", "true")
+    st.caps = rpr.get("cap") == "all"
     latin = rpr.find("a:latin", _A)
     if latin is not None:
         st.font = brand.font(latin.get("typeface") or "")
@@ -240,6 +266,7 @@ def _merge(base: TextStyle, extra: TextStyle) -> TextStyle:
             setattr(base, attr, getattr(extra, attr))
     if base.bold is None:
         base.bold = extra.bold
+    base.caps = base.caps or extra.caps
     return base
 
 
@@ -559,8 +586,42 @@ def _furniture(container, title, sw: int, sh_: int, keep: set | None = None) -> 
             # a paragraph is somebody's content.
             if len(text) > 60:
                 continue
-        out.append(deepcopy(sh._element))
+        box = (int(sh.left or 0), int(sh.top or 0),
+               int(sh.width or 0), int(sh.height or 0))
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            try:
+                out.append(Furniture(image=sh.image.blob, box=box))
+            except (AttributeError, ValueError):
+                continue
+        elif sh._element.find(".//a:blip", _A) is not None:
+            # A group or a picture-filled shape: its image lives in a part we
+            # are not copying, and a dangling reference makes PowerPoint offer
+            # to repair the file. Better to lose the shape than the deck.
+            continue
+        else:
+            out.append(Furniture(element=deepcopy(sh._element), box=box))
     return out
+
+
+def clone_furniture(slide, items) -> int:
+    """Redraw harvested furniture onto *slide*, bottom of the z-order.
+
+    Call before anything else is added: PowerPoint z-orders by document order,
+    so the chart and our text have to come after the background they sit on.
+    """
+    placed = 0
+    for item in items:
+        try:
+            if item.image:
+                slide.shapes.add_picture(io.BytesIO(item.image), *item.box)
+            elif item.element is not None:
+                slide.shapes._spTree.append(deepcopy(item.element))
+            else:
+                continue
+            placed += 1
+        except Exception:  # noqa: BLE001 — one bad shape must not lose the slide
+            continue
+    return placed
 
 
 # --- the entry point --------------------------------------------------------

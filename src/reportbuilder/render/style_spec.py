@@ -18,11 +18,19 @@ _DEFAULT_PALETTE = ["1F77B4", "FF7F0E", "2CA02C", "D62728", "9467BD", "8C564B", 
 
 
 class TemplateStyleSpec(StyleSpec):
+    # This style came from a real .pptx. Chart colours, background and ink
+    # follow the template whichever way its slides are built, so this is the
+    # flag for "a template applies" — chart_layout_index is not, since a deck
+    # whose design lives on its slides has none.
+    from_template: bool = True
     # Which layout new chart slides are built from, and where the chart goes on
-    # it. None means "no usable layout found" and the renderer synthesises a
-    # slide instead — the pre-template behaviour.
+    # it. None means the design was harvested off a slide instead (or no usable
+    # layout was found), and the renderer builds the slide itself.
     chart_layout_index: int | None = None
     chart_slot: Slot | None = None
+    # What to borrow from the template when its design is NOT in the layouts:
+    # the title's style and box, and the furniture that repeats on every slide.
+    profile: object | None = None
     # Hex, no leading '#'. Empty means "no template opinion", and the house
     # cream/ink apply.
     background: str = ""
@@ -83,6 +91,7 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     # that the same layout is called "1 layout area", "Innehåll" and "Title and
     # Content" in three real client decks.
     from reportbuilder.render.template_check import inspect_template
+    from reportbuilder.render.template_profile import extract_profile
 
     report = inspect_template(str(template_path))
     spec.heading_font = report.theme.heading_font or ""
@@ -104,6 +113,29 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
             spec._palette = list(report.theme.palette)
         spec.background = report.theme.background
         spec.ink = report.theme.ink
+
+    # Where the design actually lives. A layout carries it only when the deck's
+    # own slides are built on one — Attendo's are, Synsam's and the agent deck's
+    # are not, and building those from their (stock Office) layouts is what made
+    # a client deck come out looking like plain PowerPoint. When it does not,
+    # the profile carries the title's style and box and the repeating furniture,
+    # and the renderer draws the slide itself.
+    try:
+        spec.profile = extract_profile(str(template_path))
+    except Exception:  # noqa: BLE001 — a template we cannot harvest still renders
+        spec.profile = None
+    if spec.profile is not None:
+        spec.chart_layout_index = spec.profile.layout_index
+        spec.chart_slot = None
+        if spec.profile.layout_index is not None:
+            content = _largest_content_placeholder(
+                prs.slide_layouts[spec.profile.layout_index])
+            if content is not None:
+                spec.chart_slot = Slot(
+                    slide_index=-1,  # -1: a slide is added per chart, not reused
+                    left=int(content.left or 0), top=int(content.top or 0),
+                    width=int(content.width or 0), height=int(content.height or 0),
+                    name="chart")
     return spec
 
 

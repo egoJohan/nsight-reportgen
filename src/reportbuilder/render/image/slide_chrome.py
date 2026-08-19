@@ -22,6 +22,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
+from reportbuilder.render.template_profile import clone_furniture
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
 
 
@@ -48,7 +49,7 @@ def _theme_colours(ctx):
     ink = _rgb(getattr(style, "ink", "") or "") or PX_INK
     accent = PX_TEAL
     try:
-        if getattr(style, "chart_layout_index", None) is not None:
+        if getattr(style, "from_template", False):
             accent = _rgb(style.color_for(0)) or PX_TEAL
     except Exception:  # noqa: BLE001 — styling must not break a render
         pass
@@ -150,12 +151,115 @@ def _from_template(ctx) -> bool:
     return getattr(ctx.style, "chart_layout_index", None) is not None
 
 
+def harvested_profile(style):
+    """The profile to draw this slide from, or None.
+
+    Only when the design was harvested off a SLIDE. With a layout there is
+    nothing to draw: the slide is built from that layout and inherits it.
+    """
+    profile = getattr(style, "profile", None)
+    if profile is None or getattr(profile, "layout_index", None) is not None:
+        return None
+    if not (profile.furniture or profile.title.positioned):
+        return None
+    return profile
+
+
+def slide_headline(spec, question: str) -> str:
+    """The text that goes in the title — an authored headline, else the question.
+
+    Shared with deck.py, which has to know how tall the title will be before it
+    can decide where the chart starts.
+    """
+    return (getattr(spec, "slide_title", None) or "").strip() or (question or "").strip()
+
+
+def harvested_title_box(profile, text: str) -> tuple[int, int, int, int]:
+    """The title's box: the template's, grown downward if our text is longer.
+
+    The customer's own title fits on one line because they wrote it to. Ours is
+    a question or an AI headline and often wraps, and a box that does not grow
+    would put the second line over the chart.
+    """
+    st = profile.title
+    size = st.size_pt or TITLE_PT
+    # An all-caps title wraps sooner than the same string in mixed case, and
+    # Holiday Club's is `cap="all"` — measure it as if it were a size larger.
+    measured = size * 1.12 if st.caps else size
+    lines = wrapped_line_count(text, int(st.width), int(measured))
+    height = max(int(st.height), lines * int(Pt(size * 1.25)))
+    return int(st.left), int(st.top), int(st.width), height
+
+
+def content_floor(slide, sw: int, sh: int) -> int:
+    """The lowest point our own content may reach on *slide*.
+
+    A template's furniture usually includes something at the foot of the slide,
+    and it arrives by inheritance so it is invisible to `slide.shapes`. Synsam's
+    master puts its logo at 6.73in on a 7.5in slide, exactly where the "N = ..."
+    footer goes, and the two printed on top of each other. A full-slide backdrop
+    is not a floor, and neither is anything in the right half — the footer is
+    left-aligned, and Attendo's brand icons live bottom-right.
+    """
+    floor = sh
+    layout = getattr(slide, "slide_layout", None)
+    for container in (layout, getattr(layout, "slide_master", None)):
+        if container is None:
+            continue
+        try:
+            shapes = list(container.shapes)
+        except Exception:  # noqa: BLE001 — an unreadable layout sets no floor
+            continue
+        for shape in shapes:
+            try:
+                if shape.is_placeholder:
+                    continue
+                left, top = int(shape.left or 0), int(shape.top or 0)
+                width, height = int(shape.width or 0), int(shape.height or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if width <= 0 or height <= 0:
+                continue
+            if width * height >= 0.75 * sw * sh:
+                continue
+            if top + height < sh * 0.8 or left > sw * 0.5:
+                continue
+            floor = min(floor, top)
+    return floor
+
+
+def footer_top(slide, sh: int, sw: int) -> int:
+    """Where the methodology footer's box starts: above the template's own foot."""
+    return content_floor(slide, sw, sh) - int(Inches(0.45))
+
+
+def harvested_chart_box(profile, text: str, sw: int, sh: int,
+                        floor: int | None = None) -> tuple[int, int, int, int]:
+    """Where the chart goes on a harvested slide.
+
+    Under the title, and inside the template's own side margins — Johan's rule
+    is that the TITLE follows the template and nSight positions the rest, but a
+    chart 0.62in from the edge below a title 0.70in from the edge reads as a
+    mistake. The gap under the title is the subtitle's room, and the gap under
+    the chart is the footer's.
+    """
+    left, top, width, height = harvested_title_box(profile, text)
+    chart_top = top + height + int(Inches(0.70))
+    bottom = (sh if floor is None else floor) - int(Inches(0.70))
+    return left, chart_top, width, max(int(Inches(1.0)), bottom - chart_top)
+
+
 def _fill_title_placeholder(slide, title: str) -> bool:
     """Put *title* in the layout's title placeholder. False if there isn't one.
 
     Only the TEXT is set: size, font, colour and position stay inherited, which
-    is the whole point of using the customer's layout. An unused placeholder is
-    removed so PowerPoint does not show its "Click to add title" prompt.
+    is the whole point of using the customer's layout. Their box was drawn for
+    the headline they wrote and ours is often a question, so a long title spills
+    out of the bottom of the box — the chart and subtitle are moved down to meet
+    it (see `_resolve_slot`) rather than the type being shrunk, because the size
+    is one of the things Johan asked us to take from the template.
+    An unused placeholder is removed so PowerPoint does not show its "Click to
+    add title" prompt.
     """
     try:
         ph = slide.shapes.title
@@ -167,6 +271,7 @@ def _fill_title_placeholder(slide, title: str) -> bool:
         ph._element.getparent().remove(ph._element)
         return True
     tf = ph.text_frame
+    tf.word_wrap = True
     tf.text = title
     return True
 
@@ -188,11 +293,18 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
 
     _bg, _ink, _accent = _theme_colours(ctx)
     templated = _from_template(ctx)
+    profile = harvested_profile(ctx.style)
+
+    # 0 — The customer's own furniture, when their design was harvested off a
+    #     slide rather than inherited from a layout: background, logo, the rule
+    #     under the title. First, so everything else lands on top of it.
+    if profile is not None:
+        clone_furniture(slide, profile.furniture)
 
     # 1 — Cream background. Only when NO template laid this slide out: a
     #     full-slide rectangle would cover the customer's own background,
     #     brand furniture and everything else their layout provides.
-    if not templated:
+    if not templated and profile is None:
         bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
         bg.fill.solid()
         bg.fill.fore_color.rgb = _bg
@@ -245,7 +357,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             bar_h = min(int(Inches(1.30)), _n * int(Pt(t_size * 1.25)) + int(Inches(0.06)))
         else:
             bar_h = int(Inches(0.30))
-        if not templated:
+        if not templated and profile is None:
             acc = slide.shapes.add_shape(
                 1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
             )
@@ -259,6 +371,19 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         #     position. Only a template without a title placeholder falls
         #     through to a box of our own.
         placed = _fill_title_placeholder(slide, title) if templated else False
+        if title and not placed and profile is not None:
+            # The one thing that follows the template exactly: the title's box,
+            # font, size, weight and colour, read off the slide the customer's
+            # designer drew.
+            st = profile.title
+            box = harvested_title_box(profile, title)
+            _textbox(
+                slide, *box,
+                [(title, st.size_pt or t_size, _rgb(st.colour) or _ink,
+                  True if st.bold is None else st.bold)],
+                font=st.font or getattr(ctx.style, "heading_font", "") or "",
+            )
+            placed = True
         if title and not placed:
             # Tall, TOP-anchored box so the title can span up to ~4 lines (customers'
             # headlines are often 3) and honour manual line breaks ("\n") instead of
@@ -284,7 +409,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # On a templated slide the title placeholder owns the top of the
             # slide and we do not know how tall it is, so the subtitle hangs off
             # the CHART instead: its box bottom sits just above the plot.
-            if templated:
+            if templated or profile is not None:
                 sub_h = int(Inches(0.62))
                 sub_top = max(0, int(ctx.slot.top) - sub_h)
                 sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
@@ -314,9 +439,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         footer_text = f"N = {base_n}"
     else:
         footer_text = stat_label
+    # Left margin follows the chart on a templated or harvested slide: those
+    # margins are the customer's, and a footer 0.08in off from the chart above
+    # it reads as a mistake rather than as a choice.
+    foot_left = int(ctx.slot.left) if (templated or profile is not None) else int(Inches(0.62))
+    foot_top = footer_top(slide, sh, sw)
     _textbox(
         slide,
-        Inches(0.62), sh - Inches(0.50),
+        foot_left, foot_top,
         sw - Inches(4.0), Inches(0.40),
         [(footer_text, 9.5, PX_MUTED, False)],
         align=PP_ALIGN.LEFT,
@@ -331,7 +461,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # chart's x-axis; shares the line with the left-aligned methodology footer.
         _textbox(
             slide,
-            sw - Inches(6.4), sh - Inches(0.50),
+            sw - Inches(6.4), foot_top,
             Inches(6.0), Inches(0.40),
             [(caption, 9.5, PX_MUTED, False)],
             align=PP_ALIGN.RIGHT,
