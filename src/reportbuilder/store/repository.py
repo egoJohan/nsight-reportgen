@@ -77,6 +77,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# Smaller number = more specific. A choice at a more specific level overrides a
+# pin made at a broader one.
+_SPECIFICITY = {"report": 0, "case": 1, "customer": 2, "default": 3}
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
@@ -535,14 +540,20 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             pass
 
+        pinned, pinned_level = "", ""
         try:
             meta = self._read_json(
                 auth, P.report_meta_path(customer_id, case_id, report_id))
-            if meta.get("pinned_template"):
-                return meta["pinned_template"], "pinned"
+            pinned = meta.get("pinned_template") or ""
+            # Older pins predate the level being recorded. Treat them as the
+            # least specific thing that could have set them, so a deliberate
+            # choice still wins rather than being blocked by a pin we cannot
+            # place.
+            pinned_level = meta.get("pinned_level") or "customer"
         except (NotFound, ValueError, UnicodeDecodeError):
-            meta = None
+            pass
 
+        inherited, inherited_level = "", "default"
         for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
                             (P.customer_meta_path(customer_id), "customer")):
             try:
@@ -550,11 +561,26 @@ class Repository:
             except (NotFound, ValueError, UnicodeDecodeError):
                 continue
             if d.get("template_id"):
-                return d["template_id"], level
+                inherited, inherited_level = d["template_id"], level
+                break
+
+        # Specificity beats recency. A template set on the TUTKIMUS is a more
+        # specific decision than one on the asiakas, so it wins even over a pin
+        # — otherwise "lower level overrides upper" would silently stop being
+        # true the moment a report had been rendered once.
+        #
+        # A change at the same or a broader level does NOT win: that is the
+        # card's "jo luotujen raporttien pohja ei muutoksessa automaattisesti
+        # päivity", and clear_pinned_template is how it is requested.
+        if pinned and (not inherited
+                       or _SPECIFICITY[inherited_level] >= _SPECIFICITY[pinned_level]):
+            return pinned, "pinned"
+        if inherited:
+            return inherited, inherited_level
         return "", "default"
 
     def pin_template(self, auth: AuthContext, customer_id: str, case_id: str,
-                     report_id: str, template_id: str) -> None:
+                     report_id: str, template_id: str, level: str = "customer") -> None:
         """Record what a report rendered with, so a later change upstream does
         not silently restyle it."""
         path = P.report_meta_path(customer_id, case_id, report_id)
@@ -563,6 +589,9 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
         d["pinned_template"] = template_id
+        # The level matters as much as the id: it is what lets a later, MORE
+        # specific choice override the pin while a broader one does not.
+        d["pinned_level"] = level
         self._write_json(auth, path, d, [P.LABEL_REPORT_META])
 
     def clear_pinned_template(self, auth: AuthContext, customer_id: str,
@@ -574,6 +603,7 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             return
         d.pop("pinned_template", None)
+        d.pop("pinned_level", None)
         self._write_json(auth, path, d, [P.LABEL_REPORT_META])
 
     # -- Rendered deck (a cache, in the store) ----------------------------

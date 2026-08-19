@@ -541,3 +541,62 @@ class TestTemplatePinning:
         # The pin lives in the same sidecar the listing reads its name from.
         cid, kid, rid = self._rendered(repo, auth)
         assert [r.name for r in repo.list_reports(auth, cid, kid)] == ["R"]
+
+
+class TestSpecificityBeatsThePin:
+    """The card asks for two things that only reconcile if the pin remembers
+    WHICH level set it: "alempi valinta on ylempää painavampi" and "jo luotujen
+    raporttien pohja ei muutoksessa automaattisesti päivity".
+
+    Found live: after a report had rendered, setting a template on its tutkimus
+    changed nothing — the pin was consulted first and won. The deck kept
+    Attendo's 28 layouts when Holiday Club's 48 were expected.
+    """
+
+    def _rendered_under_customer(self, repo, auth):
+        c = repo.create_customer(auth, "Attendo")
+        k = repo.create_case(auth, c.id, "Brändi")
+        r = repo.save_report(auth, c.id, k.id,
+                             json.dumps({"name": "R", "template_ref": ""}))
+        repo.set_template(auth, "tpl-customer", customer_id=c.id)
+        repo.pin_template(auth, c.id, k.id, r.id, "tpl-customer", level="customer")
+        return c.id, k.id, r.id
+
+    def test_a_tutkimus_template_overrides_a_customer_level_pin(self, repo, auth):
+        cid, kid, rid = self._rendered_under_customer(repo, auth)
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+
+    def test_a_report_template_overrides_a_pin(self, repo, auth):
+        cid, kid, rid = self._rendered_under_customer(repo, auth)
+        repo.save_report(auth, cid, kid,
+                         json.dumps({"name": "R", "template_ref": "tpl-report"}),
+                         report_id=rid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-report", "report")
+
+    def test_a_change_at_the_SAME_level_does_not_move_the_report(self, repo, auth):
+        # This is the half that must keep working: a delivered report does not
+        # restyle itself because the customer picked a different template.
+        cid, kid, rid = self._rendered_under_customer(repo, auth)
+        repo.set_template(auth, "tpl-customer-v2", customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-customer", "pinned")
+
+    def test_a_pin_made_at_case_level_is_not_overridden_by_the_customer(self, repo, auth):
+        cid, kid, rid = self._rendered_under_customer(repo, auth)
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        repo.pin_template(auth, cid, kid, rid, "tpl-case", level="case")
+        repo.set_template(auth, "tpl-customer-v2", customer_id=cid)
+        # A broader level must not reach past a more specific pin.
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "pinned")
+
+    def test_a_pin_without_a_recorded_level_still_yields_to_a_choice(self, repo, auth):
+        # Pins written before the level was recorded must not freeze a report
+        # forever; they are treated as the broadest thing that could have set them.
+        cid, kid, rid = self._rendered_under_customer(repo, auth)
+        meta = P.report_meta_path(cid, kid, rid)
+        d = json.loads(repo.store.get(auth, meta).decode())
+        d.pop("pinned_level", None)
+        repo.store.put(auth, meta, json.dumps(d).encode(), "application/json",
+                       labels=[P.LABEL_REPORT_META])
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")

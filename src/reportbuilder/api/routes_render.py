@@ -148,7 +148,7 @@ def _template_for(repo: Repository, auth: AuthContext, case_id: str,
     if k is None:
         return None
     try:
-        template_id, _level = repo.resolve_template(auth, k.customer_id, k.id, report_id)
+        template_id, level = repo.resolve_template(auth, k.customer_id, k.id, report_id)
         blob = repo.template_bytes_for_report(auth, k.customer_id, k.id, report_id)
     except Exception:  # noqa: BLE001 — styling must not break rendering
         return None
@@ -159,7 +159,9 @@ def _template_for(repo: Repository, auth: AuthContext, case_id: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     path.write_bytes(blob)
     try:
-        repo.pin_template(auth, k.customer_id, k.id, report_id, template_id)
+        # Pin WITH its level, so a later, more specific choice can still win.
+        repo.pin_template(auth, k.customer_id, k.id, report_id, template_id,
+                          level=('customer' if level == 'pinned' else level))
     except Exception:  # noqa: BLE001
         pass
     return str(path)

@@ -125,6 +125,41 @@ def bind_case_template(customer_id: str, case_id: str, body: TemplateBinding,
     return {"case_id": case_id, "template_id": body.template_id}
 
 
+@templates_router.put(
+    "/customers/{customer_id}/cases/{case_id}/reports/{report_id}/template")
+def bind_report_template(customer_id: str, case_id: str, report_id: str,
+                         body: TemplateBinding,
+                         auth: AuthContext = Depends(get_auth),
+                         repo: Repository = Depends(get_repository)) -> dict:
+    """Set (or clear) a template on a single report.
+
+    A report's choice lives in its own definition rather than beside it, because
+    template_ref is already part of the report model and the renderer reads it
+    from there. Clearing it drops the report back to inheriting from its
+    tutkimus, which is what a user who unsets an override expects.
+
+    Also clears any pin: choosing a template deliberately is not the same as
+    keeping the one a previous render happened to use.
+    """
+    import json as _json
+    try:
+        raw = repo.load_report(auth, customer_id, case_id, report_id)
+    except NotFound:
+        raise HTTPException(404, f"Report '{report_id}' not found") from None
+    try:
+        report = _json.loads(raw)
+    except ValueError:
+        raise HTTPException(422, "Report definition is not valid JSON") from None
+
+    report["template_ref"] = body.template_id or ""
+    repo.save_report(auth, customer_id, case_id,
+                     _json.dumps(report, ensure_ascii=False), report_id=report_id)
+    repo.clear_pinned_template(auth, customer_id, case_id, report_id)
+
+    template_id, level = repo.resolve_template(auth, customer_id, case_id, report_id)
+    return {"template_id": template_id, "level": level}
+
+
 @templates_router.get(
     "/customers/{customer_id}/cases/{case_id}/reports/{report_id}/template")
 def report_template(customer_id: str, case_id: str, report_id: str,
