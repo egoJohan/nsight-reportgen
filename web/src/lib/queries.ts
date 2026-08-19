@@ -74,6 +74,37 @@ export function useFontSettings() {
   return useQuery({ queryKey: ["settings", "fonts"], queryFn: api.settings.fonts });
 }
 
+export function useTemplateDetail(
+  customerId: string | undefined,
+  templateId: string | undefined
+) {
+  return useQuery({
+    queryKey: ["template-detail", customerId, templateId],
+    queryFn: () => api.templates.detail(customerId!, templateId!),
+    enabled: !!customerId && !!templateId,
+  });
+}
+
+export function useSubstitutions() {
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: ["settings", "substitutions"],
+    queryFn: api.settings.substitutions,
+  });
+  const save = useMutation({
+    mutationFn: api.settings.setSubstitutions,
+    onSuccess: () => {
+      // A stand-in changes what every template resolves to and what every
+      // rendered preview looks like.
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["template-detail"] });
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+    },
+  });
+  return { ...query, save };
+}
+
 export function useChartFont() {
   return useQuery({
     queryKey: ["settings", "chart-font"],

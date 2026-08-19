@@ -434,9 +434,25 @@ export interface Template {
   fonts_ok?: boolean;
 }
 
+/** Everything the template settings dialog shows. Font status here is
+ *  re-resolved server-side, so a substitution chosen a moment ago is
+ *  already reflected. */
+export interface TemplateDetail extends Template {
+  body_font: string;
+  fonts: TemplateFont[];
+  available_fonts: string[];
+}
+
+export interface Substitutions {
+  map: Record<string, string>;
+  available: string[];
+}
+
 export interface TemplateFont {
   family: string;
-  state: "present" | "installed" | "unavailable";
+  state: "present" | "installed" | "substituted" | "unavailable";
+  /** What it actually renders as, when a stand-in was chosen. */
+  substitute?: string;
   source: string;
   reason: string;
   ok: boolean;
@@ -593,6 +609,10 @@ export const api = {
       fetch(
         `${API_BASE}/customers/${customerId}/cases/${caseId}/reports/${reportId}/template`
       ).then((r) => json<ResolvedTemplate>(r)),
+
+    detail: (customerId: string, templateId: string): Promise<TemplateDetail> =>
+      fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}`)
+        .then((r) => json<TemplateDetail>(r)),
 
     forCase: (customerId: string, caseId: string): Promise<ResolvedTemplate> =>
       fetch(`${API_BASE}/customers/${customerId}/cases/${caseId}/template`)
@@ -941,6 +961,30 @@ export const api = {
   },
 
   settings: {
+    substitutions: (): Promise<Substitutions> =>
+      fetch(`${API_BASE}/settings/font-substitutions`).then((r) =>
+        json<Substitutions>(r)
+      ),
+
+    setSubstitutions: async (map: Record<string, string>): Promise<Substitutions> => {
+      const res = await fetch(`${API_BASE}/settings/font-substitutions`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ map }),
+      });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<Substitutions>;
+    },
+
     chartFont: (): Promise<ChartFontSettings> =>
       fetch(`${API_BASE}/settings/chart-font`).then((r) =>
         json<ChartFontSettings>(r)

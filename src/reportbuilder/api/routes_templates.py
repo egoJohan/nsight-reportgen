@@ -139,6 +139,34 @@ def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
     return out
 
 
+@templates_router.get("/customers/{customer_id}/templates/{template_id}")
+def template_detail(customer_id: str, template_id: str,
+                    auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository)) -> dict:
+    """Everything known about one template, for the settings dialog.
+
+    Font status is RE-RESOLVED rather than served from the stored record: a
+    substitution chosen a minute ago has to show as resolved, and a font
+    installed since the upload should stop being reported as missing.
+    """
+    from reportbuilder.api.routes_settings import load_substitutions
+    from reportbuilder.render import fonts as F
+    from reportbuilder.render import house_style as H
+
+    for t in repo.list_templates(auth, customer_id):
+        if t.id != template_id:
+            continue
+        load_substitutions(repo, auth)
+        families = [f for f in (t.heading_font, t.body_font) if f]
+        # allow_network=False: opening a dialog must not wait on Google Fonts.
+        live = [st.as_dict() for st in
+                F.check_template_fonts(families, allow_network=False)]
+        return {**_as_dict(t), "body_font": t.body_font, "fonts": live,
+                "fonts_ok": all(f["ok"] for f in live) if live else True,
+                "available_fonts": H.available_chart_fonts()}
+    raise HTTPException(404, f"Template '{template_id}' not found")
+
+
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/file")
 def download_template(customer_id: str, template_id: str,
                       auth: AuthContext = Depends(get_auth),

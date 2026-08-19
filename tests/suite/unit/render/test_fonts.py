@@ -227,4 +227,4 @@ def test_status_serialises_for_the_api(monkeypatch):
     monkeypatch.setattr(fonts, "installed_families", lambda **_: {"verdana"})
     d = fonts.ensure_font("Verdana", fetch=_fetcher({"metadata/fonts": LIBRARY})).as_dict()
     assert d == {"family": "Verdana", "state": "present", "source": "system",
-                 "reason": "", "ok": True}
+                 "reason": "", "substitute": "", "ok": True}

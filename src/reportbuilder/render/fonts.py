@@ -50,6 +50,7 @@ URL shape as commercial Century Gothic.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import re
@@ -81,8 +82,18 @@ _LEGACY_UA = "Mozilla/4.0"
 _SFNT_MAGIC = (b"\x00\x01\x00\x00", b"true", b"OTTO", b"ttcf")
 _TIMEOUT = 8.0
 
+# Where fontconfig substitution rules are written. An admin choosing a stand-in
+# for a font we may not install is a render-side alias ONLY: the .pptx keeps
+# naming the real font, so a client who has it still sees their own brand, while
+# our PDF and previews stop falling back to whatever fontconfig picked.
+SUBSTITUTION_FILE = pathlib.Path(
+    os.environ.get("NSIGHT_FONTCONFIG_FILE",
+                   "~/.config/fontconfig/conf.d/99-nsight-substitutions.conf")
+).expanduser()
+
 PRESENT = "present"           # the host already had it
 INSTALLED = "installed"       # we fetched it and installed it just now
+SUBSTITUTED = "substituted"   # an admin chose a stand-in for it
 UNAVAILABLE = "unavailable"   # we cannot supply it — say so
 
 
@@ -95,13 +106,23 @@ class FontStatus:
     source: str = ""     # "system" | "google-fonts" | "upload"
     reason: str = ""     # populated only when UNAVAILABLE
 
+    #: The family actually drawn with, when it differs from the one asked for.
+    substitute: str = ""
+
     @property
     def ok(self) -> bool:
-        return self.state in (PRESENT, INSTALLED)
+        """A deliberate substitution counts as resolved.
+
+        The point of the warning was never "this is not the exact font" — it
+        was "something was swapped in and nobody told you". Once an admin has
+        chosen the stand-in, they have been told.
+        """
+        return self.state in (PRESENT, INSTALLED, SUBSTITUTED)
 
     def as_dict(self) -> dict:
         return {"family": self.family, "state": self.state,
-                "source": self.source, "reason": self.reason, "ok": self.ok}
+                "source": self.source, "reason": self.reason,
+                "substitute": self.substitute, "ok": self.ok}
 
 
 # --- what the host already has ---------------------------------------------
@@ -235,6 +256,56 @@ def _refresh_font_cache() -> None:
         pass
 
 
+# --- substitutions ----------------------------------------------------------
+
+_SUB_HEADER = """<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<!-- Written by nSight. Edited through Settings, not by hand. -->
+<fontconfig>
+"""
+_SUB_RULE = """  <match target="pattern">
+    <test name="family"><string>{missing}</string></test>
+    <edit name="family" mode="assign" binding="strong"><string>{use}</string></edit>
+  </match>
+"""
+
+_substitutions: dict[str, str] = {}
+
+
+def substitutions() -> dict[str, str]:
+    """The active missing-font -> stand-in map."""
+    return dict(_substitutions)
+
+
+def apply_substitutions(mapping: dict[str, str]) -> dict[str, str]:
+    """Install fontconfig rules so *mapping* takes effect for rendering.
+
+    Deliberately NOT applied by rewriting the deck: the .pptx keeps naming the
+    real font so it still renders correctly wherever that font exists. Only
+    what we rasterise here — the PDF and the previews — changes.
+    """
+    global _substitutions
+    from xml.sax.saxutils import escape
+
+    clean = {k.strip(): v.strip() for k, v in (mapping or {}).items()
+             if k and k.strip() and v and v.strip()}
+    SUBSTITUTION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not clean:
+        # No rules left: remove the file rather than leave an empty one, so the
+        # host goes back to exactly its pre-nSight behaviour.
+        with contextlib.suppress(OSError):
+            SUBSTITUTION_FILE.unlink()
+    else:
+        body = "".join(_SUB_RULE.format(missing=escape(k), use=escape(v))
+                       for k, v in sorted(clean.items()))
+        SUBSTITUTION_FILE.write_text(_SUB_HEADER + body + "</fontconfig>\n",
+                                     encoding="utf-8")
+    _refresh_font_cache()
+    installed_families(refresh=True)
+    _substitutions = clean
+    return clean
+
+
 def family_of(blob: bytes) -> str:
     """The family name recorded INSIDE a font file, or "".
 
@@ -320,6 +391,13 @@ def ensure_font(family: str, *, allow_network: bool = True,
         return FontStatus("", UNAVAILABLE, reason="Pohja ei nimeä fonttia.")
     if is_installed(family):
         return FontStatus(family, PRESENT, source="system")
+    stand_in = _substitutions.get(family)
+    if stand_in:
+        return FontStatus(
+            family, SUBSTITUTED, source="substitution", substitute=stand_in,
+            reason=f"'{family}' korvataan fontilla '{stand_in}' esikatselussa "
+                   "ja PDF:ssä. PowerPoint-tiedosto viittaa edelleen "
+                   f"fonttiin '{family}'.")
     if not allow_network:
         return FontStatus(family, UNAVAILABLE,
                           reason=f"Fonttia '{family}' ei ole asennettu, "

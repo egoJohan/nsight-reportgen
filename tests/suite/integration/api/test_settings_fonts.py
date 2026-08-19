@@ -251,3 +251,74 @@ def test_a_font_this_host_lacks_is_refused(client_store, host):
     assert resp.status_code == 422
     assert "ei ole asennettu" in resp.json()["detail"]
     assert client_store.get("/settings/chart-font").json()["family"] == ""
+
+
+# --- substitutions ----------------------------------------------------------
+#
+# Render-side only. The .pptx keeps naming the real font so a client who has it
+# still sees their own brand; only what we rasterise here changes.
+
+@pytest.fixture
+def subs(tmp_path, monkeypatch):
+    """Point the fontconfig rule file at a temp path, not the real ~/.config."""
+    monkeypatch.setattr(F, "SUBSTITUTION_FILE", tmp_path / "99-nsight.conf")
+    monkeypatch.setattr(F, "_substitutions", {}, raising=False)
+    return F.SUBSTITUTION_FILE
+
+
+def test_substitution_writes_a_fontconfig_rule(client_store, subs):
+    available = client_store.get("/settings/chart-font").json()["available"]
+    stand_in = available[0]
+
+    resp = client_store.put("/settings/font-substitutions",
+                            json={"map": {"Century Gothic": stand_in}})
+
+    assert resp.status_code == 200
+    assert resp.json()["map"] == {"Century Gothic": stand_in}
+    rule = subs.read_text()
+    assert "Century Gothic" in rule and stand_in in rule
+
+
+def test_substitution_survives_a_reread(client_store, subs):
+    available = client_store.get("/settings/chart-font").json()["available"]
+    client_store.put("/settings/font-substitutions",
+                     json={"map": {"Century Gothic": available[0]}})
+
+    body = client_store.get("/settings/font-substitutions").json()
+
+    assert body["map"] == {"Century Gothic": available[0]}
+
+
+def test_clearing_substitutions_removes_the_rule_file(client_store, subs):
+    available = client_store.get("/settings/chart-font").json()["available"]
+    client_store.put("/settings/font-substitutions",
+                     json={"map": {"Century Gothic": available[0]}})
+
+    client_store.put("/settings/font-substitutions", json={"map": {}})
+
+    assert not subs.exists()          # host back to its own behaviour
+
+
+def test_substituting_with_a_font_we_lack_is_refused(client_store, subs):
+    resp = client_store.put("/settings/font-substitutions",
+                            json={"map": {"Century Gothic": "Not Installed"}})
+
+    assert resp.status_code == 422
+    assert not subs.exists()
+
+
+def test_a_substituted_font_no_longer_reads_as_a_problem(subs, monkeypatch):
+    """The warning was about silence, not about exactness.
+
+    Once an admin has chosen the stand-in, they have been told — so the row
+    stops being an error and says what it renders as instead.
+    """
+    monkeypatch.setattr(F, "installed_families", lambda **_: set())
+    F.apply_substitutions({"Century Gothic": "DejaVu Serif"})
+
+    st = F.ensure_font("Century Gothic", allow_network=False)
+
+    assert st.state == F.SUBSTITUTED
+    assert st.ok                       # resolved, deliberately
+    assert st.substitute == "DejaVu Serif"
+    assert "PowerPoint-tiedosto viittaa edelleen" in st.reason

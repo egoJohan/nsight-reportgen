@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PANEL } from "@/lib/surfaces";
 import { useTemplates, useTemplateActions } from "@/lib/queries";
+import TemplateSettingsDialog from "@/components/TemplateSettingsDialog";
 import type { Template, TemplateFont } from "@/lib/api";
 
 /** Fonts this template names that the render host cannot supply.
@@ -170,6 +171,10 @@ export default function TemplatePicker({
                   ))}
                 </span>
               </button>
+              {/* Settings before delete: the gear is the one you want most of
+                  the time, and putting it left of the bin keeps a destructive
+                  button from being the default target. */}
+              <TemplateSettingsDialog customerId={customerId} templateId={t.id} />
               <Button
                 size="icon-sm"
                 variant="ghost"

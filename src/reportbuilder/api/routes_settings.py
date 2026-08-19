@@ -25,6 +25,7 @@ from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 settings_router = APIRouter(tags=["settings"])
 
 CHART_FONT_KEY = "chart-font"
+SUBSTITUTIONS_KEY = "font-substitutions"
 
 # The setting is read on the render path, so it is cached briefly rather than
 # fetched per chart. Short enough that a change takes effect while someone is
@@ -70,6 +71,7 @@ def list_fonts(auth: AuthContext = Depends(get_auth),
     upload instead of guessing from a deck that looks wrong.
     """
     stored = repo.list_fonts(auth)
+    load_substitutions(repo, auth)
     installed = F.installed_families(refresh=True)
     return {
         "fonts": [_font_dict(f, on_host=f.family.strip().lower() in installed)
@@ -100,6 +102,47 @@ def _missing_families(repo: Repository, auth: AuthContext) -> list[dict]:
                                                "templates": []})
                 row["templates"].append(t.name)
     return sorted(seen.values(), key=lambda r: r["family"].lower())
+
+
+def load_substitutions(repo: Repository, auth: AuthContext) -> dict:
+    """Stored substitutions, made active on this host. Never raises."""
+    try:
+        stored = repo.get_setting(auth, SUBSTITUTIONS_KEY) or {}
+        mapping = {k: v for k, v in (stored.get("map") or {}).items()}
+    except Exception:  # noqa: BLE001
+        return F.substitutions()
+    if mapping != F.substitutions():
+        F.apply_substitutions(mapping)
+    return mapping
+
+
+@settings_router.get("/settings/font-substitutions")
+def get_substitutions(auth: AuthContext = Depends(get_auth),
+                      repo: Repository = Depends(get_repository)) -> dict:
+    return {"map": load_substitutions(repo, auth),
+            "available": H.available_chart_fonts()}
+
+
+@settings_router.put("/settings/font-substitutions")
+def put_substitutions(payload: dict = Body(...),
+                      auth: AuthContext = Depends(get_auth),
+                      repo: Repository = Depends(get_repository)) -> dict:
+    """Choose stand-ins for fonts this host cannot supply.
+
+    Render-side only: the .pptx keeps naming the real font, so a client who has
+    it still sees their own brand. Only the PDF and the previews change.
+    """
+    mapping = payload.get("map") or {}
+    if not isinstance(mapping, dict):
+        raise HTTPException(422, "map must be an object")
+    available = set(H.available_chart_fonts())
+    for missing, use in mapping.items():
+        if use and use not in available:
+            raise HTTPException(
+                422, f"Fonttia '{use}' ei ole asennettu tälle palvelimelle.")
+    applied = F.apply_substitutions(mapping)
+    repo.set_setting(auth, SUBSTITUTIONS_KEY, {"map": applied})
+    return {"map": applied}
 
 
 @settings_router.get("/settings/chart-font")
