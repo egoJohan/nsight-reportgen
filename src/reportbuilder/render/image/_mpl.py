@@ -199,7 +199,14 @@ def render_png(fig) -> str:
     # caller is not expected to clean up.
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
-    fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04)
+    # transparent: the chart is placed ON a slide whose layout already paints
+    # the customer's background. An opaque panel behind the plot shows up as a
+    # white box on any template whose background is not exactly its theme lt1 —
+    # Attendo's off-white, for one. Letting the slide show through is what
+    # "use the template as is" means for the chart, and it is correct for the
+    # house default too, which now paints its cream in the layout.
+    fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04,
+                transparent=True)
     fig.clear()
     return path
 
@@ -439,7 +446,9 @@ def style_legend(ax, loc: str = "best") -> None:
     leg = ax.legend(fontsize=9.5, loc=loc, frameon=True)
     if leg is None:
         return
-    leg.get_frame().set_facecolor("#FFFFFF")
+    # Transparent to match the figure: a white pill would reintroduce exactly
+    # the opaque panel the transparent save exists to avoid.
+    leg.get_frame().set_facecolor("none")
     leg.get_frame().set_edgecolor(_GC)
     leg.get_frame().set_linewidth(0.8)
     for t in leg.get_texts():

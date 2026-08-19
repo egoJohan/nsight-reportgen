@@ -125,6 +125,37 @@ def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP
     return tb
 
 
+def _from_template(ctx) -> bool:
+    """True when this slide was built from the template's OWN chart layout.
+
+    Then the layout already carries the customer's design — background, brand
+    furniture, title styling — and anything we paint on top hides what they
+    asked us to use. nSight contributes text and the chart, nothing else.
+    """
+    return getattr(ctx.style, "chart_layout_index", None) is not None
+
+
+def _fill_title_placeholder(slide, title: str) -> bool:
+    """Put *title* in the layout's title placeholder. False if there isn't one.
+
+    Only the TEXT is set: size, font, colour and position stay inherited, which
+    is the whole point of using the customer's layout. An unused placeholder is
+    removed so PowerPoint does not show its "Click to add title" prompt.
+    """
+    try:
+        ph = slide.shapes.title
+    except (AttributeError, KeyError):
+        return False
+    if ph is None:
+        return False
+    if not title:
+        ph._element.getparent().remove(ph._element)
+        return True
+    tf = ph.text_frame
+    tf.text = title
+    return True
+
+
 def add_image_slide_chrome(ctx: RenderContext) -> None:
     """Decorate an image-mode slide with house-style chrome.
 
@@ -140,13 +171,18 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     slide = ctx.slide
     sw, sh = _slide_dims(slide)
 
-    # 1 — Cream background (full slide, added first → sits at bottom of z-order)
-    bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
-    bg.fill.solid()
     _bg, _ink, _accent = _theme_colours(ctx)
-    bg.fill.fore_color.rgb = _bg
-    bg.line.fill.background()
-    bg.shadow.inherit = False
+    templated = _from_template(ctx)
+
+    # 1 — Cream background. Only when NO template laid this slide out: a
+    #     full-slide rectangle would cover the customer's own background,
+    #     brand furniture and everything else their layout provides.
+    if not templated:
+        bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = _bg
+        bg.line.fill.background()
+        bg.shadow.inherit = False
 
     # The title block (accent bar + title + description) is gated on the
     # elements.title toggle. The live preview sets it False to render a
@@ -184,7 +220,9 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # One fixed title size for every slide (no length-based stepping).
         t_size = TITLE_PT
 
-        # 3 — Teal accent bar (thin vertical stripe, top-left), sized to the TITLE's
+        # 3 — Teal accent bar. House furniture, so it is skipped on a templated
+        #     slide: the customer's layout decides what sits beside a title.
+        # Teal accent bar (thin vertical stripe, top-left), sized to the TITLE's
         #     actual height (its wrapped line count) so it doesn't tower over a short
         #     one-line headline. Capped at the title box height.
         if title:
@@ -192,16 +230,21 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             bar_h = min(int(Inches(1.30)), _n * int(Pt(t_size * 1.25)) + int(Inches(0.06)))
         else:
             bar_h = int(Inches(0.30))
-        acc = slide.shapes.add_shape(
-            1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
-        )
-        acc.fill.solid()
-        acc.fill.fore_color.rgb = _accent
-        acc.line.fill.background()
-        acc.shadow.inherit = False
+        if not templated:
+            acc = slide.shapes.add_shape(
+                1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
+            )
+            acc.fill.solid()
+            acc.fill.fore_color.rgb = _accent
+            acc.line.fill.background()
+            acc.shadow.inherit = False
 
-        # 4 — Title box
-        if title:
+        # 4 — Title. On a templated slide it goes into the layout's own title
+        #     placeholder, so it inherits the customer's font, size, colour and
+        #     position. Only a template without a title placeholder falls
+        #     through to a box of our own.
+        placed = _fill_title_placeholder(slide, title) if templated else False
+        if title and not placed:
             # Tall, TOP-anchored box so the title can span up to ~4 lines (customers'
             # headlines are often 3) and honour manual line breaks ("\n") instead of
             # being clipped at 2. A short title still sits at the top (empty space
@@ -222,10 +265,19 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # large as possible.
             n = len(secondary)
             s_size = 15 if n <= 110 else (13 if n <= 180 else (12 if n <= 260 else 11))
+            # On a templated slide the title placeholder owns the top of the
+            # slide and we do not know how tall it is, so the subtitle hangs off
+            # the CHART instead: its box bottom sits just above the plot.
+            if templated:
+                sub_h = int(Inches(0.62))
+                sub_top = max(0, int(ctx.slot.top) - sub_h)
+                sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
+            else:
+                sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
+                sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
             _textbox(
                 slide,
-                Inches(0.80), Inches(0.92),
-                sw - Inches(1.0), Inches(0.92),
+                sub_left, sub_top, sub_w, sub_h,
                 [(secondary, s_size, PX_MUTED, False)],
                 anchor=MSO_ANCHOR.BOTTOM,
             )
