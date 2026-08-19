@@ -69,6 +69,25 @@ export function useRecentReports(limit = 10) {
   });
 }
 
+/** Fonts installed on the render host, and what the templates still need. */
+export function useFontSettings() {
+  return useQuery({ queryKey: ["settings", "fonts"], queryFn: api.settings.fonts });
+}
+
+export function useFontActions() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["settings", "fonts"] });
+    // Installing a font changes what every template resolves to, so the
+    // template panels' "font missing" flags are stale the moment this lands.
+    qc.invalidateQueries({ queryKey: ["templates"] });
+  };
+  return {
+    upload: useMutation({ mutationFn: api.settings.uploadFont, onSuccess: invalidate }),
+    remove: useMutation({ mutationFn: api.settings.deleteFont, onSuccess: invalidate }),
+  };
+}
+
 export function useTemplates(customerId: string | undefined) {
   return useQuery({
     queryKey: ["templates", customerId],

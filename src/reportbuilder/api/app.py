@@ -11,6 +11,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_ai import ai_router
 from reportbuilder.api.routes_cases import cases_router
 from reportbuilder.api.routes_customers import customers_router
+from reportbuilder.api.routes_settings import settings_router
 from reportbuilder.api.routes_templates import templates_router
 from reportbuilder.api.routes_materials import materials_router
 from reportbuilder.api.routes_questions import questions_router
@@ -41,9 +42,42 @@ def create_app(client=None) -> FastAPI:
             await asyncio.to_thread(sweep_all)
             await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
+    def _sync_fonts() -> None:
+        """Put datahive's stored fonts onto this host before anything renders.
+
+        A render host starts with an empty font directory. Without this, fonts
+        an admin installed weeks ago are missing until someone re-uploads them,
+        and every deck silently substitutes in the meantime.
+
+        Failure is logged, never fatal: the app must start even when datahive
+        is briefly unreachable, and a missing font degrades a deck rather than
+        breaking it.
+        """
+        import logging
+
+        from reportbuilder.api.deps_store import get_repository, service_auth
+        from reportbuilder.api.routes_settings import sync_fonts_to_host
+
+        try:
+            auth = service_auth()
+            if auth is None:
+                return
+            results = sync_fonts_to_host(get_repository(), auth)
+            ok = sum(1 for r in results if getattr(r, "ok", False))
+            if results:
+                logging.getLogger(__name__).info(
+                    "fonts: %d/%d installed on this host", ok, len(results))
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "fonts: could not sync from datahive", exc_info=True)
+
     @contextlib.asynccontextmanager
     async def _lifespan(_app: FastAPI):
         task = None
+        if os.environ.get("NSIGHT_DISABLE_CLEANUP") != "1":
+            # Same opt-out as the janitor: tests should not shell out to
+            # fc-cache or reach for datahive on import.
+            await asyncio.to_thread(_sync_fonts)
         # Opt out for tests and one-shot scripts, where a background task that
         # deletes files is noise at best.
         if os.environ.get("NSIGHT_DISABLE_CLEANUP") != "1":
@@ -79,6 +113,7 @@ def create_app(client=None) -> FastAPI:
     # Include routers
     app.include_router(customers_router)
     app.include_router(templates_router)
+    app.include_router(settings_router)
     app.include_router(cases_router)
     app.include_router(materials_router)
     app.include_router(questions_router)

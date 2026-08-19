@@ -74,6 +74,16 @@ class Template:
 
 
 @dataclass(frozen=True)
+class FontFile:
+    """A font an admin installed, stored so it outlives the render host."""
+
+    id: str
+    family: str
+    filename: str = ""
+    size: int = 0
+
+
+@dataclass(frozen=True)
 class ReportRef:
     id: str
     case_id: str
@@ -442,6 +452,81 @@ class Repository:
         self._write_json(auth, P.template_meta_path(customer_id, tid), meta,
                          [P.LABEL_TEMPLATE_META])
         return self._template_from(meta)
+
+    # --- fonts ------------------------------------------------------------
+    #
+    # Font FILES live in datahive, not merely on the render host. A host can be
+    # replaced or scaled out, and a font that exists only in its filesystem
+    # disappears with it — the same mistake as leaving finished decks in /tmp.
+    # `sync_fonts` materialises them onto whichever host is running.
+
+    def install_font(self, auth: AuthContext, filename: str, blob: bytes,
+                     family: str) -> "FontFile":
+        """Store a font and record what family it provides."""
+        fid = _new_id("fnt")
+        self.store.put(auth, P.font_path(fid), blob, "font/sfnt",
+                       labels=[P.LABEL_FONT])
+        meta = {"id": fid, "family": family, "filename": filename,
+                "size": len(blob)}
+        self._write_json(auth, P.font_meta_path(fid), meta, [P.LABEL_FONT_META])
+        return FontFile(**meta)
+
+    def list_fonts(self, auth: AuthContext) -> list["FontFile"]:
+        out = []
+        for info in self.store.list(auth, P.fonts_prefix(),
+                                    labels=[P.LABEL_FONT_META]):
+            try:
+                meta = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            out.append(FontFile(id=meta.get("id", ""), family=meta.get("family", ""),
+                                filename=meta.get("filename", ""),
+                                size=int(meta.get("size") or 0)))
+        return sorted(out, key=lambda f: f.family.lower())
+
+    def get_font_bytes(self, auth: AuthContext, font_id: str) -> bytes:
+        return self.store.get(auth, P.font_path(font_id))
+
+    def delete_font(self, auth: AuthContext, font_id: str) -> str:
+        """Remove a stored font; returns the family it provided.
+
+        Idempotent per object. A font is two objects and datahive gates each
+        one separately, so a delete can stop half-way waiting for approval and
+        be retried — at which point the first object is already gone. Treating
+        that as "not found" would report failure for a delete that is in fact
+        proceeding, so an object that has already gone is simply skipped.
+        """
+        import contextlib
+
+        try:
+            meta = self._read_json(auth, P.font_meta_path(font_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            meta = {}
+        found = False
+        for path in (P.font_path(font_id), P.font_meta_path(font_id)):
+            with contextlib.suppress(NotFound):
+                self.store.delete(auth, path)
+                found = True
+        if not found and not meta:
+            raise NotFound(P.font_path(font_id))
+        return meta.get("family", "")
+
+    def sync_fonts(self, auth: AuthContext, installer) -> list:
+        """Put every stored font onto this host. Returns each install result.
+
+        Called at startup: a freshly started render host has an empty font
+        directory, and the fonts an admin installed weeks ago have to be there
+        before the first deck is rendered, not after someone notices.
+        """
+        results = []
+        for font in self.list_fonts(auth):
+            try:
+                blob = self.get_font_bytes(auth, font.id)
+            except NotFound:
+                continue
+            results.append(installer(blob, filename=font.filename,
+                                     family=font.family))
+        return results
 
     def record_template_fonts(self, auth: AuthContext, customer_id: str,
                               template_id: str, fonts: list[dict]) -> None:

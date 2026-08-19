@@ -76,7 +76,7 @@ class FontStatus:
 
     family: str
     state: str
-    source: str = ""     # "system" | "google-fonts"
+    source: str = ""     # "system" | "google-fonts" | "upload"
     reason: str = ""     # populated only when UNAVAILABLE
 
     @property
@@ -217,6 +217,83 @@ def _refresh_font_cache() -> None:
         pass
 
 
+def family_of(blob: bytes) -> str:
+    """The family name recorded INSIDE a font file, or "".
+
+    Read from the font rather than taken from the filename, which is whatever
+    someone typed: "brand-font-FINAL-v2.ttf" says nothing about what fontconfig
+    will call the family, and the name is what a template asks for.
+    """
+    import io
+
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return ""
+    try:
+        font = TTFont(io.BytesIO(blob), lazy=True, fontNumber=0)
+        names = font["name"]
+        # 16 = typographic family, the one that matches what PowerPoint records
+        # for families with more than four styles; 1 = legacy family.
+        for name_id in (16, 1):
+            rec = names.getDebugName(name_id)
+            if rec:
+                return rec.strip()
+    except Exception:  # noqa: BLE001 — a broken upload is a message, not a crash
+        return ""
+    return ""
+
+
+def install_font_bytes(blob: bytes, *, filename: str = "font.ttf",
+                       family: str = "") -> FontStatus:
+    """Install a font FILE on this host. Shared by upload and cloud download.
+
+    Verifies through fontconfig rather than trusting the write: a file on disk
+    that fontconfig does not report is a font that will still be substituted at
+    render time, and reporting success there would restore the silence.
+    """
+    if not blob:
+        return FontStatus(family or filename, UNAVAILABLE,
+                          reason="Tiedosto on tyhjä.")
+    if not blob.startswith(_SFNT_MAGIC):
+        return FontStatus(
+            family or filename, UNAVAILABLE,
+            reason="Tiedosto ei ole .ttf- tai .otf-fontti. Verkkofontteja "
+                   "(WOFF, WOFF2, EOT) ei voi asentaa palvelimelle.")
+
+    detected = family or family_of(blob)
+    if not detected:
+        return FontStatus(filename, UNAVAILABLE,
+                          reason="Fontin nimeä ei saatu luettua tiedostosta.")
+
+    FONT_DIR.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", detected).strip("-") or "font"
+    suffix = ".otf" if blob[:4] == b"OTTO" else ".ttf"
+    (FONT_DIR / f"{safe}{suffix}").write_bytes(blob)
+    _refresh_font_cache()
+
+    if is_installed_after_refresh(detected):
+        return FontStatus(detected, INSTALLED, source="upload")
+    return FontStatus(detected, UNAVAILABLE,
+                      reason=f"Fontti '{detected}' tallennettiin, mutta "
+                             "järjestelmä ei tunnista sitä asennetuksi.")
+
+
+def remove_font_file(family: str) -> bool:
+    """Delete what install_font_bytes wrote for *family*. True if anything went."""
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", family).strip("-")
+    removed = False
+    for suffix in (".ttf", ".otf"):
+        path = FONT_DIR / f"{safe}{suffix}"
+        if path.exists():
+            path.unlink()
+            removed = True
+    if removed:
+        _refresh_font_cache()
+        installed_families(refresh=True)
+    return removed
+
+
 def ensure_font(family: str, *, allow_network: bool = True,
                 timeout: float = _TIMEOUT, fetch=None) -> FontStatus:
     """Make *family* usable on this host, or explain why it cannot be."""
@@ -243,26 +320,15 @@ def ensure_font(family: str, *, allow_network: bool = True,
     if not blob:
         return FontStatus(family, UNAVAILABLE,
                           reason=f"Fontin '{family}' lataus palautti tyhjän tiedoston.")
+    st = install_font_bytes(blob, filename=f"{family}.ttf", family=family)
+    if st.state == INSTALLED:
+        return FontStatus(family, INSTALLED, source="google-fonts")
     if not blob.startswith(_SFNT_MAGIC):
-        # WOFF or EOT: a font, but not one fontconfig will load, so installing
-        # it would leave the render substituting while we reported success.
         return FontStatus(family, UNAVAILABLE,
                           reason=f"Fontista '{family}' saatiin verkkomuotoinen "
                                  "tiedosto (WOFF/EOT), jota palvelin ei osaa "
                                  "käyttää.")
-
-    FONT_DIR.mkdir(parents=True, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9]+", "-", family).strip("-") or "font"
-    (FONT_DIR / f"{safe}.ttf").write_bytes(blob)
-    _refresh_font_cache()
-
-    # Verify rather than assume: a file on disk that fontconfig does not report
-    # would substitute at render time exactly as before.
-    if is_installed_after_refresh(family):
-        return FontStatus(family, INSTALLED, source="google-fonts")
-    return FontStatus(family, UNAVAILABLE,
-                      reason=f"Fontti '{family}' ladattiin, mutta järjestelmä "
-                             "ei tunnista sitä asennetuksi.")
+    return st
 
 
 def is_installed_after_refresh(family: str) -> bool:

@@ -4,6 +4,7 @@ import RecentReportsPage from "@/pages/RecentReportsPage";
 import CustomersPage from "@/pages/CustomersPage";
 import CustomerCasesPage from "@/pages/CustomerCasesPage";
 import CaseDetailPage from "@/pages/CaseDetailPage";
+import SettingsPage from "@/pages/SettingsPage";
 
 export default function App() {
   return (
@@ -17,6 +18,8 @@ export default function App() {
         {/* Pre-hierarchy cases are reachable from the sidebar's "Ilman
             asiakasta" group; only the detail route is still needed. */}
         <Route path="/cases/:id" element={<CaseDetailPage />} />
+        {/* The sidebar has linked here all along; this is the page. */}
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );

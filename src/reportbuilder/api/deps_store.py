@@ -35,6 +35,16 @@ def get_auth(authorization: str | None = Header(default=None)) -> AuthContext:
     return AuthContext(token=token)
 
 
+def service_auth() -> AuthContext | None:
+    """The app's own identity, for work with no request behind it.
+
+    Only the dev/service token: startup tasks have no caller whose rights they
+    could borrow. None when unset, so callers skip rather than guess.
+    """
+    token = os.environ.get("NSIGHT_DATAHIVE_TOKEN")
+    return AuthContext(token=token) if token else None
+
+
 def build_repository() -> Repository:
     """Datahive when configured, otherwise in-memory so the app still runs."""
     url = os.environ.get("NSIGHT_DATAHIVE_URL")

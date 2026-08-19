@@ -939,4 +939,74 @@ export const api = {
       return res.blob();
     },
   },
+
+  settings: {
+    fonts: (): Promise<FontsSettings> =>
+      fetch(`${API_BASE}/settings/fonts`).then((r) => json<FontsSettings>(r)),
+
+    uploadFont: async (file: File): Promise<InstalledFont> => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/settings/fonts`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        // The body carries WHY — "this is a WOFF, not a .ttf" is the whole
+        // value of the check, so it must not be flattened to a status code.
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<InstalledFont>;
+    },
+
+    deleteFont: async (fontId: string): Promise<void> => {
+      const res = await fetch(`${API_BASE}/settings/fonts/${fontId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          // datahive's consent gate: a 409 carries an approval envelope, and
+          // the request id is what the user needs in order to approve.
+          if (body?.detail?.error === "consent_required") {
+            detail = `${body.detail.message} (${body.detail.request_id})`;
+          } else if (typeof body?.detail === "string") {
+            detail = body.detail;
+          }
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+    },
+  },
 };
+
+export interface InstalledFont {
+  id: string;
+  family: string;
+  filename: string;
+  size: number;
+  on_host: boolean;
+}
+
+/** A font family a template names that this host cannot supply, and whose
+ *  decks are affected — what an admin needs in order to know what to upload. */
+export interface MissingFont {
+  family: string;
+  reason: string;
+  templates: string[];
+}
+
+export interface FontsSettings {
+  fonts: InstalledFont[];
+  missing: MissingFont[];
+}

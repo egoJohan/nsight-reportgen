@@ -14,6 +14,8 @@ Path carries HIERARCHY, labels carry TYPE (design
     {asiakas}/template/{template_id}.meta            nsight:template-meta
     settings/{key}                                   nsight:settings
     settings/template/default.pptx                   nsight:template
+    settings/font/{id}                               nsight:font
+    settings/font/{id}.meta                          nsight:font-meta
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -41,6 +43,8 @@ LABEL_CONFIG = "nsight:config"
 LABEL_TEMPLATE = "nsight:template"
 LABEL_TEMPLATE_META = "nsight:template-meta"
 LABEL_SETTINGS = "nsight:settings"
+LABEL_FONT = "nsight:font"
+LABEL_FONT_META = "nsight:font-meta"
 
 SETTINGS_ROOT = "settings"
 
@@ -169,6 +173,23 @@ def default_template_path() -> str:
     and defeat the point of a default.
     """
     return f"{SETTINGS_ROOT}/template/default.pptx"
+
+
+def fonts_prefix() -> str:
+    return f"{SETTINGS_ROOT}/font/"
+
+
+def font_path(font_id: str) -> str:
+    """A manually installed font file.
+
+    Under settings/ because a font serves every customer: the render host needs
+    Century Gothic once, not once per asiakas.
+    """
+    return f"{SETTINGS_ROOT}/font/{_seg(font_id, 'font_id')}"
+
+
+def font_meta_path(font_id: str) -> str:
+    return f"{font_path(font_id)}.meta"
 
 
 def settings_path(key: str) -> str:
