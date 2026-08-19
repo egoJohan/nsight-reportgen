@@ -22,6 +22,11 @@ import json
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.render.style_spec import load_style_spec as _load_style_spec
+from reportbuilder.store import paths as _paths
+from reportbuilder.store.repository import Repository
+from reportbuilder.store.seam import AuthContext
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 from reportbuilder.export.pptx_build import build_pptx
@@ -1244,12 +1249,45 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
     return d
 
 
+def _preview_template(repo, auth, material_id: str) -> tuple[str | None, str]:
+    """(path, id) of the template a preview of *material_id* should use.
+
+    Keyed off the material because that is all the preview endpoint is given.
+    Any failure returns (None, "") and the preview falls back to the house
+    style: a styling problem must not stop an analyst seeing their chart.
+    """
+    try:
+        m = repo.find_material(auth, material_id)
+        if m is None:
+            return None, ""
+        # Reports under this tutkimus resolve through the same chain, so
+        # previewing the tutkimus's template is what the deck will use unless a
+        # single report overrides it.
+        template_id, _level = repo.resolve_template(auth, m.customer_id, m.case_id, "")
+        blob = (repo.get_template_bytes(auth, m.customer_id, template_id)
+                if template_id else
+                repo.store.get(auth, _paths.default_template_path()))
+        if not blob:
+            return None, ""
+        import tempfile as _tf
+        path = pathlib.Path(_tf.gettempdir()) / "nsight-preview-templates"
+        path.mkdir(parents=True, exist_ok=True)
+        f = path / f"{template_id or 'default'}.pptx"
+        if not f.exists() or f.stat().st_size != len(blob):
+            f.write_bytes(blob)
+        return str(f), template_id or "default"
+    except Exception:  # noqa: BLE001 — styling must never break a preview
+        return None, ""
+
+
 @questions_router.post("/materials/{material_id}/preview-chart")
 def preview_chart(
     material_id: str,
     body: ChartSpecBody,
     priority: bool = False,
     client: DataHiveClient = Depends(get_client),
+    auth: AuthContext = Depends(get_auth),
+    repo: Repository = Depends(get_repository),
 ) -> Response:
     """Render a single ChartSpec as a PNG thumbnail for the wizard's live preview.
 
@@ -1279,7 +1317,16 @@ def preview_chart(
     #    formed ONCE and reused; the per-process salt invalidates it on restart
     #    (so code changes never serve a stale render). Only a changed spec (or a
     #    new process) does the full build_pptx → PDF → rasterize chain below.
-    out_dir = _preview_out_dir(material_id, body.model_dump_json())
+    # The template this material's report will actually render into. Resolved
+    # here so the Design preview matches the deck — a preview built on the house
+    # default while the deck comes out in the client's template is a WYSIWYG
+    # guarantee that quietly stopped being true.
+    template_path, template_id = _preview_template(repo, auth, material_id)
+
+    # The template is part of the cache identity: without it, changing the
+    # template would keep serving the previously cached image and look like the
+    # change had not taken effect.
+    out_dir = _preview_out_dir(material_id, body.model_dump_json() + f"|{template_id}")
     cached_png = out_dir / "preview.png"
     if cached_png.exists():
         return Response(content=cached_png.read_bytes(), media_type="image/png")
@@ -1321,7 +1368,13 @@ def preview_chart(
     uid = uuid.uuid4().hex[:8]
     pptx_path = str(out_dir / f"preview.{uid}.pptx")
     try:
-        build_pptx(report, model, df, pptx_path)
+        style = None
+        if template_path:
+            try:
+                style = _load_style_spec(template_path)
+            except Exception:  # noqa: BLE001
+                style = None
+        build_pptx(report, model, df, pptx_path, style=style)
         # The selected slide (priority) takes the reserved soffice slot so it never
         # waits behind background deck-prefetch renders.
         pdf_path = pptx_to_pdf(pptx_path, str(out_dir), priority=priority)
