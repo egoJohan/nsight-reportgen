@@ -27,6 +27,11 @@ class TemplateStyleSpec(StyleSpec):
     # cream/ink apply.
     background: str = ""
     ink: str = ""
+    # The template theme's own typefaces. Used for the text nSight draws itself
+    # (subtitle, footer): those are textboxes, not placeholders, so they inherit
+    # nothing and would otherwise sit on a customer's slide in our font.
+    heading_font: str = ""
+    body_font: str = ""
 
     def __init__(self, slide_width, slide_height, slots, fonts, palette, spec_source="generic"):
         self.slide_width = slide_width
@@ -80,6 +85,8 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     from reportbuilder.render.template_check import inspect_template
 
     report = inspect_template(str(template_path))
+    spec.heading_font = report.theme.heading_font or ""
+    spec.body_font = report.theme.body_font or ""
     if report.best is not None:
         spec.chart_layout_index = report.best.index
         layout = prs.slide_layouts[report.best.index]

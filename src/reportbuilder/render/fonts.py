@@ -5,6 +5,22 @@ render host lacks one, nothing fails — fontconfig quietly substitutes, LibreOf
 draws the deck in Noto Sans, and the output looks subtly unlike the customer's
 brand with no indication why. That silence is the problem this module removes.
 
+What a missing font actually costs, which is narrower than it first appears:
+
+  * The .pptx is NOT damaged. Slide text lives in placeholders and textboxes
+    that NAME the font, so a deck built here still says "Century Gothic" and
+    renders correctly on any machine that has it. Verified by reading the
+    theme of a deck produced on a host without the font.
+  * The PDF and the on-screen previews ARE affected. Both are rasterised here,
+    so they show whatever this host could find.
+  * Charts are not affected at all any more. Chart text is drawn by matplotlib
+    in the font chosen in Settings — deliberately nSight's own choice, not the
+    template's, because a brand display face wastes space on category labels.
+
+So the warning is about fidelity of what we RENDER, not about the file the
+analyst sends on. Worth saying accurately: overstating it teaches people to
+ignore it.
+
 Resolution order for a family:
 
 1. Already installed on the host -> use it.
@@ -179,9 +195,11 @@ def google_font_url(family: str, *, timeout: float = _TIMEOUT,
                       f"joten fonttia '{family}' ei asenneta.")
     if key not in library:
         return None, (f"'{family}' ei ole avoimen lisenssin fontti (esim. "
-                      "Monotypen tai Microsoftin fontti). Sitä ei voi asentaa "
-                      "palvelimelle automaattisesti. Asenna fontti lisenssin "
-                      "kanssa palvelimelle tai käytä toista pohjaa.")
+                      "Monotypen tai Microsoftin fontti), joten sitä ei voi "
+                      "asentaa automaattisesti. PowerPoint-tiedosto käyttää "
+                      "silti oikeaa fonttia koneilla joilla se on asennettu — "
+                      "vain esikatselu ja PDF näkyvät korvaavalla fontilla. "
+                      "Asenna fontti Asetuksissa, jos haluat ne oikein.")
     if not library[key]:
         return None, (f"'{family}' on Google Fontsissa, mutta ei avoimella "
                       "lisenssillä, joten sitä ei voi asentaa palvelimelle.")

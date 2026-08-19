@@ -106,9 +106,10 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
     # Warnings that did not block the upload (e.g. no theme colours) are worth
     # showing: the deck will render, it just will not carry the client's brand.
-    # A font we cannot supply is not a reason to refuse the template — the deck
-    # renders, in a substitute — but it IS something the user has to be told
-    # plainly rather than discovering from a deck that looks subtly wrong.
+    # A font we cannot supply is not a reason to refuse the template. The .pptx
+    # still NAMES the right font and looks correct on a machine that has it;
+    # what degrades is the PDF and the previews, which are rasterised here.
+    # Said plainly, because a warning that overstates its case gets ignored.
     font_problems = [f["reason"] for f in summary["fonts"] if not f["ok"]]
     return {**_as_dict(t), "warnings": report.problems + font_problems}
 

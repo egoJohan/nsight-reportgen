@@ -101,7 +101,7 @@ def wrapped_line_count(text: str, box_width_emu: int, size_pt: int) -> int:
     return max(1, lines)
 
 
-def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP):
+def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, font: str = ""):
     """Add a multi-run textbox.  `runs` is a list of (text, pt_size, rgb, bold) tuples."""
     tb = slide.shapes.add_textbox(l, t, w, h)
     tf = tb.text_frame
@@ -112,6 +112,7 @@ def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP
     tf.margin_top = 0
     tf.margin_bottom = 0
     first = True
+    font_name = font or _FONT
     for txt, sz, col, bold in runs:
         p = tf.paragraphs[0] if first else tf.add_paragraph()
         first = False
@@ -121,8 +122,22 @@ def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP
         r.font.size = Pt(sz)
         r.font.bold = bold
         r.font.color.rgb = col
-        r.font.name = _FONT
+        r.font.name = font_name
     return tb
+
+
+def _body_font(ctx) -> str:
+    """The typeface for text nSight draws on a templated slide.
+
+    A subtitle in our font next to a title in the customer's is the kind of
+    mismatch that reads as sloppy rather than as a missing font, so the
+    template's own body face is used when it has one.
+
+    Note this only affects how the .pptx NAMES the font. Whether it renders
+    that way depends on the machine opening it — see the module docstring in
+    render.fonts.
+    """
+    return getattr(ctx.style, "body_font", "") or ""
 
 
 def _from_template(ctx) -> bool:
@@ -255,6 +270,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 Inches(0.80), Inches(0.42),
                 sw - Inches(1.0), Inches(1.30),
                 [(title, t_size, _ink, True)],
+                font=getattr(ctx.style, "heading_font", "") or "",
             )
         if secondary:
             # The question subtitle binds to the CHART: its box bottom sits just
@@ -280,6 +296,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 sub_left, sub_top, sub_w, sub_h,
                 [(secondary, s_size, PX_MUTED, False)],
                 anchor=MSO_ANCHOR.BOTTOM,
+                font=_body_font(ctx),
             )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)
@@ -303,6 +320,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         sw - Inches(4.0), Inches(0.40),
         [(footer_text, 9.5, PX_MUTED, False)],
         align=PP_ALIGN.LEFT,
+        font=_body_font(ctx),
     )
     # Scale endpoint legend for a partially-labelled numeric scale (e.g. "1 = täysin
     # eri mieltä · 7 = täysin samaa mieltä") — a small caption just above the footer,
@@ -317,6 +335,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             Inches(6.0), Inches(0.40),
             [(caption, 9.5, PX_MUTED, False)],
             align=PP_ALIGN.RIGHT,
+            font=_body_font(ctx),
         )
     # n is shown once, in the methodology footer above (it already reads
     # "<stat label> · n = N"). The previous separate bottom-right "n = N"

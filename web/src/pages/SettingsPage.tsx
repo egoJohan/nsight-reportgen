@@ -35,8 +35,10 @@ function MissingFonts({ missing }: { missing: MissingFont[] }) {
         <h3 className="text-sm font-semibold">Puuttuvat fontit</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Nämä fontit puuttuvat palvelimelta, joten esitykset renderöidään
-        korvaavalla fontilla. Lataa fontti alla, jos sinulla on siihen lisenssi.
+        Nämä fontit puuttuvat palvelimelta. PowerPoint-tiedosto viittaa silti
+        pohjan omaan fonttiin ja näyttää oikealta koneella jolle fontti on
+        asennettu — mutta esikatselu ja PDF käyttävät korvaavaa fonttia. Lataa
+        fontti alla, jos sinulla on siihen lisenssi.
       </p>
       <ul className="mt-3 space-y-2">
         {missing.map((m) => (

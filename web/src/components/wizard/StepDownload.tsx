@@ -229,7 +229,11 @@ export default function StepDownload({
           <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
           <div className="leading-snug">
             <p className="font-medium">
-              Esitys renderöitiin korvaavalla fontilla
+              Esikatselu ja PDF käyttävät korvaavaa fonttia
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              PowerPoint-tiedosto viittaa pohjan omaan fonttiin, joten se
+              näyttää oikealta koneella jolle fontti on asennettu.
             </p>
             {fontWarnings.map((w) => (
               <p key={w} className="mt-1 text-muted-foreground">
