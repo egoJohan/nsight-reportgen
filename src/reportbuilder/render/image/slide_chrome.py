@@ -37,14 +37,15 @@ def _rgb(hex6: str):
         return None
 
 
-def _theme_colours(ctx):
-    """(background, ink, accent) for this slide, preferring the template's own.
+def theme_colours(style):
+    """(background, ink, accent) for a slide, preferring the template's own.
 
     A deck built on the client's template should not carry nSight's cream ground
-    and teal accent bar. Anything the template does not state falls back to the
-    house value, so a template with a partial theme still renders.
+    and teal accent bar — down to the bullet glyphs on a conclusion slide, which
+    were house teal on an Attendo navy deck. Anything the template does not state
+    falls back to the house value, so a template with a partial theme still
+    renders.
     """
-    style = getattr(ctx, "style", None)
     bg = _rgb(getattr(style, "background", "") or "") or PX_CREAM
     ink = _rgb(getattr(style, "ink", "") or "") or PX_INK
     accent = PX_TEAL
@@ -54,6 +55,12 @@ def _theme_colours(ctx):
     except Exception:  # noqa: BLE001 — styling must not break a render
         pass
     return bg, ink, accent
+
+
+def _theme_colours(ctx):
+    return theme_colours(getattr(ctx, "style", None))
+
+
 from reportbuilder.stats.engine import scale_endpoint_gloss
 
 _FONT = "Liberation Sans"
@@ -127,7 +134,7 @@ def _textbox(slide, l, t, w, h, runs, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP
     return tb
 
 
-def _body_font(ctx) -> str:
+def body_font(style) -> str:
     """The typeface for text nSight draws on a templated slide.
 
     A subtitle in our font next to a title in the customer's is the kind of
@@ -138,7 +145,11 @@ def _body_font(ctx) -> str:
     that way depends on the machine opening it — see the module docstring in
     render.fonts.
     """
-    return getattr(ctx.style, "body_font", "") or ""
+    return getattr(style, "body_font", "") or ""
+
+
+def _body_font(ctx) -> str:
+    return body_font(getattr(ctx, "style", None))
 
 
 def _from_template(ctx) -> bool:
@@ -247,6 +258,53 @@ def harvested_chart_box(profile, text: str, sw: int, sh: int,
     chart_top = top + height + int(Inches(0.70))
     bottom = (sh if floor is None else floor) - int(Inches(0.70))
     return left, chart_top, width, max(int(Inches(1.0)), bottom - chart_top)
+
+
+def template_ground(slide, style) -> bool:
+    """Does the TEMPLATE supply this slide's background? Redraws its furniture.
+
+    True means the house cream ground and teal accent bar must not be painted:
+    either the slide was built from the customer's layout and inherits their
+    design, or their design was harvested off a slide and is redrawn here.
+    Every kind of slide asks this — chart, bullet list, demographics grid — so
+    a deck does not come out half in the customer's design and half in ours.
+    """
+    profile = harvested_profile(style)
+    if profile is not None:
+        clone_furniture(slide, profile.furniture)
+        return True
+    return getattr(style, "chart_layout_index", None) is not None
+
+
+def draw_template_heading(slide, style, text: str) -> int:
+    """Put *text* where the template says a title goes; return its bottom edge.
+
+    0 means the template had no opinion and the caller should draw its own. On a
+    layout slide the placeholder takes it and keeps every inherited property; on
+    a harvested slide it is drawn in the box, font, size, weight and colour read
+    off the customer's own slide.
+    """
+    if getattr(style, "chart_layout_index", None) is not None:
+        # Also removes an empty placeholder, so PowerPoint shows no prompt.
+        if not _fill_title_placeholder(slide, text) or not text:
+            return 0
+        profile = getattr(style, "profile", None)
+        if profile is not None and profile.title.positioned:
+            _left, top, _width, height = harvested_title_box(profile, text)
+            return top + height
+        ph = slide.shapes.title
+        return int(ph.top or 0) + int(ph.height or 0) if ph is not None else 0
+
+    profile = harvested_profile(style)
+    if not text or profile is None or not profile.title.positioned:
+        return 0
+    st = profile.title
+    left, top, width, height = harvested_title_box(profile, text)
+    _textbox(slide, left, top, width, height,
+             [(text, st.size_pt or TITLE_PT, _rgb(st.colour) or PX_INK,
+               True if st.bold is None else st.bold)],
+             font=st.font or getattr(style, "heading_font", "") or "")
+    return top + height
 
 
 def _fill_title_placeholder(slide, title: str) -> bool:
@@ -370,20 +428,8 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         #     placeholder, so it inherits the customer's font, size, colour and
         #     position. Only a template without a title placeholder falls
         #     through to a box of our own.
-        placed = _fill_title_placeholder(slide, title) if templated else False
-        if title and not placed and profile is not None:
-            # The one thing that follows the template exactly: the title's box,
-            # font, size, weight and colour, read off the slide the customer's
-            # designer drew.
-            st = profile.title
-            box = harvested_title_box(profile, title)
-            _textbox(
-                slide, *box,
-                [(title, st.size_pt or t_size, _rgb(st.colour) or _ink,
-                  True if st.bold is None else st.bold)],
-                font=st.font or getattr(ctx.style, "heading_font", "") or "",
-            )
-            placed = True
+        placed = bool(draw_template_heading(slide, ctx.style, title)) \
+            if (templated or profile is not None) else False
         if title and not placed:
             # Tall, TOP-anchored box so the title can span up to ~4 lines (customers'
             # headlines are often 3) and honour manual line breaks ("\n") instead of

@@ -15,7 +15,10 @@ from pptx.enum.text import PP_ALIGN
 
 from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
-from reportbuilder.render.image.slide_chrome import _slide_dims, _textbox
+from reportbuilder.render.image.slide_chrome import (
+    _slide_dims, _textbox, body_font, content_floor, draw_template_heading,
+    template_ground, theme_colours,
+)
 import reportbuilder.render.plugins as _plugins
 
 _COLS = 2
@@ -25,16 +28,23 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
     """Paint the heading + grid of mini-charts. Returns the count of charts placed."""
     sw, sh = _slide_dims(slide)
 
-    # Background + teal accent + heading.
-    bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
-    bg.fill.solid(); bg.fill.fore_color.rgb = PX_CREAM
-    bg.line.fill.background(); bg.shadow.inherit = False
-    acc = slide.shapes.add_shape(1, Inches(0.55), Inches(0.40), Inches(0.10), Inches(0.62))
-    acc.fill.solid(); acc.fill.fore_color.rgb = PX_TEAL
-    acc.line.fill.background(); acc.shadow.inherit = False
+    # The customer's design when the template supplies one, house style when it
+    # does not — the same rule as every other kind of slide.
+    owned = template_ground(slide, style)
+    if not owned:
+        bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
+        bg.fill.solid(); bg.fill.fore_color.rgb = PX_CREAM
+        bg.line.fill.background(); bg.shadow.inherit = False
+        acc = slide.shapes.add_shape(1, Inches(0.55), Inches(0.40), Inches(0.10), Inches(0.62))
+        acc.fill.solid(); acc.fill.fore_color.rgb = PX_TEAL
+        acc.line.fill.background(); acc.shadow.inherit = False
+    _bg, ink, _accent = theme_colours(style)
+    face = body_font(style)
     heading = (getattr(spec, "slide_title", None) or "Vastaajat").strip()
-    _textbox(slide, Inches(0.80), Inches(0.34), sw - Inches(1.0), Inches(0.55),
-             [(heading, 22, PX_INK, True)])
+    title_bottom = draw_template_heading(slide, style, heading) if owned else 0
+    if not title_bottom:
+        _textbox(slide, Inches(0.80), Inches(0.34), sw - Inches(1.0), Inches(0.55),
+                 [(heading, 22, ink, True)], font=face)
 
     charts = [
         c for c in (spec.options.get("charts") or [])
@@ -43,9 +53,13 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
     if not charts:
         return 0
 
-    # Grid area below the heading.
-    area_l, area_t = Inches(0.55), Inches(1.15)
-    area_w, area_h = sw - Inches(1.1), sh - Inches(1.45)
+    # Grid area below the heading, and above whatever the template puts at the
+    # foot of the slide.
+    area_l = Inches(0.55)
+    area_t = title_bottom + int(Inches(0.20)) if title_bottom else Inches(1.15)
+    area_w = sw - Inches(1.1)
+    area_h = max(int(Inches(1.0)),
+                 content_floor(slide, sw, sh) - int(Inches(0.30)) - area_t)
     cols = _COLS if len(charts) > 1 else 1
     rows = -(-len(charts) // cols)  # ceil
     cell_w, cell_h = area_w // cols, area_h // rows
@@ -60,7 +74,8 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
         cx, cy = area_l + col * cell_w, area_t + r * cell_h
         # Cell title (the question).
         _textbox(slide, int(cx + pad), int(cy), int(cell_w - 2 * pad), int(title_h),
-                 [((titles.get(ref) or ref), 11, PX_INK, True)], align=PP_ALIGN.LEFT)
+                 [((titles.get(ref) or ref), 11, ink, True)], align=PP_ALIGN.LEFT,
+                 font=face)
         # Chart placed in the cell area below the title.
         cell_slot = Slot(
             slide_index=slot.slide_index,

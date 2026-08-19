@@ -25,6 +25,9 @@ from pptx.util import Inches
 from reportbuilder.render.deck import render_report
 from reportbuilder.render.image.slide_chrome import content_floor
 from reportbuilder.render.style_spec import load_style_spec
+from reportbuilder.model.report import (
+    ChartSpec, ElementToggles, NumberFormat, Report, SortSpec,
+)
 from reportbuilder.testing.fixtures import one_chart_report, known_series
 
 _TEMPLATES = {
@@ -168,3 +171,71 @@ def test_a_deck_with_no_template_is_unchanged():
     assert bg[0].width == int(prs.slide_width)
     assert _title_shape(slide, "T") is not None
     assert _title_shape(slide, "T").left == Inches(0.80)
+
+
+# ---------------------------------------------------------------------------
+# Bullet slides. A deck must not come out half in the customer's design and
+# half in ours: an overview or conclusion slide in nSight cream between chart
+# slides in the client's brand is exactly what a "use our template" request is
+# asking us not to do.
+# ---------------------------------------------------------------------------
+
+_HEADING = "Yhteenveto tutkimuksen päätuloksista"
+_BULLETS = ["Attendo tunnetaan laajasti", "  Luotettavuus korostuu"]
+
+
+def _bullet_slide(name):
+    path = pathlib.Path(_TEMPLATES[name]) if name else None
+    if path is not None and not path.exists():
+        pytest.skip(f"{path} not available locally")
+    if path is None:
+        from reportbuilder.render.base import StyleSpec
+        style = StyleSpec()
+    else:
+        style = load_style_spec(str(path))
+    spec = ChartSpec(
+        question_ref="s1", chart_type="special_conclusion", statistic="pct",
+        classifying_var=None, number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"), template_slot="s1",
+        elements=ElementToggles(), slide_title=_HEADING,
+        options={"bullets": _BULLETS})
+    report = Report(name="s", render_mode="image", template_ref="", charts=(spec,))
+    prs = render_report(report, {}, style)
+    return style, prs, prs.slides[0]
+
+
+class TestBulletSlidesFollowTheTemplateToo:
+    @pytest.mark.parametrize("name", ["attendo", "synsam"])
+    def test_no_house_ground_is_painted_over_the_clients(self, name):
+        _style, prs, slide = _bullet_slide(name)
+        full = [s for s in slide.shapes
+                if int(s.width or 0) >= int(prs.slide_width) * 0.99
+                and int(s.height or 0) >= int(prs.slide_height) * 0.99]
+        assert full == []
+
+    def test_the_heading_goes_in_the_layouts_title_placeholder(self):
+        _style, _prs, slide = _bullet_slide("attendo")
+        assert slide.shapes.title.text_frame.text == _HEADING
+
+    def test_a_harvested_heading_sits_in_the_templates_box(self):
+        style, _prs, slide = _bullet_slide("synsam")
+        shape = _title_shape(slide, _HEADING)
+        assert shape is not None
+        assert shape.top == style.profile.title.top
+        assert shape.text_frame.paragraphs[0].runs[0].font.size.pt == 22.0
+
+    def test_the_bullet_glyph_is_the_clients_accent(self):
+        """House teal dots down an Attendo navy deck was the giveaway."""
+        _style, _prs, slide = _bullet_slide("attendo")
+        box = next(s for s in slide.shapes
+                   if s.has_text_frame and "Attendo tunnetaan" in s.text_frame.text)
+        glyph = box.text_frame.paragraphs[0].runs[0]
+        assert glyph.text.startswith("•")
+        assert str(glyph.font.color.rgb) == "122D49"
+
+    def test_the_house_style_is_unchanged_without_a_template(self):
+        _style, prs, slide = _bullet_slide(None)
+        grounds = [s for s in slide.shapes
+                   if s.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
+        assert len(grounds) == 2                     # cream ground + teal bar
+        assert grounds[0].width == int(prs.slide_width)

@@ -16,7 +16,10 @@ from pptx.oxml.ns import qn
 
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
-from reportbuilder.render.image.slide_chrome import _FONT, _slide_dims, TITLE_PT
+from reportbuilder.render.image.slide_chrome import (
+    _FONT, _slide_dims, body_font, content_floor, draw_template_heading,
+    template_ground, theme_colours, TITLE_PT,
+)
 
 
 # Inline markdown: **bold** / __bold__ and *italic* / _italic_ (non-nested).
@@ -48,31 +51,43 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
     (used by a themes slide, whose heading is the open-ended question text)."""
     sw, sh = _slide_dims(slide)
 
-    # 1 — Cream background (full slide)
-    bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
-    bg.fill.solid()
-    bg.fill.fore_color.rgb = PX_CREAM
-    bg.line.fill.background()
-    bg.shadow.inherit = False
+    # 0 — The customer's design, when there is one. An overview or conclusion
+    #     slide in nSight cream between chart slides in the client's brand is
+    #     the half-and-half deck this was meant to stop.
+    owned = template_ground(slide, style)
+
+    # 1 — Cream background (full slide), only when no template supplied one.
+    if not owned:
+        bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = PX_CREAM
+        bg.line.fill.background()
+        bg.shadow.inherit = False
 
     # 2 — Heading text (compute first so the accent bar can match its height).
     heading_text = (getattr(spec, "slide_title", None) or heading or "").strip()
 
     # 3 — Teal accent bar (top-left), sized to the heading's actual line height so
     #     it doesn't tower over a short one-line title (capped at the box height).
-    _hlines = _heading_line_count(heading_text, sw) if heading_text else 1
-    _line_h = Pt(_heading_size(heading_text or "x") * 1.25)
-    bar_h = min(int(Inches(0.92)), _hlines * int(_line_h) + int(Inches(0.06)))
-    acc = slide.shapes.add_shape(
-        1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
-    )
-    acc.fill.solid()
-    acc.fill.fore_color.rgb = PX_TEAL
-    acc.line.fill.background()
-    acc.shadow.inherit = False
+    #     House furniture, so a templated slide does without: what sits beside a
+    #     title there is the customer's business.
+    if not owned:
+        _hlines = _heading_line_count(heading_text, sw) if heading_text else 1
+        _line_h = Pt(_heading_size(heading_text or "x") * 1.25)
+        bar_h = min(int(Inches(0.92)), _hlines * int(_line_h) + int(Inches(0.06)))
+        acc = slide.shapes.add_shape(
+            1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
+        )
+        acc.fill.solid()
+        acc.fill.fore_color.rgb = PX_TEAL
+        acc.line.fill.background()
+        acc.shadow.inherit = False
 
-    # 4 — Heading (slide_title, else the fallback — e.g. the question text)
-    if heading_text:
+    # 4 — Heading (slide_title, else the fallback — e.g. the question text).
+    #     In the template's own title placeholder or its title style when it has
+    #     one; the house box otherwise.
+    title_bottom = draw_template_heading(slide, style, heading_text) if owned else 0
+    if heading_text and not title_bottom:
         _heading_box(slide, sw, heading_text)
 
     # 4 — Bullet list. Each raw line is a markdown bullet: leading whitespace sets
@@ -94,7 +109,11 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
                     and re.search(r"[^\s\-•*_:.,–—]", text)):
                 parsed.append((level, text))
     if parsed:
-        _bullet_box(slide, sw, sh, parsed)
+        top = title_bottom + int(Inches(0.28)) if title_bottom else int(Inches(1.55))
+        _bg, ink, accent = theme_colours(style)
+        _bullet_box(slide, sw, sh, parsed, top=top,
+                    floor=content_floor(slide, sw, sh),
+                    accent=accent, ink=ink, font=body_font(style) or _FONT)
 
 
 def _heading_size(text: str) -> int:
@@ -154,9 +173,18 @@ _LEVEL_GLYPH = {0: "•", 1: "–", 2: "·", 3: "·"}
 _LEVEL_PT = {0: 16, 1: 14, 2: 13, 3: 13}
 
 
-def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]]) -> None:
+def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]],
+                top: int | None = None, floor: int | None = None,
+                accent=PX_TEAL, ink=PX_INK, font: str = _FONT) -> None:
+    """The bullet list. *top* is the heading's bottom on a templated slide, where
+    the customer's title is not where ours would have been; *floor* is the top of
+    whatever their design puts at the foot of the slide. Colours and typeface are
+    the template's when it has an opinion, so a conclusion slide does not arrive
+    in nSight teal in the middle of a client deck."""
+    top = int(Inches(1.55)) if top is None else int(top)
+    bottom = (sh - int(Inches(0.55))) if floor is None else (floor - int(Inches(0.25)))
     tb = slide.shapes.add_textbox(
-        Inches(0.85), Inches(1.55), sw - Inches(1.6), sh - Inches(2.1)
+        Inches(0.85), top, sw - Inches(1.6), max(int(Inches(1.0)), bottom - top)
     )
     tf = tb.text_frame
     tf.word_wrap = True
@@ -186,13 +214,13 @@ def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]]) -> None:
         dot.text = f"{_LEVEL_GLYPH.get(level, '·')}\t"
         dot.font.size = Pt(pt)
         dot.font.bold = True
-        dot.font.color.rgb = PX_TEAL
-        dot.font.name = _FONT
+        dot.font.color.rgb = accent
+        dot.font.name = font
         for seg, bold, italic in _md_runs(text):
             body = p.add_run()
             body.text = seg
             body.font.size = Pt(pt)
             body.font.bold = bold
             body.font.italic = italic
-            body.font.color.rgb = PX_INK
+            body.font.color.rgb = ink
             body.font.name = _FONT
