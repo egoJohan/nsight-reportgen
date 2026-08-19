@@ -34,6 +34,9 @@ from reportbuilder.export.preview import rasterize_pages
 log = logging.getLogger(__name__)
 
 EMU_PER_INCH = 914400
+# PowerPoint's own text-frame insets, applied when a shape does not state its own.
+_DEFAULT_LR_INSET = 91440      # 0.1in
+_DEFAULT_TB_INSET = 45720      # 0.05in
 _CACHE = Path(tempfile.gettempdir()) / "nsight-preview-ground"
 
 
@@ -251,18 +254,21 @@ def _paste_picture(image, shape, to_px) -> None:
                 resized)
 
 
-def _line_step(shape, style) -> float:
-    """Line pitch as a multiple of the type size.
+def _line_step(shape, style, font) -> int:
+    """Pixels from one baseline to the next, as PowerPoint computes it.
 
-    1.25 is what nSight's own textboxes are laid out on. A title PLACEHOLDER
-    follows the master instead — Attendo's and Holiday Club's both set 90% — and
-    at 1.25 a two-line title drifts visibly below the real slide's second line.
+    `lnSpc` is a percentage of the FONT'S OWN line height — ascent plus descent,
+    about 1.36em for Noto Sans — not of the point size. Multiplying the point
+    size by Holiday Club's 90% made every line 26% too tight, so a two-line
+    title came out crammed together while wrapping at exactly the right words.
     """
+    ascent, descent = font.getmetrics()
+    natural = ascent + descent
     if shape.is_placeholder:
         title = getattr(getattr(style, "profile", None), "title", None)
         if title is not None and title.line_spacing:
-            return title.line_spacing
-    return 1.25
+            return int(round(natural * title.line_spacing))
+    return int(round(natural))
 
 
 _A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
@@ -344,9 +350,18 @@ def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
     from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 
     frame = shape.text_frame
-    left_emu, top_emu = int(shape.left or 0), int(shape.top or 0)
-    width_px = max(1, to_px(int(shape.width or 0)))
-    height_px = max(1, to_px(int(shape.height or 0)))
+    # A text frame insets its text from the shape's edges. nSight's own boxes set
+    # all four to zero; a PLACEHOLDER inherits PowerPoint's defaults — 0.1in left
+    # and right, 0.05in top and bottom — which at 110 dpi is the 10px left and
+    # 5px down that every composited title was out by.
+    l_ins = frame.margin_left if frame.margin_left is not None else _DEFAULT_LR_INSET
+    t_ins = frame.margin_top if frame.margin_top is not None else _DEFAULT_TB_INSET
+    r_ins = frame.margin_right if frame.margin_right is not None else _DEFAULT_LR_INSET
+    b_ins = frame.margin_bottom if frame.margin_bottom is not None else _DEFAULT_TB_INSET
+    left_emu = int(shape.left or 0) + int(l_ins)
+    top_emu = int(shape.top or 0) + int(t_ins)
+    width_px = max(1, to_px(int(shape.width or 0) - int(l_ins) - int(r_ins)))
+    height_px = max(1, to_px(int(shape.height or 0) - int(t_ins) - int(b_ins)))
     y = to_px(top_emu)
 
     lines: list[tuple[list, object, int, int, bool]] = []
@@ -362,7 +377,7 @@ def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
         for run in runs:
             family, size_pt, colour, bold, italic = _run_style(shape, para, run, style)
             font = _font(family, max(6.0, size_pt * dpi / 72), bold=bold, italic=italic)
-            step = max(step, int(round(size_pt * _line_step(shape, style) * dpi / 72)))
+            step = max(step, _line_step(shape, style, font))
             text = run.text.replace("\t", "  ")
             if _caps(shape, run, style):
                 text = text.upper()
@@ -384,7 +399,7 @@ def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
         if alignment in (PP_ALIGN.RIGHT, PP_ALIGN.CENTER):
             width = sum(draw.textlength(t, font=f) for t, f, _c in segments)
             if alignment == PP_ALIGN.RIGHT:
-                x = to_px(left_emu + int(shape.width or 0)) - int(width)
+                x = to_px(left_emu) + width_px - int(width)
             else:
                 x = to_px(left_emu) + (width_px - int(width)) // 2
         for text, font, colour in segments:
