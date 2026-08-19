@@ -16,7 +16,9 @@ difficulty is entirely in what real templates do.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import pathlib
+from unittest import mock
 
 import pytest
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -304,3 +306,35 @@ class TestTheSubtitleBelongsToTheTitle:
         _style, _prs, slide = _render("synsam", headline=_LONG)
         rule = next(s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.LINE)
         assert _subtitle(slide).top >= rule.top + rule.height
+
+
+class TestWhenHarvestingFails:
+    """The fallback must not be the thing we set out to prevent.
+
+    Harvesting is a heuristic over somebody else's file, so it can throw. It
+    used to fall back to building on the template's layouts — which for a
+    stock-Office file is a 44pt centred title placeholder on a white slide, the
+    exact plain-PowerPoint deck this module exists to avoid, with nothing in the
+    log to say it had happened.
+    """
+
+    def _without_harvesting(self, name):
+        import reportbuilder.render.template_profile as tp
+
+        path = pathlib.Path(_TEMPLATES[name])
+        if not path.exists():
+            pytest.skip(f"{path} not available locally")
+        with mock.patch.object(tp, "extract_profile", side_effect=RuntimeError("boom")):
+            return load_style_spec(str(path))
+
+    def test_a_stock_office_template_falls_back_to_the_house_style(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            style = self._without_harvesting("agent_deck")
+        assert style.profile is None
+        assert style.chart_layout_index is None      # not its Office layouts
+        assert "could not harvest" in caplog.text    # and it is not silent
+
+    def test_a_branded_template_still_uses_its_own_layout(self):
+        """There the layouts ARE the brand, so they remain the better fallback."""
+        style = self._without_harvesting("attendo")
+        assert style.chart_layout_index is not None

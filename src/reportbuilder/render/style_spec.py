@@ -1,8 +1,13 @@
 """Load a StyleSpec (fonts/colors/slots) from a template .pptx (REQ-C-25/27a)."""
 from __future__ import annotations
+
+import logging
+
 from pptx import Presentation
 from reportbuilder import config
 from reportbuilder.render.base import Slot, StyleSpec
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_FONTS: dict[str, tuple[str, int]] = {
     "title": ("Arial", 14),
@@ -146,7 +151,18 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     try:
         spec.profile = extract_profile(str(template_path))
     except Exception:  # noqa: BLE001 — a template we cannot harvest still renders
+        # LOUDLY. Swallowed, this reverts to building on the template's layouts,
+        # and for a stock-Office file that is the plain-PowerPoint deck this
+        # whole module exists to prevent — with nothing in the log to say why.
+        log.warning("could not harvest a style profile from %s; falling back",
+                    template_path, exc_info=True)
         spec.profile = None
+    if spec.profile is None and not spec.brand_palette:
+        # Nothing harvested AND no brand in the theme: whatever layouts this
+        # file has are Office's own, and a 44pt centred title placeholder on a
+        # white slide is worse than nSight's house style. Take the house style.
+        spec.chart_layout_index = None
+        spec.chart_slot = None
     if spec.profile is not None:
         spec.chart_layout_index = spec.profile.layout_index
         spec.chart_slot = None
