@@ -419,6 +419,24 @@ export interface CaseReportInfo {
   name: string;
 }
 
+export interface Template {
+  id: string;
+  name: string;
+  size: number;
+  layout_name: string;
+  palette: string[];
+  heading_font: string;
+  warnings?: string[];
+}
+
+/** Which template a report resolves to, and WHERE from — the level is what lets
+ *  the UI say "inherited from the customer" instead of showing a bare id. */
+export interface ResolvedTemplate {
+  template_id: string;
+  level: "report" | "pinned" | "case" | "customer" | "default";
+  name: string;
+}
+
 export interface RecentReport {
   id: string;
   case_id: string;
@@ -449,6 +467,12 @@ export interface CustomerCase {
 
 const jsonPost = (body: unknown) => ({
   method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+const jsonPut = (body: unknown) => ({
+  method: "PUT",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
@@ -506,6 +530,59 @@ export const api = {
         `${API_BASE}/customers/${customerId}/cases/${caseId}`,
         jsonPatch({ name })
       ).then((r) => json<CustomerCase>(r)),
+  },
+
+  templates: {
+    list: (customerId: string): Promise<Template[]> =>
+      fetch(`${API_BASE}/customers/${customerId}/templates`).then((r) =>
+        json<Template[]>(r)
+      ),
+
+    upload: (customerId: string, file: File): Promise<Template> => {
+      const form = new FormData();
+      form.append("file", file);
+      return fetch(`${API_BASE}/customers/${customerId}/templates`, {
+        method: "POST",
+        body: form,
+      }).then((r) => json<Template>(r));
+    },
+
+    remove: (customerId: string, templateId: string): Promise<{ removed: number }> =>
+      fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}`, {
+        method: "DELETE",
+      }).then((r) => json<{ removed: number }>(r)),
+
+    // null clears the binding, so the level above takes over again.
+    bindCustomer: (customerId: string, templateId: string | null) =>
+      fetch(`${API_BASE}/customers/${customerId}/template`, jsonPut({ template_id: templateId }))
+        .then((r) => json<unknown>(r)),
+
+    bindCase: (customerId: string, caseId: string, templateId: string | null) =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/cases/${caseId}/template`,
+        jsonPut({ template_id: templateId })
+      ).then((r) => json<unknown>(r)),
+
+    bindReport: (customerId: string, caseId: string, reportId: string,
+                 templateId: string | null) =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/cases/${caseId}/reports/${reportId}/template`,
+        jsonPut({ template_id: templateId })
+      ).then((r) => json<unknown>(r)),
+
+    forReport: (customerId: string, caseId: string,
+                reportId: string): Promise<ResolvedTemplate> =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/cases/${caseId}/reports/${reportId}/template`
+      ).then((r) => json<ResolvedTemplate>(r)),
+
+    /** "Päivitys pitää erikseen pyytää" — move a delivered report onto whatever
+     *  its tutkimus or customer now specifies. */
+    refreshReport: (customerId: string, caseId: string, reportId: string) =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/cases/${caseId}/reports/${reportId}/template/refresh`,
+        { method: "POST" }
+      ).then((r) => json<ResolvedTemplate>(r)),
   },
 
   cases: {

@@ -69,6 +69,66 @@ export function useRecentReports(limit = 10) {
   });
 }
 
+export function useTemplates(customerId: string | undefined) {
+  return useQuery({
+    queryKey: ["templates", customerId],
+    queryFn: () => api.templates.list(customerId!),
+    enabled: !!customerId,
+  });
+}
+
+export function useReportTemplate(
+  customerId: string | undefined,
+  caseId: string | undefined,
+  reportId: string | undefined
+) {
+  return useQuery({
+    queryKey: ["template", customerId, caseId, reportId],
+    queryFn: () => api.templates.forReport(customerId!, caseId!, reportId!),
+    enabled: !!customerId && !!caseId && !!reportId,
+  });
+}
+
+/** Every template mutation invalidates both lists and resolutions: binding at
+ *  one level changes what the levels below resolve to. */
+export function useTemplateActions(customerId: string | undefined) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["templates", customerId] });
+    qc.invalidateQueries({ queryKey: ["template"] });
+  };
+  return {
+    upload: useMutation({
+      mutationFn: (file: File) => api.templates.upload(customerId!, file),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (templateId: string) => api.templates.remove(customerId!, templateId),
+      onSuccess: invalidate,
+    }),
+    bindCustomer: useMutation({
+      mutationFn: (templateId: string | null) =>
+        api.templates.bindCustomer(customerId!, templateId),
+      onSuccess: invalidate,
+    }),
+    bindCase: useMutation({
+      mutationFn: (v: { caseId: string; templateId: string | null }) =>
+        api.templates.bindCase(customerId!, v.caseId, v.templateId),
+      onSuccess: invalidate,
+    }),
+    bindReport: useMutation({
+      mutationFn: (v: { caseId: string; reportId: string; templateId: string | null }) =>
+        api.templates.bindReport(customerId!, v.caseId, v.reportId, v.templateId),
+      onSuccess: invalidate,
+    }),
+    refreshReport: useMutation({
+      mutationFn: (v: { caseId: string; reportId: string }) =>
+        api.templates.refreshReport(customerId!, v.caseId, v.reportId),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
 export function useCustomers() {
   return useQuery({ queryKey: ["customers"], queryFn: api.customers.list });
 }

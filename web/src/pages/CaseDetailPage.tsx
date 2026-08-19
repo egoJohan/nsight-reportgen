@@ -20,10 +20,12 @@ import {
   useRenameCase,
   useResolvedCase,
   useRenameCustomerCase,
+  useTemplateActions,
   useDeleteCase,
   useCaseMaterials,
 } from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
+import TemplatePicker from "@/components/TemplatePicker";
 
 function CaseHeading({
   caseId,
@@ -106,6 +108,7 @@ export default function CaseDetailPage() {
   // A case under a customer is not in the legacy /cases list, so resolve it by
   // id; without this the heading fell back to rendering the raw case id.
   const { data: resolved } = useResolvedCase(id);
+  const templates = useTemplateActions(resolved?.customer_id);
   const legacyCase = cases?.find((c) => c.id === id);
   const caseName = resolved?.name ?? legacyCase?.name ?? "";
   const { workspace, removeReport } = useWorkspace(id ?? "");
@@ -187,6 +190,22 @@ export default function CaseDetailPage() {
           Poista tutkimus
         </Button>
       </div>
+
+      {/* A tutkimus can override its customer's pohja; leaving it unset
+          inherits. */}
+      {resolved?.customer_id && id && (
+        <div className="mb-8">
+          <TemplatePicker
+            customerId={resolved.customer_id}
+            level="case"
+            currentId=""
+            inheritedFrom={`asiakkaalta ${resolved.customer_name}`}
+            onBind={(tid) =>
+              templates.bindCase.mutate({ caseId: id, templateId: tid })
+            }
+          />
+        </div>
+      )}
 
       {!materialId ? (
         // No data yet (e.g. a legacy case): let the user import a SAV into it.

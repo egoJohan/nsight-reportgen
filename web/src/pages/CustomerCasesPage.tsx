@@ -8,7 +8,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { useCustomer, useCustomerCases, useCreateCustomerCase } from "@/lib/queries";
+import {
+  useCustomer,
+  useCustomerCases,
+  useCreateCustomerCase,
+  useTemplateActions,
+} from "@/lib/queries";
+import TemplatePicker from "@/components/TemplatePicker";
 import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
 
 /** One customer's cases. */
@@ -18,6 +24,7 @@ export default function CustomerCasesPage() {
   const { data: customer } = useCustomer(customerId);
   const { data: cases, isLoading, isError } = useCustomerCases(customerId);
   const createCase = useCreateCustomerCase(customerId);
+  const templates = useTemplateActions(customerId);
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
 
@@ -72,6 +79,19 @@ export default function CustomerCasesPage() {
           Uusi tutkimus
         </Button>
       </div>
+
+      {/* Every tutkimus under this customer inherits this unless it sets its
+          own. */}
+      {customerId && (
+        <div className="mt-8">
+          <TemplatePicker
+            customerId={customerId}
+            level="customer"
+            currentId={(customer as { template_id?: string } | undefined)?.template_id ?? ""}
+            onBind={(id) => templates.bindCustomer.mutate(id)}
+          />
+        </div>
+      )}
 
       <div className="mt-8 space-y-2">
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
