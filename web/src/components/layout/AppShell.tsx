@@ -210,19 +210,23 @@ function Breadcrumb() {
   if (path === "/") {
     crumbs.push({ label: "Etusivu" });
   } else if (path.startsWith("/customers")) {
-    crumbs.push({ label: "Asiakkaat", to: customerId ? "/customers" : undefined });
+    crumbs.push({ label: "Asiakkaat", to: "/customers" });
     const c = customers?.find((x) => x.id === customerId);
-    if (c) crumbs.push({ label: c.name });
+    if (c) crumbs.push({ label: c.name, to: `/customers/${customerId}` });
   } else if (path.startsWith("/cases/") && id) {
     crumbs.push({ label: "Asiakkaat", to: "/customers" });
     if (resolved) {
       crumbs.push({ label: resolved.customer_name, to: `/customers/${resolved.customer_id}` });
-      crumbs.push({ label: resolved.name });
+      // Linked WITHOUT the ?report= param, which is how you leave an open
+      // report: with a report open this crumb is the way back to the case, and
+      // it used to be dead text with no other route out.
+      crumbs.push({ label: resolved.name, to: `/cases/${id}` });
     } else {
       // A legacy case has no customer; say so rather than inventing one.
       crumbs.push({ label: "Ilman asiakasta" });
       crumbs.push({
         label: legacyCases?.find((c) => c.id === id)?.name ?? id,
+        to: `/cases/${id}`,
       });
     }
     // The open report's own name, not the literal word: the crumb has to say
@@ -234,20 +238,27 @@ function Breadcrumb() {
     }
   }
 
+  // Every crumb but the last is a way back — the last one is where you are, so
+  // it stays plain whatever `to` it carries. Deciding it here rather than when
+  // the crumbs are built is what stops a newly added crumb from silently
+  // stranding the one above it.
   return (
     <nav className="flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
-      {crumbs.map((c, i) => (
-        <span key={`${c.label}-${i}`} className="flex min-w-0 items-center gap-1">
-          {i > 0 && <span className="text-muted-foreground/50 mx-0.5">/</span>}
-          {c.to ? (
-            <NavLink to={c.to} className="truncate transition-colors hover:text-foreground">
-              {c.label}
-            </NavLink>
-          ) : (
-            <span className="truncate font-medium text-foreground">{c.label}</span>
-          )}
-        </span>
-      ))}
+      {crumbs.map((c, i) => {
+        const here = i === crumbs.length - 1;
+        return (
+          <span key={`${c.label}-${i}`} className="flex min-w-0 items-center gap-1">
+            {i > 0 && <span className="text-muted-foreground/50 mx-0.5">/</span>}
+            {c.to && !here ? (
+              <NavLink to={c.to} className="truncate transition-colors hover:text-foreground">
+                {c.label}
+              </NavLink>
+            ) : (
+              <span className="truncate font-medium text-foreground">{c.label}</span>
+            )}
+          </span>
+        );
+      })}
     </nav>
   );
 }
