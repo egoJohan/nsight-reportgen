@@ -116,3 +116,21 @@ def test_a_short_deck_is_not_sliced(tmp_path, monkeypatch):
                         lambda path, out, priority=False: calls.append(path) or "x.pdf")
     assert pc.pptx_to_pdf_parallel(src, str(tmp_path)) == "x.pdf"
     assert calls == [src]                      # the whole deck, in one go
+
+
+def test_parallelism_follows_the_cores_this_process_may_use(monkeypatch):
+    """Not the machine's cores — the ones we are scheduled on.
+
+    A render pinned to one core (taskset, or a container given one) would
+    otherwise slice its deck six ways and pay six LibreOffice startups for
+    parallelism that cannot happen.
+    """
+    from reportbuilder.export import _cpu
+
+    monkeypatch.setattr(_cpu.os, "process_cpu_count", lambda: 1, raising=False)
+    assert _cpu.usable_cores() == 1
+    assert _cpu.workers_for(6) == 1              # one core -> one worker
+
+    monkeypatch.setattr(_cpu.os, "process_cpu_count", lambda: 16, raising=False)
+    assert _cpu.workers_for(6) == 6              # capped: RAM runs out first
+    assert _cpu.workers_for(32) == 15            # one core left for the server

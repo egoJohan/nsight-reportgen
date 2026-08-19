@@ -21,6 +21,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from reportbuilder.export._cpu import workers_for
+
 log = logging.getLogger(__name__)
 
 def pdf_page_count(pdf_path: str) -> int:
@@ -36,8 +38,12 @@ def pdf_page_count(pdf_path: str) -> int:
 # the box; conversions beyond this queue for a free profile slot. A deck split
 # for parallel conversion wants several at once, so this is wider than the 4 it
 # was, and tunable where RAM is tighter than cores (each instance is ~300 MB).
+# One less than the box has, so a render never takes the last core from the web
+# server answering requests; capped at 6 because each instance is ~300 MB and RAM
+# runs out before cores do. On a one- or two-core host this is 1: a second
+# soffice there costs another 4s of startup for cores that do not exist.
 _MAX_CONCURRENT = max(1, int(os.environ.get(
-    "NSIGHT_SOFFICE_WORKERS", min(6, max(2, (os.cpu_count() or 2) - 2)))))
+    "NSIGHT_SOFFICE_WORKERS", workers_for(6))))
 # Namespace the profile root by PID so multiple worker PROCESSES (gunicorn/uvicorn
 # --workers N) never hand out the same UserInstallation dir to two concurrent
 # soffice invocations — which would re-introduce the single-instance-per-profile

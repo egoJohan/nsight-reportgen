@@ -4,6 +4,8 @@ import glob
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+
+from reportbuilder.export._cpu import workers_for
 import pdfplumber
 
 def pdf_page_to_png(pdf_path: str, page_index: int, out_path: str, *, resolution: int = 150) -> str:
@@ -51,7 +53,9 @@ def rasterize_pages(pdf_path: str, out_dir: str, *, dpi: int = 150,
         subprocess.run(cmd + [pdf_path, prefix], capture_output=True, check=True)
 
     pages = _page_count(pdf_path)
-    n = workers or max(1, min(8, (os.cpu_count() or 2) - 2))
+    # One per core, less one for the server itself; 1 on a single-core host,
+    # where splitting only adds process overhead to the same amount of work.
+    n = workers or workers_for(8)
     if pages < 2 or n < 2:
         _run()
     else:
