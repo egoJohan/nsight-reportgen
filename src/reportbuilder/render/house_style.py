@@ -102,9 +102,16 @@ def use_chart_font(family: str) -> str:
     degrades to a deliberate choice instead of an accidental one.
     """
     global _configured_family, _applied_family
+    wanted = (family or "").strip()
+    if wanted == _configured_family and _applied_family:
+        # Already active. Called on EVERY render and preview, so the unchanged
+        # case must cost nothing: re-registering meant rescanning the font
+        # directory and rebuilding matplotlib's 244-family list per chart,
+        # which is what made previews slow.
+        return _applied_family
     with _FONTS_LOCK:
-        _configured_family = (family or "").strip()
-    _applied_family = ""      # force re-application on the next figure
+        _configured_family = wanted
+    _applied_family = ""      # a real change: re-apply on the next figure
     register_fonts()
     return _applied_family
 
