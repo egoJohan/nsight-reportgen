@@ -45,6 +45,10 @@ export default function StepDownload({
   }, [questions]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Fonts the template names that the render host could not supply. Not an
+  // error — the deck rendered — but the typeface is not the customer's, and
+  // this is the last screen before it gets sent to one.
+  const [fontWarnings, setFontWarnings] = useState<string[]>([]);
   const [rendered, setRendered] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [downloading, setDownloading] = useState<"pdf" | "pptx" | null>(null);
@@ -79,6 +83,7 @@ export default function StepDownload({
 
   async function handleGenerate() {
     setError(null);
+    setFontWarnings([]);
     setCancelled(false);
     setPreview(null);
     setRendered(false);
@@ -90,7 +95,10 @@ export default function StepDownload({
         setError("Raportin tallennus ennen renderöintiä epäonnistui. Yritä uudelleen.");
         return;
       }
-      await render.mutateAsync({ reportId, materialId, signal: controller.signal });
+      const out = await render.mutateAsync({
+        reportId, materialId, signal: controller.signal,
+      });
+      setFontWarnings(out?.font_warnings ?? []);
       const blob = await api.reports.previewPdf(caseId, reportId);
       setPreview(URL.createObjectURL(blob));
       setRendered(true);
@@ -211,6 +219,24 @@ export default function StepDownload({
         <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
           <span className="leading-snug">{error}</span>
+        </div>
+      )}
+
+      {/* Fonts the host could not supply. Amber, not red: the deck rendered
+          and is downloadable — it just is not in the customer's typeface. */}
+      {fontWarnings.length > 0 && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <div className="leading-snug">
+            <p className="font-medium">
+              Esitys renderöitiin korvaavalla fontilla
+            </p>
+            {fontWarnings.map((w) => (
+              <p key={w} className="mt-1 text-muted-foreground">
+                {w}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 

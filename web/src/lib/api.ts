@@ -427,6 +427,19 @@ export interface Template {
   palette: string[];
   heading_font: string;
   warnings?: string[];
+  /** Whether the render host can supply the fonts this template names. A
+   *  template only NAMES its fonts; a missing one is substituted silently
+   *  unless we say otherwise. */
+  fonts?: TemplateFont[];
+  fonts_ok?: boolean;
+}
+
+export interface TemplateFont {
+  family: string;
+  state: "present" | "installed" | "unavailable";
+  source: string;
+  reason: string;
+  ok: boolean;
 }
 
 /** Which template a report resolves to, and WHERE from — the level is what lets
@@ -883,7 +896,7 @@ export const api = {
       materialId: string,
       view: "slides" = "slides",
       signal?: AbortSignal
-    ): Promise<{ pdf_url: string }> => {
+    ): Promise<{ pdf_url: string; font_warnings?: string[] }> => {
       const res = await fetch(
         `${API_BASE}/cases/${caseId}/reports/${reportId}/render`,
         {
@@ -903,7 +916,7 @@ export const api = {
         }
         throw new Error(detail);
       }
-      return res.json() as Promise<{ pdf_url: string }>;
+      return res.json() as Promise<{ pdf_url: string; font_warnings?: string[] }>;
     },
 
     previewPdf: async (caseId: string, reportId: string): Promise<Blob> => {

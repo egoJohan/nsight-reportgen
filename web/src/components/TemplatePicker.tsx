@@ -1,10 +1,22 @@
 import { useRef, useState } from "react";
-import { UploadIcon, Trash2Icon, CheckIcon, Loader2Icon } from "lucide-react";
+import {
+  UploadIcon, Trash2Icon, CheckIcon, Loader2Icon, AlertTriangleIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PANEL } from "@/lib/surfaces";
 import { useTemplates, useTemplateActions } from "@/lib/queries";
-import type { Template } from "@/lib/api";
+import type { Template, TemplateFont } from "@/lib/api";
+
+/** Fonts this template names that the render host cannot supply.
+ *
+ *  A deck still renders without them — LibreOffice substitutes — so this is a
+ *  warning on the row rather than a block on using the template. What it buys
+ *  is that nobody sends a deck in the wrong typeface without having been told.
+ */
+function missingFonts(t: Template): TemplateFont[] {
+  return (t.fonts ?? []).filter((f) => !f.ok);
+}
 
 /** Where a binding is being made. The wording differs per level because
  *  "inherited" means something different at each one. */
@@ -47,7 +59,9 @@ export default function TemplatePicker({
       // list and nothing visibly happens, which reads as a failure.
       onBind(created.id);
       if (created.warnings?.length) {
-        toast.warning(created.warnings[0]);
+        // Every warning, not just the first: a deck naming two unavailable
+        // fonts has two separate things for someone to act on.
+        created.warnings.forEach((w) => toast.warning(w, { duration: 12000 }));
       } else {
         toast.success(`${created.name} otettu käyttöön`);
       }
@@ -128,6 +142,22 @@ export default function TemplatePicker({
                     {t.layout_name}
                     {t.heading_font ? ` · ${t.heading_font}` : ""}
                   </span>
+                  {missingFonts(t).length > 0 && (
+                    <span
+                      className="mt-0.5 flex items-center gap-1 text-xs text-destructive"
+                      title={missingFonts(t)
+                        .map((f) => f.reason)
+                        .join("\n\n")}
+                    >
+                      <AlertTriangleIcon className="size-3 shrink-0" />
+                      <span className="truncate">
+                        Fontti puuttuu:{" "}
+                        {missingFonts(t)
+                          .map((f) => f.family)
+                          .join(", ")}
+                      </span>
+                    </span>
+                  )}
                 </span>
                 {/* The palette is the fastest way to recognise a client's deck. */}
                 <span className="ml-auto flex shrink-0 gap-0.5">

@@ -66,6 +66,11 @@ class Template:
     layout_name: str = ""
     palette: tuple[str, ...] = ()
     heading_font: str = ""
+    body_font: str = ""
+    # Whether the render host can actually supply the fonts this template names.
+    # Recorded at upload; a name is not the font, and a missing one is
+    # substituted silently by fontconfig unless something says otherwise.
+    fonts: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -438,6 +443,19 @@ class Repository:
                          [P.LABEL_TEMPLATE_META])
         return self._template_from(meta)
 
+    def record_template_fonts(self, auth: AuthContext, customer_id: str,
+                              template_id: str, fonts: list[dict]) -> None:
+        """Add a font-availability check to a template's stored summary.
+
+        Lets a template uploaded before the check existed acquire one without
+        being re-uploaded. Merges into the meta rather than rewriting it, so a
+        concurrent binding change is not clobbered by a font check.
+        """
+        path = P.template_meta_path(customer_id, template_id)
+        meta = self._read_json(auth, path)
+        meta["fonts"] = fonts
+        self._write_json(auth, path, meta, [P.LABEL_TEMPLATE_META])
+
     def list_templates(self, auth: AuthContext, customer_id: str) -> list[Template]:
         out = []
         for info in self.store.list(auth, P.templates_prefix(customer_id),
@@ -504,6 +522,8 @@ class Repository:
             layout_name=meta.get("layout_name", ""),
             palette=tuple(meta.get("palette") or ()),
             heading_font=meta.get("heading_font", ""),
+            body_font=meta.get("body_font", ""),
+            fonts=tuple(meta.get("fonts") or ()),
         )
 
     def set_template(self, auth: AuthContext, template_id: str | None, *,

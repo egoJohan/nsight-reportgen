@@ -9,6 +9,8 @@ single report, and the lower level always wins. An already-delivered report
 keeps the template it rendered with until someone asks for the update — see
 Repository.resolve_template.
 """
+from dataclasses import replace
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -29,9 +31,37 @@ class TemplateBinding(BaseModel):
 
 
 def _as_dict(t) -> dict:
-    return {"id": t.id, "name": t.name, "size": t.size,
-            "layout_name": t.layout_name, "palette": list(t.palette),
-            "heading_font": t.heading_font}
+    d = {"id": t.id, "name": t.name, "size": t.size,
+         "layout_name": t.layout_name, "palette": list(t.palette),
+         "heading_font": t.heading_font}
+    # Recorded at upload; carried on every listing so the UI can keep flagging a
+    # template whose fonts the render host cannot supply.
+    fonts = list(getattr(t, "fonts", ()) or ())
+    d["fonts"] = fonts
+    # No recorded check (a template uploaded before this existed) is not the
+    # same as a failed one, so absence reads as OK rather than as an alarm.
+    d["fonts_ok"] = all(f.get("ok") for f in fonts) if fonts else True
+    return d
+
+
+def _resolve_template_fonts(theme) -> list[dict]:  # theme OR Template record
+    """Install the fonts this template names, or record why we cannot.
+
+    Done at UPLOAD, because that is when someone is looking and can act: get a
+    licence, install the font, or choose a different template. Discovering it at
+    render time means finding out after the deck was sent.
+
+    Never raises: a template with an unavailable font still uploads and still
+    renders — it just renders in a substitute, which is exactly what the
+    returned status says out loud.
+    """
+    from reportbuilder.render.fonts import check_template_fonts
+    families = [f for f in (getattr(theme, "heading_font", ""),
+                            getattr(theme, "body_font", "")) if f]
+    try:
+        return [st.as_dict() for st in check_template_fonts(families)]
+    except Exception:  # noqa: BLE001 — a font check must not block an upload
+        return []
 
 
 @templates_router.post("/customers/{customer_id}/templates", status_code=201)
@@ -67,6 +97,7 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
         "body_font": report.theme.body_font,
         "slide_width_in": report.slide_width_in,
         "slide_height_in": report.slide_height_in,
+        "fonts": _resolve_template_fonts(report.theme),
     }
     try:
         t = repo.upload_template(auth, customer_id, file.filename or "template.pptx",
@@ -75,13 +106,36 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
     # Warnings that did not block the upload (e.g. no theme colours) are worth
     # showing: the deck will render, it just will not carry the client's brand.
-    return {**_as_dict(t), "warnings": report.problems}
+    # A font we cannot supply is not a reason to refuse the template — the deck
+    # renders, in a substitute — but it IS something the user has to be told
+    # plainly rather than discovering from a deck that looks subtly wrong.
+    font_problems = [f["reason"] for f in summary["fonts"] if not f["ok"]]
+    return {**_as_dict(t), "warnings": report.problems + font_problems}
 
 
 @templates_router.get("/customers/{customer_id}/templates")
 def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
                    repo: Repository = Depends(get_repository)) -> list[dict]:
-    return [_as_dict(t) for t in repo.list_templates(auth, customer_id)]
+    """List a customer's templates, checking any whose fonts we never checked.
+
+    The backfill is here rather than on the render path for two reasons: a
+    template uploaded before the check existed would otherwise never be flagged,
+    and this runs when someone opens the template panel — a place where a short
+    pause is acceptable and a network round trip during a render is not. It
+    happens once per template; the result is stored.
+    """
+    out = []
+    for t in repo.list_templates(auth, customer_id):
+        if not t.fonts and t.heading_font:
+            fonts = _resolve_template_fonts(t)
+            if fonts:
+                try:
+                    repo.record_template_fonts(auth, customer_id, t.id, fonts)
+                except Exception:  # noqa: BLE001 — a cache miss, not a failure
+                    pass
+                t = replace(t, fonts=tuple(fonts))
+        out.append(_as_dict(t))
+    return out
 
 
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/file")

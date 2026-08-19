@@ -132,6 +132,30 @@ def orchestrate_render(
     return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
 
 
+def _font_warnings(repo: Repository, auth: AuthContext, case_id: str,
+                   report_id: str) -> list[str]:
+    """Reasons the resolved template's fonts are unavailable. Never raises.
+
+    Read from what was recorded at upload rather than re-checked: this runs
+    while someone waits for a deck, and a network round trip to Google Fonts
+    does not belong on that path.
+    """
+    try:
+        k = repo.find_case(auth, case_id)
+        if k is None:
+            return []
+        template_id, _ = repo.resolve_template(auth, k.customer_id, k.id, report_id)
+        if not template_id:
+            return []
+        for t in repo.list_templates(auth, k.customer_id):
+            if t.id == template_id:
+                return [f["reason"] for f in (t.fonts or [])
+                        if isinstance(f, dict) and not f.get("ok")]
+    except Exception:  # noqa: BLE001 — a warning must not fail a finished render
+        return []
+    return []
+
+
 def _template_for(repo: Repository, auth: AuthContext, case_id: str,
                   report_id: str, out_dir: pathlib.Path) -> str | None:
     """Put the report's resolved template on disk and return its path.
@@ -292,6 +316,11 @@ async def render_report(
     _persist_deck(repo, auth, case_id, report_id, body.material_id, result["pptx"])
 
     result["pdf_url"] = f"/cases/{case_id}/reports/{report_id}/preview.pdf"
+    # A font the host cannot supply does not fail the render — LibreOffice
+    # substitutes and the deck is usable — but the analyst is about to send it
+    # to a client, so the deck's typeface being wrong has to be visible HERE
+    # and not only on the template screen where it was uploaded.
+    result["font_warnings"] = _font_warnings(repo, auth, case_id, report_id)
     return result
 
 
