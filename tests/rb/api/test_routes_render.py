@@ -104,35 +104,9 @@ def test_route_returns_artifacts() -> None:
 # Test 2 — view=pages is forwarded to orchestrate_render (REQ-C-19)
 # ---------------------------------------------------------------------------
 
-
-def test_route_forwards_view_pages() -> None:
-    """POST body with view=pages causes orchestrate_render to receive view='pages'.
-    (REQ-C-19)"""
-    mock_client = _make_mock_client()
-    app = create_app(client=mock_client)
-    http = TestClient(app)
-
-    with patch("reportbuilder.api.routes_render.orchestrate_render") as mock_orch:
-        mock_orch.return_value = dict(_ARTIFACTS)
-
-        resp = http.post(
-            "/cases/case-2/reports/rep-2/render",
-            json={"material_id": "mat-1", "view": "pages"},
-        )
-
-    assert resp.status_code == 200
-    mock_orch.assert_called_once()
-    assert mock_orch.call_args[1]["view"] == "pages"
-
-
-# ---------------------------------------------------------------------------
-# Test 3 — orchestrate_render wiring without LibreOffice (REQ-C-19, REQ-C-21, REQ-C-22)
-# ---------------------------------------------------------------------------
-
-
 def test_orchestrate_render_wiring() -> None:
     """Call orchestrate_render directly with mocked heavy deps.
-    Verifies the chain: read_sav -> build_pptx -> pptx_to_pdf -> slide_view.
+    Verifies the chain: read_sav -> build_pptx -> pptx_to_pdf.
     No LibreOffice or real .sav required.
     (REQ-C-19, REQ-C-21, REQ-C-22)"""
     from reportbuilder.api.routes_render import orchestrate_render
@@ -163,18 +137,16 @@ def test_orchestrate_render_wiring() -> None:
         patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
         patch("reportbuilder.api.routes_render.pptx_to_pdf") as mock_pptx_to_pdf,
-        patch("reportbuilder.api.routes_render.slide_view") as mock_slide_view,
     ):
         mock_load.return_value = (fake_df, small_model)
         mock_build_pptx.side_effect = _fake_build
         mock_pptx_to_pdf.side_effect = _fake_pdf
-        mock_slide_view.return_value = ["/t/p1.png"]
 
         result = orchestrate_render(
             "case-3", "rep-3", "mat-3", mock_client, view="slides"
         )
 
-    # Atomic publish: canonical names, real files on disk, preview from slide_view.
+    # Atomic publish: canonical names, real files on disk.
     assert os.path.basename(result["pptx"]) == "deck.pptx"
     assert os.path.basename(result["pdf"]) == "deck.pdf"
     assert os.path.exists(result["pptx"]) and os.path.exists(result["pdf"])
@@ -184,7 +156,6 @@ def test_orchestrate_render_wiring() -> None:
     mock_load.assert_called_once()
     mock_build_pptx.assert_called_once()
     mock_pptx_to_pdf.assert_called_once()
-    mock_slide_view.assert_called_once()
 
 
 def test_orchestrate_render_cancels_before_pdf(tmp_path) -> None:

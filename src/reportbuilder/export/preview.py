@@ -70,11 +70,8 @@ def rasterize_pages(pdf_path: str, out_dir: str, *, dpi: int = 150,
     return sorted(glob.glob(os.path.join(out_dir, "page*.png")))
 
 
-def slide_view(pdf_path: str, out_dir: str, *, dpi: int = 150) -> list[str]:
-    """PPT-style view: one image per slide/page (REQ-C-19b). Same artifact as page_view."""
-    return rasterize_pages(pdf_path, out_dir, dpi=dpi)
-
-
-def page_view(pdf_path: str, out_dir: str, *, dpi: int = 150) -> list[str]:
-    """PDF-style continuous-page view (REQ-C-19a/b). Same artifact as slide_view."""
-    return rasterize_pages(pdf_path, out_dir, dpi=dpi)
+# `slide_view` / `page_view` used to live here: two names for this one function,
+# because REQ-C-19b lets the user switch between a slide-per-page and a
+# continuous view. They are two views of ONE PDF, which is how the app has
+# always drawn them — in the browser, from the PDF — so neither name ever had a
+# caller that needed it.

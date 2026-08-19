@@ -1,8 +1,8 @@
 """Render router: orchestrate the full export chain (REQ-C-19, REQ-C-21, REQ-C-22).
 
 POST /cases/{case_id}/reports/{report_id}/render
-  body: {"material_id": str, "view"?: "slides"|"pages"}
-  returns: {"pptx": <path>, "pdf": <path>, "preview": [<png paths>], "pdf_url": <url>}
+  body: {"material_id": str}
+  returns: {"pptx": <path>, "pdf": <path>, "pdf_url": <url>}
 
 GET /cases/{case_id}/reports/{report_id}/preview.pdf
   streams the rendered PDF (REQ-C-19, REQ-C-21)
@@ -29,7 +29,6 @@ from reportbuilder.store.seam import AuthContext
 from reportbuilder.export.pdf_convert import (
     pdf_page_count, pptx_to_pdf, pptx_to_pdf_parallel,
 )
-from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.api.model_loader import df_model_for_material
 from reportbuilder.model.report import report_from_json
@@ -66,21 +65,19 @@ def orchestrate_render(
     material_id: str,
     client,
     *,
-    view: str = "slides",
     out_dir: str | None = None,
     cancel_check=None,
     template_path: str | None = None,
-    page_images: bool = False,
 ) -> dict:
     """Load the report + the material's data, build the deck, convert to PDF.
-    Returns {"pptx": <path>, "pdf": <path>, "preview": [<png paths>]}.
-    (REQ-C-19, REQ-C-21, REQ-C-22)
+    Returns {"pptx": <path>, "pdf": <path>}. (REQ-C-19, REQ-C-21, REQ-C-22)
 
-    One image per slide (REQ-C-19b) is produced on request — `page_images=True`.
-    It is off by default because nothing asks for it: the app shows the deck by
-    fetching the PDF and letting the browser draw it, and no route even serves
-    these files. Producing them anyway was ~7s of a 30s render the analyst waits
-    through.
+    No per-slide images. REQ-C-19b's slide-view/page-view toggle is two views of
+    ONE artifact — the design said so — and that is how the app implements it:
+    it fetches the PDF and lets the browser paginate. The chain rasterized a PNG
+    per slide anyway, from the day it was written five days before the UI
+    existed. Nothing ever fetched them (no route even served them), each render
+    left another ~7 MB of them in /tmp, and /tmp is RAM.
     """
     # A render is something an analyst sits and waits through, so where the time
     # went is worth knowing without a profiler.
@@ -149,18 +146,6 @@ def orchestrate_render(
     os.replace(work_pptx, final_pptx)
     os.replace(work_pdf, final_pdf)
 
-    # 6. One image per slide, when the caller wants them (REQ-C-19b). Into a
-    #    per-render subdir so concurrent renders don't mix each other's
-    #    page*.png via the sorted glob. 110 dpi is ~1500px across a 13.3in
-    #    slide — enough for anything that reads them.
-    preview: list[str] = []
-    if page_images:
-        page_dir = os.path.join(str(out_dir), f"pages-{uid}")
-        os.makedirs(page_dir, exist_ok=True)
-        rasterize = slide_view if view != "pages" else page_view
-        preview = rasterize(final_pdf, page_dir, dpi=110)
-        mark("raster")
-
     last = 0.0
     parts = []
     for phase, at in marks:
@@ -169,8 +154,8 @@ def orchestrate_render(
     log.info("rendered %s: %d slides in %.1fs (%s)", report_id,
              pdf_page_count(final_pdf), last, ", ".join(parts))
 
-    # 7. Return artifact paths
-    return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
+    # 6. Return artifact paths
+    return {"pptx": final_pptx, "pdf": final_pdf}
 
 
 def _font_warnings(repo: Repository, auth: AuthContext, case_id: str,
@@ -293,11 +278,6 @@ class RenderRequest(BaseModel):
     """Request body for POST .../render."""
 
     material_id: str
-    view: str = "slides"
-    #: One PNG per slide in the response. Off by default: the app draws the deck
-    #: from the PDF, so making them cost ~7s of every render for files nobody
-    #: opened. Ask for them and they are produced exactly as before.
-    page_images: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +296,7 @@ async def render_report(
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
 ) -> dict:
-    """Orchestrate PPTX build, PDF conversion, and preview rasterization for a report.
+    """Orchestrate the PPTX build and PDF conversion for a report.
     Writes artifacts to a deterministic per-report dir so the preview PDF is fetchable.
 
     Cancellable: the heavy build runs in a worker thread while we watch for the client
@@ -350,8 +330,8 @@ async def render_report(
             None,
             lambda: orchestrate_render(
                 case_id, report_id, body.material_id, client,
-                view=body.view, out_dir=str(out_dir), cancel_check=cancel.is_set,
-                template_path=template_path, page_images=body.page_images,
+                out_dir=str(out_dir), cancel_check=cancel.is_set,
+                template_path=template_path,
             ),
         )
     except RenderCancelled:

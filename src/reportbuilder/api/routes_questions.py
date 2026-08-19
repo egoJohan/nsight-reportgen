@@ -1407,4 +1407,14 @@ def preview_chart(
     tmp_png = out_dir / f"preview.{uid}.png"
     tmp_png.write_bytes(png_bytes)
     os.replace(tmp_png, cached_png)
+    # The .pptx, the .pdf and the rasterized page were the road to that PNG, not
+    # the destination: only the PNG is ever served. Keeping them made a cached
+    # preview five times its own size, and on a host where /tmp is tmpfs that is
+    # five times the RAM — ~900 cached previews had grown to 278 MB.
+    shutil.rmtree(out_dir / f"pages-{uid}", ignore_errors=True)
+    for leftover in (pptx_path, pdf_path):
+        try:
+            os.unlink(leftover)
+        except OSError:
+            pass
     return Response(content=png_bytes, media_type="image/png")

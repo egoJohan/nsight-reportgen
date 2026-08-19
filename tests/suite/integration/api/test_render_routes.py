@@ -152,10 +152,11 @@ def test_render_happy_path_returns_artifacts(client_memory, require_soffice):
     )
     assert r.status_code == 200
     body = r.json()
-    assert set(body.keys()) >= {"pptx", "pdf", "preview", "pdf_url"}
+    assert set(body.keys()) >= {"pptx", "pdf", "pdf_url"}
     assert body["pdf_url"] == f"/cases/{cid}/reports/{rid}/preview.pdf"
-    # No per-slide images unless asked for: the app draws the deck from the PDF.
-    assert body["preview"] == []
+    # No per-slide images at all: the app draws the deck from the PDF, and
+    # rasterizing 60 PNGs nobody fetches cost ~7s and ~7 MB of tmpfs a render.
+    assert "preview" not in body
 
     # Artifacts are now fetchable.
     pdf = client_memory.get(f"/cases/{cid}/reports/{rid}/preview.pdf")
@@ -170,19 +171,18 @@ def test_render_happy_path_returns_artifacts(client_memory, require_soffice):
 
 
 @pytest.mark.export
-def test_per_slide_images_on_request(client_memory, require_soffice):
-    """One PNG per slide is still available (REQ-C-19b) — it is just not made
-    for every render. Nothing serves these files and the app draws the deck from
-    the PDF, so producing them by default was ~7s of every render wasted."""
+def test_a_render_leaves_only_the_deck_and_its_pdf(client_memory, require_soffice,
+                                                   tmp_path):
+    """What a render leaves in /tmp matters: on most hosts /tmp is tmpfs, so
+    every stray artifact is RAM. Each render used to add another ~7 MB of page
+    images that nothing read."""
+    import pathlib as _pathlib
+
     cid, rid, mid = _seed_case_material_report(client_memory, "vertical_bar")
-    r = client_memory.post(
-        f"/cases/{cid}/reports/{rid}/render",
-        json={"material_id": mid, "view": "slides", "page_images": True},
-    )
+    r = client_memory.post(f"/cases/{cid}/reports/{rid}/render",
+                           json={"material_id": mid})
     assert r.status_code == 200
-    preview = r.json()["preview"]
-    assert isinstance(preview, list) and preview
-    for path in preview:
-        assert path.endswith(".png")
-        with open(path, "rb") as f:
-            assert f.read(8) == b"\x89PNG\r\n\x1a\n"
+    out = _pathlib.Path(r.json()["pdf"]).parent
+    left = sorted(p.name for p in out.iterdir())
+    assert [n for n in left if n.startswith("pages-")] == []
+    assert {"deck.pptx", "deck.pdf"} <= set(left)

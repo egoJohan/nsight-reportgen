@@ -217,20 +217,14 @@ def test_api_full_chain(tmp_path):
 
     resp = tc.post(
         f"/cases/{case_id}/reports/{report_id}/render",
-        # page_images: per-slide PNGs are opt-in now (nothing serves them and
-        # the app draws the deck from the PDF); this chain asserts they still
-        # come out when asked for.
-        json={"material_id": material_id, "page_images": True},
+        json={"material_id": material_id},
     )
     assert resp.status_code == 200, resp.text
     result = resp.json()
 
     assert "pptx" in result, "Render response missing 'pptx'"
     assert "pdf" in result, "Render response missing 'pdf'"
-    assert "preview" in result, "Render response missing 'preview'"
-    assert isinstance(result["preview"], list) and len(result["preview"]) > 0, (
-        "Render 'preview' should be a non-empty list of PNG paths"
-    )
+    # No 'preview' images: the deck's PDF is the artifact the app displays.
 
     # The PDF file must exist on disk (REQ-C-21)
     assert os.path.isfile(result["pdf"]), (

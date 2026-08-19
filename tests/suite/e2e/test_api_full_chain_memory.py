@@ -99,7 +99,7 @@ def test_full_chain_render_and_preview(client_memory, require_soffice):
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert set(body.keys()) >= {"pptx", "pdf", "preview", "pdf_url"}
+    assert set(body.keys()) >= {"pptx", "pdf", "pdf_url"}
     assert body["pdf_url"] == f"/cases/{cid}/reports/{rid}/preview.pdf"
 
     pdf = client_memory.get(f"/cases/{cid}/reports/{rid}/preview.pdf")
