@@ -32,6 +32,7 @@ import {
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepDownload from "./StepDownload";
+import TemplateButton from "@/components/wizard/TemplateButton";
 
 /** Move an item within an array, returning a new array. */
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -1000,6 +1001,10 @@ export default function ReportWizard({
               <CheckIcon className="size-3.5" /> Saved
             </span>
           ) : null}
+          {/* Left of Save: which pohja this report comes out on. Visible on
+              every step, because it changes what Design previews AND what the
+              export produces. */}
+          <TemplateButton caseId={caseId} reportId={reportId} />
           <Button
             variant="outline"
             size="sm"

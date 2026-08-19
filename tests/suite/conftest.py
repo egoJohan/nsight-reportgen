@@ -48,7 +48,22 @@ def mock_hive(synthetic_bytes) -> Mock:
 
 @pytest.fixture
 def client_mock(mock_hive) -> TestClient:
-    return TestClient(create_app(client=mock_hive))
+    """App on the mock store, with the repository and auth dependencies filled.
+
+    The preview route now resolves a template through the object store, so
+    without these it fails closed with 401 — correct in production, useless in
+    a test asserting a 422 or a 503.
+    """
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.store.memory_objects import InMemoryObjectStore
+    from reportbuilder.store.repository import Repository
+    from reportbuilder.store.seam import AuthContext
+
+    app = create_app(client=mock_hive)
+    repo = Repository(InMemoryObjectStore())
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_auth] = lambda: AuthContext(token="test")
+    return TestClient(app)
 
 
 @pytest.fixture

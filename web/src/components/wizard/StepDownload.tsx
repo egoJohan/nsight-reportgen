@@ -13,8 +13,6 @@ import type { Question, ReportDoc } from "@/lib/api";
 import { useRegroupedQuestions, useRenderReport } from "@/lib/queries";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { SlideGrid } from "@/components/wizard/SlideGrid";
-import TemplatePicker from "@/components/TemplatePicker";
-import { useResolvedCase, useReportTemplate, useTemplateActions } from "@/lib/queries";
 
 export default function StepDownload({
   caseId,
@@ -45,14 +43,6 @@ export default function StepDownload({
     (questions ?? []).forEach((q) => m.set(q.qid, q));
     return m;
   }, [questions]);
-  // The report's own pohja lives here, in the export step: this is where the
-  // deck is produced, so it is where "which template does this come out on"
-  // belongs. resolve tells us whether it is set here or inherited.
-  const { data: resolvedCase } = useResolvedCase(caseId);
-  const customerId = resolvedCase?.customer_id;
-  const { data: resolvedTemplate } = useReportTemplate(customerId, caseId, reportId);
-  const templates = useTemplateActions(customerId);
-
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rendered, setRendered] = useState(false);
@@ -144,43 +134,9 @@ export default function StepDownload({
 
   return (
     <div className="space-y-5">
-      {/* Which pohja this deck comes out on. Shown before the render buttons
-          because changing it changes what those buttons produce. */}
-      {customerId && (
-        <TemplatePicker
-          customerId={customerId}
-          level="report"
-          currentId={resolvedTemplate?.level === "report" ? resolvedTemplate.template_id : ""}
-          inheritedFrom={
-            resolvedTemplate && resolvedTemplate.level !== "report"
-              ? `${resolvedTemplate.name}${
-                  resolvedTemplate.level === "pinned" ? " (lukittu tähän raporttiin)" : ""
-                }`
-              : undefined
-          }
-          onBind={(tid) =>
-            templates.bindReport.mutate({ caseId, reportId, templateId: tid })
-          }
-        />
-      )}
-
-      {/* A pinned report keeps the pohja it was rendered with, so moving it on
-          has to be asked for — see "päivitys pitää erikseen pyytää". */}
-      {resolvedTemplate?.level === "pinned" && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed p-3 text-sm">
-          <span className="text-muted-foreground">
-            Tämä raportti käyttää edelleen pohjaa, jolla se on aiemmin luotu.
-          </span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => templates.refreshReport.mutate({ caseId, reportId })}
-          >
-            Päivitä nykyiseen pohjaan
-          </Button>
-        </div>
-      )}
-
+      {/* The pohja control lives in the wizard toolbar (TemplateButton), where
+          it is visible on every step — it changes what Design previews as well
+          as what this step exports, so it does not belong to Preview alone. */}
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
