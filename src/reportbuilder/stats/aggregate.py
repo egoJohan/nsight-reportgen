@@ -1,6 +1,20 @@
 from __future__ import annotations
+import threading
+
 import duckdb
 import pandas as pd
+
+# One connection per thread, kept for the life of it. duckdb.connect() costs
+# ~15ms, which was being paid once per chart; a connection is not safe to share
+# across threads, and a render is one thread.
+_local = threading.local()
+
+
+def _connection():
+    con = getattr(_local, "con", None)
+    if con is None:
+        con = _local.con = duckdb.connect()
+    return con
 
 def aggregate_counts(data: pd.DataFrame, value_var: str,
                      classifying_var: str | None = None,
@@ -31,12 +45,19 @@ def aggregate_counts(data: pd.DataFrame, value_var: str,
                 counts[(float(code), str(key))] = int(cnt)
         return counts
     if seg_series is not None:
-        data = data.assign(__seg__=list(seg_series))
+        scan = data[[value_var]].copy()
+        scan["__seg__"] = list(seg_series)
         seg_col: str | None = "__seg__"
     else:
         seg_col = classifying_var
-    con = duckdb.connect()
-    con.register("d", data)
+        # Only the columns the SQL below names. Registering the whole frame made
+        # duckdb walk every column of it to build the scan — on a survey with 690
+        # variables that was ~900 column reads to count ONE, and the single
+        # biggest cost in computing a chart.
+        cols = [value_var] + ([seg_col] if seg_col and seg_col != value_var else [])
+        scan = data[cols]
+    con = _connection()
+    con.register("d", scan)
     counts: dict[tuple[float | None, str], int] = {}
 
     # The Total column sits on the SAME population as the per-segment bases (see
@@ -65,5 +86,5 @@ def aggregate_counts(data: pd.DataFrame, value_var: str,
             else:
                 seg_label = str(int(s)) if float(s).is_integer() else str(s)
             counts[(float(v), seg_label)] = int(n)
-    con.close()
+    con.unregister("d")
     return counts
