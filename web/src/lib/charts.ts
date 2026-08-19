@@ -196,8 +196,11 @@ export const DEFAULT_ELEMENTS: ChartElements = {
   data_labels: true,
 };
 
+// Survey order by default: the SAV's own category order is the order the
+// respondent saw and the order the analyst reads the questionnaire in, so a
+// fresh chart matches the source until someone decides otherwise. (Johan)
 export const DEFAULT_SORT: SortSpec = {
-  basis: "pct",
+  basis: "data_order",
   topbox_codes: [],
   descending: true,
 };
@@ -227,20 +230,16 @@ export function makeChart(
   suggestedChartType: string
 ): ChartSpec {
   const chartType = suggestedChartType || "vertical_bar";
-  // Stacked bars are the scale/battery distribution — default them to "Top 2 sum"
-  // (most-agree statement on top); everything else keeps the default percentage sort.
-  const isStacked = chartType.startsWith("stacked_");
   return {
     question_ref: questionRef,
     chart_type: chartType,
     statistic: "pct",
     classifying_var: null,
     number_format: { ...DEFAULT_NUMBER_FORMAT },
-    sort: {
-      ...DEFAULT_SORT,
-      basis: isStacked ? "topbox_sum" : DEFAULT_SORT.basis,
-      topbox_codes: [],
-    },
+    // Survey order, stacked bars included: "always", per Johan. A battery used
+    // to default to Top-2-sum so the most-agree statement led; that is now a
+    // choice the author makes rather than one we make for them.
+    sort: { ...DEFAULT_SORT, topbox_codes: [] },
     template_slot: "s1",
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,
