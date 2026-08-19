@@ -74,6 +74,25 @@ export function useFontSettings() {
   return useQuery({ queryKey: ["settings", "fonts"], queryFn: api.settings.fonts });
 }
 
+export function useChartFont() {
+  return useQuery({
+    queryKey: ["settings", "chart-font"],
+    queryFn: api.settings.chartFont,
+  });
+}
+
+export function useSetChartFont() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.settings.setChartFont,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings", "chart-font"] });
+      // Every rendered thumbnail was drawn with the previous font.
+      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+    },
+  });
+}
+
 export function useFontActions() {
   const qc = useQueryClient();
   const invalidate = () => {

@@ -941,6 +941,30 @@ export const api = {
   },
 
   settings: {
+    chartFont: (): Promise<ChartFontSettings> =>
+      fetch(`${API_BASE}/settings/chart-font`).then((r) =>
+        json<ChartFontSettings>(r)
+      ),
+
+    setChartFont: async (family: string): Promise<ChartFontSettings> => {
+      const res = await fetch(`${API_BASE}/settings/chart-font`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ family }),
+      });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<ChartFontSettings>;
+    },
+
     fonts: (): Promise<FontsSettings> =>
       fetch(`${API_BASE}/settings/fonts`).then((r) => json<FontsSettings>(r)),
 
@@ -1004,6 +1028,17 @@ export interface MissingFont {
   family: string;
   reason: string;
   templates: string[];
+}
+
+/** The chart font is independent of the template's: brand faces are often too
+ *  wide for the long category labels charts are mostly made of. */
+export interface ChartFontSettings {
+  /** "" means no choice made, so the house default applies. */
+  family: string;
+  /** What charts actually draw with — differs from `family` if it fell back. */
+  effective: string;
+  default: string;
+  available: string[];
 }
 
 export interface FontsSettings {

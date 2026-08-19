@@ -12,16 +12,47 @@ Licence responsibility sits with whoever uploads. nSight declines to DOWNLOAD
 commercial fonts because it cannot know the licence; an admin uploading a font
 they hold a licence for is a different act, and the UI says so.
 """
-from dataclasses import replace
+import time
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.render import fonts as F
+from reportbuilder.render import house_style as H
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 
 settings_router = APIRouter(tags=["settings"])
+
+CHART_FONT_KEY = "chart-font"
+
+# The setting is read on the render path, so it is cached briefly rather than
+# fetched per chart. Short enough that a change takes effect while someone is
+# still looking at the settings page, long enough that a six-slide deck does not
+# make six round trips to datahive.
+_CACHE_SECONDS = 20.0
+_cached: tuple[float, str] | None = None
+
+
+def chart_font_for(repo: Repository, auth: AuthContext) -> str:
+    """The configured chart font family ("" = house default). Never raises."""
+    global _cached
+    now = time.monotonic()
+    if _cached is not None and now - _cached[0] < _CACHE_SECONDS:
+        return _cached[1]
+    family = ""
+    try:
+        stored = repo.get_setting(auth, CHART_FONT_KEY) or {}
+        family = (stored.get("family") or "").strip()
+    except Exception:  # noqa: BLE001 — styling must not break a render
+        family = _cached[1] if _cached else ""
+    _cached = (now, family)
+    return family
+
+
+def apply_chart_font(repo: Repository, auth: AuthContext) -> str:
+    """Make charts draw in the configured family. Returns what was applied."""
+    return H.use_chart_font(chart_font_for(repo, auth))
 
 
 def _font_dict(f, *, on_host: bool) -> dict:
@@ -69,6 +100,39 @@ def _missing_families(repo: Repository, auth: AuthContext) -> list[dict]:
                                                "templates": []})
                 row["templates"].append(t.name)
     return sorted(seen.values(), key=lambda r: r["family"].lower())
+
+
+@settings_router.get("/settings/chart-font")
+def get_chart_font(auth: AuthContext = Depends(get_auth),
+                   repo: Repository = Depends(get_repository)) -> dict:
+    """Which font charts draw in, and every family this host could use.
+
+    Separate from the template's font on purpose: a brand display face is
+    often wide, and chart text is mostly long category labels, so an admin may
+    want a narrower one to fit more of a label before it is truncated.
+    """
+    family = chart_font_for(repo, auth)
+    return {"family": family,
+            "effective": H.use_chart_font(family),
+            "default": H._DEFAULT_CHART_FONT,
+            "available": H.available_chart_fonts()}
+
+
+@settings_router.put("/settings/chart-font")
+def set_chart_font(payload: dict = Body(...),
+                   auth: AuthContext = Depends(get_auth),
+                   repo: Repository = Depends(get_repository)) -> dict:
+    """Set the chart font. An empty family restores the house default."""
+    global _cached
+
+    family = (payload.get("family") or "").strip()
+    available = set(H.available_chart_fonts())
+    if family and family not in available:
+        raise HTTPException(
+            422, f"Fonttia '{family}' ei ole asennettu tälle palvelimelle.")
+    repo.set_setting(auth, CHART_FONT_KEY, {"family": family})
+    _cached = None                       # the next render must see the change
+    return {"family": family, "effective": H.use_chart_font(family)}
 
 
 @settings_router.post("/settings/fonts", status_code=201)
@@ -119,4 +183,4 @@ def sync_fonts_to_host(repo: Repository, auth: AuthContext) -> list:
     return repo.sync_fonts(auth, F.install_font_bytes)
 
 
-__all__ = ["settings_router", "sync_fonts_to_host", "replace"]
+__all__ = ["settings_router", "sync_fonts_to_host", "apply_chart_font"]

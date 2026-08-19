@@ -453,6 +453,19 @@ class Repository:
                          [P.LABEL_TEMPLATE_META])
         return self._template_from(meta)
 
+    # --- settings -----------------------------------------------------------
+
+    def get_setting(self, auth: AuthContext, key: str, default=None):
+        """A stored setting, or *default* when never set or unreadable."""
+        try:
+            return self._read_json(auth, P.settings_path(key))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return default
+
+    def set_setting(self, auth: AuthContext, key: str, value: dict) -> dict:
+        self._write_json(auth, P.settings_path(key), value, [P.LABEL_SETTINGS])
+        return value
+
     # --- fonts ------------------------------------------------------------
     #
     # Font FILES live in datahive, not merely on the render host. A host can be

@@ -11,7 +11,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { PANEL, ROW, EMPTY } from "@/lib/surfaces";
-import { useFontSettings, useFontActions } from "@/lib/queries";
+import {
+  useFontSettings, useFontActions, useChartFont, useSetChartFont,
+} from "@/lib/queries";
 import type { InstalledFont, MissingFont } from "@/lib/api";
 
 function bytes(n: number): string {
@@ -92,6 +94,61 @@ function FontRow({ font }: { font: InstalledFont }) {
   );
 }
 
+/** The font chart text is drawn in — deliberately not the template's.
+ *
+ *  A brand display face is usually designed for headlines, and chart text is
+ *  mostly long category labels. Picking a narrower face fits more of a label
+ *  before it truncates or rotates, so this is a separate choice rather than
+ *  something inherited from the pohja.
+ */
+function ChartFontSetting() {
+  const { data } = useChartFont();
+  const set = useSetChartFont();
+
+  if (!data) return null;
+  const fellBack = data.family !== "" && data.effective !== data.family;
+
+  return (
+    <div className={`${PANEL} p-4`}>
+      <h3 className="text-sm font-semibold">Kuvaajien fontti</h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Kuvaajien teksti piirretään tällä fontilla. Se on tarkoituksella eri
+        asetus kuin esityspohjan fontti: kapeampi fontti mahtuu paremmin pitkiin
+        vastausvaihtoehtoihin.
+      </p>
+
+      <div className="mt-3 flex items-center gap-2">
+        <select
+          className="h-9 min-w-0 flex-1 rounded-md border bg-surface px-2 text-sm"
+          value={data.family}
+          disabled={set.isPending}
+          onChange={(e) =>
+            set.mutate(e.target.value, {
+              onError: (err) => toast.error(err.message),
+            })
+          }
+        >
+          <option value="">Oletus ({data.default})</option>
+          {data.available.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+        {set.isPending && (
+          <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+        )}
+      </div>
+
+      {fellBack && (
+        <p className="mt-2 text-xs text-amber-600">
+          Valittua fonttia ei löytynyt, joten käytössä on {data.effective}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function FontsTab() {
   const { data, isLoading } = useFontSettings();
   const actions = useFontActions();
@@ -110,6 +167,8 @@ function FontsTab() {
   return (
     <div className="space-y-6">
       {data && <MissingFonts missing={data.missing} />}
+
+      <ChartFontSetting />
 
       <div className={`${PANEL} p-4`}>
         <h3 className="text-sm font-semibold">Asennetut fontit</h3>

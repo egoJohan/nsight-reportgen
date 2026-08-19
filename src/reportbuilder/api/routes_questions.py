@@ -1298,6 +1298,11 @@ def preview_chart(
     short reason — never a 500 or a dropped connection.
     (REQ-C-05, REQ-C-13, REQ-C-19, REQ-D-06, RX-be.2, RX-be.3)
     """
+    # The preview is meant to be what the slide will look like, so it has to
+    # honour the same chart font as the deck. Left out, the wizard would show
+    # one typeface and the delivered .pptx another.
+    from reportbuilder.api.routes_settings import apply_chart_font
+    apply_chart_font(repo, auth)
     # Guard: LibreOffice required for PDF conversion
     if shutil.which("soffice") is None and shutil.which("libreoffice") is None:
         raise HTTPException(

@@ -203,3 +203,51 @@ def test_sync_on_an_empty_hive_is_a_no_op(client_store, host, store_repo, auth):
     from reportbuilder.api.routes_settings import sync_fonts_to_host
 
     assert sync_fonts_to_host(store_repo, auth) == []
+
+
+# --- chart font -------------------------------------------------------------
+#
+# Deliberately NOT the template's font. A brand display face is often wide and
+# chart text is mostly long category labels, so the admin can pick a narrower
+# one and fit more of a label before it truncates.
+
+def test_chart_font_defaults_to_the_house_face(client_store, host):
+    body = client_store.get("/settings/chart-font").json()
+
+    assert body["family"] == ""                     # nothing chosen
+    assert body["effective"] == body["default"]     # so the house face applies
+    assert body["available"]                        # and there is a list to pick from
+
+
+def test_setting_a_chart_font_sticks(client_store, host):
+    available = client_store.get("/settings/chart-font").json()["available"]
+    choice = next(f for f in available if f != "Liberation Sans")
+
+    resp = client_store.put("/settings/chart-font", json={"family": choice})
+
+    assert resp.status_code == 200
+    assert resp.json()["effective"] == choice
+    assert client_store.get("/settings/chart-font").json()["family"] == choice
+
+
+def test_clearing_it_restores_the_house_face(client_store, host):
+    available = client_store.get("/settings/chart-font").json()["available"]
+    client_store.put("/settings/chart-font",
+                     json={"family": next(f for f in available
+                                          if f != "Liberation Sans")})
+
+    client_store.put("/settings/chart-font", json={"family": ""})
+
+    body = client_store.get("/settings/chart-font").json()
+    assert body["family"] == ""
+    assert body["effective"] == body["default"]
+
+
+def test_a_font_this_host_lacks_is_refused(client_store, host):
+    """Accepting it would leave charts silently drawn in something else."""
+    resp = client_store.put("/settings/chart-font",
+                            json={"family": "Definitely Not Installed"})
+
+    assert resp.status_code == 422
+    assert "ei ole asennettu" in resp.json()["detail"]
+    assert client_store.get("/settings/chart-font").json()["family"] == ""

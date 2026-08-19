@@ -6,6 +6,7 @@ individual builders.
 """
 from __future__ import annotations
 
+import contextlib as _contextlib
 import threading as _threading
 
 import matplotlib as _mpl
@@ -61,30 +62,91 @@ _LIBERATION_PATHS = [
 
 _FONTS_LOCK = _threading.Lock()
 
+# The chart font is a SETTING, deliberately separate from the template's font.
+# A brand display face can be wide, and chart text is mostly long category
+# labels — letting an admin pick a narrower face buys legible labels that would
+# otherwise be truncated or rotated. Empty means the house default.
+_DEFAULT_CHART_FONT = "Liberation Sans"
+_configured_family = ""
+_applied_family = ""
+
+
+def _addfont_dir(directory) -> None:
+    """Let matplotlib see fonts installed after it was first imported.
+
+    Fonts an admin uploads land on disk while the process is running.
+    fontconfig picks them up on the next fc-cache, but matplotlib's own list is
+    built once, so without this a freshly installed font is selectable in the
+    UI and silently ignored by every chart.
+    """
+    try:
+        for path in sorted(directory.glob("*")):
+            if path.suffix.lower() in (".ttf", ".otf"):
+                with _contextlib.suppress(Exception):
+                    _fm.fontManager.addfont(str(path))
+    except (OSError, AttributeError):
+        pass
+
+
+def available_chart_fonts() -> list[str]:
+    """Families matplotlib can actually draw with, for the settings picker."""
+    register_fonts()
+    return sorted({f.name for f in _fm.fontManager.ttflist})
+
+
+def use_chart_font(family: str) -> str:
+    """Choose the family for chart text. Returns the one actually applied.
+
+    A configured font that matplotlib cannot find falls back to the house
+    default rather than to matplotlib's own DejaVu, so an unavailable setting
+    degrades to a deliberate choice instead of an accidental one.
+    """
+    global _configured_family, _applied_family
+    with _FONTS_LOCK:
+        _configured_family = (family or "").strip()
+    _applied_family = ""      # force re-application on the next figure
+    register_fonts()
+    return _applied_family
+
+
+def current_chart_font() -> str:
+    """The family charts are drawing with right now."""
+    register_fonts()
+    return _applied_family
+
 
 def register_fonts() -> None:
-    """Register Liberation Sans with matplotlib; fall back to DejaVu Sans if absent.
+    """Make the configured chart font active for matplotlib.
 
     Idempotent and thread-safe — chart rendering runs on a threadpool, so the
-    check-then-set and the shared fontManager / rcParams mutation are guarded by a
-    lock to register exactly once per process. REQ-C-25 (consistent typography).
+    shared fontManager / rcParams mutation is guarded by a lock. Re-applies
+    only when the wanted family differs from the applied one, so the common
+    case stays a single comparison. REQ-C-25 (consistent typography).
     """
-    global _FONTS_REGISTERED
-    if _FONTS_REGISTERED:
+    global _FONTS_REGISTERED, _applied_family
+    wanted = _configured_family or _DEFAULT_CHART_FONT
+    if _FONTS_REGISTERED and _applied_family == wanted:
         return
     with _FONTS_LOCK:
-        if _FONTS_REGISTERED:
+        if _FONTS_REGISTERED and _applied_family == wanted:
             return
-        for fp in _LIBERATION_PATHS:
-            try:
-                _fm.fontManager.addfont(fp)
-            except Exception:
-                pass
+        if not _FONTS_REGISTERED:
+            for fp in _LIBERATION_PATHS:
+                with _contextlib.suppress(Exception):
+                    _fm.fontManager.addfont(fp)
+        # Uploaded fonts are re-scanned on every change: the family being asked
+        # for may have arrived since the last figure was drawn.
+        from reportbuilder.render.fonts import FONT_DIR
+        _addfont_dir(FONT_DIR)
+
         avail = {f.name for f in _fm.fontManager.ttflist}
-        if "Liberation Sans" in avail:
-            _mpl.rcParams["font.family"] = "Liberation Sans"
+        for candidate in (wanted, _DEFAULT_CHART_FONT, "DejaVu Sans"):
+            if candidate in avail:
+                _mpl.rcParams["font.family"] = candidate
+                _applied_family = candidate
+                break
         else:
-            _mpl.rcParams["font.family"] = "DejaVu Sans"  # graceful fallback
+            _applied_family = _mpl.rcParams["font.family"]
         _FONTS_REGISTERED = True
 
 
