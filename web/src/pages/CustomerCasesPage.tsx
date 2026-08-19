@@ -93,7 +93,13 @@ export default function CustomerCasesPage() {
         </div>
       )}
 
-      <div className="mt-8 space-y-2">
+      {/* The template panel sits between the header and the list, so the list
+          needs its own heading to stay recognisable as the page's content. */}
+      <h2 className="mt-8 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        Tutkimukset
+      </h2>
+
+      <div className="mt-3 space-y-2">
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
