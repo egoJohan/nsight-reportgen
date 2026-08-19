@@ -450,11 +450,15 @@ export interface ResolvedCase {
   name: string;
   customer_id: string;
   customer_name: string;
+  /** Template bound on the CASE itself; "" when inheriting. */
+  template_id?: string;
 }
 
 export interface Customer {
   id: string;
   name: string;
+  /** Template bound AT THIS LEVEL; "" when inheriting. */
+  template_id?: string;
 }
 
 /** A case now belongs to exactly one customer, so its id alone is no longer a
@@ -463,6 +467,7 @@ export interface CustomerCase {
   id: string;
   customer_id: string;
   name: string;
+  template_id?: string;
 }
 
 const jsonPost = (body: unknown) => ({

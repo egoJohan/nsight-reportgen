@@ -40,7 +40,8 @@ def list_customers(auth: AuthContext = Depends(get_auth),
                    repo: Repository = Depends(get_repository)) -> list[dict]:
     """Only the customers this caller may see — datahive filters the listing,
     so an over-permissive UI cannot widen it."""
-    return [{"id": c.id, "name": c.name} for c in repo.list_customers(auth)]
+    return [{"id": c.id, "name": c.name, "template_id": c.template_id}
+            for c in repo.list_customers(auth)]
 
 
 @customers_router.get("/customers/{customer_id}")
@@ -50,7 +51,7 @@ def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
         c = repo.get_customer(auth, customer_id)
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
-    return {"id": c.id, "name": c.name}
+    return {"id": c.id, "name": c.name, "template_id": c.template_id}
 
 
 @customers_router.patch("/customers/{customer_id}")
@@ -72,13 +73,15 @@ def create_case(customer_id: str, body: NameBody,
         k = repo.create_case(auth, customer_id, _name(body))
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
-    return {"id": k.id, "customer_id": k.customer_id, "name": k.name}
+    return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
+            "template_id": k.template_id}
 
 
 @customers_router.get("/customers/{customer_id}/cases")
 def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
                repo: Repository = Depends(get_repository)) -> list[dict]:
-    return [{"id": k.id, "customer_id": k.customer_id, "name": k.name}
+    return [{"id": k.id, "customer_id": k.customer_id, "name": k.name,
+             "template_id": k.template_id}
             for k in repo.list_cases(auth, customer_id)]
 
 
@@ -89,7 +92,8 @@ def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_aut
         k = repo.get_case(auth, customer_id, case_id)
     except NotFound:
         raise HTTPException(404, f"Case '{case_id}' not found") from None
-    return {"id": k.id, "customer_id": k.customer_id, "name": k.name}
+    return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
+            "template_id": k.template_id}
 
 
 @customers_router.patch("/customers/{customer_id}/cases/{case_id}")
@@ -100,7 +104,8 @@ def rename_case(customer_id: str, case_id: str, body: NameBody,
         k = repo.rename_case(auth, customer_id, case_id, _name(body))
     except NotFound:
         raise HTTPException(404, f"Case '{case_id}' not found") from None
-    return {"id": k.id, "customer_id": k.customer_id, "name": k.name}
+    return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
+            "template_id": k.template_id}
 
 
 @customers_router.get("/reports/recent")
@@ -137,7 +142,7 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
     except NotFound:
         pass
     return {"id": k.id, "name": k.name, "customer_id": k.customer_id,
-            "customer_name": customer_name}
+            "customer_name": customer_name, "template_id": k.template_id}
 
 
 def _case_name_from_filename(filename: str) -> str:

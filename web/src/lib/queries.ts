@@ -96,6 +96,11 @@ export function useTemplateActions(customerId: string | undefined) {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["templates", customerId] });
     qc.invalidateQueries({ queryKey: ["template"] });
+    // The binding lives ON the customer/case record, so those queries are stale
+    // too — without this the panel keeps showing the previous state.
+    qc.invalidateQueries({ queryKey: ["customer"] });
+    qc.invalidateQueries({ queryKey: ["customers"] });
+    qc.invalidateQueries({ queryKey: ["case"] });
   };
   return {
     upload: useMutation({

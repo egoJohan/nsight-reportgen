@@ -198,7 +198,7 @@ export default function CaseDetailPage() {
           <TemplatePicker
             customerId={resolved.customer_id}
             level="case"
-            currentId=""
+            currentId={resolved.template_id ?? ""}
             inheritedFrom={`asiakkaalta ${resolved.customer_name}`}
             onBind={(tid) =>
               templates.bindCase.mutate({ caseId: id, templateId: tid })

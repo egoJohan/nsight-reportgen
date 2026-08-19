@@ -35,6 +35,9 @@ _PPTX = ("application/vnd.openxmlformats-officedocument.presentationml.presentat
 class Customer:
     id: str
     name: str
+    # The template bound AT THIS LEVEL, "" when none. Surfaced because the UI
+    # must distinguish "set here" from "inherited" to show the right thing.
+    template_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class Case:
     id: str
     customer_id: str
     name: str
+    template_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -111,12 +115,14 @@ class Repository:
         out = []
         for info in self.store.list(auth, "", labels=[P.LABEL_CUSTOMER]):
             d = self._read_json(auth, info.path)
-            out.append(Customer(id=d["id"], name=d.get("name", d["id"])))
+            out.append(Customer(id=d["id"], name=d.get("name", d["id"]),
+                                template_id=d.get("template_id", "")))
         return sorted(out, key=lambda c: c.name.lower())
 
     def get_customer(self, auth: AuthContext, customer_id: str) -> Customer:
         d = self._read_json(auth, P.customer_meta_path(customer_id))
-        return Customer(id=d["id"], name=d.get("name", d["id"]))
+        return Customer(id=d["id"], name=d.get("name", d["id"]),
+                        template_id=d.get("template_id", ""))
 
     def rename_customer(self, auth: AuthContext, customer_id: str, name: str) -> Customer:
         """A metadata write, not a move — which is why ids are in the path and
@@ -142,12 +148,15 @@ class Repository:
                                     labels=[P.LABEL_CASE]):
             d = self._read_json(auth, info.path)
             out.append(Case(id=d["id"], customer_id=customer_id,
-                            name=d.get("name", d["id"])))
+                            name=d.get("name", d["id"]),
+                            template_id=d.get("template_id", "")))
         return sorted(out, key=lambda c: c.name.lower())
 
     def get_case(self, auth: AuthContext, customer_id: str, case_id: str) -> Case:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))
-        return Case(id=d["id"], customer_id=customer_id, name=d.get("name", d["id"]))
+        return Case(id=d["id"], customer_id=customer_id,
+                    name=d.get("name", d["id"]),
+                    template_id=d.get("template_id", ""))
 
     def find_case(self, auth: AuthContext, case_id: str) -> Case | None:
         """Locate a case by id alone, without knowing its customer.
@@ -166,7 +175,8 @@ class Repository:
             if len(segments) >= 2 and segments[1] == case_id:
                 d = self._read_json(auth, info.path)
                 return Case(id=d["id"], customer_id=segments[0],
-                            name=d.get("name", d["id"]))
+                            name=d.get("name", d["id"]),
+                            template_id=d.get("template_id", ""))
         return None
 
     def rename_case(self, auth: AuthContext, customer_id: str, case_id: str,

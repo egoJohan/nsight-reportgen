@@ -87,7 +87,7 @@ export default function CustomerCasesPage() {
           <TemplatePicker
             customerId={customerId}
             level="customer"
-            currentId={(customer as { template_id?: string } | undefined)?.template_id ?? ""}
+            currentId={customer?.template_id ?? ""}
             onBind={(id) => templates.bindCustomer.mutate(id)}
           />
         </div>
