@@ -2,6 +2,8 @@
 from __future__ import annotations
 import os
 import shutil
+import subprocess
+
 import pytest
 from pptx import Presentation
 from pptx.util import Inches
@@ -56,3 +58,61 @@ def test_pdf_page_to_png(tmp_path):
     png = pdf_page_to_png(pdf, 0, str(tmp_path / "p0.png"))
 
     assert os.path.getsize(png) > 0, "PNG must be non-empty"
+
+
+def test_a_long_deck_converts_in_parallel_and_keeps_its_order(tmp_path):
+    """Slices go to separate soffice processes and poppler stitches them back.
+
+    The page count must match the deck and the pages must stay in order — a
+    merge that reordered or dropped slides would be invisible in a thumbnail
+    strip and catastrophic in front of a client.
+    """
+    import shutil as _shutil
+
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from reportbuilder.export.pdf_convert import (
+        pdf_page_count, pptx_to_pdf_parallel,
+    )
+
+    if _shutil.which("pdfunite") is None:
+        pytest.skip("poppler pdfunite required")
+
+    # 20 numbered slides: enough to cross the threshold where slicing pays off.
+    prs = Presentation()
+    for i in range(20):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        run = box.text_frame.paragraphs[0].add_run()
+        run.text = f"SLIDE {i + 1}"
+        run.font.size = Pt(54)
+    src = str(tmp_path / "long.pptx")
+    prs.save(src)
+
+    pdf = pptx_to_pdf_parallel(src, str(tmp_path / "out"))
+    assert pdf_page_count(pdf) == 20
+
+    text = subprocess.run(["pdftotext", pdf, "-"], capture_output=True,
+                          text=True, check=True).stdout
+    found = [line.strip() for line in text.splitlines() if line.strip().startswith("SLIDE")]
+    assert found == [f"SLIDE {i + 1}" for i in range(20)]
+
+
+def test_a_short_deck_is_not_sliced(tmp_path, monkeypatch):
+    """Splitting costs a LibreOffice startup per slice; below the threshold that
+    is slower than just converting the deck."""
+    from pptx import Presentation
+
+    import reportbuilder.export.pdf_convert as pc
+
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[6])
+    src = str(tmp_path / "short.pptx")
+    prs.save(src)
+
+    calls = []
+    monkeypatch.setattr(pc, "pptx_to_pdf",
+                        lambda path, out, priority=False: calls.append(path) or "x.pdf")
+    assert pc.pptx_to_pdf_parallel(src, str(tmp_path)) == "x.pdf"
+    assert calls == [src]                      # the whole deck, in one go

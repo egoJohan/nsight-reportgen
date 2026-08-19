@@ -26,7 +26,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
-from reportbuilder.export.pdf_convert import pptx_to_pdf
+from reportbuilder.export.pdf_convert import pptx_to_pdf, pptx_to_pdf_parallel
 from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.api.model_loader import df_model_for_material
@@ -128,8 +128,10 @@ def orchestrate_render(
     if cancel_check is not None and cancel_check():
         raise RenderCancelled()
 
-    # 4. Convert to PDF (requires LibreOffice soffice) — yields deck.<uid>.pdf
-    work_pdf = pptx_to_pdf(work_pptx, str(out_dir))
+    # 4. Convert to PDF (requires LibreOffice soffice) — yields deck.<uid>.pdf.
+    #    A long deck is sliced and converted in parallel; a short one goes
+    #    straight through, and anything unexpected falls back to one process.
+    work_pdf = pptx_to_pdf_parallel(work_pptx, str(out_dir))
     mark("pdf")
 
     # 5. Atomically publish to the canonical names that the GET routes serve.

@@ -12,12 +12,16 @@ conversions run in parallel without stepping on each other. Profiles are reused
 across calls so the (slow) first-run profile init happens once per slot.
 """
 from __future__ import annotations
+import logging
 import os
 import queue
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 def pdf_page_count(pdf_path: str) -> int:
     """Page count via poppler `pdfinfo`. (REQ-C-21/28a)"""
@@ -29,8 +33,11 @@ def pdf_page_count(pdf_path: str) -> int:
 
 
 # Bound concurrent soffice processes — each is heavy (startup + memory). Sized to
-# the box; conversions beyond this queue for a free profile slot.
-_MAX_CONCURRENT = max(1, min(4, (os.cpu_count() or 2)))
+# the box; conversions beyond this queue for a free profile slot. A deck split
+# for parallel conversion wants several at once, so this is wider than the 4 it
+# was, and tunable where RAM is tighter than cores (each instance is ~300 MB).
+_MAX_CONCURRENT = max(1, int(os.environ.get(
+    "NSIGHT_SOFFICE_WORKERS", min(6, max(2, (os.cpu_count() or 2) - 2)))))
 # Namespace the profile root by PID so multiple worker PROCESSES (gunicorn/uvicorn
 # --workers N) never hand out the same UserInstallation dir to two concurrent
 # soffice invocations — which would re-introduce the single-instance-per-profile
@@ -103,3 +110,83 @@ def pptx_to_pdf(pptx_path: str, out_dir: str, priority: bool = False) -> str:
     if not os.path.exists(pdf):
         raise RuntimeError(f"expected PDF not produced: {pdf}\n{proc.stdout}")
     return pdf
+
+
+# Below this a deck converts faster in one go than it takes to split it: each
+# extra soffice costs ~4s of startup, which only pays off across enough slides.
+_CHUNK_THRESHOLD = 12
+_RID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+def _slide_count(pptx_path: str) -> int:
+    from pptx import Presentation
+    try:
+        return len(Presentation(pptx_path).slides._sldIdLst)
+    except Exception:  # noqa: BLE001 — an unreadable deck is the caller's problem
+        return 0
+
+
+def _slice_deck(pptx_path: str, keep: set[int], out_path: str) -> str:
+    """A copy of *pptx_path* holding only the slides at indices *keep*.
+
+    Masters, layouts and theme come along, so each part converts to exactly the
+    pages the whole deck would have produced for those slides.
+    """
+    from pptx import Presentation
+
+    prs = Presentation(pptx_path)
+    ids = prs.slides._sldIdLst
+    for i, sld in enumerate(list(ids)):
+        if i in keep:
+            continue
+        rid = sld.get(_RID)
+        ids.remove(sld)
+        if rid:
+            try:
+                prs.part.drop_rel(rid)
+            except KeyError:
+                pass
+    prs.save(out_path)
+    return out_path
+
+
+def pptx_to_pdf_parallel(pptx_path: str, out_dir: str, priority: bool = False) -> str:
+    """PPTX -> PDF, converting slices of a long deck at the same time.
+
+    LibreOffice converts a deck one slide after another on one core: a 60-slide
+    report spent 19 seconds here, and an analyst waits through every one of them.
+    The slides are independent, so the deck is sliced, the slices go to separate
+    soffice processes, and poppler stitches the PDFs back together in order.
+
+    Correctness first: anything unexpected — no pdfunite, a slice that will not
+    convert, a page count that does not add up — falls back to converting the
+    whole deck in one process, which is always right if slower.
+    """
+    pages = _slide_count(pptx_path)
+    parts = min(_MAX_CONCURRENT, max(1, pages // 8))
+    if pages < _CHUNK_THRESHOLD or parts < 2 or not shutil.which("pdfunite"):
+        return pptx_to_pdf(pptx_path, out_dir, priority=priority)
+
+    work = Path(out_dir) / f".parts-{os.getpid()}-{abs(hash(pptx_path)) % 10**8}"
+    size = -(-pages // parts)
+    spans = [set(range(i, min(i + size, pages))) for i in range(0, pages, size)]
+    try:
+        work.mkdir(parents=True, exist_ok=True)
+        slices = [_slice_deck(pptx_path, span, str(work / f"part-{i:02d}.pptx"))
+                  for i, span in enumerate(spans)]
+        with ThreadPoolExecutor(max_workers=len(slices)) as pool:
+            # Each conversion is its own process and takes its own profile slot,
+            # so these threads only wait.
+            pdfs = list(pool.map(lambda p: pptx_to_pdf(p, str(work)), slices))
+        merged = os.path.join(out_dir,
+                              os.path.splitext(os.path.basename(pptx_path))[0] + ".pdf")
+        subprocess.run(["pdfunite", *pdfs, merged], capture_output=True, check=True)
+        if pdf_page_count(merged) != pages:
+            raise RuntimeError("merged PDF page count does not match the deck")
+        return merged
+    except Exception:  # noqa: BLE001 — the whole-deck conversion is the safety net
+        log.warning("parallel PDF conversion failed for %s; converting in one go",
+                    pptx_path, exc_info=True)
+        return pptx_to_pdf(pptx_path, out_dir, priority=priority)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
