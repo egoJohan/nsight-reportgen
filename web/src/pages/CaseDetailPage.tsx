@@ -145,7 +145,10 @@ export default function CaseDetailPage() {
       onSuccess: () => {
         clearWorkspace(id);
         toast.success("Tutkimus poistettu");
-        navigate("/");
+        // One level up — the asiakas whose tutkimus this was — not the landing
+        // page. Deleting one study of several should leave you looking at the
+        // rest of them. A pre-hierarchy case has no customer page to go to.
+        navigate(resolved?.customer_id ? `/customers/${resolved.customer_id}` : "/");
       },
       onError: (e) => toast.error(`Poisto epäonnistui: ${e.message}`),
     });
