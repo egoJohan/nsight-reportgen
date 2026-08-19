@@ -55,7 +55,11 @@ start_datahive() {
 start_backend() {
   up "http://127.0.0.1:$API_PORT/health" && { echo "backend already up"; return; }
   local token
-  token=$(python3 -c "import json;print(json.load(open('$ROOT/work/datahive_creds.json'))['bearer'])") || {
+  # bearer_admin, not bearer: nSight owns this hive, and datahive gates
+  # destructive operations behind an admin approval. Without owner authority
+  # every "poista tutkimus" comes back needing consent that only an admin can
+  # give — which is how deletion looked broken to users.
+  token=$(python3 -c "import json;d=json.load(open('$ROOT/work/datahive_creds.json'));print(d.get('bearer_admin') or d['bearer'])") || {
     echo "no work/datahive_creds.json — mint one with 'datahive auth grant'"; return 1; }
   # NSIGHT_DEMO keeps the legacy case/material/report routes on the JSON store
   # while the new customer routes go to datahive. Both run side by side until

@@ -54,7 +54,7 @@ export default function ManageGroupingDialog({
   grouping: GroupingOverride;
   onSave: (override: GroupingOverride) => void;
   // When opened from a suggestion: these variables are PRE-SELECTED in the pool so the
-  // user sees them highlighted and clicks "Group as battery" themselves — nothing is
+  // user sees them highlighted and clicks "Ryhmitä patteristoksi" themselves — nothing is
   // grouped automatically.
   initialSelection?: readonly string[];
 }) {
@@ -93,7 +93,7 @@ export default function ManageGroupingDialog({
   // Reshape with the WORKING grouping so each card's title is the REAL title the
   // backend produces (the frontend can't re-derive it — O-pattern members carry the
   // OPTION label, not the question). Cards + pool are DERIVED from this, so what you
-  // see always matches the questions list after "Apply to report".
+  // see always matches the questions list after "Vie raporttiin".
   const working = { groups, singles, comparisons };
   const { data: workingReshaped } = useRegroupedQuestions(
     open ? materialId : null,
@@ -163,7 +163,7 @@ export default function ManageGroupingDialog({
     setSingles([...(grouping.singles ?? [])]);
     setComparisons((grouping.comparisons ?? []).map((c) => ({ ...c })));
     // Pre-select the suggested variables (if any) — the user reviews the selection and
-    // clicks "Group as battery" to create it; nothing is grouped automatically.
+    // clicks "Ryhmitä patteristoksi" to create it; nothing is grouped automatically.
     setSelected(new Set(initialSelection ?? []));
     setInitialTop([...(initialSelection ?? [])]);
     setJustCreatedKey(null);
@@ -352,13 +352,13 @@ export default function ManageGroupingDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[85vh] w-[85vw] max-w-[85vw] flex-col sm:max-w-[85vw]">
         <DialogHeader>
-          <DialogTitle>Manage grouping</DialogTitle>
+          <DialogTitle>Hallitse ryhmittelyä</DialogTitle>
           <DialogDescription>
             Combine variables into a group — for this report. Tick-box (yes/no)
             variables form a <strong>multi-response</strong> question; rating-scale
             variables on a <strong>compatible scale</strong> (same 1–N range, even if
             worded differently) form a <strong>battery</strong> (a stacked comparison
-            chart) — select them, or use <em>Add selected</em> on an existing battery.
+            chart) — select them, or use <em>Lisää valitut</em> on an existing battery.
             A mixed-wording battery labels its stack from the first member. Other
             question types aren't shown here; groups can be split back into singles.
           </DialogDescription>
@@ -383,7 +383,7 @@ export default function ManageGroupingDialog({
                 </button>
               </div>
               <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Report impact</span>
+                <span>Vaikutus raporttiin</span>
                 <span className="font-semibold tabular-nums text-foreground">{counts.total} items</span>
                 {delta !== 0 && (
                   <span className={`rounded-full px-2 py-0.5 font-medium tabular-nums ${delta < 0 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
@@ -403,7 +403,7 @@ export default function ManageGroupingDialog({
             </div>
             <div className="flex-1 overflow-y-auto p-1.5">
               {pool.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted-foreground">No ungrouped variables</p>
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">Ei ryhmittelemättömiä muuttujia</p>
               ) : (
                 pool.map((name) => (
                   <button
@@ -438,7 +438,7 @@ export default function ManageGroupingDialog({
               <Input
                 value={groupName}
                 onChange={(e) => setGroupName(e.target.value)}
-                placeholder="Group name (optional)"
+                placeholder="Ryhmän nimi (valinnainen)"
                 className="h-8"
               />
               <div className="flex gap-2">
@@ -449,7 +449,7 @@ export default function ManageGroupingDialog({
                   disabled={!canMulti}
                   title={
                     selected.size >= 2 && !canMulti
-                      ? "Select 2+ tick-box (yes/no) variables"
+                      ? "Valitse vähintään 2 kyllä/ei-muuttujaa"
                       : undefined
                   }
                   onClick={() => groupSelected("multi")}
@@ -463,7 +463,7 @@ export default function ManageGroupingDialog({
                   disabled={!canBattery}
                   title={
                     selected.size >= 2 && !canBattery
-                      ? "Select 2+ rating-scale variables sharing a scale"
+                      ? "Valitse vähintään 2 samaa asteikkoa käyttävää arviointimuuttujaa"
                       : undefined
                   }
                   onClick={() => groupSelected("battery")}
@@ -476,11 +476,11 @@ export default function ManageGroupingDialog({
 
           <div className="flex min-h-0 flex-col rounded-lg border">
             <div className="border-b px-3 py-2">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Groups</span>
+              <span className="text-xs font-medium uppercase text-muted-foreground">Ryhmät</span>
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto p-2">
               {cards.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted-foreground">No groups</p>
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">Ei ryhmiä</p>
               ) : (
                 cards.map((card) => {
                   const addable = canAddTo(card);
@@ -514,7 +514,7 @@ export default function ManageGroupingDialog({
                         <Badge variant="outline" className="font-normal text-[10px]">
                           {card.source === "manual" ? "manual" : "auto"}
                         </Badge>
-                        <Button size="icon-sm" variant="ghost" title="Split into single variables" onClick={() => ungroup(card)}>
+                        <Button size="icon-sm" variant="ghost" title="Pura yksittäisiksi muuttujiksi" onClick={() => ungroup(card)}>
                           <Undo2Icon className="size-4" />
                         </Button>
                       </div>
@@ -596,7 +596,7 @@ export default function ManageGroupingDialog({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        title="Split back into separate questions"
+                        title="Pura takaisin erillisiksi kysymyksiksi"
                         onClick={() => splitComparison(q.members ?? [])}
                       >
                         <Undo2Icon className="size-4" />
@@ -611,7 +611,7 @@ export default function ManageGroupingDialog({
                           {labelByQid.get(mq) ?? mq}
                           <button
                             className="text-muted-foreground hover:text-foreground"
-                            title="Remove from comparison"
+                            title="Poista vertailusta"
                             onClick={() => removeMember(q.members ?? [], mq)}
                           >
                             ×
@@ -631,7 +631,7 @@ export default function ManageGroupingDialog({
           {/* Changes rail — every edit, reversible */}
           <div className="flex w-60 shrink-0 flex-col rounded-lg border">
             <div className="flex items-center justify-between border-b px-3 py-2">
-              <span className="text-xs font-medium uppercase text-muted-foreground">Changes</span>
+              <span className="text-xs font-medium uppercase text-muted-foreground">Muutokset</span>
               {changes.length > 0 && (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
                   {changes.length} pending
@@ -662,7 +662,7 @@ export default function ManageGroupingDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Peruuta</Button>
           <Button
             onClick={() => {
               onSave({ groups, singles, comparisons });

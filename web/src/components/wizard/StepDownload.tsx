@@ -87,7 +87,7 @@ export default function StepDownload({
     try {
       const ok = await save();
       if (!ok) {
-        setError("Could not save the report before rendering. Try again.");
+        setError("Raportin tallennus ennen renderöintiä epäonnistui. Yritä uudelleen.");
         return;
       }
       await render.mutateAsync({ reportId, materialId, signal: controller.signal });
@@ -100,10 +100,10 @@ export default function StepDownload({
         setCancelled(true);
         return;
       }
-      const msg = e instanceof Error ? e.message : "Render failed";
+      const msg = e instanceof Error ? e.message : "Renderöinti epäonnistui";
       // 503 → LibreOffice missing
       if (/503/.test(msg) || /libreoffice/i.test(msg)) {
-        setError("Chart rendering requires LibreOffice on the server.");
+        setError("Kuvaajien renderöinti vaatii LibreOfficen palvelimelle.");
       } else {
         setError(msg);
       }
@@ -121,13 +121,13 @@ export default function StepDownload({
           : await api.reports.previewPptx(caseId, reportId);
       downloadBlob(blob, `${fileBase}.${kind}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Download failed");
+      setError(e instanceof Error ? e.message : "Lataus epäonnistui");
     } finally {
       setDownloading(null);
     }
   }
 
-  // Deck generation is DELIBERATE (a "Generate deck" click), not automatic on entering
+  // Deck generation is DELIBERATE (a "Luo esitys" click), not automatic on entering
   // this step — a full render can be very resource-heavy (a large deck of slides), so it
   // must never run just because the user navigated here.
   const pending = render.isPending;
@@ -140,7 +140,7 @@ export default function StepDownload({
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold">Generate your deck</h3>
+          <h3 className="text-base font-semibold">Luo esitys</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Assemble {deckCharts.length}{" "}
             {deckCharts.length === 1 ? "slide" : "slides"} into a PowerPoint
@@ -179,7 +179,7 @@ export default function StepDownload({
           ) : (
             <Button className="min-w-[150px]" onClick={handleGenerate} disabled={noCharts}>
               <SparklesIcon className="size-4" />
-              {rendered ? "Regenerate deck" : "Generate deck"}
+              {rendered ? "Luo esitys uudelleen" : "Luo esitys"}
             </Button>
           )}
         </div>
@@ -229,7 +229,7 @@ export default function StepDownload({
         <div className="flex h-[640px] w-full flex-col items-center justify-center gap-4 rounded-xl border bg-muted/30 text-center">
           <Loader2Icon className="size-7 animate-spin text-primary" />
           <div>
-            <p className="text-sm font-medium">Generating your deck…</p>
+            <p className="text-sm font-medium">Luodaan esitystä…</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Rendering charts and assembling slides — this can take a moment.
             </p>
@@ -241,7 +241,7 @@ export default function StepDownload({
       ) : pdfUrl ? (
         <iframe
           src={pdfUrl}
-          title="Report PDF preview"
+          title="Raportin PDF-esikatselu"
           className="h-[640px] w-full rounded-xl border"
         />
       ) : null}

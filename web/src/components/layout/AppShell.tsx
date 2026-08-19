@@ -358,10 +358,10 @@ export default function AppShell() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={<NavLink to="/settings" />}
-                tooltip="Settings"
+                tooltip="Asetukset"
               >
                 <SettingsIcon className="size-4" />
-                <span>Settings</span>
+                <span>Asetukset</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

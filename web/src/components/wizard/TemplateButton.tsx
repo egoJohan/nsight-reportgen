@@ -5,7 +5,9 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import TemplatePicker from "@/components/TemplatePicker";
-import { useResolvedCase, useReportTemplate, useTemplateActions } from "@/lib/queries";
+import {
+  useResolvedCase, useReportTemplate, useCaseTemplate, useTemplateActions,
+} from "@/lib/queries";
 
 /** Compact template control for the wizard toolbar.
  *
@@ -20,18 +22,24 @@ export default function TemplateButton({
   reportId,
 }: {
   caseId: string;
-  reportId: string;
+  /** Omit to control the TUTKIMUS's template instead of a single report's. */
+  reportId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const { data: resolvedCase } = useResolvedCase(caseId);
   const customerId = resolvedCase?.customer_id;
-  const { data: resolved } = useReportTemplate(customerId, caseId, reportId);
+  const level = reportId ? "report" : "case";
+  // Both hooks are declared unconditionally — hook order cannot vary between
+  // renders — and each disables itself when its ids are absent.
+  const report = useReportTemplate(customerId, caseId, reportId);
+  const forCase = useCaseTemplate(customerId, reportId ? undefined : caseId);
+  const resolved = reportId ? report.data : forCase.data;
   const actions = useTemplateActions(customerId);
 
   if (!customerId) return null;
 
   const label = resolved?.name ?? "Pohja";
-  const inherited = resolved && resolved.level !== "report";
+  const inherited = resolved && resolved.level !== level;
 
   return (
     <>
@@ -42,7 +50,7 @@ export default function TemplateButton({
         title={
           inherited
             ? `Peritty (${resolved?.level}): ${label}`
-            : `Asetettu tälle raportille: ${label}`
+            : `Asetettu ${level === "report" ? "tälle raportille" : "tälle tutkimukselle"}: ${label}`
         }
       >
         <PaletteIcon className="size-4" />
@@ -52,26 +60,31 @@ export default function TemplateButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Raportin esityspohja</DialogTitle>
+            <DialogTitle>
+              {level === "report" ? "Raportin esityspohja" : "Tutkimuksen esityspohja"}
+            </DialogTitle>
             <DialogDescription>
-              Valinta koskee vain tätä raporttia. Ilman valintaa käytetään
-              tutkimuksen tai asiakkaan pohjaa.
+              {level === "report"
+                ? "Valinta koskee vain tätä raporttia. Ilman valintaa käytetään tutkimuksen tai asiakkaan pohjaa."
+                : "Valinta koskee tämän tutkimuksen uusia raportteja. Ilman valintaa käytetään asiakkaan pohjaa."}
             </DialogDescription>
           </DialogHeader>
           <TemplatePicker
             customerId={customerId}
-            level="report"
-            currentId={resolved?.level === "report" ? resolved.template_id : ""}
+            level={level}
+            currentId={resolved?.level === level ? resolved.template_id : ""}
             inheritedFrom={inherited ? label : undefined}
             onBind={(tid) =>
-              actions.bindReport.mutate({ caseId, reportId, templateId: tid })
+              reportId
+                ? actions.bindReport.mutate({ caseId, reportId, templateId: tid })
+                : actions.bindCase.mutate({ caseId, templateId: tid })
             }
           />
-          {resolved?.level === "pinned" && (
+          {reportId && resolved?.level === "pinned" && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => actions.refreshReport.mutate({ caseId, reportId })}
+              onClick={() => actions.refreshReport.mutate({ caseId, reportId: reportId! })}
             >
               Päivitä nykyiseen pohjaan
             </Button>

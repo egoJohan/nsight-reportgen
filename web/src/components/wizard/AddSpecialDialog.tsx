@@ -40,38 +40,38 @@ const SLIDE_CHOICES: {
 }[] = [
   {
     type: "special_overview",
-    label: "Overview",
+    label: "Yhteenveto",
     description:
-      "Background about the research, written by AI from the available information.",
+      "Taustaa tutkimuksesta, tekoälyn kirjoittamana saatavilla olevasta tiedosta.",
     Icon: FileTextIcon,
   },
   {
     type: "special_conclusion",
-    label: "Conclusion",
+    label: "Johtopäätökset",
     description:
-      "The major conclusions drawn across the report's questions, written by AI.",
+      "Raportin kysymyksistä vedetyt keskeiset johtopäätökset, tekoälyn kirjoittamana.",
     Icon: ListChecksIcon,
   },
   {
     type: "special_demographics",
-    label: "Demographics",
+    label: "Taustatiedot",
     description:
-      "Facts about the respondents plus a chart per demographic question, written by AI.",
+      "Tietoa vastaajista sekä kuvaaja jokaisesta taustakysymyksestä, tekoälyn kirjoittamana.",
     Icon: UsersIcon,
   },
   {
     type: "special_blank",
-    label: "Empty slide",
+    label: "Tyhjä dia",
     description:
-      "A heading and your own bullets, written in markdown — nothing generated.",
+      "Otsikko ja omat ranskalaiset viivat markdownina — mitään ei generoida.",
     Icon: PencilLineIcon,
     repeatable: true,
   },
   {
     type: "compare_groups",
-    label: "Compare groups",
+    label: "Vertaa ryhmiä",
     description:
-      "One slide per question, split into the groups of a variable you choose — e.g. the two packaging designs.",
+      "Yksi dia per kysymys, jaettuna valitsemasi muuttujan ryhmiin — esim. kahteen pakkausvaihtoehtoon.",
     Icon: ColumnsIcon,
     repeatable: true,
   },
@@ -123,12 +123,12 @@ export function AddSpecialDialog({
       >
         <DialogHeader className="min-w-0">
           <DialogTitle>
-            {mode === "compare" ? "Compare groups" : "Add a slide"}
+            {mode === "compare" ? "Vertaa ryhmiä" : "Lisää dia"}
           </DialogTitle>
           <DialogDescription>
             {mode === "compare"
-              ? "Adds one slide per question, split into the chosen variable's groups. Your existing total-level slides stay as they are."
-              : "Add a slide beyond the one-per-question defaults."}
+              ? "Lisää yhden dian per kysymys, jaettuna valitun muuttujan ryhmiin. Nykyiset kokonaistason diat säilyvät ennallaan."
+              : "Lisää dia yksi-per-kysymys-oletusten lisäksi."}
           </DialogDescription>
         </DialogHeader>
 
@@ -257,10 +257,10 @@ function CompareGroupsForm({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
       <div className="min-w-0 space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Group by</Label>
+        <Label className="text-xs font-medium text-muted-foreground">Ryhmittele</Label>
         <Select value={clf} onValueChange={(v) => setClf(v ?? "")}>
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Choose a variable…" />
+            <SelectValue placeholder="Valitse muuttuja…" />
           </SelectTrigger>
           <SelectContent>
             {segmenters.map((v) => (
@@ -278,7 +278,7 @@ function CompareGroupsForm({
             Questions
           </Label>
           {/* Only the questions this variable SPLITS can be selected, so
-              "Select all" means all selectable ones — never a disabled row. */}
+              "Valitse kaikki" means all selectable ones — never a disabled row. */}
           {clf && !loading && selectable.length > 0 && (
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -357,7 +357,7 @@ function CompareGroupsForm({
         <Button disabled={!clf || chosen.length === 0} onClick={() => onSubmit(clf, chosen)}>
           {chosen.length
             ? `Add ${chosen.length} slide${chosen.length === 1 ? "" : "s"}`
-            : "Add slides"}
+            : "Lisää diat"}
         </Button>
       </DialogFooter>
     </>

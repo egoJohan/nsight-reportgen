@@ -70,9 +70,9 @@ function replaceSpecialGroup(
 }
 
 const STEPS = [
-  { id: "select", label: "Select" },
-  { id: "configure", label: "Design" },
-  { id: "download", label: "Preview" },
+  { id: "select", label: "Valinta" },
+  { id: "configure", label: "Suunnittelu" },
+  { id: "download", label: "Esikatselu" },
 ];
 
 // Index of the Design step — the Preview grid jumps here when a slide is clicked.

@@ -25,7 +25,7 @@ import {
   useCaseMaterials,
 } from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
-import TemplatePicker from "@/components/TemplatePicker";
+import TemplateButton from "@/components/wizard/TemplateButton";
 
 function CaseHeading({
   caseId,
@@ -54,7 +54,7 @@ function CaseHeading({
       { caseId, name: next },
       {
         onSuccess: () => setEditing(false),
-        onError: (e) => toast.error(`Rename failed: ${e.message}`),
+        onError: (e) => toast.error(`Nimen muutos epäonnistui: ${e.message}`),
       }
     );
   }
@@ -146,7 +146,7 @@ export default function CaseDetailPage() {
         toast.success("Tutkimus poistettu");
         navigate("/");
       },
-      onError: (e) => toast.error(`Delete failed: ${e.message}`),
+      onError: (e) => toast.error(`Poisto epäonnistui: ${e.message}`),
     });
   }
 
@@ -180,32 +180,21 @@ export default function CaseDetailPage() {
           <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0 text-muted-foreground hover:border-destructive/40 hover:text-destructive"
-          onClick={() => setConfirmDelete(true)}
-        >
-          <Trash2Icon className="size-4" />
-          Poista tutkimus
-        </Button>
-      </div>
-
-      {/* A tutkimus can override its customer's pohja; leaving it unset
-          inherits. */}
-      {resolved?.customer_id && id && (
-        <div className="mb-8">
-          <TemplatePicker
-            customerId={resolved.customer_id}
-            level="case"
-            currentId={resolved.template_id ?? ""}
-            inheritedFrom={`asiakkaalta ${resolved.customer_name}`}
-            onBind={(tid) =>
-              templates.bindCase.mutate({ caseId: id, templateId: tid })
-            }
-          />
+        {/* Same compact control as the report toolbar: the pohja is a setting
+            you check at a glance, not a panel that competes with the data. */}
+        <div className="flex shrink-0 items-center gap-2">
+          {id && <TemplateButton caseId={id} />}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2Icon className="size-4" />
+            Poista tutkimus
+          </Button>
         </div>
-      )}
+      </div>
 
       {!materialId ? (
         // No data yet (e.g. a legacy case): let the user import a SAV into it.
@@ -233,7 +222,7 @@ export default function CaseDetailPage() {
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Cancel
+              Peruuta
             </Button>
             <Button
               variant="destructive"

@@ -49,6 +49,19 @@ class RepositoryClient:
 
     # -- material ---------------------------------------------------------
 
+    def attach_material(self, case_id: str, name: str, sav_bytes: bytes,
+                        codebook_summary: str = "") -> str:
+        """Attach a .sav to a tutkimus; return the material id.
+
+        The legacy signature is case-rooted, so the customer is resolved here.
+        `codebook_summary` is accepted and ignored: nSight parses the .sav in
+        process, so nothing downstream reads it, and the legacy caller still
+        passes it.
+        """
+        k = self._case(case_id)
+        return self.repo.attach_material(self.auth, k.customer_id, k.id,
+                                         name, sav_bytes).id
+
     def get_material(self, material_id: str) -> bytes:
         m = self._material(material_id)
         return self.repo.get_material(self.auth, m.customer_id, m.case_id, m.id)
@@ -109,6 +122,17 @@ class RepositoryClient:
             out += [{"id": k.id, "name": k.name}
                     for k in self.repo.list_cases(self.auth, c.id)]
         return out
+
+    def delete_case(self, case_id: str) -> int:
+        """Delete a tutkimus and everything under it.
+
+        ConsentRequired is allowed to propagate: datahive gates destructive
+        operations behind explicit approval, and catching it here would either
+        silently delete nothing or auto-approve destroying an analyst's work.
+        The route turns it into a response the UI can act on.
+        """
+        k = self._case(case_id)
+        return self.repo.delete_case(self.auth, k.customer_id, k.id)
 
     def rename_case(self, case_id: str, name: str) -> None:
         k = self._case(case_id)

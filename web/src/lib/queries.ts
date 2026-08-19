@@ -89,6 +89,19 @@ export function useReportTemplate(
   });
 }
 
+/** What a tutkimus resolves to with no report in play. Shares the "template"
+ *  key prefix so a bind at any level invalidates it. */
+export function useCaseTemplate(
+  customerId: string | undefined,
+  caseId: string | undefined
+) {
+  return useQuery({
+    queryKey: ["template", customerId, caseId],
+    queryFn: () => api.templates.forCase(customerId!, caseId!),
+    enabled: !!customerId && !!caseId,
+  });
+}
+
 /** Every template mutation invalidates both lists and resolutions: binding at
  *  one level changes what the levels below resolve to. */
 export function useTemplateActions(customerId: string | undefined) {

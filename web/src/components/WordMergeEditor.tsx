@@ -67,7 +67,7 @@ export default function WordMergeEditor({
     save.mutate(
       { qid, merges: groups },
       {
-        onSuccess: () => toast.success("Word-cloud merges saved"),
+        onSuccess: () => toast.success("Sanapilven yhdistämiset tallennettu"),
         onError: (e) =>
           toast.error(`Save failed: ${e instanceof Error ? e.message : "unknown error"}`),
       }
@@ -75,7 +75,7 @@ export default function WordMergeEditor({
   }
 
   if (!data) {
-    return <p className="text-xs text-muted-foreground">Loading words…</p>;
+    return <p className="text-xs text-muted-foreground">Ladataan sanoja…</p>;
   }
   if (data.words.length === 0 && groups.length === 0) {
     return <p className="text-xs text-muted-foreground">No word-cloud answers to merge.</p>;
@@ -96,7 +96,7 @@ export default function WordMergeEditor({
                 type="button"
                 onClick={() => setGroups((gs) => gs.filter((x) => x !== g))}
                 className="text-muted-foreground hover:text-destructive"
-                title="Split this merge"
+                title="Pura tämä yhdistäminen"
               >
                 <Undo2Icon className="size-3.5" />
               </button>
@@ -142,7 +142,7 @@ export default function WordMergeEditor({
         <Input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Merged word (defaults to the most frequent)"
+          placeholder="Yhdistetty sana (oletuksena yleisin)"
           className="h-8 flex-1"
         />
         <Button size="sm" variant="outline" disabled={selected.size < 2} onClick={mergeSelected}>

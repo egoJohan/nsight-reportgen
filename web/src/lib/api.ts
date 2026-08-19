@@ -581,6 +581,10 @@ export const api = {
         `${API_BASE}/customers/${customerId}/cases/${caseId}/reports/${reportId}/template`
       ).then((r) => json<ResolvedTemplate>(r)),
 
+    forCase: (customerId: string, caseId: string): Promise<ResolvedTemplate> =>
+      fetch(`${API_BASE}/customers/${customerId}/cases/${caseId}/template`)
+        .then((r) => json<ResolvedTemplate>(r)),
+
     /** "Päivitys pitää erikseen pyytää" — move a delivered report onto whatever
      *  its tutkimus or customer now specifies. */
     refreshReport: (customerId: string, caseId: string, reportId: string) =>

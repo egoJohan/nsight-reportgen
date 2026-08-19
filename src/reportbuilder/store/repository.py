@@ -524,6 +524,25 @@ class Repository:
             d.pop("template_id", None)
         self._write_json(auth, path, d, [label])
 
+    def resolve_case_template(self, auth: AuthContext, customer_id: str,
+                              case_id: str) -> tuple[str, str]:
+        """What a tutkimus renders with absent any report-level choice.
+
+        This is the inheritance half of `resolve_template`, split out because
+        the tutkimus page has to answer it with no report in hand. Same order,
+        lowest wins: the tutkimus's own choice, then its asiakas, then the
+        house default.
+        """
+        for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
+                            (P.customer_meta_path(customer_id), "customer")):
+            try:
+                d = self._read_json(auth, path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            if d.get("template_id"):
+                return d["template_id"], level
+        return "", "default"
+
     def resolve_template(self, auth: AuthContext, customer_id: str, case_id: str,
                          report_id: str) -> tuple[str, str]:
         """Which template does this report render with, and where did it come from?
@@ -563,16 +582,8 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             pass
 
-        inherited, inherited_level = "", "default"
-        for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
-                            (P.customer_meta_path(customer_id), "customer")):
-            try:
-                d = self._read_json(auth, path)
-            except (NotFound, ValueError, UnicodeDecodeError):
-                continue
-            if d.get("template_id"):
-                inherited, inherited_level = d["template_id"], level
-                break
+        inherited, inherited_level = self.resolve_case_template(
+            auth, customer_id, case_id)
 
         # Specificity beats recency. A template set on the TUTKIMUS is a more
         # specific decision than one on the asiakas, so it wins even over a pin

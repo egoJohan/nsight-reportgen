@@ -54,7 +54,7 @@ export default function ChartThumb({
     grouping,
   });
   const message =
-    error instanceof Error ? error.message : error ? "Preview failed" : null;
+    error instanceof Error ? error.message : error ? "Esikatselu epäonnistui" : null;
 
   return (
     <div
@@ -67,14 +67,14 @@ export default function ChartThumb({
       {url ? (
         <img
           src={url}
-          alt="Chart preview"
+          alt="Kuvaajan esikatselu"
           className="max-h-full max-w-full rounded-md object-contain shadow-sm"
         />
       ) : (
         !message && (
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
             <ImageIcon className="size-6 opacity-40" />
-            {seen && <span className="text-xs">Rendering…</span>}
+            {seen && <span className="text-xs">Renderöidään…</span>}
           </div>
         )
       )}

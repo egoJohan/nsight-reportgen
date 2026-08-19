@@ -48,7 +48,7 @@ export default function ChatPanel({
       const { reply } = await api.materials.chat(materialId, next);
       setMessages((m) => [...m, { role: "assistant", content: reply }]);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Chat failed";
+      const msg = e instanceof Error ? e.message : "Keskustelu epäonnistui";
       setError(/503/.test(msg) ? "AI-palvelu ei ole juuri nyt käytettävissä." : msg);
     } finally {
       setLoading(false);

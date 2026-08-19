@@ -70,7 +70,7 @@ def test_delete_case_cascades_materials_via_memory(client_memory, memory_hive, s
 
     resp = client_memory.delete(f"/cases/{cid}")
     assert resp.status_code == 200
-    assert resp.json() == {"deleted": cid}
+    assert resp.json()["deleted"] == cid
 
     # Cascade: the case is gone and its material is no longer reachable.
     assert cid not in {c["id"] for c in client_memory.get("/cases").json()}
@@ -83,7 +83,12 @@ def test_delete_missing_case_is_404_via_memory(client_memory):
     assert resp.status_code == 404
 
 
-def test_delete_not_supported_is_501_on_mock_spec(client_mock):
-    """Mock(spec=DataHiveClient) has no delete_case -> route returns 501."""
-    resp = client_mock.delete("/cases/case-1")
-    assert resp.status_code == 501
+# Deleted: test_delete_not_supported_is_501_on_mock_spec.
+#
+# It asserted that a store without `delete_case` makes the route answer 501,
+# which the route achieved by probing with getattr(). That probe is why the
+# datahive-backed store — which CAN delete — reported "not implemented" to
+# users: RepositoryClient simply had no such method yet, and the guard turned
+# a missing implementation into a plausible-looking answer instead of an
+# error. Deletion is part of the store contract now, so the route calls it
+# directly and a store that cannot delete is a bug, not a 501.

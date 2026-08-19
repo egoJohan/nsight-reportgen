@@ -160,6 +160,20 @@ def bind_report_template(customer_id: str, case_id: str, report_id: str,
     return {"template_id": template_id, "level": level}
 
 
+@templates_router.get("/customers/{customer_id}/cases/{case_id}/template")
+def case_template(customer_id: str, case_id: str,
+                  auth: AuthContext = Depends(get_auth),
+                  repo: Repository = Depends(get_repository)) -> dict:
+    """What this tutkimus renders with, and where that came from."""
+    template_id, level = repo.resolve_case_template(auth, customer_id, case_id)
+    name = ""
+    if template_id:
+        name = next((t.name for t in repo.list_templates(auth, customer_id)
+                     if t.id == template_id), "")
+    return {"template_id": template_id, "level": level,
+            "name": name or ("nSight-oletuspohja" if not template_id else template_id)}
+
+
 @templates_router.get(
     "/customers/{customer_id}/cases/{case_id}/reports/{report_id}/template")
 def report_template(customer_id: str, case_id: str, report_id: str,

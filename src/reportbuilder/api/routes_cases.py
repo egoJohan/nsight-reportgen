@@ -63,12 +63,33 @@ def delete_case(
     case_id: str,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
-    """Delete a case and its materials."""
-    fn = getattr(client, "delete_case", None)
-    if fn is None:
-        raise HTTPException(status_code=501, detail="Delete not supported by this store")
+    """Delete a tutkimus and everything in it: materials, curation, reports, renders.
+
+    datahive gates destructive operations behind explicit approval, so this can
+    come back needing consent. That is returned as a 409 carrying the approval
+    envelope rather than a bare error, so the caller can approve and retry —
+    swallowing it would either do nothing or auto-approve destroying an
+    analyst's work.
+    """
+    from reportbuilder.store.seam import ConsentRequired
+
     try:
-        fn(case_id)
+        removed = client.delete_case(case_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found") from exc
-    return {"deleted": case_id}
+    except ConsentRequired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "consent_required",
+                "message": "Poisto vaatii vahvistuksen datahivessä.",
+                "request_id": exc.request_id,
+                "target": exc.target,
+                "approve": exc.envelope.get("approval_urls", {}),
+            },
+        ) from exc
+    # Legacy stores return nothing from delete; only report a count we have.
+    payload = {"deleted": case_id}
+    if isinstance(removed, int):
+        payload["objects_removed"] = removed
+    return payload
