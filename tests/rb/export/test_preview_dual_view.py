@@ -4,6 +4,7 @@ TDD — these tests must be written before the implementation.
 Skip if LibreOffice (soffice) or poppler (pdftoppm) are not installed.
 """
 from __future__ import annotations
+import pathlib
 import shutil
 import pandas as pd
 import pytest
@@ -141,3 +142,26 @@ def test_rasterize_pages_count(tmp_path):
     out_dir = str(tmp_path / "pages")
     pages = rasterize_pages(pdf_path, out_dir)
     assert len(pages) == 1
+
+
+def test_chunked_rasterization_matches_a_single_process(tmp_path):
+    """The pages go out in parallel chunks; the result must be identical.
+
+    Safe only because pdftoppm pads the page number by the DOCUMENT's page
+    count, not the chunk's — so page 9 of a 12-page deck is `page-09.png`
+    whether it was rendered with pages 1-8 or on its own, and the sort still
+    orders the deck. If that ever changes, this test says so.
+    """
+    model, data = _two_chart_model_and_data()
+    report = _two_chart_report()
+    pptx_path = build_pptx(report, model, data, str(tmp_path / "two.pptx"))
+    pdf_path = pptx_to_pdf(pptx_path, str(tmp_path / "pdf_out"))
+
+    one = rasterize_pages(pdf_path, str(tmp_path / "serial"), workers=1)
+    many = rasterize_pages(pdf_path, str(tmp_path / "parallel"), workers=2)
+
+    assert [pathlib.Path(p).name for p in one] == [pathlib.Path(p).name for p in many]
+    assert len(many) == 2
+    for path in many:
+        with open(path, "rb") as f:
+            assert f.read(8) == PNG_MAGIC

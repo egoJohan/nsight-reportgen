@@ -10,10 +10,12 @@ GET /cases/{case_id}/reports/{report_id}/preview.pdf
 from __future__ import annotations
 
 import asyncio
+import logging
 import pathlib
 import tempfile
 import os
 import threading
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,6 +33,8 @@ from reportbuilder.api.model_loader import df_model_for_material
 from reportbuilder.model.report import report_from_json
 from reportbuilder.render.deck import RenderCancelled
 from reportbuilder.store.datahive_client import DataHiveClient
+
+log = logging.getLogger(__name__)
 
 render_router = APIRouter()
 
@@ -69,12 +73,22 @@ def orchestrate_render(
     Returns {"pptx": <path>, "pdf": <path>, "preview": [<png paths>]}.
     (REQ-C-19, REQ-C-21, REQ-C-22)
     """
+    # A render is something an analyst sits and waits through, so where the time
+    # went is worth knowing without a profiler.
+    marks: list[tuple[str, float]] = []
+    started = time.monotonic()
+
+    def mark(phase: str) -> None:
+        marks.append((phase, time.monotonic() - started))
+
     # 1. Load and parse the report definition
     report = report_from_json(client.load_report(case_id, report_id))
+    mark("report")
 
     # 2. Fetch material data + build the model with THIS report's grouping applied
     #    (auto-detection fills the gaps).
     df, model = df_model_for_material(material_id, client, report.grouping)
+    mark("data")
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories
@@ -101,8 +115,10 @@ def orchestrate_render(
                 # An unreadable template must not fail the render; the deck
                 # falls back to the generic style it used before templates.
                 style = None
+        mark("template")
         build_pptx(report, model, df, work_pptx, style=style,
                    cancel_check=cancel_check)
+        mark("build")
     except ValueError as exc:
         # Surface chart-level errors (e.g. scatter with null scatter_xy) as a
         # clean 422 instead of an unhandled 500. (FIX-3)
@@ -114,6 +130,7 @@ def orchestrate_render(
 
     # 4. Convert to PDF (requires LibreOffice soffice) — yields deck.<uid>.pdf
     work_pdf = pptx_to_pdf(work_pptx, str(out_dir))
+    mark("pdf")
 
     # 5. Atomically publish to the canonical names that the GET routes serve.
     final_pptx = os.path.join(str(out_dir), "deck.pptx")
@@ -126,7 +143,19 @@ def orchestrate_render(
     page_dir = os.path.join(str(out_dir), f"pages-{uid}")
     os.makedirs(page_dir, exist_ok=True)
     rasterize = slide_view if view != "pages" else page_view
-    preview = rasterize(final_pdf, page_dir)
+    # 110 dpi is ~1500px across a 13.3in slide — more than the UI shows (it
+    # renders the PDF itself and never asks for these) and enough for anything
+    # that reads them. At the 150 default this step was a quarter of the wait.
+    preview = rasterize(final_pdf, page_dir, dpi=110)
+    mark("raster")
+
+    last = 0.0
+    parts = []
+    for phase, at in marks:
+        parts.append(f"{phase} {at - last:.1f}s")
+        last = at
+    log.info("rendered %s: %d slides in %.1fs (%s)", report_id, len(preview),
+             last, ", ".join(parts))
 
     # 7. Return artifact paths
     return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}

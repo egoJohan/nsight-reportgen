@@ -38,7 +38,17 @@ app = build_server_app()
 
 
 def main():
+    import logging
     import uvicorn
+
+    # uvicorn configures its OWN loggers and leaves the root one bare, so
+    # nothing the application logs is ever printed — including the warning that
+    # says a customer's template could not be harvested, and the line that says
+    # where a slow render spent its time. NSIGHT_LOG_LEVEL raises or lowers it.
+    logging.basicConfig(
+        level=os.environ.get("NSIGHT_LOG_LEVEL", "INFO").upper(),
+        format="%(levelname)s:%(name)s: %(message)s",
+    )
 
     # Dev hot-reload: NSIGHT_RELOAD=1 restarts the server when backend source
     # changes (watches src/reportbuilder only, so frontend edits don't churn it).
