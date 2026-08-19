@@ -217,7 +217,10 @@ def test_api_full_chain(tmp_path):
 
     resp = tc.post(
         f"/cases/{case_id}/reports/{report_id}/render",
-        json={"material_id": material_id},
+        # page_images: per-slide PNGs are opt-in now (nothing serves them and
+        # the app draws the deck from the PDF); this chain asserts they still
+        # come out when asked for.
+        json={"material_id": material_id, "page_images": True},
     )
     assert resp.status_code == 200, resp.text
     result = resp.json()

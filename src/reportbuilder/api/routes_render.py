@@ -26,7 +26,9 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
-from reportbuilder.export.pdf_convert import pptx_to_pdf, pptx_to_pdf_parallel
+from reportbuilder.export.pdf_convert import (
+    pdf_page_count, pptx_to_pdf, pptx_to_pdf_parallel,
+)
 from reportbuilder.export.preview import page_view, slide_view
 from reportbuilder.export.pptx_build import build_pptx
 from reportbuilder.api.model_loader import df_model_for_material
@@ -68,10 +70,17 @@ def orchestrate_render(
     out_dir: str | None = None,
     cancel_check=None,
     template_path: str | None = None,
+    page_images: bool = False,
 ) -> dict:
-    """Load the report + the material's data, build the deck, convert to PDF, rasterize a preview.
+    """Load the report + the material's data, build the deck, convert to PDF.
     Returns {"pptx": <path>, "pdf": <path>, "preview": [<png paths>]}.
     (REQ-C-19, REQ-C-21, REQ-C-22)
+
+    One image per slide (REQ-C-19b) is produced on request — `page_images=True`.
+    It is off by default because nothing asks for it: the app shows the deck by
+    fetching the PDF and letting the browser draw it, and no route even serves
+    these files. Producing them anyway was ~7s of a 30s render the analyst waits
+    through.
     """
     # A render is something an analyst sits and waits through, so where the time
     # went is worth knowing without a profiler.
@@ -140,24 +149,25 @@ def orchestrate_render(
     os.replace(work_pptx, final_pptx)
     os.replace(work_pdf, final_pdf)
 
-    # 6. Rasterize preview into a per-render subdir so concurrent renders don't
-    #    mix each other's page*.png via the sorted glob.
-    page_dir = os.path.join(str(out_dir), f"pages-{uid}")
-    os.makedirs(page_dir, exist_ok=True)
-    rasterize = slide_view if view != "pages" else page_view
-    # 110 dpi is ~1500px across a 13.3in slide — more than the UI shows (it
-    # renders the PDF itself and never asks for these) and enough for anything
-    # that reads them. At the 150 default this step was a quarter of the wait.
-    preview = rasterize(final_pdf, page_dir, dpi=110)
-    mark("raster")
+    # 6. One image per slide, when the caller wants them (REQ-C-19b). Into a
+    #    per-render subdir so concurrent renders don't mix each other's
+    #    page*.png via the sorted glob. 110 dpi is ~1500px across a 13.3in
+    #    slide — enough for anything that reads them.
+    preview: list[str] = []
+    if page_images:
+        page_dir = os.path.join(str(out_dir), f"pages-{uid}")
+        os.makedirs(page_dir, exist_ok=True)
+        rasterize = slide_view if view != "pages" else page_view
+        preview = rasterize(final_pdf, page_dir, dpi=110)
+        mark("raster")
 
     last = 0.0
     parts = []
     for phase, at in marks:
         parts.append(f"{phase} {at - last:.1f}s")
         last = at
-    log.info("rendered %s: %d slides in %.1fs (%s)", report_id, len(preview),
-             last, ", ".join(parts))
+    log.info("rendered %s: %d slides in %.1fs (%s)", report_id,
+             pdf_page_count(final_pdf), last, ", ".join(parts))
 
     # 7. Return artifact paths
     return {"pptx": final_pptx, "pdf": final_pdf, "preview": preview}
@@ -284,6 +294,10 @@ class RenderRequest(BaseModel):
 
     material_id: str
     view: str = "slides"
+    #: One PNG per slide in the response. Off by default: the app draws the deck
+    #: from the PDF, so making them cost ~7s of every render for files nobody
+    #: opened. Ask for them and they are produced exactly as before.
+    page_images: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +351,7 @@ async def render_report(
             lambda: orchestrate_render(
                 case_id, report_id, body.material_id, client,
                 view=body.view, out_dir=str(out_dir), cancel_check=cancel.is_set,
-                template_path=template_path,
+                template_path=template_path, page_images=body.page_images,
             ),
         )
     except RenderCancelled:

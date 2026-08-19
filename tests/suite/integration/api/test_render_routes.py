@@ -154,7 +154,8 @@ def test_render_happy_path_returns_artifacts(client_memory, require_soffice):
     body = r.json()
     assert set(body.keys()) >= {"pptx", "pdf", "preview", "pdf_url"}
     assert body["pdf_url"] == f"/cases/{cid}/reports/{rid}/preview.pdf"
-    assert isinstance(body["preview"], list) and body["preview"]
+    # No per-slide images unless asked for: the app draws the deck from the PDF.
+    assert body["preview"] == []
 
     # Artifacts are now fetchable.
     pdf = client_memory.get(f"/cases/{cid}/reports/{rid}/preview.pdf")
@@ -166,3 +167,22 @@ def test_render_happy_path_returns_artifacts(client_memory, require_soffice):
     assert pptx.status_code == 200
     # PPTX is a zip container → starts with the "PK" local-file-header magic.
     assert pptx.content[:2] == b"PK"
+
+
+@pytest.mark.export
+def test_per_slide_images_on_request(client_memory, require_soffice):
+    """One PNG per slide is still available (REQ-C-19b) — it is just not made
+    for every render. Nothing serves these files and the app draws the deck from
+    the PDF, so producing them by default was ~7s of every render wasted."""
+    cid, rid, mid = _seed_case_material_report(client_memory, "vertical_bar")
+    r = client_memory.post(
+        f"/cases/{cid}/reports/{rid}/render",
+        json={"material_id": mid, "view": "slides", "page_images": True},
+    )
+    assert r.status_code == 200
+    preview = r.json()["preview"]
+    assert isinstance(preview, list) and preview
+    for path in preview:
+        assert path.endswith(".png")
+        with open(path, "rb") as f:
+            assert f.read(8) == b"\x89PNG\r\n\x1a\n"
