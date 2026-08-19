@@ -161,17 +161,46 @@ def register_fonts() -> None:
 # Colour helpers
 # ---------------------------------------------------------------------------
 
-def scale_colors(n: int) -> list[str]:
+def ramp_from(accent: str, steps: int = 4) -> list[str]:
+    """A light→dark ramp built from one colour, by blending it toward white.
+
+    The house teal ramp IS this shape — #13615E at 80/60/35/0% toward white is
+    #CFE3E2/#9CC6C4/#5E9C9A/#13615E to within a couple of levels — so a template
+    that states its accent gets ramps in ITS colour by the same construction,
+    and the house teal remains what a template without one produces.
+
+    Needed because a template whose design lives on its SLIDES does not state
+    its brand in its theme: `attendo_agent_deck.pptx` is cream and teal on every
+    slide while its theme is stock Office blue.
+    """
+    accent = (accent or "").lstrip("#")
+    if len(accent) != 6:
+        return list(_TEAL_RAMP)
+    try:
+        r, g, b = (int(accent[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return list(_TEAL_RAMP)
+    mixes = [0.80, 0.60, 0.35, 0.0][-steps:] if steps <= 4 else \
+        [0.80 - i * (0.80 / (steps - 1)) for i in range(steps)]
+    out = []
+    for m in mixes:
+        out.append("#%02X%02X%02X" % tuple(
+            round(c + (255 - c) * m) for c in (r, g, b)))
+    return out
+
+
+def scale_colors(n: int, accent: str = "") -> list[str]:
     """*n* colours forming a MONOTONIC light→dark teal gradient.
 
     For ORDERED scale segments — the Likert/rating levels of a stacked bar
     (disagree→agree). Unlike series_colors (a categorical palette that cycles
     after 4), this interpolates so a 5- or 7-point scale reads as a clean
     gradient with no repeated colour."""
+    ramp = ramp_from(accent) if accent else _TEAL_RAMP
     if n <= 1:
-        return [TEAL]
-    lo = (0xCF, 0xE3, 0xE2)  # palest teal
-    hi = (0x13, 0x61, 0x5E)  # strongest teal
+        return [ramp[-1]]
+    lo = tuple(int(ramp[0].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
+    hi = tuple(int(ramp[-1].lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))
     out: list[str] = []
     for i in range(n):
         t = i / (n - 1)
@@ -199,7 +228,8 @@ def contrast_ink(color) -> str:
     return "#FFFFFF" if lum < 0.55 else INK
 
 
-def series_colors(n: int, palette: list[str] | None = None) -> list[str]:
+def series_colors(n: int, palette: list[str] | None = None,
+                  accent: str = "") -> list[str]:
     """Return *n* distinct hex colour strings for CATEGORICAL series (REQ-C-27a).
 
     *palette* is the template's own accent colours when one is in play, so a
@@ -221,18 +251,19 @@ def series_colors(n: int, palette: list[str] | None = None) -> list[str]:
         # mixing in house colours, which would look like a rendering error on a
         # branded deck.
         return [palette[i % len(palette)] for i in range(n)]
+    ramp = ramp_from(accent) if accent else _TEAL_RAMP
     if n == 1:
-        return [TEAL]
-    ramp = _TEAL_RAMP
+        return [ramp[-1]]
     if n <= len(ramp):
         # evenly spaced; always include darkest at the end
         indices = [round(i * (len(ramp) - 1) / (n - 1)) for i in range(n)]
         return [ramp[idx] for idx in indices]
-    if n <= len(_CATEGORICAL):
-        return _CATEGORICAL[:n]
-    # Beyond the palette (11+ categories — rare): interpolate extra teal shades so the
-    # tail never exactly repeats an earlier colour.
-    out = list(_CATEGORICAL)
-    for i in range(len(_CATEGORICAL), n):
-        out.append(scale_colors(n)[i])
+    categorical = ramp + _BLUE_RAMP + _RED_RAMP
+    if n <= len(categorical):
+        return categorical[:n]
+    # Beyond the palette (11+ categories — rare): interpolate extra shades of the
+    # lead colour so the tail never exactly repeats an earlier colour.
+    out = list(categorical)
+    for i in range(len(categorical), n):
+        out.append(scale_colors(n, accent)[i])
     return out[:n]

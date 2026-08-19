@@ -939,9 +939,12 @@ export const api = {
       return res.json() as Promise<{ pdf_url: string; font_warnings?: string[] }>;
     },
 
+    // `no-store`: the URL is fixed but the file changes with every render, and a
+    // cached copy is indistinguishable from "the render did nothing".
     previewPdf: async (caseId: string, reportId: string): Promise<Blob> => {
       const res = await fetch(
-        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pdf`
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pdf`,
+        { cache: "no-store" }
       );
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`);
@@ -951,7 +954,8 @@ export const api = {
 
     previewPptx: async (caseId: string, reportId: string): Promise<Blob> => {
       const res = await fetch(
-        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pptx`
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/preview.pptx`,
+        { cache: "no-store" }
       );
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`);

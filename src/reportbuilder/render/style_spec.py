@@ -16,6 +16,20 @@ _DEFAULT_FONTS: dict[str, tuple[str, int]] = {
 }
 _DEFAULT_PALETTE = ["1F77B4", "FF7F0E", "2CA02C", "D62728", "9467BD", "8C564B", "E377C2", "7F7F7F"]
 
+# PowerPoint's own default themes. A template whose accents are exactly one of
+# these has never had its theme edited, so it states no brand — and using it
+# would paint a client's deck in Office blue. `attendo_agent_deck.pptx` is that
+# case: stock Office masters under slides drawn in cream and teal by hand.
+_STOCK_THEMES: tuple[tuple[str, ...], ...] = (
+    ("4F81BD", "C0504D", "9BBB59", "8064A2", "4BACC6", "F79646"),   # Office 2007-10
+    ("5B9BD5", "ED7D31", "A5A5A5", "FFC000", "4472C4", "70AD47"),   # Office 2013+
+)
+
+
+def states_a_brand(palette) -> bool:
+    """True when a theme's accents are a deliberate choice, not Office's default."""
+    return bool(palette) and tuple(c.upper() for c in palette[:6]) not in _STOCK_THEMES
+
 
 class TemplateStyleSpec(StyleSpec):
     # This style came from a real .pptx. Chart colours, background and ink
@@ -35,6 +49,12 @@ class TemplateStyleSpec(StyleSpec):
     # cream/ink apply.
     background: str = ""
     ink: str = ""
+    # The theme's accents when the template actually states a brand — empty when
+    # its theme is untouched Office. Charts use these in order when present.
+    brand_palette: list[str] = []
+    # The one colour this template leads with: its first brand accent, else the
+    # colour its own slides are drawn in. Chart ramps are built from it.
+    accent: str = ""
     # The template theme's own typefaces. Used for the text nSight draws itself
     # (subtitle, footer): those are textboxes, not placeholders, so they inherit
     # nothing and would otherwise sit on a customer's slide in our font.
@@ -108,9 +128,12 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
                 name="chart")
         # The template's own theme colours beat our defaults: accent1-6 is what
         # PowerPoint's charts use for series, so a deck in Attendo's template
-        # gets Attendo's palette rather than nSight teal.
-        if report.theme.palette:
+        # gets Attendo's palette rather than nSight teal. Untouched Office
+        # accents are not a brand and are not used — see states_a_brand.
+        if states_a_brand(report.theme.palette):
+            spec.brand_palette = list(report.theme.palette)
             spec._palette = list(report.theme.palette)
+            spec.accent = report.theme.palette[0]
         spec.background = report.theme.background
         spec.ink = report.theme.ink
 
@@ -127,6 +150,15 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     if spec.profile is not None:
         spec.chart_layout_index = spec.profile.layout_index
         spec.chart_slot = None
+        if spec.profile.layout_index is None:
+            # Design on the slides means colours on the slides too. The theme of
+            # such a file describes nothing that is on screen: attendo_agent_deck
+            # renders cream and teal while its theme says white, black and Office
+            # blue, and reading the theme is what made a client's deck come back
+            # in colours that appear nowhere in their template.
+            spec.background = spec.profile.background or spec.background
+            spec.ink = spec.profile.title.colour or spec.ink
+            spec.accent = spec.accent or spec.profile.accent
         if spec.profile.layout_index is not None:
             content = _largest_content_placeholder(
                 prs.slide_layouts[spec.profile.layout_index])

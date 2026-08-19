@@ -28,7 +28,7 @@ import re
 import textwrap
 
 import numpy as np
-from reportbuilder.render.image._mpl import (
+from reportbuilder.render.image._mpl import (chart_accent,
     new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
     place_picture_square, series_values, format_value, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
@@ -478,7 +478,8 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     _c, _s, data = series_values(series)
     n_cat = len(cats)
     n_sec = max((len(segs) for _p, segs in groups), default=1)
-    clrs = series_colors(n_sec, palette=template_palette(ctx))
+    clrs = series_colors(n_sec, palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
     max_val = max(all_vals, default=0.0)
 
@@ -755,7 +756,8 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
 
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
-        clrs = series_colors(n, palette=template_palette(ctx))
+        clrs = series_colors(n, palette=template_palette(ctx),
+                              accent=chart_accent(ctx))
         if vertical:
             x = np.arange(n_cat)
             w = 0.82 / n if n > 1 else 0.6
@@ -843,7 +845,8 @@ def build_image_column(ctx) -> None:
 def _render_column_v(ctx, cats, segs, data) -> None:
     """Internal vertical-bar renderer."""
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs), palette=template_palette(ctx))
+    clrs = series_colors(len(segs), palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
 
     n_cats = len(cats)
     n_segs = len(segs)
@@ -928,7 +931,8 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # slide) over shrinking the font or truncating.
     row_in = label_lines * 0.18 + 0.16
     fig, ax = new_tall_figure(ctx, n_cats * row_in + 1.2)
-    clrs = series_colors(len(segs), palette=template_palette(ctx))
+    clrs = series_colors(len(segs), palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
 
     n_segs = len(segs)
     y = np.arange(n_cats)[::-1]   # top category at top of plot
@@ -1113,7 +1117,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     # no bar at all, and a panel with no bars used to reach `min(y)` on an empty
     # sequence (ValueError). It is omitted instead. (final review I3)
     groups = _drawable_panels(_primary_groups(series), bars_all)
-    clrs = scale_colors(len(stack))                 # the stack is the shared scale
+    clrs = scale_colors(len(stack), chart_accent(ctx))                 # the stack is the shared scale
     fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     # Each panel's OWN bar labels (the classifier's own group names, via
     # `_secondary_tick`), measured PER PANEL rather than flattened into one
@@ -1201,7 +1205,7 @@ def build_image_column_stacked(ctx) -> None:
         return
     fig, ax = new_figure(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
-    clrs = scale_colors(len(segs))
+    clrs = scale_colors(len(segs), chart_accent(ctx))
 
     # Cross-tab: group the stacked bars by primary classifier (gap + group label), so the
     # SECOND classifier is used instead of a flat undifferentiated row.
@@ -1319,7 +1323,7 @@ def build_image_bar_stacked(ctx) -> None:
         return
     fig, ax = new_figure(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
-    clrs = scale_colors(len(segs))
+    clrs = scale_colors(len(segs), chart_accent(ctx))
 
     n_cats = len(cats)
     # Cross-tab: group the stacked bars by primary classifier (gap + group label).

@@ -106,6 +106,12 @@ class TemplateProfile:
     layout_index: int | None = None
     title: TextStyle = field(default_factory=TextStyle)
     subtitle_font: str = ""
+    #: The ground the slide is drawn on, and the colour its design leads with —
+    #: read off the SHAPES, because a deck designed slide-by-slide does not
+    #: state its brand in its theme. `attendo_agent_deck.pptx` is cream F7F3EC
+    #: and teal 13615E on every slide while its theme is stock Office blue.
+    background: str = ""
+    accent: str = ""
     #: Shape XML to clone onto every generated slide: background, logo, footer,
     #: and any graphic sitting with the title. Order preserved so z-order is.
     #: Empty for a layout source, where those shapes are inherited already.
@@ -126,6 +132,7 @@ class TemplateProfile:
                                  (self.title.left, self.title.top,
                                   self.title.width, self.title.height)],
                 "subtitle_font": self.subtitle_font,
+                "background": self.background, "accent": self.accent,
                 "furniture_shapes": len(self.furniture)}
 
 
@@ -624,6 +631,45 @@ def clone_furniture(slide, items) -> int:
     return placed
 
 
+def _solid_fill(shape) -> str:
+    """A shape's solid fill as hex, or "" — theme references included, since a
+    slide that names `accent1` still means one definite colour."""
+    try:
+        fill = shape.fill
+        if fill.type != 1:            # 1 = MSO_FILL.SOLID
+            return ""
+        return str(fill.fore_color.rgb).upper()
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+def _line_colour(shape) -> str:
+    try:
+        return str(shape.line.color.rgb).upper()
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+def _ground_and_accent(shapes, sw: int, sh_: int) -> tuple[str, str]:
+    """(background, accent) read off the slide's own furniture.
+
+    The backdrop is the ground. The accent is the first coloured thing that is
+    not the ground — the bar beside the title, the rule under it — which is what
+    a deck's charts are drawn in. Both matter because the THEME of such a file
+    is usually untouched Office: white, black, and six colours nobody chose.
+    """
+    background, accent = "", ""
+    for shape in shapes:
+        colour = _solid_fill(shape) or _line_colour(shape)
+        if not colour:
+            continue
+        if _is_backdrop(shape, sw, sh_):
+            background = background or colour
+        elif not accent:
+            accent = colour
+    return background, accent
+
+
 # --- the entry point --------------------------------------------------------
 
 def extract_profile(template_path: str) -> TemplateProfile:
@@ -660,5 +706,9 @@ def extract_profile(template_path: str) -> TemplateProfile:
         # Only a slide's furniture needs cloning. A layout's own decoration, and
         # the master's, land on every slide built from it without our help —
         # cloning them there would draw the logo twice.
-        profile.furniture = _furniture(source, title, sw, sh_, _repeating(prs))
+        keep = _repeating(prs)
+        profile.furniture = _furniture(source, title, sw, sh_, keep)
+        kept = [sh for sh in _decoration(source)
+                if sh is not title and (not keep or _shape_key(sh) in keep)]
+        profile.background, profile.accent = _ground_and_accent(kept, sw, sh_)
     return profile

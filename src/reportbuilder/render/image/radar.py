@@ -21,7 +21,7 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
-from reportbuilder.render.image._mpl import (
+from reportbuilder.render.image._mpl import (chart_accent,
     render_png, place_picture_square, series_values, style_legend, wrap_label,
 )
 from reportbuilder.render.house_style import (
@@ -42,7 +42,8 @@ def build_image_radar(ctx) -> None:
     """
     register_fonts()
     cats, segs, data = series_values(ctx.series)
-    clrs = series_colors(len(segs), palette=template_palette(ctx))
+    clrs = series_colors(len(segs), palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
 
     # Square figure: min slot dimension → circular polar axes, not oval
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)

@@ -328,11 +328,22 @@ async def render_report(
     return result
 
 
+# Both artifacts live at a fixed URL and are rewritten by every render, so the
+# browser must ask every time.
+_NO_STORE = {"Cache-Control": "no-store, must-revalidate"}
+
+
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pdf")
 def get_preview_pdf(case_id: str, report_id: str,
                     auth: AuthContext = Depends(get_auth),
                     repo: Repository = Depends(get_repository)) -> FileResponse:
-    """Stream the rendered PDF for a report to the client browser. (REQ-C-19, REQ-C-21)"""
+    """Stream the rendered PDF for a report to the client browser. (REQ-C-19, REQ-C-21)
+
+    Never cached. This URL is fixed but its content changes with every render,
+    and with no Cache-Control the browser is free to reuse its copy on a
+    heuristic — which is how a re-rendered deck kept showing the PREVIOUS
+    render's slides and looked like the render had not taken effect.
+    """
     # pptx_to_pdf produces <stem>.pdf; since we write deck.pptx the output is deck.pdf
     out = render_output_dir(case_id, report_id)
     pdf = out / "deck.pdf"
@@ -344,9 +355,10 @@ def get_preview_pdf(case_id: str, report_id: str,
             recovered = out / "deck.pdf"
             if recovered.exists():
                 return FileResponse(str(recovered), media_type="application/pdf",
-                                    filename="preview.pdf")
+                                    filename="preview.pdf", headers=_NO_STORE)
         raise HTTPException(status_code=404, detail="not rendered yet")
-    return FileResponse(str(pdf), media_type="application/pdf", filename="preview.pdf")
+    return FileResponse(str(pdf), media_type="application/pdf", filename="preview.pdf",
+                        headers=_NO_STORE)
 
 
 _PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -359,10 +371,13 @@ def get_preview_pptx(case_id: str, report_id: str,
     """Stream the rendered PowerPoint deck for a report to the client browser.
 
     The deck is the deliverable, so /tmp is a cache and datahive is the record:
-    if the local copy is gone, fetch the stored one back before giving up."""
+    if the local copy is gone, fetch the stored one back before giving up.
+
+    Never cached, for the same reason as the PDF: same URL, new content on
+    every render."""
     out = render_output_dir(case_id, report_id)
     pptx = out / "deck.pptx"
     if not pptx.exists() and not _restore_deck(repo, auth, case_id, report_id, out):
         raise HTTPException(status_code=404, detail="not rendered yet")
-        raise HTTPException(status_code=404, detail="not rendered yet")
-    return FileResponse(str(pptx), media_type=_PPTX_MEDIA_TYPE, filename="preview.pptx")
+    return FileResponse(str(pptx), media_type=_PPTX_MEDIA_TYPE, filename="preview.pptx",
+                        headers=_NO_STORE)

@@ -51,7 +51,9 @@ def theme_colours(style):
     accent = PX_TEAL
     try:
         if getattr(style, "from_template", False):
-            accent = _rgb(style.color_for(0)) or PX_TEAL
+            # style.accent is the template's brand accent, or the colour its own
+            # slides are drawn in when its theme states no brand.
+            accent = _rgb(getattr(style, "accent", "") or "") or _rgb(style.color_for(0)) or PX_TEAL
     except Exception:  # noqa: BLE001 — styling must not break a render
         pass
     return bg, ink, accent
@@ -307,6 +309,28 @@ def draw_template_heading(slide, style, text: str) -> int:
     return top + height
 
 
+def header_furniture_floor(profile, chart_top: int, sw: int, sh: int) -> int:
+    """The bottom of whatever the template draws between the title and the chart.
+
+    Synsam rules a line under its titles and the agent deck sets a bar beside
+    them; a subtitle placed by the title's height alone lands across it.
+    Backdrops are ignored — they span the whole slide and would push everything
+    to the floor.
+    """
+    floor = 0
+    for item in getattr(profile, "furniture", []) or []:
+        left, top, width, height = (int(v or 0) for v in item.box)
+        if width <= 0 and height <= 0:
+            continue
+        if sw > 0 and sh > 0 and width * height >= 0.75 * sw * sh:
+            continue
+        bottom = top + height
+        if top >= chart_top or bottom > chart_top:
+            continue
+        floor = max(floor, bottom)
+    return floor
+
+
 def _fill_title_placeholder(slide, title: str) -> bool:
     """Put *title* in the layout's title placeholder. False if there isn't one.
 
@@ -452,10 +476,22 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # large as possible.
             n = len(secondary)
             s_size = 15 if n <= 110 else (13 if n <= 180 else (12 if n <= 260 else 11))
-            # On a templated slide the title placeholder owns the top of the
-            # slide and we do not know how tall it is, so the subtitle hangs off
-            # the CHART instead: its box bottom sits just above the plot.
-            if templated or profile is not None:
+            # With a template, the subtitle belongs to the TITLE — a line of
+            # explanation directly under it, which is where every one of the
+            # real client decks puts it. Left hanging off the chart instead it
+            # floated in the middle of the slide with a band of empty cream
+            # above it.
+            anchor = MSO_ANCHOR.BOTTOM
+            title_profile = getattr(ctx.style, "profile", None)
+            if title_profile is not None and title_profile.title.positioned:
+                _l, t_top, _w, t_height = harvested_title_box(title_profile, title)
+                sub_top = max(t_top + t_height,
+                              header_furniture_floor(title_profile, int(ctx.slot.top),
+                                                     sw, sh)) + int(Inches(0.10))
+                sub_h = max(int(Inches(0.30)), int(ctx.slot.top) - sub_top)
+                sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
+                anchor = MSO_ANCHOR.TOP
+            elif templated or profile is not None:
                 sub_h = int(Inches(0.62))
                 sub_top = max(0, int(ctx.slot.top) - sub_h)
                 sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
@@ -466,7 +502,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
                 [(secondary, s_size, PX_MUTED, False)],
-                anchor=MSO_ANCHOR.BOTTOM,
+                anchor=anchor,
                 font=_body_font(ctx),
             )
 

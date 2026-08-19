@@ -41,12 +41,23 @@ _LONG = ("Attendo liitetään vahvimmin attribuutteihin luotettava ja "
          "ammattitaitoinen")
 
 
-def _render(name, title=_LONG):
+#: The question, which becomes the subtitle when a distinct headline is set.
+_QUESTION = "Mikä seuraavista vastaa työtilannettasi tällä hetkellä?"
+
+
+def _render(name, title=_LONG, headline=""):
+    """Render one chart into *name*'s template. With *headline* set, the title is
+    the headline and the QUESTION becomes the subtitle line under it."""
     path = pathlib.Path(_TEMPLATES[name])
     if not path.exists():
         pytest.skip(f"{path} not available locally")
     style = load_style_spec(str(path))
     report = dataclasses.replace(one_chart_report(), render_mode="image")
+    if headline:
+        charts = tuple(dataclasses.replace(c, slide_title=headline)
+                       for c in report.charts)
+        report = dataclasses.replace(report, charts=charts)
+        title = _QUESTION
     prs = render_report(report, {"q1": known_series()}, style, titles={"q1": title})
     return style, prs, prs.slides[0]
 
@@ -55,6 +66,11 @@ def _picture(slide):
     pics = [s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
     assert len(pics) == 1
     return pics[0]
+
+
+def _subtitle(slide):
+    return next(s for s in slide.shapes
+                if s.has_text_frame and s.text_frame.text.strip() == _QUESTION)
 
 
 def _title_shape(slide, text):
@@ -239,3 +255,52 @@ class TestBulletSlidesFollowTheTemplateToo:
                    if s.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE]
         assert len(grounds) == 2                     # cream ground + teal bar
         assert grounds[0].width == int(prs.slide_width)
+
+
+class TestTheDeckIsInTheTemplatesColours:
+    """The agent deck is the case that made this necessary: cream and teal on
+    every slide, stock Office in its theme. Reading the theme produced a deck in
+    colours that appear nowhere in the customer's own file."""
+
+    def test_a_slide_designed_template_paints_on_its_own_ground(self):
+        style, _prs, _slide = _render("agent_deck")
+        assert style.background == "F7F3EC"
+        assert style.accent == "13615E"
+        assert style.brand_palette == []          # stock Office states no brand
+
+    def test_a_themed_template_keeps_its_theme(self):
+        style, _prs, _slide = _render("attendo")
+        assert style.brand_palette[:1] == ["122D49"]
+        assert style.accent == "122D49"
+
+    def test_the_chart_is_drawn_in_the_templates_colour(self):
+        """Not a colour test on pixels — the ramp the chart builder is handed."""
+        from reportbuilder.render.house_style import series_colors
+        from reportbuilder.render.image._mpl import chart_accent, template_palette
+
+        class _Ctx:
+            pass
+
+        style, _prs, _slide = _render("agent_deck")
+        ctx = _Ctx()
+        ctx.style = style
+        assert template_palette(ctx) is None      # its theme is not its brand
+        assert series_colors(1, palette=template_palette(ctx),
+                             accent=chart_accent(ctx)) == ["#13615E"]
+
+
+class TestTheSubtitleBelongsToTheTitle:
+    def test_it_sits_under_the_title_not_over_the_chart(self):
+        """It used to hang off the chart, floating in a band of empty cream."""
+        style, _prs, slide = _render("agent_deck", headline=_LONG)
+        sub = _subtitle(slide)
+        st = style.profile.title
+        assert sub.top >= st.top + st.height
+        assert sub.top + sub.height <= _picture(slide).top + 1
+
+    def test_it_clears_the_graphic_the_template_rules_under_the_title(self):
+        """Synsam's rule sits below its title box; placing the subtitle by the
+        title's height alone landed the text across it."""
+        _style, _prs, slide = _render("synsam", headline=_LONG)
+        rule = next(s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.LINE)
+        assert _subtitle(slide).top >= rule.top + rule.height

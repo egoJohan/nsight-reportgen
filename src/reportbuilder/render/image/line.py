@@ -7,7 +7,7 @@ Returns None.
 """
 from __future__ import annotations
 
-from reportbuilder.render.image._mpl import (
+from reportbuilder.render.image._mpl import (chart_accent,
     new_figure, render_png, place_picture, series_values,
     format_value, style_legend, wrap_label,
 )
@@ -28,7 +28,8 @@ def build_image_line(ctx) -> None:
     """
     cats, segs, data = series_values(ctx.series)
     fig, ax = new_figure(ctx)
-    clrs = series_colors(len(segs), palette=template_palette(ctx))
+    clrs = series_colors(len(segs), palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
 
     x = list(range(len(cats)))
 

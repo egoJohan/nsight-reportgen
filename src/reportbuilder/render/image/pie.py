@@ -30,7 +30,7 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
-from reportbuilder.render.image._mpl import (
+from reportbuilder.render.image._mpl import (chart_accent,
     render_png, place_picture_square, series_values, format_value,
 )
 from reportbuilder.render.house_style import (
@@ -98,7 +98,8 @@ def _render_pie(ctx, *, donut: bool) -> None:
     """Shared pie/doughnut renderer — circular, fully contained, labels never overlap."""
     cats, segs, data = series_values(ctx.series)
     vals = data[segs[0]]
-    clrs = series_colors(len(cats), palette=template_palette(ctx))
+    clrs = series_colors(len(cats), palette=template_palette(ctx),
+                          accent=chart_accent(ctx))
     # R4.2: override "Not answered" slice colour with MUTED grey.
     clrs = [MUTED if c == NOT_ANSWERED_LABEL else clr for c, clr in zip(cats, clrs)]
 

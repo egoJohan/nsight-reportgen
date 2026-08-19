@@ -117,3 +117,26 @@ class TestFurniture:
         survives is the backdrop and the accent bar beside the title."""
         profile = _profile("agent_deck")
         assert len(profile.furniture) == 2
+
+
+class TestTheColoursComeOffTheSlide:
+    """A template whose design lives on its slides does not state its brand in
+    its theme. `attendo_agent_deck.pptx` renders cream and teal on every slide
+    while its theme is untouched Office: white, black, and six colours nobody
+    chose."""
+
+    def test_the_ground_and_accent_are_read_from_the_shapes(self):
+        profile = _profile("agent_deck")
+        assert profile.background == "F7F3EC"
+        assert profile.accent == "13615E"
+
+    def test_a_rule_under_the_title_counts_as_the_accent(self):
+        """Synsam draws no backdrop — its one repeating graphic is the orange
+        rule under the title, and that is the colour its charts are in."""
+        assert _profile("synsam").accent == "FF5000"
+
+    def test_a_layout_template_leaves_them_to_the_theme(self):
+        """There the theme IS the brand, and template_check already reads it."""
+        profile = _profile("attendo")
+        assert profile.background == ""
+        assert profile.accent == ""

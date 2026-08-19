@@ -286,14 +286,30 @@ def template_palette(ctx) -> list[str] | None:
     It used to key on chart_layout_index, which stopped meaning "a template" the
     moment a template whose design lives on its slides was given no layout to
     build from — a client deck would have lost the client's chart colours.
+
+    A template with no BRAND palette (untouched Office accents) returns None on
+    purpose: the ramp built from `chart_accent` applies instead, which is the
+    colour that template's own slides are actually drawn in.
     """
     if not getattr(ctx.style, "from_template", False):
         return None
+    brand = getattr(ctx.style, "brand_palette", None)
+    if not brand:
+        return None
     try:
-        palette = [f"#{ctx.style.color_for(i)}" for i in range(6)]
+        return [f"#{c}" for c in brand]
     except Exception:  # noqa: BLE001 — styling must not break a render
         return None
-    return palette or None
+
+
+def chart_accent(ctx) -> str:
+    """The colour this deck's charts lead with: the template's, else house teal.
+
+    Series ramps are built from it, so a template that states only one colour —
+    the bar beside its titles, the rule under them — still gets charts in its
+    own colour rather than in ours.
+    """
+    return getattr(ctx.style, "accent", "") or ""
 
 
 def colors(ctx, n: int) -> list[str]:
