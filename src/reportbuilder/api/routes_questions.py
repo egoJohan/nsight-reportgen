@@ -9,7 +9,10 @@ import hashlib
 import os
 import pathlib
 import re
+import io
+import logging
 import shutil
+import time
 import tempfile
 import uuid
 from typing import Any, Literal
@@ -29,8 +32,12 @@ from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
-from reportbuilder.export.pptx_build import build_pptx
-from reportbuilder.ingest.grouping_override import apply_grouping_override, suggest_parallel_questions
+from reportbuilder.export.pptx_build import build_pptx, build_presentation
+from reportbuilder.ingest.grouping_override import (
+    apply_grouping_override,
+    suggest_parallel_questions,
+)
+from reportbuilder.render.image.fast_preview import compose_from_slide
 from reportbuilder.ingest.battery_group import suggest_scale_batteries
 from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
@@ -62,6 +69,8 @@ from reportbuilder.stats.engine import (
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
 
+
+log = logging.getLogger(__name__)
 
 questions_router = APIRouter()
 
@@ -1334,7 +1343,9 @@ def preview_chart(
     out_dir = _preview_out_dir(material_id, body.model_dump_json() + f"|{template_id}")
     cached_png = out_dir / "preview.png"
     if cached_png.exists():
+        log.info("preview %s %s: cached", material_id, body.chart_type)
         return Response(content=cached_png.read_bytes(), media_type="image/png")
+    started = time.monotonic()
 
     # 1. Load material data
     raw = client.get_material(material_id)
@@ -1379,14 +1390,44 @@ def preview_chart(
                 style = _load_style_spec(template_path)
             except Exception:  # noqa: BLE001
                 style = None
+
+        # Fast path: the customer's empty slide is rendered by LibreOffice ONCE
+        # per template and cached, and this chart is drawn onto a copy of it —
+        # ~0.2s instead of ~4.4s, of which 3.3s was starting LibreOffice again
+        # for a background identical to the last sixty.
+        #
+        # Only when the frontend owns the title band (render_title=False, which
+        # is how the Design page asks): a baked title wraps and anchors inside
+        # its box, and reproducing that is where a compositor stops being exact.
+        if not body.render_title:
+            try:
+                fast = compose_from_slide(
+                    style, build_presentation(report, model, df, style=style).slides[0])
+            except Exception:  # noqa: BLE001 — never worth failing a preview over
+                log.warning("fast preview failed; falling back to LibreOffice",
+                            exc_info=True)
+                fast = None
+            if fast is not None:
+                buf = io.BytesIO()
+                fast.save(buf, format="PNG")
+                png_bytes = buf.getvalue()
+                tmp_png = out_dir / f"preview.{uid}.png"
+                tmp_png.write_bytes(png_bytes)
+                os.replace(tmp_png, cached_png)
+                log.info("preview %s %s: %.1fs (composited)", material_id,
+                         body.chart_type, time.monotonic() - started)
+                return Response(content=png_bytes, media_type="image/png")
         build_pptx(report, model, df, pptx_path, style=style)
+        built = time.monotonic()
         # The selected slide (priority) takes the reserved soffice slot so it never
         # waits behind background deck-prefetch renders.
         pdf_path = pptx_to_pdf(pptx_path, str(out_dir), priority=priority)
+        converted = time.monotonic()
         # Previews are shown at ~640px (big pane) / smaller (thumbs), so 110 DPI
         # is ample and ~40% lighter than deck DPI — smaller PNGs decode faster
         # and use less memory across 100+ cached previews.
         pngs = rasterize_pages(pdf_path, str(out_dir / f"pages-{uid}"), dpi=110)
+        rastered = time.monotonic()
     except HTTPException:
         raise  # already a well-formed HTTP error — pass through unchanged
     except Exception as exc:
@@ -1417,4 +1458,9 @@ def preview_chart(
             os.unlink(leftover)
         except OSError:
             pass
+    # The Design page waits on this one chart at a time, so its latency is what
+    # "the app feels slow" usually means.
+    log.info("preview %s %s: %.1fs (build %.1fs, pdf %.1fs, raster %.1fs)",
+             material_id, body.chart_type, time.monotonic() - started,
+             built - started, converted - built, rastered - converted)
     return Response(content=png_bytes, media_type="image/png")

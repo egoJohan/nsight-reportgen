@@ -10,8 +10,10 @@ stay deterministic from the stats engine. The caller stores the results into
 """
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -33,6 +35,8 @@ from reportbuilder.ai.text import (
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.ingest.grouping_override import apply_grouping_override
+
+log = logging.getLogger(__name__)
 from reportbuilder.api.model_loader import (
     df_model_for_material,
     df_model_label_for_material,
@@ -204,12 +208,18 @@ def ai_slide_title(
     Computes the deterministic SeriesResult, takes the top-N categories as
     findings, and asks egoHive for a headline. egoHive failures -> 503.
     """
+    # A title is one round trip to a language model per chart, and the Design
+    # step asks for one per chart: whether the wait is the model or our own work
+    # is the first thing to know, so both halves are timed.
+    started = time.monotonic()
+    loaded = started
     try:
         df, model = _load_df_model(material_id, client)
         # Apply the report's grouping so battery/multi qids resolve (REQ: AI titles for
         # combined questions). No-op when the caller sends no grouping.
         if body.grouping:
             model = apply_grouping_override(model, body.grouping, df=df)
+        loaded = time.monotonic()
     except HTTPException:
         raise
     except Exception as exc:  # data load is part of the AI flow — degrade to 503
@@ -243,7 +253,11 @@ def ai_slide_title(
         # Fall back to the question text instead of generating a bogus headline.
         if not findings:
             return {"title": question.text}
+        asked = time.monotonic()
         title = generate_slide_title(question.text, findings, chat=egohive_chat)
+        log.info("ai title %s %s: %.1fs (data %.1fs, stats %.1fs, llm %.1fs)",
+                 material_id, body.question_ref, time.monotonic() - started,
+                 loaded - started, asked - loaded, time.monotonic() - asked)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except HTTPException:

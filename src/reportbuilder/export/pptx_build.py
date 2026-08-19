@@ -10,7 +10,7 @@ from reportbuilder.model.report import (
 )
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
-from reportbuilder.render.deck import render_to_file, RenderCancelled
+from reportbuilder.render.deck import render_report, render_to_file, RenderCancelled
 from reportbuilder.stats.engine import compute
 from reportbuilder.stats.series import SeriesResult
 
@@ -33,6 +33,22 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
                style: StyleSpec | None = None, cancel_check=None) -> str:
     """Compute each chart's SeriesResult, then render the Report to a .pptx (REQ-C-22/18).
     `cancel_check` (optional) is polled between charts so a long build aborts promptly."""
+    return _build(report, model, data, style, cancel_check, out_path=out_path)
+
+
+def build_presentation(report: Report, model: QuestionModel, data,
+                       style: StyleSpec | None = None, cancel_check=None):
+    """The same deck, handed back as a Presentation instead of a file.
+
+    The chart preview needs the SHAPES — where the picture landed, what the
+    footer says and in which font — so it can draw them itself instead of paying
+    LibreOffice per chart. Nothing about the rendering differs; only the ending.
+    """
+    return _build(report, model, data, style, cancel_check, out_path=None)
+
+
+def _build(report: Report, model: QuestionModel, data, style, cancel_check,
+           *, out_path: str | None):
     if style is None:
         style = StyleSpec()   # generic base style (no template); deck synthesizes slides
     series_by_ref: dict = {}
@@ -72,5 +88,8 @@ def build_pptx(report: Report, model: QuestionModel, data, out_path: str,
         except Exception:
             series_by_ref[spec.question_ref] = _empty_series(spec.statistic)
         titles[spec.question_ref] = q.text
+    if out_path is None:
+        return render_report(report, series_by_ref, style, titles=titles,
+                             cancel_check=cancel_check)
     return render_to_file(report, series_by_ref, style, out_path, titles=titles,
                           cancel_check=cancel_check)
