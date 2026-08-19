@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from reportbuilder.api.deps import get_client
 from reportbuilder.model.report import Report, report_from_json, report_to_json
 from reportbuilder.store.datahive_client import DataHiveClient
+from reportbuilder.store.seam import NotFound
 
 
 reports_router = APIRouter()
@@ -84,7 +85,7 @@ def update_report(
     of silently re-creating it."""
     try:
         client.load_report(case_id, report_id)
-    except (KeyError, FileNotFoundError) as exc:
+    except (KeyError, FileNotFoundError, NotFound) as exc:
         raise HTTPException(
             status_code=404, detail=f"Report '{report_id}' not found"
         ) from exc
@@ -102,7 +103,7 @@ def get_report(
     """Return the exact report definition JSON (parsed) for a report doc. (REQ-C-08)"""
     try:
         raw = client.load_report(case_id, report_id)
-    except (KeyError, FileNotFoundError) as exc:
+    except (KeyError, FileNotFoundError, NotFound) as exc:
         raise HTTPException(
             status_code=404, detail=f"Report '{report_id}' not found"
         ) from exc
