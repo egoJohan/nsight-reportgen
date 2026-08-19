@@ -82,6 +82,22 @@ class TemplateReport:
         return self.candidates[0] if self.candidates else None
 
 
+def theme_root(prs):
+    """The template's theme XML, or None.
+
+    python-pptx exposes no theme API, so this walks the master's relationships
+    to the theme part. Shared with template_profile, which resolves a title's
+    inherited font and colour through the same scheme.
+    """
+    try:
+        for rel in prs.slide_master.part.rels.values():
+            if "theme" in rel.reltype:
+                return etree.fromstring(rel.target_part.blob)
+    except Exception:  # noqa: BLE001 — an unreadable theme is not a failure
+        return None
+    return None
+
+
 def _theme(prs) -> TemplateTheme:
     """Read the colour and font scheme out of the template's theme part.
 
@@ -90,16 +106,8 @@ def _theme(prs) -> TemplateTheme:
     template is still usable, it just does not hand us its brand.
     """
     theme = TemplateTheme()
-    try:
-        part = None
-        for rel in prs.slide_master.part.rels.values():
-            if "theme" in rel.reltype:
-                part = rel.target_part
-                break
-        if part is None:
-            return theme
-        root = etree.fromstring(part.blob)
-    except Exception:  # noqa: BLE001
+    root = theme_root(prs)
+    if root is None:
         return theme
 
     for i in range(1, 7):
@@ -157,20 +165,15 @@ def _score(has_title: bool, content_count: int, has_picture: bool,
     return max(score, 1)
 
 
-def inspect_template(path: str) -> TemplateReport:
-    """Check an uploaded .pptx and rank its layouts. Never raises on bad input."""
-    try:
-        prs = Presentation(path)
-    except Exception as exc:  # noqa: BLE001 — any unreadable file is one problem
-        return TemplateReport(ok=False, problems=[f"Not a readable PowerPoint file: {exc}"])
+def rank_layouts(prs) -> list[LayoutCandidate]:
+    """Every layout that could hold a headline and a chart, best first.
 
-    report = TemplateReport(
-        ok=False,
-        slide_width_in=round((prs.slide_width or 0) / 914400, 2),
-        slide_height_in=round((prs.slide_height or 0) / 914400, 2),
-        layout_count=len(prs.slide_layouts),
-    )
-
+    Split out of inspect_template so template_profile can ask the same question
+    of a Presentation it already has open. It asked its own way once, ranking by
+    how much decoration a layout carried, and picked Attendo's "Agenda slide"
+    and Synsam's "Slutbild" over their content layouts. One ranking, one answer.
+    """
+    candidates: list[LayoutCandidate] = []
     for i, layout in enumerate(prs.slide_layouts):
         try:
             kinds = [p.placeholder_format.type for p in layout.placeholders]
@@ -188,13 +191,31 @@ def inspect_template(path: str) -> TemplateReport:
 
         score = _score(has_title, len(content_phs), picture, area_pct)
         if score:
-            report.candidates.append(LayoutCandidate(
+            candidates.append(LayoutCandidate(
                 index=i, name=layout.name, score=score, has_title=has_title,
                 content_count=len(content_phs), has_picture=picture,
                 content_area_pct=round(area_pct, 1)))
 
     # Highest score first; ties keep template order so the result is stable.
-    report.candidates.sort(key=lambda c: (-c.score, c.index))
+    candidates.sort(key=lambda c: (-c.score, c.index))
+    return candidates
+
+
+def inspect_template(path: str) -> TemplateReport:
+    """Check an uploaded .pptx and rank its layouts. Never raises on bad input."""
+    try:
+        prs = Presentation(path)
+    except Exception as exc:  # noqa: BLE001 — any unreadable file is one problem
+        return TemplateReport(ok=False, problems=[f"Not a readable PowerPoint file: {exc}"])
+
+    report = TemplateReport(
+        ok=False,
+        slide_width_in=round((prs.slide_width or 0) / 914400, 2),
+        slide_height_in=round((prs.slide_height or 0) / 914400, 2),
+        layout_count=len(prs.slide_layouts),
+    )
+
+    report.candidates = rank_layouts(prs)
 
     if report.layout_count == 0:
         report.problems.append("The template contains no slide layouts.")
