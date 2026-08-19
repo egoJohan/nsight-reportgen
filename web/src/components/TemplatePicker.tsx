@@ -23,12 +23,6 @@ function missingFonts(t: Template): TemplateFont[] {
  *  "inherited" means something different at each one. */
 export type TemplateLevel = "customer" | "case" | "report";
 
-const LEVEL_LABEL: Record<TemplateLevel, string> = {
-  customer: "asiakkaalle",
-  case: "tutkimukselle",
-  report: "raportille",
-};
-
 /** Templates are stored per CUSTOMER even when bound to a tutkimus or a report:
  *  the same client deck is reused across their studies, and uploading it once
  *  per report would be absurd. So every level picks from the customer's list. */
@@ -76,17 +70,19 @@ export default function TemplatePicker({
   }
 
   return (
-    <div className={`${PANEL} p-4`}>
-      <div className="flex items-start justify-between gap-4">
+    <div className={`${PANEL} px-3 py-2.5`}>
+      <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">Esityspohja</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {currentId
-              ? `Asetettu ${LEVEL_LABEL[level]}.`
-              : inheritedFrom
+          {/* Only says something when the pohja is NOT set here: where it IS
+              set, the panel's own position already says so. */}
+          {!currentId && (
+            <p className="text-xs text-muted-foreground">
+              {inheritedFrom
                 ? `Peritty: ${inheritedFrom}`
                 : "Käytössä nSightin oletuspohja."}
-          </p>
+            </p>
+          )}
         </div>
         <Button
           size="sm"
@@ -113,7 +109,7 @@ export default function TemplatePicker({
         />
       </div>
 
-      <div className="mt-3 space-y-1">
+      <div className="mt-2 space-y-0.5">
         {isLoading && <p className="text-xs text-muted-foreground">Ladataan…</p>}
 
         {templates?.length === 0 && !isLoading && (
@@ -127,7 +123,7 @@ export default function TemplatePicker({
           return (
             <div
               key={t.id}
-              className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
+              className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-accent"
             >
               <button
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
@@ -139,13 +135,9 @@ export default function TemplatePicker({
                 />
                 <span className="min-w-0">
                   <span className="block truncate text-sm">{t.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {t.layout_name}
-                    {t.heading_font ? ` · ${t.heading_font}` : ""}
-                  </span>
                   {missingFonts(t).length > 0 && (
                     <span
-                      className="mt-0.5 flex items-center gap-1 text-xs text-destructive"
+                      className="flex items-center gap-1 text-xs text-destructive"
                       title={missingFonts(t)
                         .map((f) => f.reason)
                         .join("\n\n")}

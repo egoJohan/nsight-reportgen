@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useCustomers, useCreateCustomer } from "@/lib/queries";
-import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
+import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_SUB, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,
  *  so this sits above the case list rather than beside it. */
@@ -49,13 +49,11 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-12">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Asiakkaat</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Jokainen tutkimus kuuluu yhteen asiakkaaseen.
-          </p>
+    <div className={PAGE}>
+      <div className={PAGE_HEADER}>
+        <div className="min-w-0">
+          <h1 className={PAGE_TITLE}>Asiakkaat</h1>
+          <p className={PAGE_SUB}>Jokainen tutkimus kuuluu yhteen asiakkaaseen.</p>
         </div>
         <Button onClick={() => setOpen(true)}>
           <PlusIcon className="mr-2 size-4" />
@@ -63,7 +61,7 @@ export default function CustomersPage() {
         </Button>
       </div>
 
-      <div className="mt-8 space-y-2">
+      <div className="space-y-2">
         {isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useNavigate, useParams, Link, useSearchParams } from "react-router-dom";
-import { PlusIcon, FolderIcon, ArrowRightIcon, ChevronLeftIcon } from "lucide-react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { PlusIcon, FolderIcon, ArrowRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ import {
   useTemplateActions,
 } from "@/lib/queries";
 import TemplatePicker from "@/components/TemplatePicker";
-import { ROW, EMPTY, ERROR } from "@/lib/surfaces";
+import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
@@ -56,20 +56,12 @@ export default function CustomerCasesPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 py-12">
-      <Link
-        to="/"
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeftIcon className="mr-1 size-4" />
-        Asiakkaat
-      </Link>
-
-      <div className="mt-4 flex items-center justify-between">
+    <div className={PAGE}>
+      {/* No back-link here: the shell's breadcrumb already carries the way
+          back, and two of them side by side is one too many. */}
+      <div className={PAGE_HEADER}>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {customer?.name ?? "…"}
-          </h1>
+          <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Oletusnimenä on tiedoston nimi.
           </p>

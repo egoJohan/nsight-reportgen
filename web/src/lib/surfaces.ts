@@ -14,6 +14,22 @@
  * reads as its own thing. Change the tint in index.css, not here.
  */
 
+/** The page shell: width, gutters and vertical rhythm.
+ *
+ * Every page had been spelling its own — max-w-4xl/6xl/3xl with py-8/12/16 —
+ * so moving between Asiakkaat, a tutkimus and Asetukset shifted the content
+ * sideways and changed the top margin. One definition, so they line up.
+ */
+export const PAGE = "mx-auto w-full max-w-6xl px-6 py-8";
+
+/** A page-level heading. Pairs with PAGE_SUB for the line underneath. */
+export const PAGE_TITLE = "text-2xl font-semibold tracking-tight";
+export const PAGE_SUB = "mt-1 text-sm text-muted-foreground";
+
+/** The header block: title on the left, actions on the right, one gap below.
+ *  Matches the tutkimus page, which is the layout the others are aligned to. */
+export const PAGE_HEADER = "mb-8 flex items-start justify-between gap-4";
+
 /** A bordered container holding a divided list (reports, questions). */
 export const PANEL = "overflow-hidden rounded-xl border bg-surface";
 

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
+import { PAGE, PAGE_HEADER } from "@/lib/surfaces";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -155,7 +156,7 @@ export default function CaseDetailPage() {
   // A report is open → the wizard takes over the whole page.
   if (openReportId && materialId) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-6 py-8">
+      <div className={PAGE}>
         <ReportWizard
           key={openReportId}
           caseId={id}
@@ -173,9 +174,9 @@ export default function CaseDetailPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-6 py-8">
+    <div className={PAGE}>
       {/* Heading + delete */}
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className={PAGE_HEADER}>
         <div className="min-w-0">
           <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>

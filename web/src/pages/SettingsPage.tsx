@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { PANEL, ROW, EMPTY } from "@/lib/surfaces";
+import { EMPTY, PAGE, PAGE_TITLE, PANEL, ROW } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
 } from "@/lib/queries";
@@ -250,8 +250,8 @@ function FontsTab() {
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Asetukset</h1>
+    <div className={PAGE}>
+      <h1 className={PAGE_TITLE}>Asetukset</h1>
 
       <Tabs defaultValue="fonts" className="mt-6">
         <TabsList>
