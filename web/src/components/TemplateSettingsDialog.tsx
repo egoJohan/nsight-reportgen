@@ -58,7 +58,7 @@ function FontRow({
           </span>
         )}
         {font.state === "present" && (
-          <span className="text-xs text-muted-foreground">asennettu</span>
+          <span className="text-xs text-muted-foreground">installed</span>
         )}
       </div>
 

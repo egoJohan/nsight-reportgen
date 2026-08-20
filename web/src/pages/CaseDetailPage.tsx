@@ -244,7 +244,7 @@ export default function CaseDetailPage() {
               disabled={deleteCase.isPending}
             >
               {deleteCase.isPending && <Loader2Icon className="size-4 animate-spin" />}
-              Poista tutkimus
+              Delete study
             </Button>
           </DialogFooter>
         </DialogContent>

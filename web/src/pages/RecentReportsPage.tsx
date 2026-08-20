@@ -6,20 +6,20 @@ import { EMPTY, ERROR, OVERLINE, PAGE_TITLE, ROW } from "@/lib/surfaces";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
 
 /** Relative time at the granularity a report list actually needs. An exact
- *  timestamp is noise here — "3 pv sitten" answers "what was I last working
- *  on?", which is the only question this list is asked. */
+ *  timestamp is noise here — "3d ago" answers "what was I last working on?",
+ *  which is the only question this list is asked. */
 function since(iso: string): string {
   if (!iso) return "";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";
   const mins = Math.floor((Date.now() - then) / 60000);
-  if (mins < 1) return "juuri nyt";
-  if (mins < 60) return `${mins} min sitten`;
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} h sitten`;
+  if (hours < 24) return `${hours} h ago`;
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} pv sitten`;
-  return new Date(iso).toLocaleDateString("fi-FI");
+  if (days < 30) return `${days} d ago`;
+  return new Date(iso).toLocaleDateString("en-GB");
 }
 
 /** The welcome page: brand, then what you were last working on.

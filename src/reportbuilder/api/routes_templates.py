@@ -49,10 +49,10 @@ def _live_font_status(stored: list[dict], families: list[str]) -> list[dict]:
 
     The stored record is what was true at upload. It cannot know about a font
     installed since, or a stand-in chosen a minute ago, so a template row would
-    keep saying "Fontti puuttuu" after the admin had already dealt with it.
+    keep saying "Missing font" after the admin had already dealt with it.
 
     Where a font is still unresolved the STORED reason wins: it explains the
-    licence ("Monotypen fontti, ei voi asentaa automaattisesti"), while a
+    licence ("not an open-licence font, cannot be installed"), while a
     network-free re-check can only say it is absent. Cheap enough for a list —
     no network, and fontconfig's family list is cached in-process.
     """

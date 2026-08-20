@@ -104,7 +104,7 @@ def test_download_that_fontconfig_never_sees_is_reported_unavailable(monkeypatch
     st = fonts.ensure_font("Questrial", fetch=fetch)
 
     assert st.state == fonts.UNAVAILABLE
-    assert "ei tunnista sitä asennetuksi" in st.reason
+    assert "does not recognise it as installed" in st.reason
 
 
 # --- the licence line -------------------------------------------------------
@@ -119,7 +119,7 @@ def test_commercially_licensed_font_is_never_downloaded(monkeypatch):
 
     assert st.state == fonts.UNAVAILABLE
     assert not st.ok
-    assert "ei ole avoimen lisenssin fontti" in st.reason
+    assert "is not an open-licence font" in st.reason
     # Only the licence listing was read — no CSS, no font file.
     assert len(calls) == 1 and "metadata/fonts" in calls[0]
 
@@ -129,7 +129,7 @@ def test_font_in_the_library_but_not_open_source_is_refused(monkeypatch):
     st = fonts.ensure_font("Brand Sans", fetch=_fetcher({"metadata/fonts": LIBRARY}))
 
     assert st.state == fonts.UNAVAILABLE
-    assert "ei avoimella" in st.reason
+    assert "not under an open licence" in st.reason
 
 
 def test_unreadable_licence_listing_refuses_rather_than_assumes(monkeypatch):
@@ -141,7 +141,7 @@ def test_unreadable_licence_listing_refuses_rather_than_assumes(monkeypatch):
     st = fonts.ensure_font("Questrial", fetch=fetch)
 
     assert st.state == fonts.UNAVAILABLE
-    assert "lisenssitietoja ei saatu" in st.reason
+    assert "Could not fetch the font library's licence data" in st.reason
     assert all("gstatic" not in c for c in calls)
 
 
@@ -169,7 +169,7 @@ def test_unknown_family_is_reported_not_guessed(monkeypatch):
                            fetch=_fetcher({"metadata/fonts": LIBRARY}))
 
     assert st.state == fonts.UNAVAILABLE
-    assert "ei ole avoimen lisenssin fontti" in st.reason
+    assert "is not an open-licence font" in st.reason
 
 
 # --- failure modes that must not break a render -----------------------------
@@ -182,7 +182,7 @@ def test_network_failure_is_reported_rather_than_raised(monkeypatch):
     st = fonts.ensure_font("Questrial", fetch=fetch)
 
     assert st.state == fonts.UNAVAILABLE
-    assert "ei saatu yhteyttä" in st.reason
+    assert "Could not reach Google Fonts" in st.reason
 
 
 def test_network_can_be_switched_off_entirely(monkeypatch):
@@ -193,14 +193,14 @@ def test_network_can_be_switched_off_entirely(monkeypatch):
 
     assert st.state == fonts.UNAVAILABLE
     assert calls == []
-    assert "verkkohaku ole käytössä" in st.reason
+    assert "network lookup is switched off" in st.reason
 
 
 def test_blank_family_is_not_an_error_worth_fetching(monkeypatch):
     monkeypatch.setattr(fonts, "installed_families", lambda **_: set())
     st = fonts.ensure_font("   ", fetch=_fetcher({"metadata/fonts": LIBRARY}))
     assert st.state == fonts.UNAVAILABLE
-    assert "ei nimeä fonttia" in st.reason
+    assert "names no font" in st.reason
 
 
 # --- template-level check ---------------------------------------------------

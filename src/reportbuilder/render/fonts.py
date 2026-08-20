@@ -212,18 +212,18 @@ def google_font_url(family: str, *, timeout: float = _TIMEOUT,
     library = open_library(timeout=timeout, fetch=fetch)
     key = family.strip().lower()
     if not library:
-        return None, ("Fonttikirjaston lisenssitietoja ei saatu haettua, "
-                      f"joten fonttia '{family}' ei asenneta.")
+        return None, ("Could not fetch the font library's licence data, so "
+                      f"'{family}' will not be installed.")
     if key not in library:
-        return None, (f"'{family}' ei ole avoimen lisenssin fontti (esim. "
-                      "Monotypen tai Microsoftin fontti), joten sitä ei voi "
-                      "asentaa automaattisesti. PowerPoint-tiedosto käyttää "
-                      "silti oikeaa fonttia koneilla joilla se on asennettu — "
-                      "vain esikatselu ja PDF näkyvät korvaavalla fontilla. "
-                      "Asenna fontti Asetuksissa, jos haluat ne oikein.")
+        return None, (f"'{family}' is not an open-licence font (a Monotype or "
+                      "Microsoft font, say), so it cannot be installed "
+                      "automatically. The PowerPoint file still refers to the "
+                      "right font, and will use it on any machine that has it — "
+                      "only the preview and the PDF show a stand-in. Install "
+                      "the font in Settings if you want those right too.")
     if not library[key]:
-        return None, (f"'{family}' on Google Fontsissa, mutta ei avoimella "
-                      "lisenssillä, joten sitä ei voi asentaa palvelimelle.")
+        return None, (f"'{family}' is on Google Fonts, but not under an open "
+                      "licence, so it cannot be installed on the server.")
 
     quoted = family.strip().replace(" ", "+")
     try:
@@ -233,7 +233,7 @@ def google_font_url(family: str, *, timeout: float = _TIMEOUT,
             return None, f"Google Fonts ei tunne fonttia '{family}'."
         return None, f"Google Fonts vastasi virheellä {exc.code}."
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        return None, f"Google Fontsiin ei saatu yhteyttä ({exc.__class__.__name__})."
+        return None, f"Could not reach Google Fonts ({exc.__class__.__name__})."
 
     if "@font-face" not in body:
         return None, f"Google Fonts ei tarjoa fonttia '{family}'."
@@ -371,17 +371,17 @@ def install_font_bytes(blob: bytes, *, filename: str = "font.ttf",
     """
     if not blob:
         return FontStatus(family or filename, UNAVAILABLE,
-                          reason="Tiedosto on tyhjä.")
+                          reason="The file is empty.")
     if not blob.startswith(_SFNT_MAGIC):
         return FontStatus(
             family or filename, UNAVAILABLE,
-            reason="Tiedosto ei ole .ttf- tai .otf-fontti. Verkkofontteja "
-                   "(WOFF, WOFF2, EOT) ei voi asentaa palvelimelle.")
+            reason="The file is not a .ttf or .otf font. Web fonts (WOFF, "
+                   "WOFF2, EOT) cannot be installed on the server.")
 
     detected = family or family_of(blob)
     if not detected:
         return FontStatus(filename, UNAVAILABLE,
-                          reason="Fontin nimeä ei saatu luettua tiedostosta.")
+                          reason="Could not read the font name out of the file.")
 
     FONT_DIR.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9]+", "-", detected).strip("-") or "font"
@@ -392,8 +392,8 @@ def install_font_bytes(blob: bytes, *, filename: str = "font.ttf",
     if is_installed_after_refresh(detected):
         return FontStatus(detected, INSTALLED, source="upload")
     return FontStatus(detected, UNAVAILABLE,
-                      reason=f"Fontti '{detected}' tallennettiin, mutta "
-                             "järjestelmä ei tunnista sitä asennetuksi.")
+                      reason=f"'{detected}' was saved, but the system does "
+                             "not recognise it as installed.")
 
 
 def remove_font_file(family: str) -> bool:
@@ -416,20 +416,20 @@ def ensure_font(family: str, *, allow_network: bool = True,
     """Make *family* usable on this host, or explain why it cannot be."""
     family = (family or "").strip()
     if not family:
-        return FontStatus("", UNAVAILABLE, reason="Pohja ei nimeä fonttia.")
+        return FontStatus("", UNAVAILABLE, reason="The template names no font.")
     if is_installed(family):
         return FontStatus(family, PRESENT, source="system")
     stand_in = _substitutions.get(family)
     if stand_in:
         return FontStatus(
             family, SUBSTITUTED, source="substitution", substitute=stand_in,
-            reason=f"'{family}' korvataan fontilla '{stand_in}' esikatselussa "
-                   "ja PDF:ssä. PowerPoint-tiedosto viittaa edelleen "
-                   f"fonttiin '{family}'.")
+            reason=f"'{family}' is replaced by '{stand_in}' in previews and "
+                   "in the PDF. The PowerPoint file still refers to "
+                   f"'{family}'.")
     if not allow_network:
         return FontStatus(family, UNAVAILABLE,
-                          reason=f"Fonttia '{family}' ei ole asennettu, "
-                                 "eikä verkkohaku ole käytössä.")
+                          reason=f"'{family}' is not installed, and network "
+                                 "lookup is switched off.")
 
     url, reason = google_font_url(family, timeout=timeout, fetch=fetch)
     if url is None:
@@ -439,19 +439,18 @@ def ensure_font(family: str, *, allow_network: bool = True,
         blob = (fetch or _fetch)(url, timeout)
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return FontStatus(family, UNAVAILABLE,
-                          reason=f"Fontin '{family}' lataus epäonnistui "
+                          reason=f"Downloading '{family}' failed "
                                  f"({exc.__class__.__name__}).")
     if not blob:
         return FontStatus(family, UNAVAILABLE,
-                          reason=f"Fontin '{family}' lataus palautti tyhjän tiedoston.")
+                          reason=f"Downloading '{family}' returned an empty file.")
     st = install_font_bytes(blob, filename=f"{family}.ttf", family=family)
     if st.state == INSTALLED:
         return FontStatus(family, INSTALLED, source="google-fonts")
     if not blob.startswith(_SFNT_MAGIC):
         return FontStatus(family, UNAVAILABLE,
-                          reason=f"Fontista '{family}' saatiin verkkomuotoinen "
-                                 "tiedosto (WOFF/EOT), jota palvelin ei osaa "
-                                 "käyttää.")
+                          reason=f"'{family}' came back as a web-format file "
+                                 "(WOFF/EOT), which the server cannot use.")
     return st
 
 

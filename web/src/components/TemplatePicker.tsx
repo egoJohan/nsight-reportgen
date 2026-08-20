@@ -95,7 +95,7 @@ export default function TemplatePicker({
                     >
                       <AlertTriangleIcon className="size-3 shrink-0" />
                       <span className="truncate">
-                        Fontti puuttuu:{" "}
+                        Missing font:{" "}
                         {missingFonts(t)
                           .map((f) => f.family)
                           .join(", ")}

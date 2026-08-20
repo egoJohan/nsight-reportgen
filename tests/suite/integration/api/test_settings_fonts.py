@@ -321,4 +321,4 @@ def test_a_substituted_font_no_longer_reads_as_a_problem(subs, monkeypatch):
     assert st.state == F.SUBSTITUTED
     assert st.ok                       # resolved, deliberately
     assert st.substitute == "DejaVu Serif"
-    assert "PowerPoint-tiedosto viittaa edelleen" in st.reason
+    assert "The PowerPoint file still refers to" in st.reason

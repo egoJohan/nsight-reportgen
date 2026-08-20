@@ -146,7 +146,7 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
 
 
 def _case_name_from_filename(filename: str) -> str:
-    """Casen default nimi on materiaalin tiedostonimi (Asiakkuuden hallinta).
+    """A study is named after the file imported into it.
 
     Strips the extension only — the rest of the name is the analyst's, and
     second-guessing it produces worse titles than leaving it alone.
@@ -154,7 +154,7 @@ def _case_name_from_filename(filename: str) -> str:
     stem = (filename or "").rsplit("/", 1)[-1]
     if "." in stem:
         stem = stem.rsplit(".", 1)[0]
-    return stem.strip() or "Uusi tutkimus"
+    return stem.strip() or "New study"
 
 
 @customers_router.post("/customers/{customer_id}/cases/from-material", status_code=201)

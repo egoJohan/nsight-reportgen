@@ -130,7 +130,7 @@ function ChartFontSetting() {
             })
           }
         >
-          <option value="">Oletus ({data.default})</option>
+          <option value="">Default ({data.default})</option>
           {data.available.map((f) => (
             <option key={f} value={f}>
               {f}
