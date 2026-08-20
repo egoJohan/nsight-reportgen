@@ -1,14 +1,9 @@
-"""Cases routes: POST /cases (create), GET /cases (list), PATCH /cases/{id} (rename). (REQ-C-03, REQ-C-07)"""
+"""Cases routes: GET /cases (list), PATCH /cases/{id} (rename), DELETE /cases/{id}. (REQ-C-03, REQ-C-07)"""
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from reportbuilder.api.deps import get_client
 from reportbuilder.store.datahive_client import DataHiveClient
-
-
-class CaseCreate(BaseModel):
-    """Request body for POST /cases."""
-    name: str
 
 
 class CaseRename(BaseModel):
@@ -20,13 +15,17 @@ cases_router = APIRouter()
 
 
 @cases_router.post("/cases")
-def create_case(
-    body: CaseCreate,
-    client: DataHiveClient = Depends(get_client),
-) -> dict:
-    """Create a case (project); return the new case_id. (REQ-C-03)"""
-    case_id = client.create_case(body.name)
-    return {"case_id": case_id}
+def create_case() -> None:
+    """Superseded: a tutkimus now lives under a customer, and this path carries
+    none to put it in. `RepositoryClient` has no `create_case` — it cannot
+    sensibly grow one — so this used to fail closed with a 500. 410 rather
+    than 400 because the request isn't malformed, the endpoint is gone; the
+    frontend already only calls the replacement (`grep '"/cases"'
+    web/src/lib/api.ts` finds nothing)."""
+    raise HTTPException(
+        status_code=410,
+        detail="POST /cases is gone. Create a case under its customer: "
+               "POST /customers/{customer_id}/cases")
 
 
 @cases_router.get("/cases")

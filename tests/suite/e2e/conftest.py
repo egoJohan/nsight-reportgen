@@ -71,8 +71,9 @@ def demo_app(tmp_path, monkeypatch):
     app = create_app(client=client)
     tc = TestClient(app)
 
-    resp = tc.post("/cases", json={"name": "nsight-demo-real-savs"})
+    cust = tc.post("/customers", json={"name": "nsight-demo-real-savs"}).json()["id"]
+    resp = tc.post(f"/customers/{cust}/cases", json={"name": "nsight-demo-real-savs"})
     assert resp.status_code in (200, 201), resp.text
-    case_id = resp.json()["case_id"]
+    case_id = resp.json()["id"]
     assert case_id, f"unexpected /cases response: {resp.json()!r}"
     return tc, case_id

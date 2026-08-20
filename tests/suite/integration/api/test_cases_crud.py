@@ -38,12 +38,12 @@ def _delete_with_consent(client, url):
 
 # --- create / list ----------------------------------------------------------
 
-def test_create_case_returns_case_id(client_mock, mock_hive):
-    mock_hive.create_case.return_value = "case-77"
+def test_create_case_is_410_gone(client_mock):
+    """A tutkimus now lives under a customer, and this path carries none to
+    put it in — superseded, not malformed, hence 410 rather than 400."""
     resp = client_mock.post("/cases", json={"name": "My case"})
-    assert resp.status_code == 200
-    assert resp.json() == {"case_id": "case-77"}
-    mock_hive.create_case.assert_called_once_with("My case")
+    assert resp.status_code == 410
+    assert "/customers/{customer_id}/cases" in resp.json()["detail"]
 
 
 def test_list_cases_returns_client_payload(client_mock, mock_hive):
@@ -55,7 +55,8 @@ def test_list_cases_returns_client_payload(client_mock, mock_hive):
 
 
 def test_create_then_list_via_memory(client_memory):
-    cid = client_memory.post("/cases", json={"name": "Alpha"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "Alpha"}).json()["id"]
+    cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "Alpha"}).json()["id"]
     listing = client_memory.get("/cases").json()
     assert {c["id"]: c["name"] for c in listing}[cid] == "Alpha"
 

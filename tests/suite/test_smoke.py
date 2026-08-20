@@ -15,9 +15,10 @@ def test_synthetic_model_loads(synthetic_model):
 
 
 def test_memory_client_roundtrips_a_case(client_memory):
-    r = client_memory.post("/cases", json={"name": "smoke"})
+    cust = client_memory.post("/customers", json={"name": "smoke"}).json()["id"]
+    r = client_memory.post(f"/customers/{cust}/cases", json={"name": "smoke"})
     assert r.status_code in (200, 201)
-    assert r.json()["case_id"]
+    assert r.json()["id"]
 
 
 def test_recording_chat(canned_chat):

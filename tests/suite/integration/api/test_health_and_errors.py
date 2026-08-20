@@ -1,8 +1,10 @@
 """Health endpoint + DataHiveError -> HTTP mapping, exercised through multiple routes.
 
-Deterministic: no soffice, no network. The mapping table (REQ-C-30) is asserted
-via both POST /cases and GET /cases so we know the single exception handler is
-route-independent.
+Deterministic: no soffice, no network. The mapping table (REQ-C-30) used to be
+asserted via both POST /cases and GET /cases to show the single exception
+handler is route-independent; POST /cases no longer reaches a client at all
+(see test_create_case_is_410_gone below), so GET /cases carries the table
+alone now.
 """
 from __future__ import annotations
 
@@ -48,14 +50,13 @@ _COLLAPSE_TO_502 = [500, 503, 418, 599, 302]
 _TABLE = [(s, s) for s in _PASS_THROUGH] + [(s, 502) for s in _COLLAPSE_TO_502]
 
 
-@pytest.mark.parametrize("upstream,expected", _TABLE)
-def test_error_mapping_via_post_cases(client_mock, mock_hive, upstream, expected):
-    mock_hive.create_case.side_effect = DataHiveError(upstream, "boom", "POST", "http://dh/cases")
+def test_create_case_is_410_gone(client_mock):
+    """POST /cases is superseded, not malformed — 410 names the replacement
+    (POST /customers/{customer_id}/cases) regardless of what the client would
+    have done, because the route never reaches one."""
     resp = client_mock.post("/cases", json={"name": "X"})
-    assert resp.status_code == expected
-    detail = resp.json()["detail"]
-    assert detail.startswith("datahive: ")
-    assert len(detail) <= 500
+    assert resp.status_code == 410
+    assert "/customers/{customer_id}/cases" in resp.json()["detail"]
 
 
 @pytest.mark.parametrize("upstream,expected", _TABLE)
