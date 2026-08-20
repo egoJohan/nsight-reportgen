@@ -127,7 +127,10 @@ def _admits(user, path: str) -> bool:
 
 class Repository:
     """Domain operations over the seam. Every call carries the caller's auth,
-    so datahive decides what this user may see — never this class."""
+    but datahive no longer decides what this user may see: nSight holds one
+    tenant-wide service credential (spec D3), so the store hands back the
+    whole tenant regardless of who is asking. For the listing methods, THIS
+    CLASS narrows that down, via `_admits`, using the caller's grants."""
 
     def __init__(self, store: ObjectStore):
         self.store = store
@@ -209,8 +212,8 @@ class Repository:
         The URL surface is still case-rooted (`/cases/{id}/...`) from before the
         hierarchy existed, so the app frequently holds a case id and nothing
         else. One listing answers it: labels select the case metadata objects,
-        the store has already restricted them to what this caller may read, and
-        the customer is the first path segment.
+        filtered here by the caller's grants — the store returns the whole
+        tenant — and the customer is the first path segment.
 
         Returns None rather than raising — "no such case, or not yours" is an
         ordinary answer here, and the two must stay indistinguishable.
@@ -391,9 +394,10 @@ class Repository:
         """The most recently modified reports this user may see, across every
         customer.
 
-        No path prefix: the listing is already restricted to paths this caller
-        may see, so "accessible to this person" is the store's answer rather
-        than a filter applied here.
+        No path prefix — this listing spans the whole tenant by design, because
+        it is the landing page. "Accessible to this person" used to be the
+        store's answer for free; now it is this method's answer, via
+        `_admits`, because the store no longer narrows by caller.
 
         Cost note: this reads one sidecar per accessible report. They are ~100
         bytes each and today's corpus is tens of reports, so it is a fine trade
