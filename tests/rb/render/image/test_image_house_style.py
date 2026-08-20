@@ -311,3 +311,73 @@ def test_add_image_slide_chrome_n_annotation():
     textboxes = [s for s in slide.shapes if s.has_text_frame]
     n_texts = [s for s in textboxes if "5" in s.text_frame.text]
     assert n_texts, "N=5 annotation not found in any textbox after chrome"
+
+
+# ---------------------------------------------------------------------------
+# Title fitting (Task D2): a title too long for the template's own box shrinks
+# instead of growing the box without limit.
+# ---------------------------------------------------------------------------
+
+def _title_style(**overrides):
+    from reportbuilder.render.template_profile import TextStyle
+
+    # A generous single-line template box: 10in wide, 0.5in tall, 20pt — close
+    # to what a customer's own one-line headline is actually drawn at.
+    fields = dict(size_pt=20.0, caps=False, line_spacing=1.0,
+                  left=int(Inches(0.7)), top=int(Inches(0.45)),
+                  width=int(Inches(10)), height=int(Inches(0.5)))
+    fields.update(overrides)
+    return TextStyle(**fields)
+
+
+_SHORT_TITLE = "Brand awareness"
+_LONG_TITLE = ("How strongly do respondents associate our brand with being "
+               "trustworthy, professional, and a leader in customer care, "
+               "compared to every other brand active in this market segment "
+               "today, across all the regions surveyed this quarter?")
+_PATHOLOGICAL_TITLE = (_LONG_TITLE + " ") * 8
+
+
+def test_short_title_renders_at_the_templates_own_size():
+    """The regression that matters: a customer-length title must not restyle."""
+    from reportbuilder.render.image.slide_chrome import fit_title_size
+
+    st = _title_style()
+    assert fit_title_size(st, _SHORT_TITLE) == st.size_pt
+
+
+def test_a_long_title_shrinks_and_the_box_reflects_it():
+    from reportbuilder.render.image.slide_chrome import fit_title_size, harvested_title_box
+    from reportbuilder.render.template_profile import TemplateProfile
+
+    st = _title_style()
+    size = fit_title_size(st, _LONG_TITLE)
+    assert size < st.size_pt
+
+    profile = TemplateProfile(title=st)
+    _left, _top, _width, height = harvested_title_box(profile, _LONG_TITLE)
+    # The box the smaller size actually needs, not the box the ORIGINAL size
+    # would have needed — otherwise deck.py starts the chart too low.
+    at_original_size = harvested_title_box(
+        TemplateProfile(title=_title_style()), "x")  # 1-line box, i.e. st.height
+    assert height <= 2 * at_original_size[3]
+
+
+def test_a_pathologically_long_title_stops_at_the_floor():
+    from reportbuilder.render.image.slide_chrome import fit_title_size, _TITLE_MIN_SCALE
+
+    st = _title_style()
+    size = fit_title_size(st, _PATHOLOGICAL_TITLE)
+    assert size == pytest.approx(st.size_pt * _TITLE_MIN_SCALE)
+
+
+def test_an_all_caps_title_still_wraps_sooner():
+    """cap="all" widens the rendered text, so the same string needs a smaller
+    size (or wraps to more lines) than it would in mixed case — unchanged from
+    before D2, just now expressed as a smaller chosen size rather than a
+    taller box."""
+    from reportbuilder.render.image.slide_chrome import fit_title_size
+
+    mixed = _title_style(caps=False)
+    capped = _title_style(caps=True)
+    assert fit_title_size(capped, _LONG_TITLE) <= fit_title_size(mixed, _LONG_TITLE)

@@ -187,20 +187,78 @@ def slide_headline(spec, question: str) -> str:
     return (getattr(spec, "slide_title", None) or "").strip() or (question or "").strip()
 
 
+# How far the title box may grow before the type shrinks instead of the box.
+# Twice the customer's own title height is roughly enough for our text to add
+# one full wrapped line beyond theirs; past that, growing the box further is
+# what produced the "elephant" title regression (a headline eating the slide),
+# so the font steps down instead. A fixed multiple of the TEMPLATE's own
+# height (rather than a fraction of the slide) keeps the rule proportional to
+# how much room the customer actually drew for a title, whether that's a
+# generous banner or a tight one-liner.
+_TITLE_MAX_GROWTH = 2.0
+
+# The font never steps down past this share of the template's own size. Below
+# it the deck looks broken in a different way than an oversized title did, and
+# the honest fix at that point is a shorter headline, not smaller type.
+_TITLE_MIN_SCALE = 0.6
+
+# Increment used to step the title size down. Coarse enough that the rendered
+# result matches what wrapped_line_count predicted — a finer step just adds
+# iterations without changing the outcome, since the line-count estimate is
+# itself an approximation.
+_TITLE_STEP_PT = 0.5
+
+
+def _title_line_height(size_pt: float, st) -> int:
+    """The height of one wrapped line of the title, at *size_pt*."""
+    return int(Pt(size_pt * (st.line_spacing or 1.25)))
+
+
+def fit_title_size(st, text: str) -> float:
+    """The size to actually render *text* at in title style *st*.
+
+    Starts at the template's own size — the common case, a customer-length
+    title, never needs to move off it. While the wrapped text is taller than
+    `_TITLE_MAX_GROWTH` × the template's own box, the size steps down by
+    `_TITLE_STEP_PT`, stopping at `_TITLE_MIN_SCALE` of the template's size
+    even if the text still does not fit there.
+    """
+    base = st.size_pt or TITLE_PT
+    if not text or not st.width or not st.height:
+        return base
+    floor = base * _TITLE_MIN_SCALE
+    max_height = int(st.height) * _TITLE_MAX_GROWTH
+    size = base
+    while True:
+        # An all-caps title wraps sooner than the same string in mixed case,
+        # and Holiday Club's is `cap="all"` — measure it as if it were a size
+        # larger.
+        measured = size * 1.12 if st.caps else size
+        lines = wrapped_line_count(text, int(st.width), int(measured))
+        height = lines * _title_line_height(size, st)
+        if height <= max_height or size <= floor:
+            break
+        size -= _TITLE_STEP_PT
+    return max(size, floor)
+
+
 def harvested_title_box(profile, text: str) -> tuple[int, int, int, int]:
-    """The title's box: the template's, grown downward if our text is longer.
+    """The title's box, at the size it will actually render.
 
     The customer's own title fits on one line because they wrote it to. Ours is
-    a question or an AI headline and often wraps, and a box that does not grow
-    would put the second line over the chart.
+    a question or an AI headline and often wraps; rather than growing the box
+    to fit it without limit (that produced titles that ate the slide), the type
+    shrinks — see `fit_title_size` — and the box grows only up to
+    `_TITLE_MAX_GROWTH` × the template's own height, for the cases a shrunk
+    title still does not fit in the template's exact box.
     """
     st = profile.title
-    size = st.size_pt or TITLE_PT
-    # An all-caps title wraps sooner than the same string in mixed case, and
-    # Holiday Club's is `cap="all"` — measure it as if it were a size larger.
+    size = fit_title_size(st, text)
     measured = size * 1.12 if st.caps else size
     lines = wrapped_line_count(text, int(st.width), int(measured))
-    height = max(int(st.height), lines * int(Pt(size * (st.line_spacing or 1.25))))
+    wanted = lines * _title_line_height(size, st)
+    max_height = int(st.height) * _TITLE_MAX_GROWTH if st.height else wanted
+    height = min(max(int(st.height), wanted), int(max_height))
     return int(st.left), int(st.top), int(st.width), height
 
 
@@ -302,8 +360,9 @@ def draw_template_heading(slide, style, text: str) -> int:
         return 0
     st = profile.title
     left, top, width, height = harvested_title_box(profile, text)
+    size = fit_title_size(st, text)
     _textbox(slide, left, top, width, height,
-             [(text, st.size_pt or TITLE_PT, _rgb(st.colour) or PX_INK,
+             [(text, size, _rgb(st.colour) or PX_INK,
                True if st.bold is None else st.bold)],
              font=st.font or getattr(style, "heading_font", "") or "")
     return top + height
