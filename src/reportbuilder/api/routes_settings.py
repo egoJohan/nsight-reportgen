@@ -28,6 +28,7 @@ settings_router = APIRouter(tags=["settings"])
 
 CHART_FONT_KEY = "chart-font"
 SUBSTITUTIONS_KEY = "font-substitutions"
+ACCESS_KEY = "access.json"
 
 # The setting is read on the render path, so it is cached briefly rather than
 # fetched per chart. Short enough that a change takes effect while someone is
@@ -148,6 +149,42 @@ def put_substitutions(payload: dict = Body(...),
     applied = F.apply_substitutions(mapping)
     repo.set_setting(auth, SUBSTITUTIONS_KEY, {"map": applied})
     return {"map": applied}
+
+
+@settings_router.get("/settings/access")
+def get_access(auth: AuthContext = Depends(get_auth),
+              repo: Repository = Depends(get_repository),
+              user: User = Depends(require_admin)) -> dict:
+    """Who may sign in without an invitation, and what they get (spec §5
+    domain auto-join). Admin only — this is app configuration, not data."""
+    stored = repo.get_setting(auth, ACCESS_KEY) or {}
+    return {"allowed_domains": stored.get("allowed_domains", []),
+            "default_grants": stored.get("default_grants", [])}
+
+
+@settings_router.put("/settings/access")
+def put_access(payload: dict = Body(...),
+              auth: AuthContext = Depends(get_auth),
+              repo: Repository = Depends(get_repository),
+              user: User = Depends(require_admin)) -> dict:
+    from reportbuilder.auth.permissions import Grant  # noqa: PLC0415
+
+    domains = payload.get("allowed_domains", [])
+    grants = payload.get("default_grants", [])
+    if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
+        raise HTTPException(422, "allowed_domains must be a list of strings")
+    if not isinstance(grants, list):
+        raise HTTPException(422, "default_grants must be a list")
+    for g in grants:
+        if not isinstance(g, dict) or not g.get("scope"):
+            raise HTTPException(422, "each default grant needs a scope")
+        try:
+            Grant(g["scope"], g.get("mode", "view"))  # validates scope/mode
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    value = {"allowed_domains": domains, "default_grants": grants}
+    repo.set_setting(auth, ACCESS_KEY, value)
+    return value
 
 
 @settings_router.get("/settings/chart-font")
