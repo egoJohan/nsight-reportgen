@@ -659,6 +659,20 @@ class Repository:
             d.pop("template_id", None)
         self._write_json(auth, path, d, [label])
 
+    def _live_template_ids(self, auth: AuthContext, customer_id: str) -> set[str]:
+        """Ids of templates the asiakas still has.
+
+        Resolution checks every binding against this, so deleting a template
+        from the asiakas resets whatever pointed at it back to inheriting —
+        wherever that binding was. Doing it here rather than by rewriting the
+        bindings on delete means nothing can be missed: a report bound to a
+        deleted file cannot survive in a document nobody thought to walk.
+        """
+        try:
+            return {t.id for t in self.list_templates(auth, customer_id)}
+        except Exception:  # noqa: BLE001 — resolution must not fail on a listing
+            return set()
+
     def resolve_case_template(self, auth: AuthContext, customer_id: str,
                               case_id: str) -> tuple[str, str]:
         """What a tutkimus renders with absent any report-level choice.
@@ -673,13 +687,14 @@ class Repository:
         case, and having to upload it AND then select it read as the upload not
         having worked.
         """
+        live = self._live_template_ids(auth, customer_id)
         for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
                             (P.customer_meta_path(customer_id), "customer")):
             try:
                 d = self._read_json(auth, path)
             except (NotFound, ValueError, UnicodeDecodeError):
                 continue
-            if d.get("template_id"):
+            if d.get("template_id") in live:
                 return d["template_id"], level
         first = self.list_templates(auth, customer_id)
         if first:
@@ -705,9 +720,10 @@ class Repository:
         "report" | "pinned" | "case" | "customer" | "default". An empty
         template_id means the house default.
         """
+        live = self._live_template_ids(auth, customer_id)
         try:
             report = json.loads(self.load_report(auth, customer_id, case_id, report_id))
-            if report.get("template_ref"):
+            if report.get("template_ref") in live:
                 return report["template_ref"], "report"
         except (NotFound, ValueError, UnicodeDecodeError):
             pass
@@ -717,6 +733,8 @@ class Repository:
             meta = self._read_json(
                 auth, P.report_meta_path(customer_id, case_id, report_id))
             pinned = meta.get("pinned_template") or ""
+            if pinned not in live:
+                pinned = ""
             # Older pins predate the level being recorded. Treat them as the
             # least specific thing that could have set them, so a deliberate
             # choice still wins rather than being blocked by a pin we cannot

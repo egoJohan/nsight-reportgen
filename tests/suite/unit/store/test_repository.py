@@ -14,6 +14,40 @@ from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 
 
+def approve_all(store, fn):
+    """Run *fn*, approving each consent request until it completes.
+
+    datahive gates destructive operations behind an approval, and the in-memory
+    seam mirrors that, so any test that deletes something goes through here.
+    """
+    for _ in range(50):
+        try:
+            return fn()
+        except ConsentRequired as exc:
+            store.approve(exc.request_id)
+    raise AssertionError("consent loop did not converge")
+
+
+def tpl(repo, auth, customer_id, alias):
+    """A REAL uploaded template, remembered under a readable alias.
+
+    Resolution ignores a binding whose template the asiakas no longer has —
+    that is how "the pohja was deleted" resets a tutkimus or a report to
+    inheriting. So a test that binds an id must bind one that exists, which is
+    what the app does too; a synthetic "tpl-attendo" described a state the app
+    cannot reach. The alias keeps the tests readable, since "tpl-case" says
+    which binding is under test and a generated id does not.
+
+    Memoised on the repo, which the fixtures make fresh for every test.
+    """
+    known = repo.__dict__.setdefault("_test_templates", {})
+    key = (customer_id, alias)
+    if key not in known:
+        known[key] = repo.upload_template(
+            auth, customer_id, f"{alias}.pptx", b"PK\x03\x04").id
+    return known[key]
+
+
 @pytest.fixture
 def store():
     return InMemoryObjectStore()
@@ -403,12 +437,7 @@ class TestDeletion:
 
     def _approve_all(self, store, auth, fn):
         """Run *fn*, approving each consent request until it completes."""
-        for _ in range(50):
-            try:
-                return fn()
-            except ConsentRequired as exc:
-                store.approve(exc.request_id)
-        raise AssertionError("consent loop did not converge")
+        return approve_all(store, fn)
 
     def test_deleting_a_report_takes_its_sidecar_and_render(self, repo, store, auth):
         c = repo.create_customer(auth, "Acme")
@@ -492,8 +521,39 @@ class TestTemplateResolution:
         chosen outranks it."""
         cid, kid, rid = self._tree(repo, auth)
         repo.upload_template(auth, cid, "a.pptx", b"PK\x03\x04")
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-case"), "case")
+
+    def test_deleting_a_template_resets_what_pointed_at_it(self, repo, store, auth):
+        """"If the selected item is removed, reset to Use parent." (Johan)
+
+        Handled in resolution rather than by rewriting the bindings on delete,
+        so nothing can be missed — a report bound to a deleted file cannot
+        survive in a document nobody thought to walk.
+        """
+        cid, kid, rid = self._tree(repo, auth)
+        keep = tpl(repo, auth, cid, "tpl-keep")
+        doomed = tpl(repo, auth, cid, "tpl-doomed")
+        repo.set_template(auth, keep, customer_id=cid)
+        repo.set_template(auth, doomed, customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (doomed, "case")
+
+        approve_all(store, lambda: repo.delete_template(auth, cid, doomed))
+        # Back to what the parent says, not to nothing.
+        assert repo.resolve_template(auth, cid, kid, rid) == (keep, "customer")
+
+    def test_a_report_bound_to_a_deleted_template_falls_back_too(self, repo, store, auth):
+        cid, kid, _ = self._tree(repo, auth)
+        keep = tpl(repo, auth, cid, "tpl-keep")
+        doomed = tpl(repo, auth, cid, "tpl-doomed")
+        repo.set_template(auth, keep, customer_id=cid)
+        rid = repo.save_report(
+            auth, cid, kid,
+            json.dumps({"name": "R", "template_ref": doomed})).id
+        assert repo.resolve_template(auth, cid, kid, rid) == (doomed, "report")
+
+        approve_all(store, lambda: repo.delete_template(auth, cid, doomed))
+        assert repo.resolve_template(auth, cid, kid, rid) == (keep, "customer")
 
     def test_a_customer_with_no_templates_still_gets_the_house_default(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
@@ -501,30 +561,30 @@ class TestTemplateResolution:
 
     def test_a_customer_template_reaches_its_reports(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
-        repo.set_template(auth, "tpl-attendo", customer_id=cid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-attendo", "customer")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-attendo"), customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-attendo"), "customer")
 
     def test_a_tutkimus_template_overrides_its_customer(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
-        repo.set_template(auth, "tpl-customer", customer_id=cid)
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-customer"), customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-case"), "case")
 
     def test_a_report_template_overrides_everything(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
-        repo.set_template(auth, "tpl-customer", customer_id=cid)
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-customer"), customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
         repo.save_report(auth, cid, kid,
-                         json.dumps({"name": "R", "template_ref": "tpl-report"}),
+                         json.dumps({"name": "R", "template_ref": tpl(repo, auth, cid, "tpl-report")}),
                          report_id=rid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-report", "report")
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-report"), "report")
 
     def test_clearing_a_binding_falls_back_up_the_chain(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
-        repo.set_template(auth, "tpl-customer", customer_id=cid)
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-customer"), customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
         repo.set_template(auth, None, customer_id=cid, case_id=kid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-customer", "customer")
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-customer"), "customer")
 
 
 class TestTemplatePinning:
@@ -537,28 +597,28 @@ class TestTemplatePinning:
         k = repo.create_case(auth, c.id, "Brändi")
         r = repo.save_report(auth, c.id, k.id,
                              json.dumps({"name": "R", "template_ref": ""}))
-        repo.set_template(auth, "tpl-v1", customer_id=c.id)
-        repo.pin_template(auth, c.id, k.id, r.id, "tpl-v1")
+        repo.set_template(auth, tpl(repo, auth, c.id, "tpl-v1"), customer_id=c.id)
+        repo.pin_template(auth, c.id, k.id, r.id, tpl(repo, auth, c.id, "tpl-v1"))
         return c.id, k.id, r.id
 
     def test_changing_the_customer_template_leaves_a_delivered_report_alone(
             self, repo, auth):
         cid, kid, rid = self._rendered(repo, auth)
-        repo.set_template(auth, "tpl-v2", customer_id=cid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-v1", "pinned")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-v2"), customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-v1"), "pinned")
 
     def test_a_new_report_picks_up_the_new_template(self, repo, auth):
         cid, kid, _ = self._rendered(repo, auth)
-        repo.set_template(auth, "tpl-v2", customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-v2"), customer_id=cid)
         fresh = repo.save_report(auth, cid, kid,
                                  json.dumps({"name": "New", "template_ref": ""}))
-        assert repo.resolve_template(auth, cid, kid, fresh.id) == ("tpl-v2", "customer")
+        assert repo.resolve_template(auth, cid, kid, fresh.id) == (tpl(repo, auth, cid, "tpl-v2"), "customer")
 
     def test_requesting_the_update_moves_the_report_on(self, repo, auth):
         cid, kid, rid = self._rendered(repo, auth)
-        repo.set_template(auth, "tpl-v2", customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-v2"), customer_id=cid)
         repo.clear_pinned_template(auth, cid, kid, rid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-v2", "customer")
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-v2"), "customer")
 
     def test_pinning_does_not_disturb_the_report_name(self, repo, auth):
         # The pin lives in the same sidecar the listing reads its name from.
@@ -581,36 +641,36 @@ class TestSpecificityBeatsThePin:
         k = repo.create_case(auth, c.id, "Brändi")
         r = repo.save_report(auth, c.id, k.id,
                              json.dumps({"name": "R", "template_ref": ""}))
-        repo.set_template(auth, "tpl-customer", customer_id=c.id)
-        repo.pin_template(auth, c.id, k.id, r.id, "tpl-customer", level="customer")
+        repo.set_template(auth, tpl(repo, auth, c.id, "tpl-customer"), customer_id=c.id)
+        repo.pin_template(auth, c.id, k.id, r.id, tpl(repo, auth, c.id, "tpl-customer"), level="customer")
         return c.id, k.id, r.id
 
     def test_a_tutkimus_template_overrides_a_customer_level_pin(self, repo, auth):
         cid, kid, rid = self._rendered_under_customer(repo, auth)
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-case"), "case")
 
     def test_a_report_template_overrides_a_pin(self, repo, auth):
         cid, kid, rid = self._rendered_under_customer(repo, auth)
         repo.save_report(auth, cid, kid,
-                         json.dumps({"name": "R", "template_ref": "tpl-report"}),
+                         json.dumps({"name": "R", "template_ref": tpl(repo, auth, cid, "tpl-report")}),
                          report_id=rid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-report", "report")
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-report"), "report")
 
     def test_a_change_at_the_SAME_level_does_not_move_the_report(self, repo, auth):
         # This is the half that must keep working: a delivered report does not
         # restyle itself because the customer picked a different template.
         cid, kid, rid = self._rendered_under_customer(repo, auth)
-        repo.set_template(auth, "tpl-customer-v2", customer_id=cid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-customer", "pinned")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-customer-v2"), customer_id=cid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-customer"), "pinned")
 
     def test_a_pin_made_at_case_level_is_not_overridden_by_the_customer(self, repo, auth):
         cid, kid, rid = self._rendered_under_customer(repo, auth)
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
-        repo.pin_template(auth, cid, kid, rid, "tpl-case", level="case")
-        repo.set_template(auth, "tpl-customer-v2", customer_id=cid)
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
+        repo.pin_template(auth, cid, kid, rid, tpl(repo, auth, cid, "tpl-case"), level="case")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-customer-v2"), customer_id=cid)
         # A broader level must not reach past a more specific pin.
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "pinned")
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-case"), "pinned")
 
     def test_a_pin_without_a_recorded_level_still_yields_to_a_choice(self, repo, auth):
         # Pins written before the level was recorded must not freeze a report
@@ -621,5 +681,5 @@ class TestSpecificityBeatsThePin:
         d.pop("pinned_level", None)
         repo.store.put(auth, meta, json.dumps(d).encode(), "application/json",
                        labels=[P.LABEL_REPORT_META])
-        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
-        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+        repo.set_template(auth, tpl(repo, auth, cid, "tpl-case"), customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == (tpl(repo, auth, cid, "tpl-case"), "case")
