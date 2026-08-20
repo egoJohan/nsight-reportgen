@@ -16,6 +16,8 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/template/default.pptx                   nsight:template
     settings/font/{id}                               nsight:font
     settings/font/{id}.meta                          nsight:font-meta
+    settings/user/{user_id}                          nsight:user
+    settings/user/{user_id}.grants                   nsight:grants
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -45,6 +47,8 @@ LABEL_TEMPLATE_META = "nsight:template-meta"
 LABEL_SETTINGS = "nsight:settings"
 LABEL_FONT = "nsight:font"
 LABEL_FONT_META = "nsight:font-meta"
+LABEL_USER = "nsight:user"
+LABEL_GRANTS = "nsight:grants"
 
 SETTINGS_ROOT = "settings"
 
@@ -194,3 +198,14 @@ def font_meta_path(font_id: str) -> str:
 
 def settings_path(key: str) -> str:
     return f"{SETTINGS_ROOT}/{_seg(key, 'key')}"
+
+
+def user_path(user_id: str) -> str:
+    return f"{SETTINGS_ROOT}/user/{_seg(user_id, 'user_id')}"
+
+
+def user_grants_path(user_id: str) -> str:
+    """Grants are a sibling of the user, not part of it: they are rewritten far
+    more often than the identity they belong to, exactly as material curation is
+    a sibling of the .sav."""
+    return f"{user_path(user_id)}.grants"

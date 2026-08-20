@@ -532,6 +532,84 @@ class Repository:
         self._write_json(auth, P.settings_path(key), value, [P.LABEL_SETTINGS])
         return value
 
+    # --- users and grants -------------------------------------------------
+    #
+    # Stored in datahive so that attaching a different hive brings the people
+    # with it (spec §2). nSight keeps no user list of its own.
+
+    def save_user(self, auth: AuthContext, user: "User") -> "User":
+        """Create or replace. An empty id means create."""
+        from dataclasses import replace  # noqa: PLC0415
+
+        uid = user.id or _new_id("usr")
+        self._write_json(auth, P.user_path(uid),
+                         {"id": uid, "email": user.email.strip(),
+                          "name": user.name, "is_admin": bool(user.is_admin)},
+                         [P.LABEL_USER])
+        self.set_grants(auth, uid, user.grants)
+        return replace(user, id=uid)
+
+    def set_grants(self, auth: AuthContext, user_id: str, grants) -> None:
+        self._write_json(auth, P.user_grants_path(user_id),
+                         {"grants": [{"scope": g.scope, "mode": g.mode} for g in grants]},
+                         [P.LABEL_GRANTS])
+
+    def _grants(self, auth: AuthContext, user_id: str) -> tuple:
+        from reportbuilder.auth.permissions import Grant  # noqa: PLC0415
+
+        try:
+            d = self._read_json(auth, P.user_grants_path(user_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return ()
+        grants = []
+        for g in d.get("grants", []):
+            if not g.get("scope"):
+                continue
+            try:
+                grants.append(Grant(g["scope"], g.get("mode", "view")))
+            except ValueError:
+                # A malformed grant row must cost its owner that one grant, not
+                # their whole account. Task 1 made Grant construction strict
+                # (rejecting empty/trailing-slash/. or .. scopes and invalid
+                # modes), so a bad row here is a configuration error. Skip it and
+                # let the user load with their valid grants intact.
+                continue
+        return tuple(grants)
+
+    def get_user(self, auth: AuthContext, user_id: str) -> "User | None":
+        from reportbuilder.auth.permissions import User  # noqa: PLC0415
+
+        try:
+            d = self._read_json(auth, P.user_path(user_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        return User(id=d["id"], email=d.get("email", ""), name=d.get("name", ""),
+                    is_admin=bool(d.get("is_admin")), grants=self._grants(auth, d["id"]))
+
+    def list_users(self, auth: AuthContext) -> list:
+        out = []
+        for info in self.store.list(auth, P.SETTINGS_ROOT + "/", labels=[P.LABEL_USER]):
+            user = self.get_user(auth, info.path.rsplit("/", 1)[-1])
+            if user is not None:
+                out.append(user)
+        return sorted(out, key=lambda u: u.email.lower())
+
+    def find_user_by_email(self, auth: AuthContext, email: str) -> "User | None":
+        """Sign-in has a verified email and nothing else.
+
+        Case-insensitive: an IdP may return `Maija@Egoiq.com` today and
+        `maija@egoiq.com` tomorrow, and they are the same person.
+        """
+        wanted = (email or "").strip().lower()
+        return next((u for u in self.list_users(auth) if u.email.lower() == wanted), None)
+
+    def delete_user(self, auth: AuthContext, user_id: str) -> None:
+        for path in (P.user_path(user_id), P.user_grants_path(user_id)):
+            try:
+                self.store.delete(auth, path)
+            except NotFound:
+                pass
+
     # --- fonts ------------------------------------------------------------
     #
     # Font FILES live in datahive, not merely on the render host. A host can be
