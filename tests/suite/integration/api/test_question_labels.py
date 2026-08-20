@@ -7,7 +7,8 @@ from __future__ import annotations
 
 
 def _case_material(client, synthetic_bytes) -> str:
-    cid = client.post("/cases", json={"name": "A"}).json()["case_id"]
+    cust = client.post("/customers", json={"name": "A"}).json()["id"]
+    cid = client.post(f"/customers/{cust}/cases", json={"name": "A"}).json()["id"]
     return client.post(
         f"/cases/{cid}/materials",
         files={"file": ("s.sav", synthetic_bytes, "application/octet-stream")},

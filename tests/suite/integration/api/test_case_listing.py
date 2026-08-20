@@ -7,7 +7,8 @@ from reportbuilder.testing.fixtures import report_json_n_charts
 
 
 def _new_case(client) -> str:
-    return client.post("/cases", json={"name": "A"}).json()["case_id"]
+    cust = client.post("/customers", json={"name": "A"}).json()["id"]
+    return client.post(f"/customers/{cust}/cases", json={"name": "A"}).json()["id"]
 
 
 def test_get_case_materials_lists_uploaded(client_memory, synthetic_bytes):

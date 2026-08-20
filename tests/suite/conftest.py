@@ -50,19 +50,34 @@ def mock_hive(synthetic_bytes) -> Mock:
 def client_mock(mock_hive) -> TestClient:
     """App on the mock store, with the repository and auth dependencies filled.
 
+    The mock answers the data calls (attach_material, get_material, ...); the
+    repository answers "does this exist and whose is it" — the split a route
+    guard introduces. Seeded here with one customer, one case and one material
+    so a guard resolving a case_id/material_id through the repository finds
+    one, and the mock's own ids are set to agree with the seeded ones so a
+    test can address either.
+
     The preview route now resolves a template through the object store, so
-    without these it fails closed with 401 — correct in production, useless in
-    a test asserting a 422 or a 503.
+    without the repository/auth overrides it fails closed with 401 — correct
+    in production, useless in a test asserting a 422 or a 503.
     """
     from reportbuilder.api.deps_store import get_auth, get_repository
     from reportbuilder.store.memory_objects import InMemoryObjectStore
     from reportbuilder.store.repository import Repository
     from reportbuilder.store.seam import AuthContext
 
-    app = create_app(client=mock_hive)
+    auth = AuthContext(token="test")
     repo = Repository(InMemoryObjectStore())
+    customer = repo.create_customer(auth, "Mock Co")
+    case = repo.create_case(auth, customer.id, "Mock Case")
+    material = repo.attach_material(auth, customer.id, case.id, "mock.sav", b"")
+
+    mock_hive.create_case.return_value = case.id
+    mock_hive.attach_material.return_value = material.id
+
+    app = create_app(client=mock_hive)
     app.dependency_overrides[get_repository] = lambda: repo
-    app.dependency_overrides[get_auth] = lambda: AuthContext(token="test")
+    app.dependency_overrides[get_auth] = lambda: auth
     return TestClient(app)
 
 
@@ -75,20 +90,22 @@ def memory_hive(tmp_path) -> InMemoryDataHiveClient:
 
 
 @pytest.fixture
-def client_memory(memory_hive) -> TestClient:
-    """App wired to the in-memory stores.
+def client_memory() -> TestClient:
+    """App wired the way production is: `get_client` builds a RepositoryClient
+    over the same object store the repository dependency returns.
 
-    Also overrides the repository and auth dependencies: the render routes now
-    reach the object store directly, to persist a finished deck and to fetch it
-    back when /tmp no longer has it. Without these the routes fail closed with
-    401, which is the correct production behaviour and useless in a test.
+    It used to inject a separate InMemoryDataHiveClient, which meant a material
+    created through a route lived in one store while anything reading the
+    repository saw another. That was invisible while nothing cross-checked the
+    two — and became a wall of 404s the moment route guards started resolving
+    ids through the repository.
     """
     from reportbuilder.api.deps_store import get_auth, get_repository
     from reportbuilder.store.memory_objects import InMemoryObjectStore
     from reportbuilder.store.repository import Repository
     from reportbuilder.store.seam import AuthContext
 
-    app = create_app(client=memory_hive)
+    app = create_app()
     repo = Repository(InMemoryObjectStore())
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: AuthContext(token="test")

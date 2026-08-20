@@ -3,7 +3,8 @@ from __future__ import annotations
 
 
 def test_upload_via_memory_ingests_and_is_retrievable(client_memory, memory_hive, synthetic_bytes):
-    cid = client_memory.post("/cases", json={"name": "C"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "C"}).json()["id"]
+    cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "C"}).json()["id"]
     resp = client_memory.post(
         f"/cases/{cid}/materials",
         files={"file": ("study.sav", synthetic_bytes, "application/octet-stream")},
@@ -37,7 +38,8 @@ def test_upload_response_shape_via_mock(client_mock, mock_hive, synthetic_bytes)
 
 def _seed(client, synthetic_bytes, *, reports=()):
     """A tutkimus with a dataset and, optionally, reports built on it."""
-    cid = client.post("/cases", json={"name": "C"}).json()["case_id"]
+    cust = client.post("/customers", json={"name": "C"}).json()["id"]
+    cid = client.post(f"/customers/{cust}/cases", json={"name": "C"}).json()["id"]
     mid = client.post(
         f"/cases/{cid}/materials",
         files={"file": ("study.sav", synthetic_bytes, "application/octet-stream")},

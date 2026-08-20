@@ -32,13 +32,15 @@ def test_create_then_list_via_memory(client_memory):
 
 @pytest.mark.parametrize("bad", ["", "   ", "\t\n"])
 def test_rename_empty_or_whitespace_is_422(client_memory, bad):
-    cid = client_memory.post("/cases", json={"name": "Alpha"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "Alpha"}).json()["id"]
+    cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "Alpha"}).json()["id"]
     resp = client_memory.patch(f"/cases/{cid}", json={"name": bad})
     assert resp.status_code == 422
 
 
 def test_rename_updates_listing_via_memory(client_memory):
-    cid = client_memory.post("/cases", json={"name": "Alpha"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "Alpha"}).json()["id"]
+    cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "Alpha"}).json()["id"]
     resp = client_memory.patch(f"/cases/{cid}", json={"name": "Renamed"})
     assert resp.status_code == 200
     assert resp.json() == {"id": cid, "name": "Renamed"}
@@ -60,7 +62,8 @@ def test_rename_not_supported_is_501_on_mock_spec(client_mock):
 # --- delete -----------------------------------------------------------------
 
 def test_delete_case_cascades_materials_via_memory(client_memory, memory_hive, synthetic_bytes):
-    cid = client_memory.post("/cases", json={"name": "Alpha"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "Alpha"}).json()["id"]
+    cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "Alpha"}).json()["id"]
     up = client_memory.post(
         f"/cases/{cid}/materials",
         files={"file": ("s.sav", synthetic_bytes, "application/octet-stream")},

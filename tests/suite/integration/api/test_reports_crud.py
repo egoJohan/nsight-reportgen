@@ -8,7 +8,8 @@ from reportbuilder.testing.fixtures import report_json_n_charts
 
 @pytest.fixture
 def case_id(client_memory):
-    return client_memory.post("/cases", json={"name": "C"}).json()["case_id"]
+    cust = client_memory.post("/customers", json={"name": "C"}).json()["id"]
+    return client_memory.post(f"/customers/{cust}/cases", json={"name": "C"}).json()["id"]
 
 
 def _report_body():

@@ -36,7 +36,8 @@ def _report_json(question_ref: str = "q1") -> dict:
 
 def _seed(client) -> tuple[str, str]:
     """Create a case and upload the synthetic SAV. Returns (case_id, material_id)."""
-    cid = client.post("/cases", json={"name": "api-chain"}).json()["case_id"]
+    cust = client.post("/customers", json={"name": "api-chain"}).json()["id"]
+    cid = client.post(f"/customers/{cust}/cases", json={"name": "api-chain"}).json()["id"]
     up = client.post(
         f"/cases/{cid}/materials",
         files={"file": ("synthetic.sav", synthetic_sav_bytes(),

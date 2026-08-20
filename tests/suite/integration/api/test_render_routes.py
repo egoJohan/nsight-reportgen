@@ -56,7 +56,8 @@ def _seed_case_material_report(client, chart_type: str, *,
     chart. Returns (case_id, report_id, material_id)."""
     from reportbuilder.testing.fixtures import synthetic_sav_bytes
 
-    cid = client.post("/cases", json={"name": "C"}).json()["case_id"]
+    cust = client.post("/customers", json={"name": "C"}).json()["id"]
+    cid = client.post(f"/customers/{cust}/cases", json={"name": "C"}).json()["id"]
     up = client.post(
         f"/cases/{cid}/materials",
         files={"file": ("t.sav", synthetic_sav_bytes(),
