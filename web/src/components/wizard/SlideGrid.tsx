@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { chartTypeLabel, isSpecialSlide, SLIDE_ASPECT } from "@/lib/charts";
+import { chartTypeLabel, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
 import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";

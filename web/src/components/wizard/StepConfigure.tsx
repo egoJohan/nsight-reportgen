@@ -27,7 +27,7 @@ import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
 import { useDragReorder } from "@/lib/useDragReorder";
-import { slideTitle } from "@/components/wizard/SlideGrid";
+import { slideTitle } from "@/components/wizard/slideTitle";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import {
   CHART_TYPES,
