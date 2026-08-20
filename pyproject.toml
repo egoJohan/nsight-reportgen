@@ -22,6 +22,7 @@ dependencies = [
     "pdfplumber>=0.11",
     "httpx>=0.27",
     "argon2-cffi>=23.1,<26",
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]
