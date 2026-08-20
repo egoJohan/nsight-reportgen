@@ -50,13 +50,18 @@ _COLLAPSE_TO_502 = [500, 503, 418, 599, 302]
 _TABLE = [(s, s) for s in _PASS_THROUGH] + [(s, 502) for s in _COLLAPSE_TO_502]
 
 
-def test_create_case_is_410_gone(client_mock):
-    """POST /cases is superseded, not malformed — 410 names the replacement
-    (POST /customers/{customer_id}/cases) regardless of what the client would
-    have done, because the route never reaches one."""
+@pytest.mark.parametrize("upstream,expected", _TABLE)
+def test_create_case_is_410_gone(client_mock, mock_hive, upstream, expected):
+    """POST /cases is superseded, not malformed: it now answers 410 naming its
+    replacement (POST /customers/{customer_id}/cases) no matter what upstream
+    would have said, because the route no longer reaches a client to ask —
+    kept parametrized over the old mapping table to show that's true for the
+    whole range this route used to pass through."""
+    mock_hive.create_case.side_effect = DataHiveError(upstream, "boom", "POST", "http://dh/cases")
     resp = client_mock.post("/cases", json={"name": "X"})
     assert resp.status_code == 410
     assert "/customers/{customer_id}/cases" in resp.json()["detail"]
+    mock_hive.create_case.assert_not_called()
 
 
 @pytest.mark.parametrize("upstream,expected", _TABLE)
