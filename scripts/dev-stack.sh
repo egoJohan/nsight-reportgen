@@ -11,7 +11,11 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DH_REPO="${NSIGHT_DATAHIVE_REPO:-$HOME/Projects/egoiq/egohive/egohive-datahive}"
-DH_STATE="${NSIGHT_DATAHIVE_STATE:-$HOME/.local/share/datahive/nsight-dev}"
+# nsight-local, not nsight-dev: the old instance shared the `datahive` database
+# on :5433 with other projects, and one of their migrations emptied it — every
+# table gone. This one has its own Postgres (docker-compose.datahive.yml,
+# port 5434) and its own Qdrant, so nothing outside this repo can reset it.
+DH_STATE="${NSIGHT_DATAHIVE_STATE:-$HOME/.local/share/datahive/nsight-local}"
 DH_PORT=7910
 EH_PORT=8000
 API_PORT=8200
@@ -46,6 +50,8 @@ status() {
 
 start_datahive() {
   up "http://127.0.0.1:$DH_PORT/healthz" && { echo "datahive already up"; return; }
+  # Its backing services first — the hive will not start without them.
+  ( cd "$ROOT" && docker compose -f docker-compose.datahive.yml up -d >/dev/null 2>&1 )
   ( cd "$DH_REPO" && nohup .venv/bin/datahive serve \
       --config "$DH_STATE/datahive.yaml" --state-dir "$DH_STATE" \
       > "$DH_STATE/server.log" 2>&1 & echo $! > "$DH_STATE/server.pid" )
