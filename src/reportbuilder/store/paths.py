@@ -18,6 +18,8 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/font/{id}.meta                          nsight:font-meta
     settings/user/{user_id}                          nsight:user
     settings/user/{user_id}.grants                   nsight:grants
+    settings/user/{user_id}.password                 nsight:password
+    settings/session/{session_id}                    nsight:session
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -49,6 +51,8 @@ LABEL_FONT = "nsight:font"
 LABEL_FONT_META = "nsight:font-meta"
 LABEL_USER = "nsight:user"
 LABEL_GRANTS = "nsight:grants"
+LABEL_SESSION = "nsight:session"
+LABEL_PASSWORD = "nsight:password"
 
 SETTINGS_ROOT = "settings"
 
@@ -210,3 +214,13 @@ def user_grants_path(user_id: str) -> str:
     more often than the identity they belong to, exactly as material curation is
     a sibling of the .sav."""
     return f"{user_path(user_id)}.grants"
+
+
+def user_password_path(user_id: str) -> str:
+    """A sibling of the user, like grants — rewritten independently of the
+    identity it belongs to."""
+    return f"{user_path(user_id)}.password"
+
+
+def session_path(session_id: str) -> str:
+    return f"{SETTINGS_ROOT}/session/{_seg(session_id, 'session_id')}"

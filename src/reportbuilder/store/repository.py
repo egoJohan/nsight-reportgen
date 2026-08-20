@@ -22,12 +22,12 @@ import json
 import re
 import uuid
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
 from reportbuilder.auth.permissions import Grant, User, may_read
 from reportbuilder.store import paths as P
-from reportbuilder.store.seam import AuthContext, NotFound, ObjectStore
+from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound, ObjectStore
 
 _JSON = "application/json"
 _PPTX = ("application/vnd.openxmlformats-officedocument.presentationml.presentation")
@@ -92,6 +92,15 @@ class ReportRef:
     customer_id: str
     name: str
     modified_at: str = ""
+
+
+@dataclass(frozen=True)
+class Session:
+    id: str
+    user_id: str
+    created: str
+    last_seen: str
+    expires: str
 
 
 def _now() -> str:
@@ -711,6 +720,104 @@ class Repository:
                 self.store.delete(auth, path)
             except NotFound:
                 pass
+
+    # --- passwords ----------------------------------------------------------
+    #
+    # A sibling of the user record, like grants (spec: this plan's Task 3).
+    # Absent for a user who only ever signed in with Google or Microsoft.
+
+    def set_password(self, auth: AuthContext, user_id: str, password_hash: str) -> None:
+        self._write_json(auth, P.user_password_path(user_id),
+                         {"hash": password_hash}, [P.LABEL_PASSWORD])
+
+    def get_password_hash(self, auth: AuthContext, user_id: str) -> str | None:
+        try:
+            d = self._read_json(auth, P.user_password_path(user_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        return d.get("hash") or None
+
+    # --- sessions -------------------------------------------------------------
+    #
+    # A cookie names a session id; this record decides who that is and whether
+    # it still counts (spec §7). `created`/`expires` are set once; `last_seen`
+    # moves — see reportbuilder/auth/session.py for the idle/absolute rules
+    # that read these three fields.
+
+    def create_session(self, auth: AuthContext, user_id: str,
+                       lifetime_seconds: int) -> Session:
+        sid = _new_id("sess")
+        now = _now()
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds)) \
+            .isoformat(timespec="seconds")
+        self._write_json(auth, P.session_path(sid),
+                         {"id": sid, "user_id": user_id, "created": now,
+                          "last_seen": now, "expires": expires},
+                         [P.LABEL_SESSION])
+        return Session(id=sid, user_id=user_id, created=now, last_seen=now, expires=expires)
+
+    def get_session(self, auth: AuthContext, session_id: str) -> Session | None:
+        """A live session, or None — for an unknown id AND an expired one.
+
+        This is the property `delete_session` leans on to stay safe without
+        the delete having to succeed (see its docstring): a session's
+        authority comes from being found here, unexpired, never from the
+        record having been physically removed. So expiry is enforced on
+        every read, not only when something gets around to deleting it.
+        """
+        try:
+            d = self._read_json(auth, P.session_path(session_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        if d["expires"] <= _now():
+            # ISO 8601 timestamps with the same (UTC) offset compare
+            # correctly as strings — no parsing needed, and no risk of a
+            # naive/aware mismatch.
+            return None
+        return Session(id=d["id"], user_id=d["user_id"], created=d["created"],
+                       last_seen=d["last_seen"], expires=d["expires"])
+
+    def touch_session(self, auth: AuthContext, session_id: str, last_seen: str) -> None:
+        session = self.get_session(auth, session_id)
+        if session is None:
+            return
+        self._write_json(auth, P.session_path(session_id),
+                         {"id": session.id, "user_id": session.user_id,
+                          "created": session.created, "last_seen": last_seen,
+                          "expires": session.expires},
+                         [P.LABEL_SESSION])
+
+    def delete_session(self, auth: AuthContext, session_id: str) -> None:
+        """End a session. Never raises for consent, on purpose.
+
+        Sign-out and the idle/expiry cleanup in `auth/session.py` both call
+        this with no human present to answer a consent prompt — nSight runs
+        against its own hive under an admin bearer precisely so a destructive
+        op like this one does not need one (`scripts/dev-stack.sh`), but the
+        in-memory double used in tests still gates every first delete
+        unconditionally. Swallowing `ConsentRequired` here, rather than
+        weakening that double, is safe only because `get_session` treats an
+        expired record as absent: a session this call could not physically
+        remove is still unusable the moment it expires, so nothing downstream
+        depends on this delete having actually taken effect.
+        """
+        try:
+            self.store.delete(auth, P.session_path(session_id))
+        except (NotFound, ConsentRequired):
+            pass
+
+    def delete_sessions_for_user(self, auth: AuthContext, user_id: str) -> None:
+        """Used when a user is deleted (spec §7: "deleting a user, or their
+        session, ends it"). Not wired to `delete_user` in this plan — nothing
+        calls `delete_user` over HTTP yet (Plan 1's own note); Plan 3's Users
+        screen wires the two together when it adds "revoke"."""
+        for info in self.store.list(auth, P.SETTINGS_ROOT + "/", labels=[P.LABEL_SESSION]):
+            try:
+                d = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            if d.get("user_id") == user_id:
+                self.delete_session(auth, d["id"])
 
     # --- fonts ------------------------------------------------------------
     #
