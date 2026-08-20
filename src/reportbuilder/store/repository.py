@@ -166,6 +166,26 @@ class Repository:
         return Customer(id=d["id"], name=d.get("name", d["id"]),
                         template_id=d.get("template_id", ""))
 
+    def find_customer(self, auth: AuthContext, customer_id: str,
+                      user=None) -> Customer | None:
+        """Locate a customer by id, or None if it does not exist or is not
+        this user's to see.
+
+        Mirrors `find_case`/`find_material`: existence and grant are answered
+        together so a caller can 404 either way without leaking which one it
+        was. Unlike those two, the path is addressable directly — no scan
+        needed — so a missing object surfaces as `NotFound` from the store.
+        """
+        path = P.customer_meta_path(customer_id)
+        try:
+            d = self._read_json(auth, path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        if not _admits(user, path):
+            return None
+        return Customer(id=d["id"], name=d.get("name", d["id"]),
+                        template_id=d.get("template_id", ""))
+
     def rename_customer(self, auth: AuthContext, customer_id: str, name: str) -> Customer:
         """A metadata write, not a move — which is why ids are in the path and
         names are not."""

@@ -60,8 +60,23 @@ def _check(user: User, path: str, write: bool) -> None:
 
 
 def _customer_guard(write: bool):
-    def guard(customer_id: str, user: User = Depends(current_user)) -> User:
-        _check(user, customer_id, write)
+    """The customer-addressed routes.
+
+    Same shape as `_case_guard`/`_material_guard`: resolve the id first, 404 if
+    it does not exist, THEN ask the permission question. Checking the grant
+    against a raw, unresolved id would answer 403 for a customer that was never
+    there, which claims to know something it does not — a write route's 403
+    means "you can already see this, you just may not change it", and that is
+    false for a nonexistent customer.
+    """
+    def guard(customer_id: str,
+              user: User = Depends(current_user),
+              auth: AuthContext = Depends(get_auth),
+              repo: Repository = Depends(get_repository)) -> User:
+        customer = repo.find_customer(auth, customer_id, user=user)
+        if customer is None:
+            raise HTTPException(404, f"Customer '{customer_id}' not found")
+        _check(user, customer.id, write)
         return user
     guard.__name__ = "require_customer_write" if write else "require_customer"
     return guard
