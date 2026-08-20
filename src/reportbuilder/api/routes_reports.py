@@ -116,8 +116,39 @@ def delete_report(
     report_id: str,
     client: DataHiveClient = Depends(get_client),
 ) -> dict:
-    """Delete a report doc. (REQ-C-12)"""
-    client.delete_report(case_id, report_id)
+    """Delete a report doc. (REQ-C-12)
+
+    Consent comes back as a 409 carrying the approval envelope, as for a case
+    or a dataset — it used to escape as a bare 500, which left the UI with no
+    approval link to offer.
+    """
+    from reportbuilder.store.seam import ConsentRequired
+
+    # Asked here rather than inside the delete: a delete is re-run after
+    # datahive grants consent, and by the second pass the objects removed on the
+    # first are legitimately gone. Checking in there would turn the retry into a
+    # 404.
+    known = {r["report_id"] for r in client.list_reports(case_id)}
+    if report_id not in known:
+        raise HTTPException(
+            status_code=404, detail=f"Report '{report_id}' not found")
+
+    try:
+        client.delete_report(case_id, report_id)
+    except (KeyError, NotFound) as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Report '{report_id}' not found") from exc
+    except ConsentRequired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "consent_required",
+                "message": "Deleting needs approval in datahive.",
+                "request_id": exc.request_id,
+                "target": exc.target,
+                "approve": exc.envelope.get("approval_urls", {}),
+            },
+        ) from exc
     return {"deleted": report_id}
 
 

@@ -3,6 +3,38 @@ from __future__ import annotations
 
 import pytest
 
+from reportbuilder.api.deps_store import get_auth, get_repository
+
+
+def _material_bytes(client, material_id):
+    """Read a material's raw bytes straight from the repository client_memory
+    is wired to. `memory_hive` is a different, unwritten-to store now that
+    client_memory resolves materials through the repository — reading through
+    it would only prove the wrong store is empty."""
+    repo = client.app.dependency_overrides[get_repository]()
+    auth = client.app.dependency_overrides[get_auth]()
+    m = repo.find_material(auth, material_id)
+    if m is None:
+        raise KeyError(material_id)
+    return repo.get_material(auth, m.customer_id, m.case_id, m.id)
+
+
+def _delete_with_consent(client, url):
+    """DELETE *url*, approving datahive's consent gate until it succeeds.
+
+    The in-memory seam mirrors datahive's real behaviour: the first delete of
+    an object always comes back needing approval (see
+    unit/store/test_repository.py's `approve_all` for the same pattern one
+    layer down, where the repository is called directly instead of over HTTP).
+    """
+    repo = client.app.dependency_overrides[get_repository]()
+    for _ in range(50):
+        resp = client.delete(url)
+        if resp.status_code != 409:
+            return resp
+        repo.store.approve(resp.json()["detail"]["request_id"])
+    raise AssertionError("consent loop did not converge")
+
 
 # --- create / list ----------------------------------------------------------
 
@@ -61,7 +93,7 @@ def test_rename_not_supported_is_501_on_mock_spec(client_mock):
 
 # --- delete -----------------------------------------------------------------
 
-def test_delete_case_cascades_materials_via_memory(client_memory, memory_hive, synthetic_bytes):
+def test_delete_case_cascades_materials_via_memory(client_memory, synthetic_bytes):
     cust = client_memory.post("/customers", json={"name": "Alpha"}).json()["id"]
     cid = client_memory.post(f"/customers/{cust}/cases", json={"name": "Alpha"}).json()["id"]
     up = client_memory.post(
@@ -69,16 +101,16 @@ def test_delete_case_cascades_materials_via_memory(client_memory, memory_hive, s
         files={"file": ("s.sav", synthetic_bytes, "application/octet-stream")},
     )
     mid = up.json()["material_id"]
-    assert memory_hive.get_material(mid) == synthetic_bytes  # reachable before delete
+    assert _material_bytes(client_memory, mid) == synthetic_bytes  # reachable before delete
 
-    resp = client_memory.delete(f"/cases/{cid}")
+    resp = _delete_with_consent(client_memory, f"/cases/{cid}")
     assert resp.status_code == 200
     assert resp.json()["deleted"] == cid
 
     # Cascade: the case is gone and its material is no longer reachable.
     assert cid not in {c["id"] for c in client_memory.get("/cases").json()}
-    with pytest.raises((KeyError, FileNotFoundError, OSError)):
-        memory_hive.get_material(mid)
+    with pytest.raises(KeyError):
+        _material_bytes(client_memory, mid)
 
 
 def test_delete_missing_case_is_404_via_memory(client_memory):

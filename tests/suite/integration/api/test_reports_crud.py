@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+from reportbuilder.api.deps_store import get_repository
 from reportbuilder.testing.fixtures import report_json_n_charts
 
 
@@ -15,6 +16,23 @@ def case_id(client_memory):
 def _report_body():
     """A valid raw Report dict (name 'R-1', one chart)."""
     return report_json_n_charts(1)
+
+
+def _delete_with_consent(client, url):
+    """DELETE *url*, approving datahive's consent gate until it succeeds.
+
+    The in-memory seam mirrors datahive's real behaviour: the first delete of
+    an object always comes back needing approval (see
+    unit/store/test_repository.py's `approve_all` for the same pattern one
+    layer down, where the repository is called directly instead of over HTTP).
+    """
+    repo = client.app.dependency_overrides[get_repository]()
+    for _ in range(50):
+        resp = client.delete(url)
+        if resp.status_code != 409:
+            return resp
+        repo.store.approve(resp.json()["detail"]["request_id"])
+    raise AssertionError("consent loop did not converge")
 
 
 # --- create / get -----------------------------------------------------------
@@ -62,7 +80,7 @@ def test_put_invalid_body_is_422(client_memory, case_id):
 
 def test_put_after_delete_does_not_resurrect(client_memory, case_id):
     rid = client_memory.post(f"/cases/{case_id}/reports", json=_report_body()).json()["report_id"]
-    assert client_memory.delete(f"/cases/{case_id}/reports/{rid}").status_code == 200
+    assert _delete_with_consent(client_memory, f"/cases/{case_id}/reports/{rid}").status_code == 200
     resp = client_memory.put(f"/cases/{case_id}/reports/{rid}", json=_report_body())
     assert resp.status_code == 404
     # Still gone: not resurrected.
@@ -73,7 +91,7 @@ def test_put_after_delete_does_not_resurrect(client_memory, case_id):
 
 def test_delete_then_get_is_404(client_memory, case_id):
     rid = client_memory.post(f"/cases/{case_id}/reports", json=_report_body()).json()["report_id"]
-    resp = client_memory.delete(f"/cases/{case_id}/reports/{rid}")
+    resp = _delete_with_consent(client_memory, f"/cases/{case_id}/reports/{rid}")
     assert resp.status_code == 200
     assert resp.json() == {"deleted": rid}
     assert client_memory.get(f"/cases/{case_id}/reports/{rid}").status_code == 404

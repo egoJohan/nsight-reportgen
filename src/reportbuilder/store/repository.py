@@ -448,9 +448,20 @@ class Repository:
         the destruction of somebody's work. The caller surfaces the approval and
         retries; each retry makes progress, because approved objects are gone by
         then.
+
+        The case/customer's own meta object goes last: a retry re-resolves the
+        bare id it was called with (find_case/find_customer) by reading that
+        exact object, so deleting it before the rest of the prefix is gone
+        would turn the next consent retry into a 404 instead of letting the
+        cascade continue.
         """
+        anchor_labels = {P.LABEL_CASE, P.LABEL_CUSTOMER}
+        listing = sorted(
+            self.store.list(auth, prefix),
+            key=lambda info: bool(anchor_labels & set(info.labels)),
+        )
         removed = 0
-        for info in self.store.list(auth, prefix):
+        for info in listing:
             self.store.delete(auth, info.path)
             removed += 1
         return removed

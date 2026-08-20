@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from reportbuilder.api.deps_store import get_repository
 from reportbuilder.model.report import (
     ChartSpec,
     ElementToggles,
@@ -49,6 +50,23 @@ def _seed(client) -> tuple[str, str]:
     return cid, body["material_id"]
 
 
+def _delete_with_consent(client, url):
+    """DELETE *url*, approving datahive's consent gate until it succeeds.
+
+    The in-memory seam mirrors datahive's real behaviour: the first delete of
+    an object always comes back needing approval (see
+    unit/store/test_repository.py's `approve_all` for the same pattern one
+    layer down, where the repository is called directly instead of over HTTP).
+    """
+    repo = client.app.dependency_overrides[get_repository]()
+    for _ in range(50):
+        resp = client.delete(url)
+        if resp.status_code != 409:
+            return resp
+        repo.store.approve(resp.json()["detail"]["request_id"])
+    raise AssertionError("consent loop did not converge")
+
+
 def test_full_crud_chain_soffice_free(client_memory):
     """Case → material → questions → report create/get/duplicate/delete, no soffice."""
     cid, mid = _seed(client_memory)
@@ -81,7 +99,7 @@ def test_full_crud_chain_soffice_free(client_memory):
     assert client_memory.get(f"/cases/{cid}/reports/{rid}").json()["name"] == "api-chain"
 
     # Delete the original.
-    dele = client_memory.delete(f"/cases/{cid}/reports/{rid}")
+    dele = _delete_with_consent(client_memory, f"/cases/{cid}/reports/{rid}")
     assert dele.status_code == 200
     assert client_memory.get(f"/cases/{cid}/reports/{rid}").status_code == 404
 
