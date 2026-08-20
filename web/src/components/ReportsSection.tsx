@@ -78,7 +78,9 @@ function ReportRow({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+        // Always visible: a control that appears on hover cannot be found by
+        // someone looking for it, and is invisible on a touch screen.
+        className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
         onClick={(e) => {
           e.stopPropagation();
           onDelete(report.id);

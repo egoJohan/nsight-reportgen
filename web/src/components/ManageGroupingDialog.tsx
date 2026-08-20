@@ -596,7 +596,7 @@ export default function ManageGroupingDialog({
                       <Button
                         size="icon-sm"
                         variant="ghost"
-                        title="Pura takaisin erillisiksi kysymyksiksi"
+                        title="Split back into separate questions"
                         onClick={() => splitComparison(q.members ?? [])}
                       >
                         <Undo2Icon className="size-4" />

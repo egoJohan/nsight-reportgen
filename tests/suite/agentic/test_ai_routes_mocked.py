@@ -301,12 +301,11 @@ def test_chat_egohive_error_503(client_mock, monkeypatch):
     assert resp.status_code == 503
 
 
-def test_chat_empty_reply_uses_finnish_fallback(client_mock, monkeypatch):
+def test_chat_empty_reply_uses_a_fallback(client_mock, monkeypatch):
+    """An empty reply still answers the user rather than showing a blank bubble."""
     _patch_chat(monkeypatch, "")  # LLM returns nothing
     resp = client_mock.post(
         f"/materials/{MID}/chat", json={"messages": [{"role": "user", "content": "hei"}]}
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {
-        "reply": "En osaa vastata tähän käytettävissä olevan datan perusteella."
-    }
+    assert resp.json() == {"reply": "I cannot answer that from the available data."}

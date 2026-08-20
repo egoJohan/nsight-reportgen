@@ -531,7 +531,7 @@ def ai_chat(
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Chat failed: {exc}") from exc
-    return {"reply": reply or "En osaa vastata tähän käytettävissä olevan datan perusteella."}
+    return {"reply": reply or "I cannot answer that from the available data."}
 
 
 __all__ = ["ai_router"]

@@ -257,7 +257,7 @@ function CompareGroupsForm({
     <>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
       <div className="min-w-0 space-y-1.5">
-        <Label className="text-xs font-medium text-muted-foreground">Ryhmittele</Label>
+        <Label className="text-xs font-medium text-muted-foreground">Group by</Label>
         <Select value={clf} onValueChange={(v) => setClf(v ?? "")}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="Choose a variable…" />
