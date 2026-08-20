@@ -369,7 +369,7 @@ export default function StepSelect({
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
-                <Button size="sm" onClick={() => groupAsBattery(s)}>
+                <Button variant="outline" size="sm" onClick={() => groupAsBattery(s)}>
                   View suggestion
                 </Button>
                 <Button

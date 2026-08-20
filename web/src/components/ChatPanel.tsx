@@ -134,7 +134,7 @@ export default function ChatPanel({
               placeholder="Ask about the data…"
               className="max-h-32 min-h-9 flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <Button
+            <Button variant="outline"
               size="icon"
               onClick={() => void send()}
               disabled={loading || !input.trim()}

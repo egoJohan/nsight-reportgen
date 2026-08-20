@@ -74,7 +74,7 @@ function CaseHeading({
           }}
           className="max-w-md text-lg font-semibold"
         />
-        <Button size="icon" onClick={save} disabled={rename.isPending || renameInCustomer.isPending}>
+        <Button variant="outline" size="icon" onClick={save} disabled={rename.isPending || renameInCustomer.isPending}>
           <CheckIcon className="size-4" />
         </Button>
         <Button size="icon" variant="ghost" onClick={() => setEditing(false)}>

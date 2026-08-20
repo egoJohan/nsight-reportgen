@@ -152,7 +152,7 @@ export default function WordMergeEditor({
 
       {dirty && (
         <div className="flex justify-end">
-          <Button size="sm" disabled={save.isPending} onClick={persist}>
+          <Button variant="outline" size="sm" disabled={save.isPending} onClick={persist}>
             Save merges
           </Button>
         </div>

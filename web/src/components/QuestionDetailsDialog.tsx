@@ -177,7 +177,7 @@ export default function QuestionDetailsDialog({
                   rows={1}
                   className="flex-1 resize-y overflow-hidden rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
-                <Button
+                <Button variant="outline"
                   size="sm"
                   className="shrink-0"
                   disabled={setLabel.isPending || name === (s.text ?? "")}

@@ -186,7 +186,7 @@ export default function StepDownload({
               <XIcon className="size-4" /> Cancel
             </Button>
           ) : (
-            <Button className="min-w-[150px]" onClick={handleGenerate} disabled={noCharts}>
+            <Button variant="outline" className="min-w-[150px]" onClick={handleGenerate} disabled={noCharts}>
               <SparklesIcon className="size-4" />
               {rendered ? "Generate again" : "Generate deck"}
             </Button>

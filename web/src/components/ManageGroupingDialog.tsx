@@ -562,7 +562,7 @@ export default function ManageGroupingDialog({
                     <p className="mt-1 truncate text-xs text-muted-foreground">
                       {s.labels.join(", ")}
                     </p>
-                    <Button size="sm" className="mt-2" onClick={() => compareAll(s.qids)}>
+                    <Button variant="outline" size="sm" className="mt-2" onClick={() => compareAll(s.qids)}>
                       <GitCompareIcon className="size-4" /> Compare
                     </Button>
                   </div>

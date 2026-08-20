@@ -963,7 +963,7 @@ export default function ReportWizard({
         <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted-foreground">
           This report couldn't be loaded. It may have been removed.
         </p>
-        <Button className="mt-5" onClick={onClose}>
+        <Button variant="outline" className="mt-5" onClick={onClose}>
           <ChevronLeftIcon className="size-4" />
           Back to reports
         </Button>
@@ -996,7 +996,7 @@ export default function ReportWizard({
                 }}
                 className="max-w-sm text-base font-semibold"
               />
-              <Button size="icon" onClick={commitName}>
+              <Button variant="outline" size="icon" onClick={commitName}>
                 <CheckIcon className="size-4" />
               </Button>
               <Button
@@ -1048,17 +1048,21 @@ export default function ReportWizard({
           {/* The button IS the status. "Unsaved changes" and "Saved" used to sit
               beside it as their own text, which put three things in a row that
               all said something about saving. The word changes, the icon
-              changes and the colour changes; the height does not, so the
-              toolbar does not move when the state does. */}
+              changes and the colour changes; the SIZE does not. The width is
+              pinned because the label cycles Save -> Saving -> Saved, and left
+              to itself the button would twitch narrower and wider on every
+              save — with the toolbar's whole right edge moving with it. */}
           <Button
             variant="outline"
             size="sm"
             onClick={save}
             disabled={updateReport.isPending || (!dirty && !!savedAt)}
             className={
-              !dirty && savedAt
+              // w-24 clears "Saving" plus its spinner, the widest state.
+              "w-24 " +
+              (!dirty && savedAt
                 ? "border-emerald-600/40 text-emerald-600 disabled:opacity-100"
-                : undefined
+                : "")
             }
             title={
               dirty
