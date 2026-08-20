@@ -15,7 +15,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.oxml.ns import qn
 
 from reportbuilder.model.report import ChartSpec
-from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
+from reportbuilder.render.house_style import PX_INK, PX_TEAL
 from reportbuilder.render.image.slide_chrome import (
     _FONT, _slide_dims, body_font, content_floor, draw_template_heading,
     template_ground, theme_colours, TITLE_PT,
@@ -56,11 +56,18 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
     #     the half-and-half deck this was meant to stop.
     owned = template_ground(slide, style)
 
-    # 1 — Cream background (full slide), only when no template supplied one.
+    # The slide's own background/ink — house cream/ink when the template states
+    # neither, the template's stated colours otherwise, ink derived from the
+    # background (house_style.furniture_colors) when the template states a
+    # background but no ink, so a dark, un-owned background still gets legible
+    # text instead of near-black on near-black.
+    theme_bg, theme_ink, _theme_accent = theme_colours(style)
+
+    # 1 — Background (full slide), only when no template supplied one.
     if not owned:
         bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
         bg.fill.solid()
-        bg.fill.fore_color.rgb = PX_CREAM
+        bg.fill.fore_color.rgb = theme_bg
         bg.line.fill.background()
         bg.shadow.inherit = False
 
@@ -88,7 +95,7 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
     #     one; the house box otherwise.
     title_bottom = draw_template_heading(slide, style, heading_text) if owned else 0
     if heading_text and not title_bottom:
-        _heading_box(slide, sw, heading_text)
+        _heading_box(slide, sw, heading_text, theme_ink)
 
     # 4 — Bullet list. Each raw line is a markdown bullet: leading whitespace sets
     # the nesting level and a leading -,*,+,• marker is stripped. Tolerate a bare
@@ -110,10 +117,9 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
                 parsed.append((level, text))
     if parsed:
         top = title_bottom + int(Inches(0.28)) if title_bottom else int(Inches(1.55))
-        _bg, ink, accent = theme_colours(style)
         _bullet_box(slide, sw, sh, parsed, top=top,
                     floor=content_floor(slide, sw, sh),
-                    accent=accent, ink=ink, font=body_font(style) or _FONT)
+                    accent=_theme_accent, ink=theme_ink, font=body_font(style) or _FONT)
 
 
 def _heading_size(text: str) -> int:
@@ -136,7 +142,7 @@ def _heading_line_count(text: str, sw: int) -> int:
     return max(1, lines)
 
 
-def _heading_box(slide, sw, text: str) -> None:
+def _heading_box(slide, sw, text: str, ink=PX_INK) -> None:
     tb = slide.shapes.add_textbox(
         Inches(0.80), Inches(0.42), sw - Inches(1.0), Inches(0.92)
     )
@@ -150,7 +156,7 @@ def _heading_box(slide, sw, text: str) -> None:
     r.text = text
     r.font.size = Pt(_heading_size(text))
     r.font.bold = True
-    r.font.color.rgb = PX_INK
+    r.font.color.rgb = ink
     r.font.name = _FONT
 
 

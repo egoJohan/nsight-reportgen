@@ -23,7 +23,9 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
 from reportbuilder.render.template_profile import clone_furniture
-from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL, PX_MUTED
+from reportbuilder.render.house_style import (
+    PX_CREAM, PX_INK, PX_TEAL, PX_MUTED, furniture_colors,
+)
 
 
 def _rgb(hex6: str):
@@ -37,6 +39,18 @@ def _rgb(hex6: str):
         return None
 
 
+def _furniture_px(style) -> tuple:
+    """(ink, muted) RGBColor for THIS slide's own background — house_style.
+    furniture_colors, converted from hex to pptx RGBColor. Same rule the image
+    chart builders use (chart_furniture in render/image/_mpl.py), so the
+    slide's own title/subtitle/footer text agrees with its charts about what
+    "dark" means. A light/unstated background resolves to exactly PX_INK/
+    PX_MUTED, unchanged."""
+    ink_hex, muted_hex, _grid = furniture_colors(getattr(style, "background", "") or "")
+    return (_rgb(ink_hex.lstrip("#")) or PX_INK,
+            _rgb(muted_hex.lstrip("#")) or PX_MUTED)
+
+
 def theme_colours(style):
     """(background, ink, accent) for a slide, preferring the template's own.
 
@@ -45,9 +59,16 @@ def theme_colours(style):
     were house teal on an Attendo navy deck. Anything the template does not state
     falls back to the house value, so a template with a partial theme still
     renders.
+
+    Ink the template doesn't state is derived from the background via
+    `_furniture_px` (house_style.furniture_colors) rather than the fixed house
+    PX_INK, so a dark background with no stated ink still gets legible
+    near-white text instead of near-black on near-black. A light background —
+    including the house default, an unstated one — resolves to exactly PX_INK,
+    unchanged.
     """
     bg = _rgb(getattr(style, "background", "") or "") or PX_CREAM
-    ink = _rgb(getattr(style, "ink", "") or "") or PX_INK
+    ink = _rgb(getattr(style, "ink", "") or "") or _furniture_px(style)[0]
     accent = PX_TEAL
     try:
         if getattr(style, "from_template", False):
@@ -417,7 +438,7 @@ def draw_template_heading(slide, style, text: str) -> int:
     left, top, width, height = harvested_title_box(profile, text)
     size = fit_title_size(st, text)
     _textbox(slide, left, top, width, height,
-             [(text, size, _rgb(st.colour) or PX_INK,
+             [(text, size, _rgb(st.colour) or _furniture_px(style)[0],
                True if st.bold is None else st.bold)],
              font=st.font or getattr(style, "heading_font", "") or "")
     return top + height
@@ -488,6 +509,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     sw, sh = _slide_dims(slide)
 
     _bg, _ink, _accent = _theme_colours(ctx)
+    _muted = _furniture_px(ctx.style)[1]
     templated = _from_template(ctx)
     profile = harvested_profile(ctx.style)
 
@@ -615,7 +637,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
-                [(secondary, s_size, PX_MUTED, False)],
+                [(secondary, s_size, _muted, False)],
                 anchor=anchor,
                 font=_body_font(ctx),
             )
@@ -644,7 +666,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         slide,
         foot_left, foot_top,
         sw - Inches(4.0), Inches(0.40),
-        [(footer_text, 9.5, PX_MUTED, False)],
+        [(footer_text, 9.5, _muted, False)],
         align=PP_ALIGN.LEFT,
         font=_body_font(ctx),
     )
@@ -659,7 +681,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             slide,
             sw - Inches(6.4), foot_top,
             Inches(6.0), Inches(0.40),
-            [(caption, 9.5, PX_MUTED, False)],
+            [(caption, 9.5, _muted, False)],
             align=PP_ALIGN.RIGHT,
             font=_body_font(ctx),
         )

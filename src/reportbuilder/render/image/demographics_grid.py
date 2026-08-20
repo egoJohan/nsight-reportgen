@@ -14,7 +14,7 @@ from pptx.util import Inches
 from pptx.enum.text import PP_ALIGN
 
 from reportbuilder.render.base import RenderContext, Slot
-from reportbuilder.render.house_style import PX_CREAM, PX_INK, PX_TEAL
+from reportbuilder.render.house_style import PX_TEAL
 from reportbuilder.render.image.slide_chrome import (
     _slide_dims, _textbox, body_font, content_floor, draw_template_heading,
     template_ground, theme_colours,
@@ -31,14 +31,18 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
     # The customer's design when the template supplies one, house style when it
     # does not — the same rule as every other kind of slide.
     owned = template_ground(slide, style)
+    # theme_bg/ink: house cream/ink when the template states neither, the
+    # template's stated colours otherwise, ink derived from the background
+    # (house_style.furniture_colors) when only a background is stated — so a
+    # dark, un-owned background gets a legible panel instead of a cream one.
+    theme_bg, ink, _accent = theme_colours(style)
     if not owned:
         bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
-        bg.fill.solid(); bg.fill.fore_color.rgb = PX_CREAM
+        bg.fill.solid(); bg.fill.fore_color.rgb = theme_bg
         bg.line.fill.background(); bg.shadow.inherit = False
         acc = slide.shapes.add_shape(1, Inches(0.55), Inches(0.40), Inches(0.10), Inches(0.62))
         acc.fill.solid(); acc.fill.fore_color.rgb = PX_TEAL
         acc.line.fill.background(); acc.shadow.inherit = False
-    _bg, ink, _accent = theme_colours(style)
     face = body_font(style)
     heading = (getattr(spec, "slide_title", None) or "Vastaajat").strip()
     title_bottom = draw_template_heading(slide, style, heading) if owned else 0
