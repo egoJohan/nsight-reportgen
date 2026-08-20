@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8200";
+// Relative by default (spec §5.4): same-origin is what makes the
+// SameSite=Strict session cookie work at all, in prod (nginx) and in dev
+// (the Vite proxy in vite.config.ts) alike.
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 // ---- Types ----
 
