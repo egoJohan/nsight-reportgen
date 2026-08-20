@@ -18,7 +18,8 @@ from reportbuilder.store.seam import AuthContext
 #: Routes that serve no customer data. Anything else must resolve a user — see
 #: tests/suite/integration/api/test_route_census.py.
 PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
-                           "/docs/oauth2-redirect", "/redoc"})
+                           "/docs/oauth2-redirect", "/redoc",
+                           "/auth/register", "/auth/login/password", "/auth/logout"})
 
 
 def current_user(request: Request,

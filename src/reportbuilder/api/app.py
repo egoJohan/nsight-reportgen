@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_ai import ai_router
+from reportbuilder.api.routes_auth import auth_router
 from reportbuilder.api.routes_cases import cases_router
 from reportbuilder.api.routes_customers import customers_router
 from reportbuilder.api.routes_settings import settings_router
@@ -111,6 +112,7 @@ def create_app(client=None) -> FastAPI:
         return {"status": "ok"}
 
     # Include routers
+    app.include_router(auth_router)
     app.include_router(customers_router)
     app.include_router(templates_router)
     app.include_router(settings_router)
