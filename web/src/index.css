@@ -54,37 +54,42 @@
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
-  /* Anything sitting ON the tiled backdrop. A hint of blue-grey
-     (hue 250, chroma 0.006) so a panel reads as a distinct surface
-     rather than merging into the page. */
-  --surface: oklch(0.984 0.006 250);
+  /* ONE tone for every raised thing: panels, the sidebar, list rows, outline
+     buttons. It was near-white (0.984), which left a row indistinguishable
+     from the page it sat on. A hint of blue-grey (hue 250, chroma 0.006)
+     keeps it from reading as dirty grey.
+
+     Everything that hovers ON this tone must be DARKER than it, or hover
+     brightens instead of settling — which is why --muted, --accent and
+     --secondary moved down with it. */
+  --surface: oklch(0.965 0.006 250);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --primary: oklch(0.205 0 0);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.935 0.006 250);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.935 0.006 250);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: oklch(0.928 0.007 250);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.902 0.005 250);
+  --input: oklch(0.902 0.005 250);
   --ring: oklch(0.708 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.965 0.006 250);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.928 0.007 250);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: oklch(0.902 0.005 250);
   --sidebar-ring: oklch(0.708 0 0);
 }
 
@@ -92,8 +97,8 @@
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
-  /* Lifted slightly above --card, same hue, so the separation
-     survives dark mode instead of going flat. */
+  /* The same one-tone rule as light mode, inverted: raised things sit ABOVE
+     the page here rather than below it, and hovers lift instead of settling. */
   --surface: oklch(0.223 0.009 250);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
@@ -115,7 +120,7 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.223 0.009 250);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
