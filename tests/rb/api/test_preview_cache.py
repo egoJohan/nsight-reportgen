@@ -8,9 +8,6 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.testing.fixtures import synthetic_sav_bytes
 
 _SPEC = {
@@ -25,13 +22,13 @@ _SPEC = {
 }
 
 
-def _client():
+def _client(rb_wire):
     mock = Mock()
     mock.get_material.return_value = synthetic_sav_bytes()
-    return TestClient(create_app(client=mock))
+    return rb_wire(client=mock)
 
 
-def test_identical_spec_renders_once_then_serves_from_cache(tmp_path):
+def test_identical_spec_renders_once_then_serves_from_cache(tmp_path, rb_wire):
     """Two identical preview requests → the render chain runs ONCE; the second is
     served from the cached PNG. A different spec renders again."""
     png = tmp_path / "p.png"
@@ -46,8 +43,8 @@ def test_identical_spec_renders_once_then_serves_from_cache(tmp_path):
          patch("reportbuilder.api.routes_questions.build_pptx", side_effect=fake_build), \
          patch("reportbuilder.api.routes_questions.pptx_to_pdf", return_value=str(tmp_path / "d.pdf")), \
          patch("reportbuilder.api.routes_questions.rasterize_pages", return_value=[str(png)]):
-        client = _client()
-        mat = "mat-cache-unique"  # unique id so no cross-test cache pollution
+        client = _client(rb_wire)
+        mat = client.material_id  # real, guard-resolvable id; wire() gives each test a fresh one
 
         r1 = client.post(f"/materials/{mat}/preview-chart", json=_SPEC)
         r2 = client.post(f"/materials/{mat}/preview-chart", json=_SPEC)

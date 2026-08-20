@@ -1,10 +1,13 @@
 """Tests for questions routes: GET /materials/{material_id}/questions,
-PUT /materials/{material_id}/grouping. (REQ-C-05, REQ-C-06, M-02)"""
+PUT /materials/{material_id}/grouping. (REQ-C-05, REQ-C-06, M-02)
+
+Every route here is `require_material`/`require_material_write` guarded: the
+material_id in the path is resolved through the repository before the handler
+runs, so a test needs `client.material_id` from `rb_wire`, not a placeholder
+like "mat-1".
+"""
 from unittest.mock import Mock, patch
 
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.model.question import QuestionModel, Question, Variable, ValueLabel
 
 
@@ -58,18 +61,17 @@ def _make_grouped_model() -> QuestionModel:
 # ---------------------------------------------------------------------------
 
 
-def test_get_questions_returns_list(tmp_path) -> None:
+def test_get_questions_returns_list(rb_wire) -> None:
     """GET /materials/{material_id}/questions returns 200 and a list of question dicts.
     (REQ-C-05)"""
     grouped_model = _make_grouped_model()
 
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = grouped_model
-        response = client.get("/materials/mat-1/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     body = response.json()
@@ -84,10 +86,10 @@ def test_get_questions_returns_list(tmp_path) -> None:
     # load_model_for_material was called with the material_id and the client
     mock_load.assert_called_once()
     call_args = mock_load.call_args
-    assert call_args[0][0] == "mat-1"
+    assert call_args[0][0] == client.material_id
 
 
-def test_get_questions_field_values(tmp_path) -> None:
+def test_get_questions_field_values(rb_wire) -> None:
     """GET /materials/{material_id}/questions returns correct field values. (REQ-C-05)"""
     # Use a simple single question model for easy assertion
     simple_model = QuestionModel(
@@ -106,12 +108,11 @@ def test_get_questions_field_values(tmp_path) -> None:
     )
 
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = simple_model
-        response = client.get("/materials/mat-2/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     body = response.json()
@@ -124,7 +125,7 @@ def test_get_questions_field_values(tmp_path) -> None:
     assert q["text"] == "Satisfaction"
 
 
-def test_get_questions_includes_values_and_category_labels(tmp_path) -> None:
+def test_get_questions_includes_values_and_category_labels(rb_wire) -> None:
     """questions response includes `values` (all value labels incl. missing) and
     `category_labels` (non-missing labels in render order). (Task B)"""
     model = QuestionModel(
@@ -144,11 +145,10 @@ def test_get_questions_includes_values_and_category_labels(tmp_path) -> None:
         questions=[Question(qid="v1", kind="single", variables=("v1",), text="Satisfaction")],
     )
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-3/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
     assert response.status_code == 200
     q = response.json()["questions"][0]
     # values includes the missing code so the picker can show/uncheck it
@@ -163,15 +163,14 @@ def test_get_questions_includes_values_and_category_labels(tmp_path) -> None:
     assert q["missing_values"] == [{"code": 99.0, "label": "EOS"}]
 
 
-def test_get_questions_multi_values_empty(tmp_path) -> None:
+def test_get_questions_multi_values_empty(rb_wire) -> None:
     """Multi questions return `values` == [] and member labels as category_labels. (Task B)"""
     model = _make_grouped_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-4/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
     assert response.status_code == 200
     multi = [q for q in response.json()["questions"] if q["kind"] == "multi"]
     assert multi, "expected an auto-grouped multi question"
@@ -233,22 +232,21 @@ def _text_question_model() -> QuestionModel:
     return QuestionModel(variables=variables, questions=questions)
 
 
-def _get_questions(model):
+def _get_questions(rb_wire, model):
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-G/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
     assert response.status_code == 200
     return response.json()["questions"]
 
 
-def test_text_question_is_chartable_as_wordcloud():
+def test_text_question_is_chartable_as_wordcloud(rb_wire):
     """An open-ended text question is chartable — defaulting to AI-summarised
     "themes" with the word cloud still available; a normal categorical question
     stays chartable and never offers themes/wordcloud."""
-    qs = {q["qid"]: q for q in _get_questions(_text_question_model())}
+    qs = {q["qid"]: q for q in _get_questions(rb_wire, _text_question_model())}
     assert qs["other"]["chartable"] is True
     assert qs["other"]["non_chartable_reason"] is None
     assert qs["other"]["compatible_chart_types"] == ["themes", "wordcloud"]
@@ -262,13 +260,13 @@ def test_text_question_is_chartable_as_wordcloud():
     assert qs["sat"]["suggested_chart_type"] != "wordcloud"
 
 
-def test_compatible_chart_types_multi_offers_pie_but_suggests_bar():
+def test_compatible_chart_types_multi_offers_pie_but_suggests_bar(rb_wire):
     """A multi-response question is a single series, so pie/doughnut ARE offered
     (the user may legitimately want a pie when the option shares read as parts of
     a whole, e.g. a "pick one if you have several" question summing to ~100%).
     The smart DEFAULT for multi stays horizontal_bar — pie is available, not
     auto-suggested."""
-    qs = _get_questions(_make_grouped_model())
+    qs = _get_questions(rb_wire, _make_grouped_model())
     multi = [q for q in qs if q["kind"] == "multi"]
     assert multi, "expected an auto-grouped multi question"
     compatible = multi[0]["compatible_chart_types"]
@@ -283,14 +281,14 @@ def test_compatible_chart_types_multi_offers_pie_but_suggests_bar():
 # ---------------------------------------------------------------------------
 
 
-def test_regroup_combines_returns_reshaped_questions(tmp_path) -> None:
+def test_regroup_combines_returns_reshaped_questions(rb_wire) -> None:
     """POST /regroup returns the reshaped (stateless) question list with the group.
     (REQ-C-06, M-02) — the full contract is covered in the suite."""
     singles = _make_singles_model()
-    tc = TestClient(create_app(client=Mock()))
+    tc = rb_wire(client=Mock())
     with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
         response = tc.post(
-            "/materials/mat-1/regroup",
+            f"/materials/{tc.material_id}/regroup",
             json={"groups": [{"kind": "multi", "variables": ["q1_1", "q1_2"]}], "singles": []},
         )
     assert response.status_code == 200
@@ -298,15 +296,15 @@ def test_regroup_combines_returns_reshaped_questions(tmp_path) -> None:
     assert any(q["kind"] == "multi" and set(q["variables"]) == {"q1_1", "q1_2"} for q in qs)
 
 
-def test_regroup_invalid_groups_are_ignored(tmp_path) -> None:
+def test_regroup_invalid_groups_are_ignored(rb_wire) -> None:
     """Regroup is lenient — an invalid group (scale member, or too few variables)
     is silently skipped, still returning 200. (REQ-C-06)"""
     singles = _make_singles_model()
-    tc = TestClient(create_app(client=Mock()))
+    tc = rb_wire(client=Mock())
     with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
-        scale = tc.post("/materials/mat-1/regroup",
+        scale = tc.post(f"/materials/{tc.material_id}/regroup",
                         json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
-        too_few = tc.post("/materials/mat-1/regroup",
+        too_few = tc.post(f"/materials/{tc.material_id}/regroup",
                           json={"groups": [{"kind": "multi", "variables": ["q1_1"]}]})
     assert scale.status_code == 200
     assert too_few.status_code == 200

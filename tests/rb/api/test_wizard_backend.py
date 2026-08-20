@@ -13,9 +13,6 @@ import shutil
 from unittest.mock import Mock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.model.question import Question, QuestionModel, ValueLabel, Variable
 from reportbuilder.render.plugins import CHART_PLUGINS
 from reportbuilder.testing.fixtures import synthetic_sav_bytes
@@ -74,16 +71,15 @@ def _make_simple_model() -> QuestionModel:
 # ---------------------------------------------------------------------------
 
 
-def test_get_questions_returns_suggested_chart_type() -> None:
+def test_get_questions_returns_suggested_chart_type(rb_wire) -> None:
     """GET questions returns suggested_chart_type (a known plugin id) per question. (REQ-C-05, REQ-C-13)"""
     model = _make_simple_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-w1/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     body = response.json()
@@ -98,16 +94,15 @@ def test_get_questions_returns_suggested_chart_type() -> None:
         )
 
 
-def test_get_questions_returns_missing_values_list() -> None:
+def test_get_questions_returns_missing_values_list(rb_wire) -> None:
     """GET questions returns missing_values as a list of {code, label} per question. (REQ-C-05, REQ-D-06)"""
     model = _make_model_with_missing()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-w1/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     body = response.json()
@@ -124,16 +119,15 @@ def test_get_questions_returns_missing_values_list() -> None:
     assert mv[0]["label"] == "Don't know"
 
 
-def test_get_questions_missing_values_empty_when_none() -> None:
+def test_get_questions_missing_values_empty_when_none(rb_wire) -> None:
     """GET questions returns empty missing_values list when variable has no missing codes. (REQ-D-06)"""
     model = _make_simple_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-w1/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     body = response.json()
@@ -143,16 +137,15 @@ def test_get_questions_missing_values_empty_when_none() -> None:
         )
 
 
-def test_get_questions_all_required_fields_present() -> None:
+def test_get_questions_all_required_fields_present(rb_wire) -> None:
     """GET questions response has all five required fields per question. (REQ-C-05, REQ-C-13, REQ-D-06)"""
     model = _make_simple_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = client.get("/materials/mat-w1/questions")
+        response = client.get(f"/materials/{client.material_id}/questions")
 
     assert response.status_code == 200
     for q in response.json()["questions"]:
@@ -172,7 +165,7 @@ _VALID_SPEC = {
 }
 
 
-def test_preview_chart_returns_png() -> None:
+def test_preview_chart_returns_png(rb_wire) -> None:
     """POST preview-chart with a valid spec returns 200 image/png with non-empty content.
 
     Requires LibreOffice (soffice) which IS present on this machine.
@@ -186,10 +179,9 @@ def test_preview_chart_returns_png() -> None:
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
 
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
-    response = client.post("/materials/mat-w1/preview-chart", json=_VALID_SPEC)
+    response = client.post(f"/materials/{client.material_id}/preview-chart", json=_VALID_SPEC)
 
     assert response.status_code == 200, (
         f"Expected 200 from preview-chart, got {response.status_code}: {response.text[:500]}"
@@ -202,14 +194,13 @@ def test_preview_chart_returns_png() -> None:
     assert response.content[:4] == b"\x89PNG", "Response content does not start with PNG magic bytes"
 
 
-def test_preview_chart_value_error_returns_422() -> None:
+def test_preview_chart_value_error_returns_422(rb_wire) -> None:
     """POST preview-chart whose build_pptx raises ValueError returns 422, not 500. (REQ-C-13, REQ-C-19)"""
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
 
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.build_pptx") as mock_build:
         mock_build.side_effect = ValueError("chart configuration error: scatter requires scatter_xy")
@@ -217,7 +208,7 @@ def test_preview_chart_value_error_returns_422() -> None:
         # Unique material id so the preview cache (keyed by material+spec) never
         # short-circuits this render — a failed build is never cached, so the
         # 422 path must run.
-        response = client.post("/materials/mat-w1-422/preview-chart", json=_VALID_SPEC)
+        response = client.post(f"/materials/{client.material_id}/preview-chart", json=_VALID_SPEC)
 
     assert response.status_code == 422, (
         f"Expected 422 for chart ValueError, got {response.status_code}"
@@ -227,17 +218,16 @@ def test_preview_chart_value_error_returns_422() -> None:
     )
 
 
-def test_preview_chart_503_when_soffice_absent() -> None:
+def test_preview_chart_503_when_soffice_absent(rb_wire) -> None:
     """POST preview-chart returns 503 when LibreOffice is not available. (REQ-C-19)"""
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
 
-    app = create_app(client=mock_client)
-    client = TestClient(app)
+    client = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.shutil.which", return_value=None):
-        response = client.post("/materials/mat-w1/preview-chart", json=_VALID_SPEC)
+        response = client.post(f"/materials/{client.material_id}/preview-chart", json=_VALID_SPEC)
 
     assert response.status_code == 503, (
         f"Expected 503 when soffice absent, got {response.status_code}"

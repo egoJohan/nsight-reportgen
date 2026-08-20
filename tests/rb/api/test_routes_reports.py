@@ -1,10 +1,12 @@
-"""Tests for reports routes: POST/PUT/GET/DELETE + duplicate. (REQ-C-08/09/10/11/12)"""
+"""Tests for reports routes: POST/PUT/GET/DELETE + duplicate. (REQ-C-08/09/10/11/12)
+
+Every route here is `require_case`/`require_case_write` guarded: the case_id
+in the path is resolved through the repository before the handler runs, so a
+test needs `client.case_id` from `rb_wire`, not the placeholder "case-42".
+"""
 import json
 from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.model.report import (
     ChartSpec,
     ElementToggles,
@@ -63,21 +65,20 @@ def _make_client() -> Mock:
 # ---------------------------------------------------------------------------
 
 
-def test_create_and_load_exact_round_trip() -> None:
+def test_create_and_load_exact_round_trip(rb_wire) -> None:
     """POST a 3-chart report; capture the JSON saved to the store; GET it back and assert the
     round-trip is exact: report_from_json(GET body) == report_from_json(original). Also asserts
     the chart count survives. (REQ-C-08, REQ-C-10, REQ-C-11)"""
     mock = _make_client()
     mock.save_report.return_value = "rep-1"
 
-    app = create_app(client=mock)
-    client = TestClient(app)
+    client = rb_wire(client=mock)
 
     original = _make_report("q1", "q2", "q3")
     body = _report_body(original)
 
     # POST to create
-    resp = client.post("/cases/case-42/reports", json=body)
+    resp = client.post(f"/cases/{client.case_id}/reports", json=body)
     assert resp.status_code in (200, 201), resp.text
     assert resp.json()["report_id"] == "rep-1"
 
@@ -88,7 +89,7 @@ def test_create_and_load_exact_round_trip() -> None:
 
     # Feed captured JSON back through load_report and GET
     mock.load_report.return_value = captured_json
-    resp_get = client.get("/cases/case-42/reports/rep-1")
+    resp_get = client.get(f"/cases/{client.case_id}/reports/rep-1")
     assert resp_get.status_code == 200
 
     # Exact round-trip: the parsed response reconstructs identically to the original
@@ -103,7 +104,7 @@ def test_create_and_load_exact_round_trip() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_duplicate_new_id_null_report_id_new_name_baked_in() -> None:
+def test_duplicate_new_id_null_report_id_new_name_baked_in(rb_wire) -> None:
     """POST .../duplicate creates a new doc (save_report called with report_id=None), assigns the
     new name, and returns a new report_id. The saved JSON must contain the new name.
     (REQ-C-09)"""
@@ -112,10 +113,9 @@ def test_duplicate_new_id_null_report_id_new_name_baked_in() -> None:
     mock.load_report.return_value = report_to_json(src)
     mock.save_report.return_value = "rep-2"
 
-    app = create_app(client=mock)
-    client = TestClient(app)
+    client = rb_wire(client=mock)
 
-    resp = client.post("/cases/case-42/reports/rep-1/duplicate", json={"name": "Copy"})
+    resp = client.post(f"/cases/{client.case_id}/reports/rep-1/duplicate", json={"name": "Copy"})
     assert resp.status_code in (200, 201), resp.text
     assert resp.json()["report_id"] == "rep-2"
 
@@ -135,19 +135,18 @@ def test_duplicate_new_id_null_report_id_new_name_baked_in() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_put_versioned_save_passes_report_id() -> None:
+def test_put_versioned_save_passes_report_id(rb_wire) -> None:
     """PUT /cases/{case_id}/reports/{report_id} calls save_report with the given report_id (not
     None), enabling versioned replace. (REQ-C-08)"""
     mock = _make_client()
     mock.save_report.return_value = "rep-99"
 
-    app = create_app(client=mock)
-    client = TestClient(app)
+    client = rb_wire(client=mock)
 
     report = _make_report("qA")
     body = _report_body(report)
 
-    resp = client.put("/cases/case-42/reports/rep-99", json=body)
+    resp = client.put(f"/cases/{client.case_id}/reports/rep-99", json=body)
     assert resp.status_code == 200, resp.text
     assert resp.json()["report_id"] == "rep-99"
 
@@ -161,15 +160,17 @@ def test_put_versioned_save_passes_report_id() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_delete_report_calls_delete_and_returns_2xx() -> None:
+def test_delete_report_calls_delete_and_returns_2xx(rb_wire) -> None:
     """DELETE /cases/{case_id}/reports/{report_id} calls client.delete_report with the given id
     and returns a 2xx response. (REQ-C-12)"""
     mock = _make_client()
     mock.delete_report.return_value = None
+    # The route checks the report is known before deleting (so a consent-retry
+    # doesn't turn into a 404 once the first pass already removed it).
+    mock.list_reports.return_value = [{"report_id": "rep-del"}]
 
-    app = create_app(client=mock)
-    client = TestClient(app)
+    client = rb_wire(client=mock)
 
-    resp = client.delete("/cases/case-42/reports/rep-del")
+    resp = client.delete(f"/cases/{client.case_id}/reports/rep-del")
     assert resp.status_code in (200, 204), resp.text
-    mock.delete_report.assert_called_once_with("case-42", "rep-del")
+    mock.delete_report.assert_called_once_with(client.case_id, "rep-del")

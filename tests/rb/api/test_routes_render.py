@@ -8,9 +8,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
-from fastapi.testclient import TestClient
 
-from reportbuilder.api.app import create_app
 from reportbuilder.model.question import Question, QuestionModel, ValueLabel, Variable
 from reportbuilder.model.report import (
     ChartSpec,
@@ -72,28 +70,27 @@ def _make_small_model() -> QuestionModel:
 # ---------------------------------------------------------------------------
 
 
-def test_route_returns_artifacts() -> None:
+def test_route_returns_artifacts(rb_wire) -> None:
     """POST /cases/.../render returns the artifact dict from orchestrate_render.
     (REQ-C-19, REQ-C-21, REQ-C-22)"""
     mock_client = _make_mock_client()
-    app = create_app(client=mock_client)
-    http = TestClient(app)
+    http = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_render.orchestrate_render") as mock_orch:
         mock_orch.return_value = dict(_ARTIFACTS)
 
         resp = http.post(
-            "/cases/case-1/reports/rep-1/render",
+            f"/cases/{http.case_id}/reports/rep-1/render",
             json={"material_id": "mat-1"},
         )
 
     assert resp.status_code == 200
-    assert resp.json() == {**_ARTIFACTS, "pdf_url": "/cases/case-1/reports/rep-1/preview.pdf"}
+    assert resp.json() == {**_ARTIFACTS, "pdf_url": f"/cases/{http.case_id}/reports/rep-1/preview.pdf"}
 
     mock_orch.assert_called_once()
     call_args = mock_orch.call_args
     # positional: case_id, report_id, material_id, client
-    assert call_args[0][0] == "case-1"
+    assert call_args[0][0] == http.case_id
     assert call_args[0][1] == "rep-1"
     assert call_args[0][2] == "mat-1"
     # keyword: view defaults to "slides"
@@ -192,13 +189,12 @@ def test_orchestrate_render_cancels_before_pdf(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_orchestrate_render_value_error_becomes_422() -> None:
+def test_orchestrate_render_value_error_becomes_422(rb_wire) -> None:
     """A ValueError raised by build_pptx is surfaced as HTTP 422, not 500.
     This guards against scatter charts with a null scatter_xy crashing the
     render endpoint with an unhandled exception. (FIX-3)"""
     mock_client = _make_mock_client()
-    app = create_app(client=mock_client)
-    http = TestClient(app)
+    http = rb_wire(client=mock_client)
 
     small_report = _make_small_report()
     small_model = _make_small_model()
@@ -216,7 +212,7 @@ def test_orchestrate_render_value_error_becomes_422() -> None:
         mock_build_pptx.side_effect = ValueError("scatter chart requires scatter_xy")
 
         resp = http.post(
-            "/cases/case-x/reports/rep-x/render",
+            f"/cases/{http.case_id}/reports/rep-x/render",
             json={"material_id": "mat-x"},
         )
 

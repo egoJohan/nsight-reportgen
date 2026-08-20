@@ -1,13 +1,15 @@
-"""Tests for materials routes: POST /cases/{case_id}/materials (upload SAV + ingest). (REQ-C-01, REQ-C-04)"""
+"""Tests for materials routes: POST /cases/{case_id}/materials (upload SAV + ingest). (REQ-C-01, REQ-C-04)
+
+`require_case_write` resolves case_id through the repository, so the case
+must be real — `test_client.case_id` from `rb_wire`, not a placeholder like
+"case-1".
+"""
 from unittest.mock import Mock, patch
 
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.model.question import QuestionModel, Question, Variable, ValueLabel
 
 
-def test_upload_material_successful_upload() -> None:
+def test_upload_material_successful_upload(rb_wire) -> None:
     """POST /cases/{case_id}/materials successfully uploads SAV, ingests it, and attaches under case.
     (REQ-C-01, REQ-C-04)
     """
@@ -46,8 +48,7 @@ def test_upload_material_successful_upload() -> None:
     mock_client = Mock()
     mock_client.attach_material.return_value = "mat-9"
 
-    app = create_app(client=mock_client)
-    test_client = TestClient(app)
+    test_client = rb_wire(client=mock_client)
 
     test_bytes = b"fake-sav-file-bytes"
 
@@ -55,7 +56,7 @@ def test_upload_material_successful_upload() -> None:
         mock_read_sav.return_value = (None, fake_model)  # df not needed for this test
 
         response = test_client.post(
-            "/cases/case-1/materials",
+            f"/cases/{test_client.case_id}/materials",
             files={"file": ("survey.sav", test_bytes, "application/octet-stream")},
         )
 
@@ -68,7 +69,7 @@ def test_upload_material_successful_upload() -> None:
     mock_client.attach_material.assert_called_once()
     call_args = mock_client.attach_material.call_args
     # Check positional arguments: (case_id, name, sav_bytes, codebook_summary)
-    assert call_args[0][0] == "case-1"  # case_id
+    assert call_args[0][0] == test_client.case_id  # case_id
     assert call_args[0][1] == "survey.sav"  # name
     assert call_args[0][2] == test_bytes  # sav_bytes (the uploaded bytes)
     # codebook_summary is the 4th arg; validate it contains expected parts
@@ -79,7 +80,7 @@ def test_upload_material_successful_upload() -> None:
     assert "q3\tsingle\tQuestion 3" in codebook
 
 
-def test_upload_material_read_sav_is_invoked() -> None:
+def test_upload_material_read_sav_is_invoked(rb_wire) -> None:
     """POST /cases/{case_id}/materials invokes read_sav on the uploaded bytes. (REQ-C-01)"""
     fake_model = QuestionModel(
         variables={},
@@ -91,8 +92,7 @@ def test_upload_material_read_sav_is_invoked() -> None:
     mock_client = Mock()
     mock_client.attach_material.return_value = "mat-x"
 
-    app = create_app(client=mock_client)
-    test_client = TestClient(app)
+    test_client = rb_wire(client=mock_client)
 
     test_bytes = b"another-sav-bytes"
 
@@ -100,7 +100,7 @@ def test_upload_material_read_sav_is_invoked() -> None:
         mock_read_sav.return_value = (None, fake_model)
 
         response = test_client.post(
-            "/cases/case-2/materials",
+            f"/cases/{test_client.case_id}/materials",
             files={"file": ("data.sav", test_bytes, "application/octet-stream")},
         )
 

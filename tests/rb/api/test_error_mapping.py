@@ -6,15 +6,18 @@ must translate it into a meaningful HTTP response for the Flutter UI:
   - 5xx / other from datahive → 502 (bad upstream)
 The response body always contains a JSON ``detail`` field starting with
 "datahive: ".
+
+Every case here is guarded (`require_case`): the route resolves `case_id`
+through the repository before its body — and therefore before the mocked
+client — ever runs, so the guard needs a real, repository-known case id, not
+the literal "c1" placeholder.
 """
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
-from reportbuilder.api.app import create_app
 from reportbuilder.store.datahive_client import DataHiveClient, DataHiveError
 
 
@@ -29,44 +32,45 @@ def _make_mock_client(exc: Exception) -> MagicMock:
     return mock
 
 
-def _client_for(exc: Exception) -> TestClient:
+def _client_for(rb_wire, exc: Exception) -> TestClient:
     mock = _make_mock_client(exc)
-    app = create_app(client=mock)
-    return TestClient(app, raise_server_exceptions=False)
+    tc = rb_wire(client=mock)
+    tc.raise_server_exceptions = False
+    return tc
 
 
 # ---------------------------------------------------------------------------
 # REQ-C-30: 4xx datahive → 4xx nSight
 # ---------------------------------------------------------------------------
 
-def test_datahive_404_maps_to_404():
+def test_datahive_404_maps_to_404(rb_wire):
     """REQ-C-30: DataHiveError(404, ...) → route returns HTTP 404 with datahive detail."""
     err = DataHiveError(404, '{"error":"not_found"}', "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
     detail = resp.json().get("detail", "")
     assert "datahive" in detail, f"Expected 'datahive' in detail, got {detail!r}"
 
 
-def test_datahive_401_maps_to_401():
+def test_datahive_401_maps_to_401(rb_wire):
     """REQ-C-30: DataHiveError(401, ...) → route returns HTTP 401."""
     err = DataHiveError(401, "Unauthorized", "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     assert resp.status_code == 401
 
 
-def test_datahive_403_maps_to_403():
+def test_datahive_403_maps_to_403(rb_wire):
     """REQ-C-30: DataHiveError(403, ...) → route returns HTTP 403."""
     err = DataHiveError(403, "Forbidden", "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     assert resp.status_code == 403
 
@@ -75,24 +79,24 @@ def test_datahive_403_maps_to_403():
 # REQ-C-30: 5xx datahive → 502 nSight
 # ---------------------------------------------------------------------------
 
-def test_datahive_500_maps_to_502():
+def test_datahive_500_maps_to_502(rb_wire):
     """REQ-C-30: DataHiveError(500, ...) → route returns HTTP 502 (bad upstream)."""
     err = DataHiveError(500, "Internal Server Error", "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     assert resp.status_code == 502, f"Expected 502, got {resp.status_code}"
     detail = resp.json().get("detail", "")
     assert "datahive" in detail, f"Expected 'datahive' in detail, got {detail!r}"
 
 
-def test_datahive_503_maps_to_502():
+def test_datahive_503_maps_to_502(rb_wire):
     """REQ-C-30: DataHiveError(503, ...) → route returns HTTP 502."""
     err = DataHiveError(503, "Service Unavailable", "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     assert resp.status_code == 502
 
@@ -101,24 +105,24 @@ def test_datahive_503_maps_to_502():
 # REQ-C-30: detail body contains datahive body text (truncated at 500 chars)
 # ---------------------------------------------------------------------------
 
-def test_detail_contains_datahive_body():
+def test_detail_contains_datahive_body(rb_wire):
     """REQ-C-30: The response detail includes the datahive error body."""
     err = DataHiveError(404, '{"error":"not_found"}', "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     detail = resp.json()["detail"]
     assert '{"error":"not_found"}' in detail
 
 
-def test_long_body_truncated_to_500_chars():
+def test_long_body_truncated_to_500_chars(rb_wire):
     """REQ-C-30: detail is capped so very long datahive bodies don't leak excessive data."""
     long_body = "x" * 1000
     err = DataHiveError(500, long_body, "GET", "http://h/x")
-    tc = _client_for(err)
+    tc = _client_for(rb_wire, err)
 
-    resp = tc.get("/cases/c1/reports/r1")
+    resp = tc.get(f"/cases/{tc.case_id}/reports/r1")
 
     detail = resp.json()["detail"]
     assert len(detail) <= 500

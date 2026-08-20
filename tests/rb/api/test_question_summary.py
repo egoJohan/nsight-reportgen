@@ -3,24 +3,21 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.testing.fixtures import synthetic_sav_bytes
 
 
-def _client():
+def _client(rb_wire):
     mock = Mock()
     mock.get_material.return_value = synthetic_sav_bytes()
-    return TestClient(create_app(client=mock))
+    return rb_wire(client=mock)
 
 
-def test_summary_has_metadata_and_distribution():
-    c = _client()
-    qs = c.get("/materials/mat-s/questions").json()["questions"]
+def test_summary_has_metadata_and_distribution(rb_wire):
+    c = _client(rb_wire)
+    qs = c.get(f"/materials/{c.material_id}/questions").json()["questions"]
     chartable = next(q for q in qs if q["chartable"] is not False)
 
-    r = c.get(f"/materials/mat-s/questions/{chartable['qid']}/summary")
+    r = c.get(f"/materials/{c.material_id}/questions/{chartable['qid']}/summary")
     assert r.status_code == 200
     s = r.json()
     assert s["qid"] == chartable["qid"]
@@ -34,5 +31,6 @@ def test_summary_has_metadata_and_distribution():
     assert s["measurement"] in {"categorical", "scale", "multi", "text"}
 
 
-def test_summary_unknown_qid_404():
-    assert _client().get("/materials/mat-s/questions/nope/summary").status_code == 404
+def test_summary_unknown_qid_404(rb_wire):
+    c = _client(rb_wire)
+    assert c.get(f"/materials/{c.material_id}/questions/nope/summary").status_code == 404

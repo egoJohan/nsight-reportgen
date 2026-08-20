@@ -20,9 +20,6 @@ import shutil
 from unittest.mock import Mock, patch
 
 import pytest
-from fastapi.testclient import TestClient
-
-from reportbuilder.api.app import create_app
 from reportbuilder.model.question import Question, QuestionModel, ValueLabel, Variable
 from reportbuilder.testing.fixtures import synthetic_sav_bytes
 
@@ -74,17 +71,16 @@ def _make_labeled_model() -> QuestionModel:
 # ---------------------------------------------------------------------------
 
 
-def test_get_variables_returns_required_fields() -> None:
+def test_get_variables_returns_required_fields(rb_wire) -> None:
     """GET /materials/{material_id}/variables returns 200 with name, label, measurement
     for every variable. (RX-be.1)"""
     model = _make_labeled_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = tc.get("/materials/mat-rx1/variables")
+        response = tc.get(f"/materials/{tc.material_id}/variables")
 
     assert response.status_code == 200
     body = response.json()
@@ -97,16 +93,15 @@ def test_get_variables_returns_required_fields() -> None:
         assert "measurement" in v, f"'measurement' missing from variable entry {v!r}"
 
 
-def test_get_variables_real_label_shown() -> None:
+def test_get_variables_real_label_shown(rb_wire) -> None:
     """A variable with a real label (label != raw name) shows that human-readable label. (RX-be.1)"""
     model = _make_labeled_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = tc.get("/materials/mat-rx1/variables")
+        response = tc.get(f"/materials/{tc.material_id}/variables")
 
     body = response.json()
     by_name = {v["name"]: v for v in body["variables"]}
@@ -115,16 +110,15 @@ def test_get_variables_real_label_shown() -> None:
     )
 
 
-def test_get_variables_name_as_label_when_no_real_label() -> None:
+def test_get_variables_name_as_label_when_no_real_label(rb_wire) -> None:
     """A variable whose label == its own name shows the name as its label. (RX-be.1)"""
     model = _make_labeled_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = tc.get("/materials/mat-rx1/variables")
+        response = tc.get(f"/materials/{tc.material_id}/variables")
 
     body = response.json()
     by_name = {v["name"]: v for v in body["variables"]}
@@ -133,16 +127,15 @@ def test_get_variables_name_as_label_when_no_real_label() -> None:
     )
 
 
-def test_get_variables_categorical_before_scale() -> None:
+def test_get_variables_categorical_before_scale(rb_wire) -> None:
     """GET /materials/{material_id}/variables sorts categorical variables before scale. (RX-be.1)"""
     model = _make_labeled_model()
     mock_client = Mock()
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
     with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
         mock_load.return_value = model
-        response = tc.get("/materials/mat-rx1/variables")
+        response = tc.get(f"/materials/{tc.material_id}/variables")
 
     body = response.json()
     measurements = [v["measurement"] for v in body["variables"]]
@@ -190,7 +183,7 @@ _STACKED_HORIZ_NO_DIM_SPEC = {
 }
 
 
-def test_preview_chart_valid_spec_returns_200_png() -> None:
+def test_preview_chart_valid_spec_returns_200_png(rb_wire) -> None:
     """POST preview-chart with a valid horizontal_bar spec returns 200 image/png. (RX-be.2)
 
     Integration-only path; skipped when LibreOffice (soffice) is absent.
@@ -204,10 +197,9 @@ def test_preview_chart_valid_spec_returns_200_png() -> None:
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
-    response = tc.post("/materials/mat-rx2/preview-chart", json=_VALID_BAR_SPEC)
+    response = tc.post(f"/materials/{tc.material_id}/preview-chart", json=_VALID_BAR_SPEC)
 
     assert response.status_code == 200, (
         f"Expected 200 image/png from valid preview-chart spec, "
@@ -219,7 +211,7 @@ def test_preview_chart_valid_spec_returns_200_png() -> None:
     assert response.content[:4] == b"\x89PNG", "Response does not start with PNG magic bytes"
 
 
-def test_preview_chart_scatter_without_xy_returns_422_not_500() -> None:
+def test_preview_chart_scatter_without_xy_returns_422_not_500(rb_wire) -> None:
     """POST preview-chart with chart_type=scatter and no scatter_xy returns 422 — never 500.
 
     The browser previously received 'XMLHttpRequest onError' from an unhandled crash.
@@ -228,10 +220,9 @@ def test_preview_chart_scatter_without_xy_returns_422_not_500() -> None:
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
-    response = tc.post("/materials/mat-rx2/preview-chart", json=_SCATTER_NO_XY_SPEC)
+    response = tc.post(f"/materials/{tc.material_id}/preview-chart", json=_SCATTER_NO_XY_SPEC)
 
     assert response.status_code == 422, (
         f"Expected 422 for scatter without scatter_xy, "
@@ -244,7 +235,7 @@ def test_preview_chart_scatter_without_xy_returns_422_not_500() -> None:
     )
 
 
-def test_preview_chart_stacked_vertical_without_classifying_var_not_blocked() -> None:
+def test_preview_chart_stacked_vertical_without_classifying_var_not_blocked(rb_wire) -> None:
     """POST preview-chart with stacked_vertical_bar and no classifying_var renders
     the answer distribution as a single total bar — it must NOT be rejected with a
     'classifying variable' 422 (total-only stacked bars are valid).
@@ -252,10 +243,9 @@ def test_preview_chart_stacked_vertical_without_classifying_var_not_blocked() ->
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
-    response = tc.post("/materials/mat-rx2/preview-chart", json=_STACKED_VERT_NO_DIM_SPEC)
+    response = tc.post(f"/materials/{tc.material_id}/preview-chart", json=_STACKED_VERT_NO_DIM_SPEC)
 
     detail = response.json().get("detail", "") if response.status_code != 200 else ""
     assert not (response.status_code == 422 and "classifying variable" in detail.lower()), (
@@ -264,15 +254,14 @@ def test_preview_chart_stacked_vertical_without_classifying_var_not_blocked() ->
     )
 
 
-def test_preview_chart_stacked_horizontal_without_classifying_var_not_blocked() -> None:
+def test_preview_chart_stacked_horizontal_without_classifying_var_not_blocked(rb_wire) -> None:
     """Same for the horizontal stacked variant — total-only is allowed."""
     sav_bytes = synthetic_sav_bytes()
     mock_client = Mock()
     mock_client.get_material.return_value = sav_bytes
-    app = create_app(client=mock_client)
-    tc = TestClient(app)
+    tc = rb_wire(client=mock_client)
 
-    response = tc.post("/materials/mat-rx2/preview-chart", json=_STACKED_HORIZ_NO_DIM_SPEC)
+    response = tc.post(f"/materials/{tc.material_id}/preview-chart", json=_STACKED_HORIZ_NO_DIM_SPEC)
 
     detail = response.json().get("detail", "") if response.status_code != 200 else ""
     assert not (response.status_code == 422 and "classifying variable" in detail.lower()), (
