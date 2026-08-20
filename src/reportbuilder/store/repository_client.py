@@ -123,6 +123,17 @@ class RepositoryClient:
                     for k in self.repo.list_cases(self.auth, c.id)]
         return out
 
+    def reports_using_material(self, case_id: str, material_id: str) -> list[dict]:
+        k = self._case(case_id)
+        return [{"report_id": r.id, "name": r.name}
+                for r in self.repo.reports_using_material(
+                    self.auth, k.customer_id, k.id, material_id)]
+
+    def delete_material(self, case_id: str, material_id: str) -> int:
+        """Delete a dataset. ConsentRequired propagates, as for a case."""
+        k = self._case(case_id)
+        return self.repo.delete_material(self.auth, k.customer_id, k.id, material_id)
+
     def delete_case(self, case_id: str) -> int:
         """Delete a tutkimus and everything under it.
 

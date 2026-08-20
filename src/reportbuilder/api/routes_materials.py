@@ -1,6 +1,6 @@
-"""Materials routes: POST /cases/{case_id}/materials (upload SAV + ingest). (REQ-C-01, REQ-C-04)"""
+"""Materials routes: upload, list and delete a case's dataset. (REQ-C-01, REQ-C-04)"""
 import tempfile
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps import get_client
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
@@ -76,3 +76,67 @@ async def upload_material(
         "question_count": len(model.questions),
         "file_label": file_label,  # SAV study title, or null
     }
+
+
+@materials_router.get("/cases/{case_id}/materials/{material_id}/usage")
+def material_usage(
+    case_id: str,
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """What deleting this dataset would affect.
+
+    Asked BEFORE the delete so the confirmation can name the reports rather than
+    count them: "this empties Report 1, Report 2 and Report 3" is something an
+    analyst can weigh, "3 reports affected" is not.
+    """
+    return {"reports": client.reports_using_material(case_id, material_id)}
+
+
+@materials_router.delete("/cases/{case_id}/materials/{material_id}")
+def delete_material(
+    case_id: str,
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+) -> dict:
+    """Delete a dataset and the curation and renders drawn from it.
+
+    The tutkimus and its REPORTS survive: a report is an analyst's list of
+    questions and how to chart them, and the usual reason to delete a dataset is
+    to import a corrected export in its place. Throwing the layout away with the
+    data would defeat that. The reports chart nothing until a dataset is
+    imported again, which is what the confirmation warns about.
+
+    Consent comes back as a 409 carrying the approval envelope, as for a case.
+    """
+    from reportbuilder.store.seam import ConsentRequired, NotFound
+
+    # Asked here rather than inside the delete: a delete is re-run after
+    # datahive grants consent, and by the second pass the objects removed on the
+    # first are legitimately gone. Checking in there would turn the retry into a
+    # 404.
+    known = {m["material_id"] for m in client.list_materials(case_id)}
+    if material_id not in known:
+        raise HTTPException(
+            status_code=404, detail=f"Material '{material_id}' not found")
+
+    try:
+        removed = client.delete_material(case_id, material_id)
+    except (KeyError, NotFound) as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Material '{material_id}' not found") from exc
+    except ConsentRequired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "consent_required",
+                "message": "Deleting needs approval in datahive.",
+                "request_id": exc.request_id,
+                "target": exc.target,
+                "approve": exc.envelope.get("approval_urls", {}),
+            },
+        ) from exc
+    payload = {"deleted": material_id}
+    if isinstance(removed, int):
+        payload["objects_removed"] = removed
+    return payload

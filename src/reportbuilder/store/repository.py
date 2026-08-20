@@ -441,6 +441,55 @@ class Repository:
                 pass  # a report may never have been rendered
         return removed
 
+    def reports_using_material(self, auth: AuthContext, customer_id: str,
+                               case_id: str, material_id: str) -> list[ReportRef]:
+        """Reports that were built from this dataset.
+
+        Every report in the tutkimus, in practice: a tutkimus holds one dataset
+        and its reports chart that dataset's questions. Listed rather than
+        counted so the caller can NAME them — "this also empties 3 reports" is a
+        fact someone can act on, "3 reports affected" is not.
+        """
+        if not self.list_materials(auth, customer_id, case_id):
+            return []
+        return self.list_reports(auth, customer_id, case_id)
+
+    def delete_material(self, auth: AuthContext, customer_id: str, case_id: str,
+                        material_id: str) -> int:
+        """A dataset, its curation, and the renders drawn from it.
+
+        The reports are KEPT. A report is a list of questions and how to chart
+        them, written by an analyst; the dataset is what those questions were
+        asked of. Deleting the data to import a corrected export is the reason
+        this exists, and throwing away the report layout with it would make the
+        feature useless for its own purpose. The reports go empty until a
+        dataset is imported again — which is why the caller warns first.
+
+        Cached renders DO go: a deck on disk drawn from data that no longer
+        exists is the one artefact nobody can tell is stale by looking.
+        """
+        # Deliberately tolerant of what is already gone: datahive gates each
+        # delete behind approval, so this method is CALLED AGAIN after consent,
+        # and by then the objects it removed on the first pass do not exist.
+        # "Does this dataset exist at all" is the caller's question, asked once
+        # before it starts — see routes_materials.delete_material.
+        removed = 0
+        for path in (P.material_path(customer_id, case_id, material_id),
+                     P.material_config_path(customer_id, case_id, material_id)):
+            try:
+                self.store.delete(auth, path)
+                removed += 1
+            except NotFound:
+                pass  # a material may carry no curation
+        for report in self.list_reports(auth, customer_id, case_id):
+            try:
+                self.store.delete(
+                    auth, P.report_render_path(customer_id, case_id, report.id))
+                removed += 1
+            except NotFound:
+                pass
+        return removed
+
     def delete_case(self, auth: AuthContext, customer_id: str, case_id: str) -> int:
         """The tutkimus and everything in it: materials, curation, reports,
         renders. Cascade rather than refusal, because a tutkimus with no

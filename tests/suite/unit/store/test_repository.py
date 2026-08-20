@@ -466,6 +466,65 @@ class TestDeletion:
         assert repo.list_materials(auth, c.id, k.id) == []
         assert repo.list_reports(auth, c.id, k.id) == []
 
+    def test_deleting_a_dataset_keeps_the_reports_built_on_it(self, repo, store, auth):
+        """The point of the feature: swap the data, keep the work.
+
+        A report is an analyst's list of questions and how to chart them; the
+        dataset is what those questions were asked of. Deleting the data to
+        import a corrected export is the reason to delete it at all, so taking
+        the layout with it would defeat the purpose.
+        """
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Brändi")
+        m = repo.attach_material(auth, c.id, k.id, "data.sav", b"SAV")
+        repo.save_material_config(auth, c.id, k.id, m.id, {"merges": ["x"]})
+        r = repo.save_report(auth, c.id, k.id, json.dumps({"name": "R"}))
+
+        approve_all(store, lambda: repo.delete_material(auth, c.id, k.id, m.id))
+
+        assert repo.list_materials(auth, c.id, k.id) == []
+        assert [x.id for x in repo.list_reports(auth, c.id, k.id)] == [r.id]
+
+    def test_deleting_a_dataset_takes_its_curation(self, repo, store, auth):
+        """Word merges and label edits describe questions that are gone; kept,
+        they would silently reattach to whatever is imported next."""
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Brändi")
+        m = repo.attach_material(auth, c.id, k.id, "data.sav", b"SAV")
+        repo.save_material_config(auth, c.id, k.id, m.id, {"merges": ["x"]})
+
+        approve_all(store, lambda: repo.delete_material(auth, c.id, k.id, m.id))
+
+        assert repo.load_material_config(auth, c.id, k.id, m.id) == {}
+
+    def test_deleting_a_dataset_takes_the_decks_drawn_from_it(self, repo, store, auth):
+        """A stored deck drawn from data that no longer exists is the one
+        artefact nobody can tell is stale by looking at it."""
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Brändi")
+        m = repo.attach_material(auth, c.id, k.id, "data.sav", b"SAV")
+        r = repo.save_report(auth, c.id, k.id, json.dumps({"name": "R"}))
+        key = repo.render_key(auth, c.id, k.id, r.id, m.id)
+        repo.save_render(auth, c.id, k.id, r.id, b"PK\x03\x04", key)
+        assert repo.load_render(auth, c.id, k.id, r.id, key) is not None
+
+        approve_all(store, lambda: repo.delete_material(auth, c.id, k.id, m.id))
+
+        assert repo.load_render(auth, c.id, k.id, r.id, key) is None
+
+    def test_the_reports_a_dataset_would_affect_can_be_named(self, repo, auth):
+        """Named, not counted: "this empties Report 1 and Report 2" is something
+        an analyst can weigh before confirming."""
+        c = repo.create_customer(auth, "Acme")
+        k = repo.create_case(auth, c.id, "Brändi")
+        m = repo.attach_material(auth, c.id, k.id, "data.sav", b"SAV")
+        repo.save_report(auth, c.id, k.id, json.dumps({"name": "First"}))
+        repo.save_report(auth, c.id, k.id, json.dumps({"name": "Second"}))
+
+        names = {r.name for r in
+                 repo.reports_using_material(auth, c.id, k.id, m.id)}
+        assert names == {"First", "Second"}
+
     def test_deleting_a_customer_takes_every_tutkimus(self, repo, store, auth):
         c = repo.create_customer(auth, "Acme")
         keep = repo.create_customer(auth, "Beta")

@@ -8,11 +8,17 @@ import {
   TriangleAlertIcon,
   CircleCheckIcon,
   CircleXIcon,
+  Trash2Icon,
+  Loader2Icon,
 } from "lucide-react";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -107,6 +113,7 @@ function QuestionTags({ q }: { q: Question }) {
           {q.measurement}
         </Badge>
       )}
+
     </div>
   );
 }
@@ -328,11 +335,34 @@ export default function DataTab({ caseId }: { caseId: string }) {
   const { workspace, setMaterial } = useWorkspace(caseId);
   const qc = useQueryClient();
   const [replacing, setReplacing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Reports the delete would leave with nothing to chart, named in the warning.
+  const [affected, setAffected] = useState<string[]>([]);
   // Prefer this browser's local pointer; else fall back to the case's material
   // on the server (so a case opened by another user/device isn't shown empty).
   const { data: caseMaterials } = useCaseMaterials(caseId);
   const serverMaterialId = caseMaterials?.materials?.[0]?.material_id ?? null;
   const materialId = workspace.materialId ?? serverMaterialId;
+
+  async function deleteMaterial() {
+    if (!materialId) return;
+    setDeleting(true);
+    try {
+      await api.materials.remove(caseId, materialId);
+      setMaterial(null);
+      setConfirmDelete(false);
+      // The reports survive but chart nothing until a dataset is imported, and
+      // every preview was drawn from data that is gone.
+      qc.invalidateQueries({ queryKey: qk.caseMaterials(caseId) });
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      toast.success("Dataset deleted");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the dataset");
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div>
@@ -363,14 +393,37 @@ export default function DataTab({ caseId }: { caseId: string }) {
                 <span className="font-mono text-xs">{materialId}</span>
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setReplacing(true)}
-              className="text-muted-foreground"
-            >
-              Replace file
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setReplacing(true)}
+                className="text-muted-foreground"
+              >
+                Replace file
+              </Button>
+              {/* Distinct from Replace: replacing swaps the data and keeps
+                  working, deleting leaves the tutkimus with none. */}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title="Delete this dataset"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={async () => {
+                  try {
+                    const { reports } = await api.materials.usage(caseId, materialId);
+                    setAffected(reports.map((r) => r.name));
+                  } catch {
+                    // The warning is a courtesy; not being able to build it is
+                    // no reason to block the delete.
+                    setAffected([]);
+                  }
+                  setConfirmDelete(true);
+                }}
+              >
+                <Trash2Icon className="size-4" />
+              </Button>
+            </div>
           </div>
           <QuestionTable
             materialId={materialId}
@@ -384,6 +437,39 @@ export default function DataTab({ caseId }: { caseId: string }) {
           />
         </>
       )}
+
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(v) => !v && setConfirmDelete(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this dataset?</DialogTitle>
+            <DialogDescription>
+              The SPSS file and its curation — groupings, word merges, label
+              edits — are removed, along with every deck rendered from it.
+              {affected.length > 0 && (
+                <>
+                  {" "}
+                  The study keeps its reports, but {affected.join(", ")} will
+                  chart nothing until a dataset is imported again.
+                </>
+              )}{" "}
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={deleteMaterial} disabled={deleting}>
+              {deleting && <Loader2Icon className="size-4 animate-spin" />}
+              Delete dataset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

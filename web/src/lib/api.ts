@@ -679,6 +679,39 @@ export const api = {
         json<{ materials: CaseMaterial[] }>(r)
       ),
 
+    // What deleting this dataset would empty. Asked before the confirmation so
+    // it can name the reports rather than count them.
+    usage: (
+      caseId: string,
+      materialId: string
+    ): Promise<{ reports: { report_id: string; name: string }[] }> =>
+      fetch(`${API_BASE}/cases/${caseId}/materials/${materialId}/usage`).then((r) =>
+        json<{ reports: { report_id: string; name: string }[] }>(r)
+      ),
+
+    remove: async (caseId: string, materialId: string): Promise<void> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/materials/${materialId}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          // datahive gates a delete behind approval; say so rather than
+          // showing the raw envelope.
+          if (body?.detail?.error === "consent_required") {
+            detail = body.detail.message;
+          } else if (typeof body?.detail === "string") {
+            detail = body.detail;
+          }
+        } catch {
+          // not JSON — keep the status text
+        }
+        throw new Error(detail);
+      }
+    },
+
     upload: (caseId: string, file: File): Promise<UploadResult> => {
       const form = new FormData();
       form.append("file", file);

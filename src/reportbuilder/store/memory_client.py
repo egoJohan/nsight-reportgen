@@ -164,6 +164,33 @@ class InMemoryDataHiveClient:
                 self._report_meta.pop(rid, None)
             self._save()
 
+    def reports_using_material(self, case_id: str, material_id: str) -> list[dict]:
+        """Every report in the tutkimus, when the dataset is there to be used."""
+        with self._lock:
+            if material_id not in self._material_meta:
+                return []
+            return [{"report_id": rid, "name": meta.get("name", rid)}
+                    for rid, meta in self._report_meta.items()
+                    if meta.get("case_id") == case_id]
+
+    def delete_material(self, case_id: str, material_id: str) -> int:
+        """The dataset and its curation. The REPORTS stay — see the route."""
+        with self._lock:
+            if material_id not in self._material_meta:
+                raise KeyError(material_id)
+            removed = 1
+            self._materials.pop(material_id, None)
+            self._material_meta.pop(material_id, None)
+            if self._material_config.pop(material_id, None) is not None:
+                removed += 1
+            if self.storage_dir is not None:
+                try:
+                    os.remove(os.path.join(self._materials_dir(), f"{material_id}.sav"))
+                except OSError:
+                    pass
+            self._save()
+            return removed
+
     # --- materials (byte-exact) ---
     def attach_material(self, case_id: str, name: str, sav_bytes: bytes,
                         codebook_summary: str) -> str:
