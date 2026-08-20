@@ -3,12 +3,9 @@ import { chartTypeLabel, isSpecialSlide, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
 import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";
+import { slideTitle } from "@/components/wizard/slideTitle";
 
 /** The display title for a slide: a question's text, or a special slide's heading. */
-export function slideTitle(c: ChartSpec, questionMap: Map<string, Question>): string {
-  if (isSpecialSlide(c)) return c.slide_title || chartTypeLabel(c.chart_type);
-  return questionMap.get(c.question_ref)?.text ?? c.question_ref;
-}
 
 // ── All-slides grid (used by the Preview step) ───────────────────────────────
 // Navigate-only: reordering + adding slides live in the Select step; clicking a

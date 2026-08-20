@@ -1458,6 +1458,16 @@ def preview_chart(
                          body.chart_type, time.monotonic() - started)
                 return Response(content=png_bytes, media_type="image/png",
                                  headers=fast_headers)
+            # compose_from_slide returns None when there is no cached ground to
+            # draw on — a template it has not rendered yet, or one it could not
+            # read. That is a silent 20x slowdown, so SAY so: without this line
+            # the log is indistinguishable from a request that never asked for
+            # the fast path at all, which cost an afternoon of guessing.
+            log.info("preview %s %s: no ground for template, using LibreOffice",
+                     material_id, body.chart_type)
+        else:
+            log.info("preview %s %s: title baked in, using LibreOffice",
+                     material_id, body.chart_type)
         build_pptx(report, model, df, pptx_path, style=style)
         built = time.monotonic()
         # The selected slide (priority) takes the reserved soffice slot so it never

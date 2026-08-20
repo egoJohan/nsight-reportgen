@@ -18,7 +18,7 @@ import { isSpecialSlide } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
-import { slideTitle } from "@/components/wizard/SlideGrid";
+import { slideTitle } from "@/components/wizard/slideTitle";
 
 
 // Human labels for the special-slide types (for the deck-row info dialog).
