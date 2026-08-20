@@ -24,7 +24,7 @@ import {
   useTemplateActions,
   useDeleteCase,
   useCaseMaterials,
-  useCustomer,
+  useCaseTemplate,
 } from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
 import TemplateSelect from "@/components/TemplateSelect";
@@ -111,10 +111,12 @@ export default function CaseDetailPage() {
   // id; without this the heading fell back to rendering the raw case id.
   const { data: resolved } = useResolvedCase(id);
   const templates = useTemplateActions(resolved?.customer_id);
-  // What applies when this tutkimus binds nothing of its own, so the dropdown
-  // can show the pohja actually in use rather than looking unset.
-  const { data: customer } = useCustomer(resolved?.customer_id);
-  const customerTemplateId = customer?.template_id || undefined;
+  // What this tutkimus actually renders with — the backend's own answer, which
+  // walks case -> asiakas -> the asiakas's first template. Reading the
+  // asiakas's explicit binding instead missed that last step, so a customer who
+  // had uploaded a pohja but never bound one showed an empty dropdown while
+  // rendering with it.
+  const { data: caseTemplate } = useCaseTemplate(resolved?.customer_id, id);
   const legacyCase = cases?.find((c) => c.id === id);
   const caseName = resolved?.name ?? legacyCase?.name ?? "";
   const { workspace, removeReport } = useWorkspace(id ?? "");
@@ -195,7 +197,7 @@ export default function CaseDetailPage() {
           <TemplateSelect
             customerId={resolved?.customer_id}
             value={resolved?.template_id ?? ""}
-            inheritedId={customerTemplateId}
+            inheritedId={caseTemplate?.template_id}
             onChange={(templateId) =>
               templates.bindCase.mutate({ caseId: id, templateId })
             }

@@ -13,6 +13,7 @@ import {
   useCustomerCases,
   useCreateCustomerCase,
   useTemplateActions,
+  useTemplates,
 } from "@/lib/queries";
 import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
@@ -26,6 +27,8 @@ export default function CustomerCasesPage() {
   const { data: cases, isLoading, isError } = useCustomerCases(customerId);
   const createCase = useCreateCustomerCase(customerId);
   const templates = useTemplateActions(customerId);
+  // Read before the upload lands, so "was this the first?" is answerable.
+  const { data: existingTemplates } = useTemplates(customerId);
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
 
@@ -75,7 +78,14 @@ export default function CustomerCasesPage() {
             <h2 className={SECTION_TITLE}>Esityspohjat</h2>
             <TemplateUploadButton
               customerId={customerId}
-              onUploaded={(id) => templates.bindCustomer.mutate(id)}
+              // The FIRST one becomes the asiakas's pohja, so a customer set
+              // up in one step has a selected default and the list shows which
+              // it is. A later upload is an addition, not a decision — binding
+              // every upload silently re-pointed every new report at whichever
+              // file happened to be added last.
+              onUploaded={(id) => {
+                if (!existingTemplates?.length) templates.bindCustomer.mutate(id);
+              }}
             />
           </div>
           <div className="mt-3">

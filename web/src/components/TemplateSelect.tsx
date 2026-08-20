@@ -14,7 +14,6 @@ export default function TemplateSelect({
   customerId,
   value,
   onChange,
-  label = "Esityspohja",
   inheritedId,
   disabled,
 }: {
@@ -22,7 +21,6 @@ export default function TemplateSelect({
   /** Bound HERE, or "" when this level binds nothing of its own. */
   value: string;
   onChange: (templateId: string | null) => void;
-  label?: string;
   /** What applies when this level binds nothing — shown as the placeholder so
    *  the control says what is in effect rather than looking unset. */
   inheritedId?: string;
@@ -38,31 +36,33 @@ export default function TemplateSelect({
   // silently made specific just by looking at it.
   const shown = value || inherited?.id || "";
 
+  // Base UI renders the raw VALUE in the trigger unless it is given a map from
+  // value to label — without this the box showed "tpl-62707de80f27".
+  const labels = Object.fromEntries((templates ?? []).map((t) => [t.id, t.name]));
+
   return (
-    <div className="flex items-center gap-2">
-      <span className="shrink-0 text-sm text-muted-foreground">{label}</span>
-      <Select
-        value={shown}
-        onValueChange={(v) => onChange(v)}
-        disabled={disabled || !templates?.length}
-      >
-        <SelectTrigger className="h-9 w-[16rem]">
-          <SelectValue
-            placeholder={
-              templates?.length
-                ? "Valitse pohja"
-                : "Ei pohjia — lisää asiakkaan sivulla"
-            }
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {templates?.map((t) => (
-            <SelectItem key={t.id} value={t.id}>
-              {t.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      items={labels}
+      value={shown}
+      onValueChange={(v) => onChange(v)}
+      disabled={disabled || !templates?.length}
+    >
+      <SelectTrigger className="h-9 w-[16rem]">
+        <SelectValue
+          placeholder={
+            templates?.length
+              ? "Valitse pohja"
+              : "Ei pohjia — lisää asiakkaan sivulla"
+          }
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {templates?.map((t) => (
+          <SelectItem key={t.id} value={t.id}>
+            {t.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

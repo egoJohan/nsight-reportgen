@@ -1047,7 +1047,6 @@ export default function ReportWizard({
             customerId={resolvedCase?.customer_id}
             value={draft?.template_ref ?? ""}
             inheritedId={caseTemplate?.template_id}
-            label=""
             onChange={(templateId) => {
               bindReport.mutate({ caseId, reportId, templateId });
               // Kept in the draft too: the deck is built from the report's own
