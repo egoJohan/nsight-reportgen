@@ -81,7 +81,7 @@ export default function ChatPanel({
             <SparklesIcon className="size-4 text-primary" />
             <h2 className={SECTION_TITLE}>Chat with the data</h2>
           </div>
-          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Sulje">
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <XIcon className="size-4" />
           </Button>
         </div>
@@ -89,9 +89,9 @@ export default function ChatPanel({
         <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
           {messages.length === 0 && (
             <p className="mt-2 text-sm text-muted-foreground">
-              Kysy mitä tahansa tämän aineiston tuloksista — esim. "Mikä on
-              yleisin ikäryhmä?" tai "Miten mielikuva Attendosta eroaa
-              kilpailijoista?". Vastaukset perustuvat aineiston dataan.
+              Ask anything about this material's results — "which age group is
+              the most common?", say, or "how does the image of Attendo differ
+              from its competitors?". Answers come from the data itself.
             </p>
           )}
           {messages.map((m, i) => (

@@ -78,8 +78,8 @@ function replaceSpecialGroup(
 }
 
 const STEPS = [
-  { id: "select", label: "Valinta" },
-  { id: "configure", label: "Suunnittelu" },
+  { id: "select", label: "Select" },
+  { id: "configure", label: "Design" },
   { id: "download", label: "Preview" },
 ];
 
@@ -245,7 +245,7 @@ export default function ReportWizard({
         const next = fn(prev);
         // A pass that rebuilt the document without changing anything is not an
         // edit. `save()` checks the same thing again against what the server
-        // holds; this just keeps the "Unsaved changes" indicator honest.
+        // holds; this just keeps the Save button's own state honest.
         if (next !== prev) setDirty(true);
         return next;
       });
@@ -510,8 +510,8 @@ export default function ReportWizard({
   // edit made since the last manual Save used to be thrown away by a refresh —
   // an added special slide, a retyped title, a changed chart type. Save shortly
   // after the edits settle instead. The Save button stays (it also commits
-  // immediately); `dirty` still drives the "Unsaved changes" indicator, so the
-  // header goes quiet on its own once the autosave lands.
+  // immediately); `dirty` still drives the Save button's state, so it goes
+  // back to "Saved" on its own once the autosave lands.
   const AUTOSAVE_DELAY_MS = 1500;
   useEffect(() => {
     if (!dirty) return;
@@ -1031,15 +1031,6 @@ export default function ReportWizard({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {dirty ? (
-            <span className="text-xs text-muted-foreground">
-              Unsaved changes
-            </span>
-          ) : savedAt ? (
-            <span className="flex items-center gap-1 text-xs text-emerald-600">
-              <CheckIcon className="size-3.5" /> Saved
-            </span>
-          ) : null}
           {/* Left of Save: which pohja this report comes out on. Visible on
               every step, because it changes what Design previews AND what the
               export produces. */}
@@ -1054,18 +1045,37 @@ export default function ReportWizard({
               mutate((d) => ({ ...d, template_ref: templateId ?? "" }));
             }}
           />
+          {/* The button IS the status. "Unsaved changes" and "Saved" used to sit
+              beside it as their own text, which put three things in a row that
+              all said something about saving. The word changes, the icon
+              changes and the colour changes; the height does not, so the
+              toolbar does not move when the state does. */}
           <Button
             variant="outline"
             size="sm"
             onClick={save}
-            disabled={updateReport.isPending}
+            disabled={updateReport.isPending || (!dirty && !!savedAt)}
+            className={
+              !dirty && savedAt
+                ? "border-emerald-600/40 text-emerald-600 disabled:opacity-100"
+                : undefined
+            }
+            title={
+              dirty
+                ? "Unsaved changes"
+                : savedAt
+                  ? `Saved ${formatReportDate(new Date(savedAt).toISOString()) ?? ""}`.trim()
+                  : "Save"
+            }
           >
             {updateReport.isPending ? (
               <Loader2Icon className="size-4 animate-spin" />
+            ) : !dirty && savedAt ? (
+              <CheckIcon className="size-4" />
             ) : (
               <SaveIcon className="size-4" />
             )}
-            Save
+            {updateReport.isPending ? "Saving" : !dirty && savedAt ? "Saved" : "Save"}
           </Button>
         </div>
       </div>

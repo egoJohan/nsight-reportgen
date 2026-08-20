@@ -46,7 +46,7 @@ export default function TemplateSelect({
   // value to label — without this the box showed "tpl-62707de80f27".
   const labels: Record<string, string> = {
     [INHERIT]: inherited
-      ? `Käytä yläpuolen asetusta (${inherited.name})`
+      ? `Use parent setting (${inherited.name})`
       : "Use parent setting",
     ...Object.fromEntries((templates ?? []).map((t) => [t.id, t.name])),
   };
@@ -58,7 +58,9 @@ export default function TemplateSelect({
       onValueChange={(v) => onChange(v === INHERIT ? null : v)}
       disabled={disabled || !templates?.length}
     >
-      <SelectTrigger className="h-9 w-[16rem]">
+      {/* Wide enough for a real template file name — "attendo_agent_deck.pptx"
+          truncated at 16rem told you nothing about which one you had. */}
+      <SelectTrigger className="h-9 w-[24rem] max-w-[60vw]">
         <SelectValue
           placeholder={
             templates?.length

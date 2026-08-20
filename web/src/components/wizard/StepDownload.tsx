@@ -231,8 +231,8 @@ export default function StepDownload({
           <div className="leading-snug">
             <p className="font-medium">The preview and the PDF use a substitute font</p>
             <p className="mt-1 text-muted-foreground">
-              PowerPoint-tiedosto viittaa pohjan omaan fonttiin, joten se
-              näyttää oikealta koneella jolle fontti on asennettu.
+              The PowerPoint file still names the template's own font, so it
+              looks right on a machine that has it installed.
             </p>
             {fontWarnings.map((w) => (
               <p key={w} className="mt-1 text-muted-foreground">

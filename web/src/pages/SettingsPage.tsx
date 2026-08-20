@@ -35,10 +35,10 @@ function MissingFonts({ missing }: { missing: MissingFont[] }) {
         <h3 className={PANEL_TITLE}>Missing fonts</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Nämä fontit puuttuvat palvelimelta. PowerPoint-tiedosto viittaa silti
-        pohjan omaan fonttiin ja näyttää oikealta koneella jolle fontti on
-        asennettu — mutta esikatselu ja PDF käyttävät korvaavaa fonttia. Lataa
-        fontti alla, jos sinulla on siihen lisenssi.
+        These fonts are missing from the server. The PowerPoint file still
+        names the template's own font and looks right on a machine that has it
+        installed — but the preview and the PDF use a substitute. Upload the
+        font below if you hold a licence for it.
       </p>
       <ul className="mt-3 space-y-2">
         {missing.map((m) => (
@@ -85,7 +85,7 @@ function FontRow({ font }: { font: InstalledFont }) {
         disabled={actions.remove.isPending}
         onClick={() =>
           actions.remove.mutate(font.id, {
-            onSuccess: () => toast.success(`Fontti '${font.family}' poistettu`),
+            onSuccess: () => toast.success(`Font '${font.family}' removed`),
             onError: (e) => toast.error(e.message),
           })
         }
@@ -114,9 +114,9 @@ function ChartFontSetting() {
     <div className={`${PANEL} p-4`}>
       <h3 className={PANEL_TITLE}>Chart font</h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        Kuvaajien teksti piirretään tällä fontilla. Se on tarkoituksella eri
-        asetus kuin esityspohjan fontti: kapeampi fontti mahtuu paremmin pitkiin
-        vastausvaihtoehtoihin.
+        Chart text is drawn in this font. It is deliberately separate from the
+        template's own: a narrower face fits more of a long answer option before
+        it is truncated.
       </p>
 
       <div className="mt-3 flex items-center gap-2">
@@ -144,7 +144,7 @@ function ChartFontSetting() {
 
       {fellBack && (
         <p className="mt-2 text-xs text-amber-600">
-          Valittua fonttia ei löytynyt, joten käytössä on {data.effective}.
+          The chosen font was not found, so {data.effective} is in use.
         </p>
       )}
     </div>
@@ -159,7 +159,7 @@ function FontsTab() {
 
   function upload(file: File) {
     actions.upload.mutate(file, {
-      onSuccess: (f) => toast.success(`Fontti '${f.family}' asennettu`),
+      onSuccess: (f) => toast.success(`Font '${f.family}' installed`),
       // The reason is the point — "this is a WOFF, not a .ttf" is what stops
       // someone retrying the same file. Long duration so it can be read.
       onError: (e) => toast.error(e.message, { duration: 12000 }),
@@ -175,10 +175,10 @@ function FontsTab() {
       <div className={`${PANEL} p-4`}>
         <h3 className={PANEL_TITLE}>Installed fonts</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          nSight asentaa avoimen lisenssin fontit automaattisesti Google
-          Fontsista. Kaupallisia fontteja (esim. Century Gothic, Calibri,
-          Verdana) se ei lataa, koska lisenssi ei ole nSightin. Lataa ne tästä —
-          vastaat itse siitä, että sinulla on fonttiin käyttöoikeus.
+          nSight installs open-licence fonts from Google Fonts by itself. It
+          does not fetch commercial ones (Century Gothic, Calibri, Verdana and
+          the like), because the licence is not nSight's to use. Upload those
+          here — you are responsible for holding the right to the font.
         </p>
 
         <div
@@ -233,8 +233,8 @@ function FontsTab() {
           )}
           {data?.fonts.length === 0 && !isLoading && (
             <p className={`${EMPTY} text-sm text-muted-foreground`}>
-              Ei käsin asennettuja fontteja. Järjestelmän omat fontit ovat
-              käytössä ilman asennusta.
+              No hand-installed fonts. The system's own fonts are in use
+              without being installed here.
             </p>
           )}
           {data?.fonts.map((f) => (

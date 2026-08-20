@@ -235,7 +235,7 @@ export default function QuestionDetailsDialog({
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-2">
-              <Stat label="Vastaajia (n)" value={s.respondent_total} />
+              <Stat label="Respondents (n)" value={s.respondent_total} />
               <Stat label="Vastanneet (base)" value={s.base_n ?? "—"} />
               <Stat
                 label="Mean"

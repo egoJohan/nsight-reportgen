@@ -71,7 +71,7 @@ const SLIDE_CHOICES: {
     type: "compare_groups",
     label: "Compare groups",
     description:
-      "Yksi dia per kysymys, jaettuna valitsemasi muuttujan ryhmiin — esim. kahteen pakkausvaihtoehtoon.",
+      "One slide per question, split by the groups of a variable you choose — two packaging options, say.",
     Icon: ColumnsIcon,
     repeatable: true,
   },
@@ -127,7 +127,7 @@ export function AddSpecialDialog({
           </DialogTitle>
           <DialogDescription>
             {mode === "compare"
-              ? "Lisää yhden dian per kysymys, jaettuna valitun muuttujan ryhmiin. Nykyiset kokonaistason diat säilyvät ennallaan."
+              ? "Adds one slide per question, split by the chosen variable's groups. The existing total-level slides stay as they are."
               : "Add a slide beyond the one-per-question defaults."}
           </DialogDescription>
         </DialogHeader>

@@ -151,13 +151,13 @@ export default function TemplatePicker({
           <DialogHeader>
             <DialogTitle>Delete this template?</DialogTitle>
             <DialogDescription>
-              “{confirmDelete?.name}” poistetaan asiakkaalta kokonaan, myös
-              niistä tutkimuksista ja raporteista, jotka käyttävät sitä. Ne
-              siirtyvät käyttämään ylemmän tason pohjaa. Toimintoa ei voi perua.
+              “{confirmDelete?.name}” is removed from the customer entirely,
+              including from the studies and reports using it. Those fall back
+              to the template above them. This cannot be undone.
               <br />
               <br />
-              Jos haluat vain lopettaa tämän pohjan käytön täällä, poista
-              valinta listasta.
+              To simply stop using this template here, clear its selection in
+              the list instead.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

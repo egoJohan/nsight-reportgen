@@ -75,7 +75,7 @@ export default function WordMergeEditor({
   }
 
   if (!data) {
-    return <p className="text-xs text-muted-foreground">Ladataan sanoja…</p>;
+    return <p className="text-xs text-muted-foreground">Loading words…</p>;
   }
   if (data.words.length === 0 && groups.length === 0) {
     return <p className="text-xs text-muted-foreground">No word-cloud answers to merge.</p>;
@@ -142,7 +142,7 @@ export default function WordMergeEditor({
         <Input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Yhdistetty sana (oletuksena yleisin)"
+          placeholder="Merged word (defaults to the most common)"
           className="h-8 flex-1"
         />
         <Button size="sm" variant="outline" disabled={selected.size < 2} onClick={mergeSelected}>

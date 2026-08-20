@@ -56,7 +56,7 @@ function CaseHeading({
       { caseId, name: next },
       {
         onSuccess: () => setEditing(false),
-        onError: (e) => toast.error(`Nimen muutos epäonnistui: ${e.message}`),
+        onError: (e) => toast.error(`Rename failed: ${e.message}`),
       }
     );
   }
@@ -157,7 +157,7 @@ export default function CaseDetailPage() {
         // rest of them. A pre-hierarchy case has no customer page to go to.
         navigate(resolved?.customer_id ? `/customers/${resolved.customer_id}` : "/");
       },
-      onError: (e) => toast.error(`Poisto epäonnistui: ${e.message}`),
+      onError: (e) => toast.error(`Delete failed: ${e.message}`),
     });
   }
 
@@ -232,8 +232,8 @@ export default function CaseDetailPage() {
           <DialogHeader>
             <DialogTitle>Delete this study?</DialogTitle>
             <DialogDescription>
-              Tämä poistaa pysyvästi tutkimuksen “{caseName || id}”, sen ladatun
-              datan ja sen raportit. Toimintoa ei voi perua.
+              This permanently deletes the study “{caseName || id}”, the data
+              imported into it, and its reports. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -453,7 +453,7 @@ export function buildDemographicsGrids(
   for (let p = 0; p < pages; p++) {
     out.push(
       makeDemographicsGrid(cells.slice(p * per, (p + 1) * per), {
-        slide_title: pages > 1 ? `Vastaajat (${p + 1}/${pages})` : "Respondents",
+        slide_title: pages > 1 ? `Respondents (${p + 1}/${pages})` : "Respondents",
         group,
       })
     );

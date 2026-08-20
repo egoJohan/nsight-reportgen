@@ -112,8 +112,8 @@ export default function TemplateSettingsDialog({
       onSuccess: () =>
         toast.success(
           use
-            ? `'${family}' korvataan fontilla '${use}'`
-            : `Korvaus poistettu fontilta '${family}'`
+            ? `'${family}' will be drawn as '${use}'`
+            : `Substitute removed from '${family}'`
         ),
       onError: (e) => toast.error(e.message),
     });
@@ -137,8 +137,9 @@ export default function TemplateSettingsDialog({
               {data?.name ?? "Template settings"}
             </DialogTitle>
             <DialogDescription>
-              Pohjan tiedot ja fontit. Korvaus koskee esikatselua ja PDF:ää —
-              PowerPoint-tiedosto viittaa aina pohjan omaan fonttiin.
+              The template's details and fonts. A substitute affects the
+              preview and the PDF only — the PowerPoint file always names the
+              template's own font.
             </DialogDescription>
           </DialogHeader>
 

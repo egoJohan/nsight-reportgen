@@ -43,11 +43,11 @@ export default function RecentReportsPage() {
         {/* Welcome hero */}
         <div className="flex flex-col items-center text-center">
           <h1 className={PAGE_TITLE}>
-            Tervetuloa nSight Studioon
+            Welcome to nSight Studio
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-            Muunna SPSS-kyselydata viimeistellyiksi raporteiksi. Luo asiakas, tuo
-            sille tutkimus ja rakenna raportit sen kysymyksistä.
+            Turn SPSS survey data into finished reports. Create a customer,
+            import a study for it, and build reports from its questions.
           </p>
         </div>
 

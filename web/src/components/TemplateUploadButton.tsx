@@ -34,7 +34,7 @@ export default function TemplateUploadButton({
         // fonts has two separate things for someone to act on.
         created.warnings.forEach((w) => toast.warning(w, { duration: 12000 }));
       } else {
-        toast.success(`${created.name} otettu käyttöön`);
+        toast.success(`${created.name} is now in use`);
       }
     } catch (e) {
       // The server rejects a template it cannot render into, with the reason.
