@@ -212,7 +212,7 @@ def _font_file(family: str, *, bold: bool = False, italic: bool = False) -> str:
     return path
 
 
-def title_box_headers(style) -> dict[str, str]:
+def title_box_headers(style, text: str = "") -> dict[str, str]:
     """Where the template puts its title, as response headers for a caller that
     draws the title itself (routes_questions's fast preview path).
 
@@ -227,8 +227,17 @@ def title_box_headers(style) -> dict[str, str]:
     a profile whose title was never positioned (`TextStyle.positioned`). The
     caller then sends no headers, and the frontend draws no title, same as
     today when a preview carries none.
+
+    *text* is the headline this preview will carry. Given it, the size reported
+    is the one the DECK would use — `fit_title_size` shrinks a long headline to
+    fit rather than letting it overrun — and the box grows with the wrapped
+    lines, exactly as `harvested_title_box` does for the real slide. Without it
+    the frontend would draw a long title at the template's nominal size and
+    overflow the box the deck keeps it inside, which is the whole defect the
+    fitting exists to prevent.
     """
-    from reportbuilder.render.image.slide_chrome import TITLE_PT
+    from reportbuilder.render.image.slide_chrome import (
+        TITLE_PT, fit_title_size, harvested_title_box)
 
     profile = getattr(style, "profile", None)
     title = getattr(profile, "title", None) if profile is not None else None
@@ -239,11 +248,18 @@ def title_box_headers(style) -> dict[str, str]:
     if sw <= 0 or sh <= 0:
         return {}
     colour = (title.colour or getattr(style, "ink", "") or "2B2B2B").lstrip("#").upper()
+    # The box the DECK would give this headline, at the size the deck would use.
+    # With no text we cannot fit anything, so fall back to the template's own.
+    size_pt = fit_title_size(title, text) if text else (title.size_pt or TITLE_PT)
+    if text:
+        box_l, box_t, box_w, box_h = harvested_title_box(profile, text)
+    else:
+        box_l, box_t, box_w, box_h = title.left, title.top, title.width, title.height
     return {
         "X-Title-Box": "{:.4f},{:.4f},{:.4f},{:.4f}".format(
-            title.left / sw, title.top / sh, title.width / sw, title.height / sh),
+            box_l / sw, box_t / sh, box_w / sw, box_h / sh),
         "X-Title-Font": title.font or getattr(style, "heading_font", "") or "Arial",
-        "X-Title-Size-Pt": f"{title.size_pt or TITLE_PT:g}",
+        "X-Title-Size-Pt": f"{size_pt:g}",
         "X-Title-Color": colour,
         "X-Title-Align": title.align or "left",
         "X-Title-Caps": "1" if title.caps else "0",

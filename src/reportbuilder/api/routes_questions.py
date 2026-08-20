@@ -1274,6 +1274,16 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
     return d
 
 
+def _preview_headline(body) -> str:
+    """The text the preview's title band will actually carry.
+
+    The frontend draws the title on the fast path, from the chart's own
+    slide_title, so that is what the size must be fitted to. A slide with no
+    authored headline shows none in the preview, so there is nothing to fit.
+    """
+    return (getattr(body, "slide_title", None) or "").strip()
+
+
 def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
@@ -1375,7 +1385,10 @@ def preview_chart(
     if not body.render_title and template_path:
         try:
             style = _load_style_spec(template_path)
-            fast_headers = title_box_headers(style)
+            # The headline this slide will carry, so the reported size is the
+            # one the deck would use for THIS text rather than the template's
+            # nominal size — see title_box_headers.
+            fast_headers = title_box_headers(style, _preview_headline(body))
         except Exception:  # noqa: BLE001 — a bad header must not fail a preview
             style = None
             fast_headers = {}
