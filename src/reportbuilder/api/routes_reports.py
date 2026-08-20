@@ -8,6 +8,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import require_case, require_case_write
+from reportbuilder.auth.permissions import User
 from reportbuilder.model.report import Report, report_from_json, report_to_json
 from reportbuilder.store.datahive_client import DataHiveClient
 from reportbuilder.store.seam import NotFound
@@ -51,6 +53,7 @@ def create_report(
     case_id: str,
     body: dict = Body(...),
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Create a new report doc under a case. Returns the new report_id. (REQ-C-08, REQ-C-10, REQ-C-11)"""
     _report, report_json, readable = _canonicalize(body)
@@ -62,6 +65,7 @@ def create_report(
 def list_case_reports(
     case_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case),
 ) -> dict:
     """List a case's reports — {"reports": [{report_id, name}]}.
 
@@ -84,6 +88,7 @@ def update_report(
     report_id: str,
     body: dict = Body(...),
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Versioned-replace an EXISTING report doc. Returns the report_id. (REQ-C-08)
 
@@ -106,6 +111,7 @@ def get_report(
     case_id: str,
     report_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case),
 ) -> dict:
     """Return the exact report definition JSON (parsed) for a report doc. (REQ-C-08)"""
     try:
@@ -122,6 +128,7 @@ def delete_report(
     case_id: str,
     report_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Delete a report doc. (REQ-C-12)
 
@@ -170,6 +177,7 @@ def duplicate_report(
     report_id: str,
     body: DuplicateBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Duplicate a report under a new name; returns the new report_id. (REQ-C-09)"""
     src = report_from_json(client.load_report(case_id, report_id))

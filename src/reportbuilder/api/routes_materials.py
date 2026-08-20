@@ -3,6 +3,8 @@ import tempfile
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import require_case, require_case_write
+from reportbuilder.auth.permissions import User
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.store.datahive_client import DataHiveClient
 from reportbuilder.store.seam import NotFound
@@ -15,6 +17,7 @@ materials_router = APIRouter()
 def list_case_materials(
     case_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case),
 ) -> dict:
     """List the materials attached to a case — {"materials": [{material_id, name}]}.
 
@@ -36,6 +39,7 @@ async def upload_material(
     case_id: str,
     file: UploadFile = File(...),
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Upload a .sav file, ingest it, and attach it under a case. (REQ-C-01, REQ-C-04)
 
@@ -91,6 +95,7 @@ def material_usage(
     case_id: str,
     material_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case),
 ) -> dict:
     """What deleting this dataset would affect.
 
@@ -109,6 +114,7 @@ def delete_material(
     case_id: str,
     material_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Delete a dataset and the curation and renders drawn from it.
 

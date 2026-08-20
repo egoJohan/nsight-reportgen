@@ -15,7 +15,9 @@ one user another's rights.
 """
 from fastapi import Depends
 
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.repository_client import RepositoryClient
 from reportbuilder.store.seam import AuthContext
@@ -24,6 +26,7 @@ from reportbuilder.store.seam import AuthContext
 def get_client(
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
+    user: User = Depends(current_user),
 ) -> RepositoryClient:
     """The storage client for this request, scoped to this caller."""
-    return RepositoryClient(repo, auth)
+    return RepositoryClient(repo, auth, user)

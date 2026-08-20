@@ -25,7 +25,9 @@ import json
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import current_user, require_material, require_material_write
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.render.style_spec import load_style_spec as _load_style_spec
 from reportbuilder.store import paths as _paths
 from reportbuilder.store.repository import Repository
@@ -76,7 +78,7 @@ questions_router = APIRouter()
 
 
 @questions_router.get("/chart-types")
-def list_chart_types() -> dict:
+def list_chart_types(user: User = Depends(current_user)) -> dict:
     """Chart-type catalog with each type's declarative config schema.
 
     The frontend renders the per-chart configuration form purely from this
@@ -574,6 +576,7 @@ def _summary_spec(qid: str) -> ChartSpec:
 def list_questions(
     material_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Browse all questions for a material. Auto-detected multi groups are pre-applied so qids are
     render-resolvable. Each question includes a suggested chart type (REQ-C-13) and the
@@ -658,6 +661,7 @@ def question_summary(
     qid: str,
     grouping: str | None = None,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Rich detail for one question: full metadata + the computed response
     distribution (counts, %, base N) and mean for scale questions. Stats failures
@@ -752,6 +756,7 @@ def list_variables(
     material_id: str,
     include_all: bool = False,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """List all variables for a material with display labels and measurement.
 
@@ -879,6 +884,7 @@ def split_groups(
     classifying_var: str,
     grouping: str | None = None,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """How many groups each question would ACTUALLY show if split by
     `classifying_var`. The "Compare groups" dialog disables the ones below 2.
@@ -963,6 +969,7 @@ def regroup(
     material_id: str,
     body: GroupingOverride,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material_write),
 ) -> dict:
     """Stateless PREVIEW: return the reshaped question list (full browse payload)
     for a grouping override, WITHOUT persisting. Applied leniently — invalid groups
@@ -1007,6 +1014,7 @@ def set_question_label(
     qid: str,
     body: QuestionLabelBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material_write),
 ) -> dict:
     """Rename a question for THIS material (case-page edit). Persisted in the
     material config as {question_labels: {qid: text}}; a blank label reverts to the
@@ -1051,6 +1059,7 @@ def question_words(
     material_id: str,
     qid: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """The question's RAW top words (pre-merge, for the merge editor) + the current
     saved merges. Empty word list for non-text questions (nothing to merge)."""
@@ -1084,6 +1093,7 @@ def set_word_merges(
     qid: str,
     body: WordMergesBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material_write),
 ) -> dict:
     """Save the question's value merges for THIS material (word-cloud token cleaning).
     Stored as {value_merges: {qid: [[label, member, …], …]}}; members are lowercased
@@ -1327,6 +1337,7 @@ def preview_chart(
     client: DataHiveClient = Depends(get_client),
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
+    user: User = Depends(require_material),
 ) -> Response:
     """Render a single ChartSpec as a PNG thumbnail for the wizard's live preview.
 

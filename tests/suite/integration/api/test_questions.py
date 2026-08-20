@@ -54,7 +54,7 @@ def test_chart_types_material_independent(client_mock):
 
 
 def test_questions_returns_q1_with_expected_fields(client_mock):
-    r = client_mock.get("/materials/mat-x/questions")
+    r = client_mock.get(f"/materials/{client_mock.material_id}/questions")
     assert r.status_code == 200
     questions = r.json()["questions"]
     by_qid = {q["qid"]: q for q in questions}
@@ -84,7 +84,7 @@ def test_questions_returns_q1_with_expected_fields(client_mock):
 
 
 def test_summary_returns_metadata_and_distribution_for_q1(client_mock):
-    r = client_mock.get("/materials/mat-x/questions/q1/summary")
+    r = client_mock.get(f"/materials/{client_mock.material_id}/questions/q1/summary")
     assert r.status_code == 200
     s = r.json()
     assert s["qid"] == "q1"
@@ -104,7 +104,7 @@ def test_summary_returns_metadata_and_distribution_for_q1(client_mock):
 
 
 def test_summary_unknown_qid_is_404(client_mock):
-    r = client_mock.get("/materials/mat-x/questions/does-not-exist/summary")
+    r = client_mock.get(f"/materials/{client_mock.material_id}/questions/does-not-exist/summary")
     assert r.status_code == 404
 
 
@@ -114,7 +114,7 @@ def test_summary_unknown_qid_is_404(client_mock):
 
 
 def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
-    r = client_mock.get("/materials/mat-x/variables")
+    r = client_mock.get(f"/materials/{client_mock.material_id}/variables")
     assert r.status_code == 200
     variables = r.json()["variables"]
     assert variables
@@ -139,7 +139,7 @@ def test_regroup_invalid_groups_are_ignored(client_mock):
     """Regroup is lenient: invalid groups (too few / unknown / scale-or-non-tick)
     are silently skipped, returning 200 with the reshaped list."""
     def post(groups):
-        return client_mock.post("/materials/mat-x/regroup", json={"groups": groups})
+        return client_mock.post(f"/materials/{client_mock.material_id}/regroup", json={"groups": groups})
     assert post([{"kind": "multi", "variables": ["q1"]}]).status_code == 200
     assert post([{"kind": "multi", "variables": ["q1", "no-such-var"]}]).status_code == 200
     assert post([{"kind": "multi", "variables": ["q1", "age"]}]).status_code == 200
@@ -147,7 +147,7 @@ def test_regroup_invalid_groups_are_ignored(client_mock):
 
 def test_regroup_valid_multi_returns_questions(client_mock):
     """m1/m2 form a valid multi group; regroup returns the reshaped question list."""
-    r = client_mock.post("/materials/mat-x/regroup",
+    r = client_mock.post(f"/materials/{client_mock.material_id}/regroup",
                          json={"groups": [{"kind": "multi", "variables": ["m1", "m2"]}], "singles": []})
     assert r.status_code == 200
     body = r.json()
@@ -161,7 +161,7 @@ def test_regroup_valid_multi_returns_questions(client_mock):
 def test_variables_entries_all_carry_a_usable_name(client_mock):
     """Every entry's `name` is what lands in ChartSpec.classifying_var — a variable
     name, or a qid for a question-backed banner classifier."""
-    r = client_mock.get("/materials/mat-x/variables")
+    r = client_mock.get(f"/materials/{client_mock.material_id}/variables")
     assert r.status_code == 200
     rows = r.json()["variables"]
     assert rows

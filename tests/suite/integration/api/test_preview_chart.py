@@ -38,7 +38,7 @@ def test_scatter_without_scatter_xy_is_422(client_mock):
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value="soffice"):
         r = client_mock.post(
-            "/materials/mat-scatter/preview-chart",
+            f"/materials/{client_mock.material_id}/preview-chart",
             json=_spec(chart_type="scatter", question_ref="q1"),
         )
     assert r.status_code == 422
@@ -52,7 +52,7 @@ def test_stacked_vertical_bar_without_classifying_var_not_blocked(client_mock):
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value="soffice"):
         r = client_mock.post(
-            "/materials/mat-stacked-v/preview-chart",
+            f"/materials/{client_mock.material_id}/preview-chart",
             json=_spec(chart_type="stacked_vertical_bar", question_ref="q1"),
         )
     assert not (r.status_code == 422
@@ -66,7 +66,7 @@ def test_stacked_horizontal_bar_without_classifying_var_not_blocked(client_mock)
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value="soffice"):
         r = client_mock.post(
-            "/materials/mat-stacked-h/preview-chart",
+            f"/materials/{client_mock.material_id}/preview-chart",
             json=_spec(chart_type="stacked_horizontal_bar", question_ref="q1"),
         )
     assert not (r.status_code == 422
@@ -81,7 +81,7 @@ def test_valid_bar_returns_503_when_soffice_absent(client_mock):
     with patch("reportbuilder.api.routes_questions.shutil.which",
                return_value=None):
         r = client_mock.post(
-            "/materials/mat-503/preview-chart",
+            f"/materials/{client_mock.material_id}/preview-chart",
             json=_spec(chart_type="vertical_bar"),
         )
     assert r.status_code == 503
@@ -96,7 +96,7 @@ def test_valid_bar_returns_503_when_soffice_absent(client_mock):
 def test_valid_bar_returns_png(client_mock, require_soffice):
     """The happy path renders a real PNG thumbnail (magic bytes b"\\x89PNG")."""
     r = client_mock.post(
-        "/materials/mat-png-ok/preview-chart",
+        f"/materials/{client_mock.material_id}/preview-chart",
         json=_spec(chart_type="vertical_bar", question_ref="q1"),
     )
     assert r.status_code == 200
@@ -119,7 +119,7 @@ def test_identical_spec_served_from_cache(client_mock, require_soffice):
         return real_build(*a, **k)
 
     spec = _spec(chart_type="vertical_bar", question_ref="q1")
-    mat = "mat-cache-reuse"  # unique id → no cross-test cache pollution
+    mat = client_mock.material_id  # real, guard-resolvable id
     with patch.object(rq, "build_pptx", side_effect=spy_build):
         r1 = client_mock.post(f"/materials/{mat}/preview-chart", json=spec)
         r2 = client_mock.post(f"/materials/{mat}/preview-chart", json=spec)

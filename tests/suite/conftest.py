@@ -78,7 +78,14 @@ def client_mock(mock_hive) -> TestClient:
     app = create_app(client=mock_hive)
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
-    return TestClient(app)
+    tc = TestClient(app)
+    # A route guard resolves ids through the repository, so a test addressing a
+    # guarded route needs THESE ids, not an arbitrary string — the mock's own
+    # methods (get_material, attach_material, ...) stay id-agnostic.
+    tc.customer_id = customer.id
+    tc.case_id = case.id
+    tc.material_id = material.id
+    return tc
 
 
 @pytest.fixture

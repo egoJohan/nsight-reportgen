@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import current_user, require_case_write
+from reportbuilder.auth.permissions import User
 from reportbuilder.store.datahive_client import DataHiveClient
 
 
@@ -15,7 +17,7 @@ cases_router = APIRouter()
 
 
 @cases_router.post("/cases")
-def create_case() -> None:
+def create_case(user: User = Depends(current_user)) -> None:
     """Superseded: a tutkimus now lives under a customer, and this path carries
     none to put it in. `RepositoryClient` has no `create_case` — it cannot
     sensibly grow one — so this used to fail closed with a 500. 410 rather
@@ -31,6 +33,7 @@ def create_case() -> None:
 @cases_router.get("/cases")
 def list_cases(
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(current_user),
 ) -> list[dict]:
     """List all cases (projects). (REQ-C-07)"""
     return client.list_cases()
@@ -41,6 +44,7 @@ def rename_case(
     case_id: str,
     body: CaseRename,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Rename a case. Used to title a case from its SAV study label and for
     manual renames."""
@@ -61,6 +65,7 @@ def rename_case(
 def delete_case(
     case_id: str,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Delete a tutkimus and everything in it: materials, curation, reports, renders.
 

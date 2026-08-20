@@ -23,7 +23,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import require_case, require_case_write
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 from reportbuilder.export.pdf_convert import (
@@ -295,6 +297,7 @@ async def render_report(
     client: DataHiveClient = Depends(get_client),
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
+    user: User = Depends(require_case_write),
 ) -> dict:
     """Orchestrate the PPTX build and PDF conversion for a report.
     Writes artifacts to a deterministic per-report dir so the preview PDF is fetchable.
@@ -366,7 +369,8 @@ _NO_STORE = {"Cache-Control": "no-store, must-revalidate"}
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pdf")
 def get_preview_pdf(case_id: str, report_id: str,
                     auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> FileResponse:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_case)) -> FileResponse:
     """Stream the rendered PDF for a report to the client browser. (REQ-C-19, REQ-C-21)
 
     Never cached. This URL is fixed but its content changes with every render,
@@ -397,7 +401,8 @@ _PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pptx")
 def get_preview_pptx(case_id: str, report_id: str,
                      auth: AuthContext = Depends(get_auth),
-                     repo: Repository = Depends(get_repository)) -> FileResponse:
+                     repo: Repository = Depends(get_repository),
+                     user: User = Depends(require_case)) -> FileResponse:
     """Stream the rendered PowerPoint deck for a report to the client browser.
 
     The deck is the deliverable, so /tmp is a cache and datahive is the record:

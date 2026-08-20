@@ -33,7 +33,7 @@ def test_upload_via_memory_ingests_and_is_retrievable(client_memory, synthetic_b
 def test_upload_response_shape_via_mock(client_mock, mock_hive, synthetic_bytes):
     mock_hive.attach_material.return_value = "mat-42"
     resp = client_mock.post(
-        "/cases/case-1/materials",
+        f"/cases/{client_mock.case_id}/materials",
         files={"file": ("study.sav", synthetic_bytes, "application/octet-stream")},
     )
     assert resp.status_code == 200
@@ -43,7 +43,7 @@ def test_upload_response_shape_via_mock(client_mock, mock_hive, synthetic_bytes)
     assert "file_label" in body
     # attach_material was called with (case_id, filename, raw_bytes, codebook_summary).
     args = mock_hive.attach_material.call_args.args
-    assert args[0] == "case-1"
+    assert args[0] == client_mock.case_id
     assert args[1] == "study.sav"
     assert args[2] == synthetic_bytes
     assert isinstance(args[3], str) and args[3]

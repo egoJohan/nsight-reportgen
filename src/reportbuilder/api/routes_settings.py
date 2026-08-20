@@ -16,7 +16,9 @@ import time
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
+from reportbuilder.api.deps_auth import current_user, require_admin
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.render import fonts as F
 from reportbuilder.render import house_style as H
 from reportbuilder.store.repository import Repository
@@ -63,7 +65,8 @@ def _font_dict(f, *, on_host: bool) -> dict:
 
 @settings_router.get("/settings/fonts")
 def list_fonts(auth: AuthContext = Depends(get_auth),
-               repo: Repository = Depends(get_repository)) -> dict:
+               repo: Repository = Depends(get_repository),
+               user: User = Depends(current_user)) -> dict:
     """Fonts installed by hand, plus which template families are still missing.
 
     `missing` is the actionable half: it names the families that uploaded
@@ -118,7 +121,8 @@ def load_substitutions(repo: Repository, auth: AuthContext) -> dict:
 
 @settings_router.get("/settings/font-substitutions")
 def get_substitutions(auth: AuthContext = Depends(get_auth),
-                      repo: Repository = Depends(get_repository)) -> dict:
+                      repo: Repository = Depends(get_repository),
+                      user: User = Depends(current_user)) -> dict:
     return {"map": load_substitutions(repo, auth),
             "available": H.available_chart_fonts()}
 
@@ -126,7 +130,8 @@ def get_substitutions(auth: AuthContext = Depends(get_auth),
 @settings_router.put("/settings/font-substitutions")
 def put_substitutions(payload: dict = Body(...),
                       auth: AuthContext = Depends(get_auth),
-                      repo: Repository = Depends(get_repository)) -> dict:
+                      repo: Repository = Depends(get_repository),
+                      user: User = Depends(require_admin)) -> dict:
     """Choose stand-ins for fonts this host cannot supply.
 
     Render-side only: the .pptx keeps naming the real font, so a client who has
@@ -147,7 +152,8 @@ def put_substitutions(payload: dict = Body(...),
 
 @settings_router.get("/settings/chart-font")
 def get_chart_font(auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> dict:
+                   repo: Repository = Depends(get_repository),
+                   user: User = Depends(current_user)) -> dict:
     """Which font charts draw in, and every family this host could use.
 
     Separate from the template's font on purpose: a brand display face is
@@ -164,7 +170,8 @@ def get_chart_font(auth: AuthContext = Depends(get_auth),
 @settings_router.put("/settings/chart-font")
 def set_chart_font(payload: dict = Body(...),
                    auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> dict:
+                   repo: Repository = Depends(get_repository),
+                   user: User = Depends(require_admin)) -> dict:
     """Set the chart font. An empty family restores the house default."""
     global _cached
 
@@ -181,7 +188,8 @@ def set_chart_font(payload: dict = Body(...),
 @settings_router.post("/settings/fonts", status_code=201)
 async def upload_font(file: UploadFile = File(...),
                       auth: AuthContext = Depends(get_auth),
-                      repo: Repository = Depends(get_repository)) -> dict:
+                      repo: Repository = Depends(get_repository),
+                      user: User = Depends(require_admin)) -> dict:
     """Install a .ttf/.otf on the render host and keep it in datahive.
 
     422 with the reason when the file is not a usable font — a WOFF renamed to
@@ -200,7 +208,8 @@ async def upload_font(file: UploadFile = File(...),
 
 @settings_router.delete("/settings/fonts/{font_id}")
 def delete_font(font_id: str, auth: AuthContext = Depends(get_auth),
-                repo: Repository = Depends(get_repository)) -> dict:
+                repo: Repository = Depends(get_repository),
+                user: User = Depends(require_admin)) -> dict:
     """Remove a font from datahive and from this host."""
     try:
         family = repo.delete_font(auth, font_id)

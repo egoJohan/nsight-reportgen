@@ -88,7 +88,7 @@ def test_rename_missing_case_is_404_via_memory(client_memory):
 
 def test_rename_not_supported_is_501_on_mock_spec(client_mock):
     """Mock(spec=DataHiveClient) has no rename_case -> route returns 501."""
-    resp = client_mock.patch("/cases/case-1", json={"name": "X"})
+    resp = client_mock.patch(f"/cases/{client_mock.case_id}", json={"name": "X"})
     assert resp.status_code == 501
 
 

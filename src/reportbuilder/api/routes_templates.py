@@ -15,7 +15,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from reportbuilder.api.deps_auth import (
+    require_case, require_case_write, require_customer, require_customer_write,
+)
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.render.template_check import inspect_template
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, NotFound
@@ -95,7 +99,8 @@ def _resolve_template_fonts(theme) -> list[dict]:  # theme OR Template record
 @templates_router.post("/customers/{customer_id}/templates", status_code=201)
 async def upload_template(customer_id: str, file: UploadFile = File(...),
                           auth: AuthContext = Depends(get_auth),
-                          repo: Repository = Depends(get_repository)) -> dict:
+                          repo: Repository = Depends(get_repository),
+                          user: User = Depends(require_customer_write)) -> dict:
     """Validate and store a template. 422 with the reason when it cannot work."""
     data = await file.read()
     if not data:
@@ -144,7 +149,8 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
 
 @templates_router.get("/customers/{customer_id}/templates")
 def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> list[dict]:
+                   repo: Repository = Depends(get_repository),
+                   user: User = Depends(require_customer)) -> list[dict]:
     """List a customer's templates, checking any whose fonts we never checked.
 
     The backfill is here rather than on the render path for two reasons: a
@@ -177,7 +183,8 @@ def list_templates(customer_id: str, auth: AuthContext = Depends(get_auth),
 @templates_router.get("/customers/{customer_id}/templates/{template_id}")
 def template_detail(customer_id: str, template_id: str,
                     auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer)) -> dict:
     """Everything known about one template, for the settings dialog.
 
     Font status is RE-RESOLVED rather than served from the stored record: a
@@ -204,7 +211,8 @@ def template_detail(customer_id: str, template_id: str,
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/file")
 def download_template(customer_id: str, template_id: str,
                       auth: AuthContext = Depends(get_auth),
-                      repo: Repository = Depends(get_repository)) -> Response:
+                      repo: Repository = Depends(get_repository),
+                      user: User = Depends(require_customer)) -> Response:
     try:
         return Response(repo.get_template_bytes(auth, customer_id, template_id),
                         media_type=_PPTX)
@@ -215,14 +223,16 @@ def download_template(customer_id: str, template_id: str,
 @templates_router.delete("/customers/{customer_id}/templates/{template_id}")
 def delete_template(customer_id: str, template_id: str,
                     auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer_write)) -> dict:
     return {"removed": repo.delete_template(auth, customer_id, template_id)}
 
 
 @templates_router.put("/customers/{customer_id}/template")
 def bind_customer_template(customer_id: str, body: TemplateBinding,
                            auth: AuthContext = Depends(get_auth),
-                           repo: Repository = Depends(get_repository)) -> dict:
+                           repo: Repository = Depends(get_repository),
+                           user: User = Depends(require_customer_write)) -> dict:
     try:
         repo.set_template(auth, body.template_id, customer_id=customer_id)
     except NotFound:
@@ -233,7 +243,8 @@ def bind_customer_template(customer_id: str, body: TemplateBinding,
 @templates_router.put("/customers/{customer_id}/cases/{case_id}/template")
 def bind_case_template(customer_id: str, case_id: str, body: TemplateBinding,
                        auth: AuthContext = Depends(get_auth),
-                       repo: Repository = Depends(get_repository)) -> dict:
+                       repo: Repository = Depends(get_repository),
+                       user: User = Depends(require_case_write)) -> dict:
     try:
         repo.set_template(auth, body.template_id, customer_id=customer_id,
                           case_id=case_id)
@@ -247,7 +258,8 @@ def bind_case_template(customer_id: str, case_id: str, body: TemplateBinding,
 def bind_report_template(customer_id: str, case_id: str, report_id: str,
                          body: TemplateBinding,
                          auth: AuthContext = Depends(get_auth),
-                         repo: Repository = Depends(get_repository)) -> dict:
+                         repo: Repository = Depends(get_repository),
+                         user: User = Depends(require_case_write)) -> dict:
     """Set (or clear) a template on a single report.
 
     A report's choice lives in its own definition rather than beside it, because
@@ -280,7 +292,8 @@ def bind_report_template(customer_id: str, case_id: str, report_id: str,
 @templates_router.get("/customers/{customer_id}/cases/{case_id}/template")
 def case_template(customer_id: str, case_id: str,
                   auth: AuthContext = Depends(get_auth),
-                  repo: Repository = Depends(get_repository)) -> dict:
+                  repo: Repository = Depends(get_repository),
+                  user: User = Depends(require_case)) -> dict:
     """What this tutkimus renders with, and where that came from."""
     template_id, level = repo.resolve_case_template(auth, customer_id, case_id)
     name = ""
@@ -295,7 +308,8 @@ def case_template(customer_id: str, case_id: str,
     "/customers/{customer_id}/cases/{case_id}/reports/{report_id}/template")
 def report_template(customer_id: str, case_id: str, report_id: str,
                     auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_case)) -> dict:
     """What this report renders with, and WHERE that came from.
 
     The level is what lets the UI say "inherited from Attendo" rather than
@@ -314,7 +328,8 @@ def report_template(customer_id: str, case_id: str, report_id: str,
     "/customers/{customer_id}/cases/{case_id}/reports/{report_id}/template/refresh")
 def refresh_report_template(customer_id: str, case_id: str, report_id: str,
                             auth: AuthContext = Depends(get_auth),
-                            repo: Repository = Depends(get_repository)) -> dict:
+                            repo: Repository = Depends(get_repository),
+                            user: User = Depends(require_case_write)) -> dict:
     """The card's "päivitys pitää erikseen pyytää": move a delivered report onto
     whatever its tutkimus or asiakas now specifies."""
     repo.clear_pinned_template(auth, customer_id, case_id, report_id)

@@ -33,7 +33,9 @@ from reportbuilder.ai.text import (
     shorten_labels,
 )
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps_auth import require_material
 from reportbuilder.api.routes_questions import _category_labels
+from reportbuilder.auth.permissions import User
 from reportbuilder.ingest.grouping_override import apply_grouping_override
 
 log = logging.getLogger(__name__)
@@ -202,6 +204,7 @@ def ai_slide_title(
     material_id: str,
     body: SlideTitleBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Generate a descriptive slide title for a chart. Returns {"title": "..."}.
 
@@ -276,6 +279,7 @@ def ai_short_labels(
     material_id: str,
     body: ShortLabelsBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Shorten category labels. Returns {"overrides": [["full","short"], ...]}.
 
@@ -349,6 +353,7 @@ def ai_themes(
     material_id: str,
     body: ThemesBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Summarise an open-ended question's answers into key themes (bullets)."""
     try:
@@ -399,6 +404,7 @@ def ai_overview(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Background/overview bullets about the research. Returns {"bullets": [...]}."""
     try:
@@ -423,6 +429,7 @@ def ai_conclusion(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Conclusion bullets summarising findings across the report's questions."""
     try:
@@ -450,6 +457,7 @@ def ai_demographics(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Pick demographic questions and write 'about the respondents' bullets.
 
@@ -507,6 +515,7 @@ def ai_chat(
     material_id: str,
     body: ChatBody,
     client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
 ) -> dict:
     """Answer a question about the material's survey DATA, grounded in the
     per-question findings (a data-aware assistant). Returns {"reply": "..."}.

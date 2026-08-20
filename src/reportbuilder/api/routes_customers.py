@@ -10,7 +10,12 @@ Trello: Asiakkuuden hallinta. Speksi 2 P-O-01. Additive — the existing
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
+from reportbuilder.api.deps_auth import (
+    current_user, require_case, require_case_write, require_customer,
+    require_customer_write, require_material,
+)
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, NotFound
 
@@ -30,23 +35,26 @@ def _name(body: NameBody) -> str:
 
 @customers_router.post("/customers", status_code=201)
 def create_customer(body: NameBody, auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(current_user)) -> dict:
     c = repo.create_customer(auth, _name(body))
     return {"id": c.id, "name": c.name}
 
 
 @customers_router.get("/customers")
 def list_customers(auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> list[dict]:
+                   repo: Repository = Depends(get_repository),
+                   user: User = Depends(current_user)) -> list[dict]:
     """Only the customers this caller may see — datahive filters the listing,
     so an over-permissive UI cannot widen it."""
     return [{"id": c.id, "name": c.name, "template_id": c.template_id}
-            for c in repo.list_customers(auth)]
+            for c in repo.list_customers(auth, user=user)]
 
 
 @customers_router.get("/customers/{customer_id}")
 def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
-                 repo: Repository = Depends(get_repository)) -> dict:
+                 repo: Repository = Depends(get_repository),
+                 user: User = Depends(require_customer)) -> dict:
     try:
         c = repo.get_customer(auth, customer_id)
     except NotFound:
@@ -57,7 +65,8 @@ def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
 @customers_router.patch("/customers/{customer_id}")
 def rename_customer(customer_id: str, body: NameBody,
                     auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer_write)) -> dict:
     try:
         c = repo.rename_customer(auth, customer_id, _name(body))
     except NotFound:
@@ -68,7 +77,8 @@ def rename_customer(customer_id: str, body: NameBody,
 @customers_router.post("/customers/{customer_id}/cases", status_code=201)
 def create_case(customer_id: str, body: NameBody,
                 auth: AuthContext = Depends(get_auth),
-                repo: Repository = Depends(get_repository)) -> dict:
+                repo: Repository = Depends(get_repository),
+                user: User = Depends(require_customer_write)) -> dict:
     try:
         k = repo.create_case(auth, customer_id, _name(body))
     except NotFound:
@@ -79,15 +89,17 @@ def create_case(customer_id: str, body: NameBody,
 
 @customers_router.get("/customers/{customer_id}/cases")
 def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
-               repo: Repository = Depends(get_repository)) -> list[dict]:
+               repo: Repository = Depends(get_repository),
+               user: User = Depends(require_customer)) -> list[dict]:
     return [{"id": k.id, "customer_id": k.customer_id, "name": k.name,
              "template_id": k.template_id}
-            for k in repo.list_cases(auth, customer_id)]
+            for k in repo.list_cases(auth, customer_id, user=user)]
 
 
 @customers_router.get("/customers/{customer_id}/cases/{case_id}")
 def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_auth),
-             repo: Repository = Depends(get_repository)) -> dict:
+             repo: Repository = Depends(get_repository),
+             user: User = Depends(require_case)) -> dict:
     try:
         k = repo.get_case(auth, customer_id, case_id)
     except NotFound:
@@ -99,7 +111,8 @@ def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_aut
 @customers_router.patch("/customers/{customer_id}/cases/{case_id}")
 def rename_case(customer_id: str, case_id: str, body: NameBody,
                 auth: AuthContext = Depends(get_auth),
-                repo: Repository = Depends(get_repository)) -> dict:
+                repo: Repository = Depends(get_repository),
+                user: User = Depends(require_case_write)) -> dict:
     try:
         k = repo.rename_case(auth, customer_id, case_id, _name(body))
     except NotFound:
@@ -111,7 +124,8 @@ def rename_case(customer_id: str, case_id: str, body: NameBody,
 @customers_router.get("/reports/recent")
 def recent_reports(limit: int = Query(default=10, ge=1, le=50),
                    auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> list[dict]:
+                   repo: Repository = Depends(get_repository),
+                   user: User = Depends(current_user)) -> list[dict]:
     """The caller's most recently modified reports, newest first.
 
     "Accessible to this person" is the store's answer, not a filter applied
@@ -120,13 +134,14 @@ def recent_reports(limit: int = Query(default=10, ge=1, le=50),
     return [
         {"id": r.id, "case_id": r.case_id, "customer_id": r.customer_id,
          "name": r.name, "modified_at": r.modified_at}
-        for r in repo.recent_reports(auth, limit=limit)
+        for r in repo.recent_reports(auth, limit=limit, user=user)
     ]
 
 
 @customers_router.get("/cases/{case_id}/resolve")
 def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
-                 repo: Repository = Depends(get_repository)) -> dict:
+                 repo: Repository = Depends(get_repository),
+                 user: User = Depends(require_case)) -> dict:
     """Resolve a bare case id to its case and owning customer.
 
     The UI holds case ids in URLs that predate the hierarchy, so it needs a way
@@ -163,6 +178,7 @@ async def create_case_from_material(
     file: UploadFile = File(...),
     auth: AuthContext = Depends(get_auth),
     repo: Repository = Depends(get_repository),
+    user: User = Depends(require_customer_write),
 ) -> dict:
     """Create a tutkimus from an uploaded .sav, in one step.
 
@@ -184,14 +200,16 @@ async def create_case_from_material(
 @customers_router.get("/customers/{customer_id}/cases/{case_id}/materials")
 def list_case_materials(customer_id: str, case_id: str,
                         auth: AuthContext = Depends(get_auth),
-                        repo: Repository = Depends(get_repository)) -> list[dict]:
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(require_case)) -> list[dict]:
     return [{"id": m.id, "name": m.name, "size": m.size}
-            for m in repo.list_materials(auth, customer_id, case_id)]
+            for m in repo.list_materials(auth, customer_id, case_id, user=user)]
 
 
 @customers_router.get("/materials/{material_id}/locate")
 def locate_material(material_id: str, auth: AuthContext = Depends(get_auth),
-                    repo: Repository = Depends(get_repository)) -> dict:
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_material)) -> dict:
     """Resolve a bare material id to its case and customer.
 
     The question, preview and render routes are all keyed by material id from

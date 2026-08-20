@@ -27,22 +27,25 @@ class MaterialNotFound(KeyError):
 
 class RepositoryClient:
     """Flat-id façade over the hierarchy. One per request — it carries the
-    caller's auth, so it must never be shared between requests."""
+    caller's auth AND their grants, so it must never be shared between
+    requests. `user=None` is unfiltered, for callers with no request behind
+    them."""
 
-    def __init__(self, repo: Repository, auth: AuthContext):
+    def __init__(self, repo: Repository, auth: AuthContext, user=None):
         self.repo = repo
         self.auth = auth
+        self.user = user
 
     # -- resolution -------------------------------------------------------
 
     def _material(self, material_id: str):
-        m = self.repo.find_material(self.auth, material_id)
+        m = self.repo.find_material(self.auth, material_id, user=self.user)
         if m is None:
             raise MaterialNotFound(material_id)
         return m
 
     def _case(self, case_id: str):
-        k = self.repo.find_case(self.auth, case_id)
+        k = self.repo.find_case(self.auth, case_id, user=self.user)
         if k is None:
             raise KeyError(case_id)
         return k
@@ -69,7 +72,8 @@ class RepositoryClient:
     def list_materials(self, case_id: str) -> list[dict]:
         k = self._case(case_id)
         return [{"material_id": m.id, "name": m.name}
-                for m in self.repo.list_materials(self.auth, k.customer_id, k.id)]
+                for m in self.repo.list_materials(self.auth, k.customer_id, k.id,
+                                                  user=self.user)]
 
     def load_material_config(self, material_id: str) -> str | None:
         """Returns JSON TEXT, not a dict: the legacy callers parse it themselves,
@@ -106,7 +110,8 @@ class RepositoryClient:
     def list_reports(self, case_id: str) -> list[dict]:
         k = self._case(case_id)
         return [{"report_id": r.id, "name": r.name}
-                for r in self.repo.list_reports(self.auth, k.customer_id, k.id)]
+                for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
+                                                user=self.user)]
 
     def delete_report(self, case_id: str, report_doc_id: str) -> None:
         k = self._case(case_id)
@@ -118,9 +123,9 @@ class RepositoryClient:
         """Every tutkimus the caller may see, across customers — the flat shape
         the old routes expect."""
         out = []
-        for c in self.repo.list_customers(self.auth):
+        for c in self.repo.list_customers(self.auth, user=self.user):
             out += [{"id": k.id, "name": k.name}
-                    for k in self.repo.list_cases(self.auth, c.id)]
+                    for k in self.repo.list_cases(self.auth, c.id, user=self.user)]
         return out
 
     def reports_using_material(self, case_id: str, material_id: str) -> list[dict]:
