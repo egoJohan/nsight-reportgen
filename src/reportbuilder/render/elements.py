@@ -6,11 +6,24 @@ from __future__ import annotations
 
 from pptx.util import Inches, Pt
 from pptx.enum.chart import XL_LABEL_POSITION, XL_LEGEND_POSITION
+from pptx.dml.color import RGBColor
 
 from reportbuilder.model.report import NumberFormat
 from reportbuilder.render.base import RenderContext
+from reportbuilder.render.house_style import furniture_colors
 import reportbuilder.stats.statistics  # noqa: F401 — ensure built-in registrations are loaded
 import reportbuilder.stats.registry as _registry
+
+
+def _native_ink(ctx: RenderContext) -> RGBColor:
+    """Text colour for a NATIVE (python-pptx) chart's legend/data-label/axis
+    text, derived from ctx's slide background rather than left to inherit the
+    theme — the theme's own text colour can be dark, which on a dark template
+    is exactly the invisible-on-dark defect this exists to fix. INK on a light
+    background (today's default, unchanged); white on a dark one — same rule
+    the image-mode builders apply via house_style.furniture_colors."""
+    ink_hex, _muted, _grid = furniture_colors(getattr(ctx.style, "background", "") or "")
+    return RGBColor.from_string(ink_hex.lstrip("#"))
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +77,7 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
             font_name, font_size = ctx.style.font_for("data_labels")
             dl.font.name = font_name
             dl.font.size = Pt(font_size)
+            dl.font.color.rgb = _native_ink(ctx)
         except AttributeError:
             # Some plot types (e.g. XyPlot / CT_ScatterChart) don't support dLbls
             # in python-pptx; skip silently.
@@ -77,6 +91,7 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
         font_name, font_size = ctx.style.font_for("legend")
         chart.legend.font.name = font_name
         chart.legend.font.size = Pt(font_size)
+        chart.legend.font.color.rgb = _native_ink(ctx)
 
     # --- Axis names / tick labels ---
     if elements.axis_names:
@@ -84,10 +99,12 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
             vfont_name, vfont_size = ctx.style.font_for("axis_values")
             chart.value_axis.tick_labels.font.name = vfont_name
             chart.value_axis.tick_labels.font.size = Pt(vfont_size)
+            chart.value_axis.tick_labels.font.color.rgb = _native_ink(ctx)
 
             cfont_name, cfont_size = ctx.style.font_for("category_names")
             chart.category_axis.tick_labels.font.name = cfont_name
             chart.category_axis.tick_labels.font.size = Pt(cfont_size)
+            chart.category_axis.tick_labels.font.color.rgb = _native_ink(ctx)
         except (AttributeError, ValueError):
             # pie / doughnut / radar / scatter have no value_axis or category_axis;
             # python-pptx raises ValueError("chart has no value axis") for those types.

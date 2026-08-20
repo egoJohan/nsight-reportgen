@@ -4,9 +4,12 @@ Draws a TRUE funnel silhouette using centered horizontal bars (widest at top,
 narrowest at bottom), which is only achievable in image mode.
 
 House style:
-- Cream background, Liberation Sans font
+- Slide-background bg, Liberation Sans font
 - TEAL fill for all funnel stages
-- INK bold data labels centred in each bar
+- White bold data labels centred in each bar (contrast against the fixed TEAL
+  fill — unrelated to the slide background, so not slide-derived)
+- Ink-tone category labels beside each bar (this IS on the slide background,
+  and derived from it via `chart_furniture`)
 - No x-axis (values are in labels); no spines
 - No matplotlib title (handled by slide chrome, REQ-D-04)
 
@@ -16,8 +19,9 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values, format_value, wrap_label,
+    chart_background, chart_furniture,
 )
-from reportbuilder.render.house_style import TEAL, INK, MUTED, CREAM
+from reportbuilder.render.house_style import TEAL
 
 
 def build_image_funnel(ctx) -> None:
@@ -29,6 +33,8 @@ def build_image_funnel(ctx) -> None:
     vals = data[segs[0]]
 
     fig, ax = new_figure(ctx)
+    bg = chart_background(ctx)
+    ink, _muted, _grid = chart_furniture(ctx)
 
     max_val = max(vals) if vals else 1.0
     bar_h = 0.60
@@ -37,10 +43,11 @@ def build_image_funnel(ctx) -> None:
     for i, (cat, v) in enumerate(zip(cats, vals)):
         # Centre the bar on the x-axis (symmetric funnel silhouette)
         left = (max_val - v) / 2
-        ax.barh(i, v, left=left, height=bar_h, color=TEAL, edgecolor=CREAM,
+        ax.barh(i, v, left=left, height=bar_h, color=TEAL, edgecolor=bg,
                 linewidth=0.8, zorder=3)
 
-        # Data label centred in bar
+        # Data label centred in bar — white on the fixed TEAL fill, same
+        # reasoning as contrast_ink(TEAL), independent of the slide background.
         lbl = format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
         ax.text(
             left + v / 2, i, lbl,
@@ -56,7 +63,7 @@ def build_image_funnel(ctx) -> None:
         ax.text(
             max_val * 1.04, i, wrap_label(cat, 28),
             va="center", ha="left",
-            fontsize=11.0, color=INK, zorder=5,
+            fontsize=11.0, color=ink, zorder=5,
         )
 
     # Invert y-axis so widest bar (index 0) appears at the top

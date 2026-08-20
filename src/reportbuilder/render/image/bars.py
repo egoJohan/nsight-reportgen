@@ -7,10 +7,15 @@ Each renders to PNG via matplotlib (Agg) and places the image with add_picture.
 Returns None.
 
 House style applied:
-- Cream figure/axes background, Liberation Sans font, INK tick labels
+- Slide-background figure/axes background, Liberation Sans font, ink-tone tick labels
 - Single series → TEAL; multi series → teal ramp (lightest → darkest)
-- No top/right spines; GRIDC grid lines only; clean tick marks
-- Data labels at bar ends (always shown, INK, bold)
+- No top/right spines; grid-tone grid lines only; clean tick marks
+- Data labels at bar ends (always shown, ink-tone, bold)
+
+Furniture (ink/muted/grid text and gridline colours) is derived from the
+slide's own background via `chart_furniture` (house_style.furniture_colors) —
+INK/MUTED/GRIDC unchanged on a light slide (byte-identical to before this
+existed), flipped for legibility on a dark one.
 - Auto-orientation: build_image_column switches to horizontal bars when there
   are > 6 categories or any label exceeds 14 characters to avoid x-label
   overlap. Explicit horizontal_bar / vertical_bar requests are always honoured.
@@ -28,14 +33,14 @@ import re
 import textwrap
 
 import numpy as np
-from reportbuilder.render.image._mpl import (chart_accent,
+from reportbuilder.render.image._mpl import (chart_accent, chart_furniture,
     new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
     place_picture_square, series_values, format_value, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     _new_agg_figure, _EMU_PER_IN,
 )
 from reportbuilder.render.house_style import (
-    series_colors, scale_colors, contrast_ink, INK, MUTED, GRIDC, register_fonts,
+    series_colors, scale_colors, contrast_ink, MUTED, register_fonts,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
@@ -88,6 +93,7 @@ def _draw_row_summary(ctx, ax, y, bars, axis_max: float = 100.0) -> None:
     vals = _row_summary_by_bar(ctx.series, bars)
     if all(v is None for v in vals):
         return
+    ink, muted, _grid = chart_furniture(ctx)
     fn = ctx.spec.row_summary_fn
     nf = ctx.spec.number_format
     header = ctx.spec.row_summary_label or default_label(fn)
@@ -97,12 +103,12 @@ def _draw_row_summary(ctx, ax, y, bars, axis_max: float = 100.0) -> None:
     ax.set_ylim(min(y) - 0.7, max(y) + 1.2)               # room for the header row
     col_x = 109.0 * axis_max / 100.0
     ax.text(col_x, max(y) + 0.9, header, ha="center", va="center",
-            fontsize=9.0, fontweight="bold", color=MUTED, zorder=6)
+            fontsize=9.0, fontweight="bold", color=muted, zorder=6)
     for yi, val in zip(y, vals):
         if val is None:
             continue
         ax.text(col_x, yi, _format_summary(val, fn, nf), ha="center", va="center",
-                fontsize=11.0, fontweight="bold", color=INK, zorder=6)
+                fontsize=11.0, fontweight="bold", color=ink, zorder=6)
 
 # ---------------------------------------------------------------------------
 # Label-wrap constants — labels are wrapped, never truncated/ellipsis-cut.
@@ -230,7 +236,7 @@ def _tick_text(v: float) -> str:
 _LEGEND_BELOW_MAX: int = 5
 
 
-def _place_series_legend(fig, ax, segs, *, vertical: bool) -> None:
+def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
     """Dynamic legend placement to keep the plot as large as possible.
 
     Few series → a compact row BELOW the plot. Many series (e.g. a cross-tab of two
@@ -239,7 +245,7 @@ def _place_series_legend(fig, ax, segs, *, vertical: bool) -> None:
     its height instead of being squeezed by a wide multi-row legend below."""
     n = len(segs)
     if n <= _LEGEND_BELOW_MAX:
-        _legend_below(ax, n, y=-0.22 if vertical else -0.08)
+        _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08)
         return
     # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
     # so long combo labels (e.g. gender × a long life-situation label) can't balloon
@@ -257,8 +263,9 @@ def _place_series_legend(fig, ax, segs, *, vertical: bool) -> None:
         handlelength=1.0, handletextpad=0.5, labelspacing=0.4,
     )
     if leg is not None:
+        ink, _muted, _grid = chart_furniture(ctx)
         for t in leg.get_texts():
-            t.set_color(INK)
+            t.set_color(ink)
 
 
 def _wrap_legend_label(label: str, width: int = 26, max_lines: int = 2) -> str:
@@ -286,7 +293,7 @@ def _leading_number(label: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
+def _legend_below(ax, n_segs: int, ctx, y: float = -0.08) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
@@ -312,12 +319,14 @@ def _legend_below(ax, n_segs: int, y: float = -0.08) -> None:
         handlelength=1.1, columnspacing=1.2, handletextpad=0.5,
     )
     if leg is not None:
+        ink, _muted, _grid = chart_furniture(ctx)
         for t in leg.get_texts():
-            t.set_color(INK)
+            t.set_color(ink)
 
 
-def _apply_bar_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None:
+def _apply_bar_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct") -> None:
     """Apply house-style spines, grid, and tick formatting to a bar axes."""
+    _ink, muted, grid = chart_furniture(ctx)
     # Remove all spines, then restore left spine only (horizontal bars)
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -328,18 +337,19 @@ def _apply_bar_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None
     ax_max, ticks = _value_axis(max_val, statistic)
     for xv in ticks:
         if xv > 0:
-            ax.axvline(xv, color=GRIDC, lw=0.8, zorder=1)
+            ax.axvline(xv, color=grid, lw=0.8, zorder=1)
 
     ax.tick_params(axis="x", length=0)
     ax.tick_params(axis="y", length=0)
 
     ax.set_xticks(ticks)
-    ax.set_xticklabels([_tick_text(v) for v in ticks], fontsize=9.5, color=MUTED)
+    ax.set_xticklabels([_tick_text(v) for v in ticks], fontsize=9.5, color=muted)
     ax.set_xlim(0, ax_max)
 
 
-def _apply_column_style(ax, max_val: float = 100.0, statistic: str = "pct") -> None:
+def _apply_column_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct") -> None:
     """Apply house-style spines, grid, and tick formatting to a column axes."""
+    _ink, muted, grid = chart_furniture(ctx)
     for spine in ax.spines.values():
         spine.set_visible(False)
     ax.spines["bottom"].set_visible(True)
@@ -349,13 +359,13 @@ def _apply_column_style(ax, max_val: float = 100.0, statistic: str = "pct") -> N
     ax_max, y_ticks = _value_axis(max_val, statistic)
     for yv in y_ticks:
         if yv > 0:
-            ax.axhline(yv, color=GRIDC, lw=0.8, zorder=1)
+            ax.axhline(yv, color=grid, lw=0.8, zorder=1)
 
     ax.tick_params(axis="x", length=0)
     ax.tick_params(axis="y", length=0)
 
     ax.set_yticks(y_ticks)
-    ax.set_yticklabels([_tick_text(v) for v in y_ticks], fontsize=9.5, color=MUTED)
+    ax.set_yticklabels([_tick_text(v) for v in y_ticks], fontsize=9.5, color=muted)
     ax.set_ylim(0, ax_max)
 
 
@@ -482,6 +492,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                           accent=chart_accent(ctx))
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
     max_val = max(all_vals, default=0.0)
+    ink, _muted, _grid = chart_furniture(ctx)
 
     if vertical:
         fig, axes = new_figure_grid(ctx, len(groups))
@@ -494,12 +505,12 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
-            ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+            ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_xticks(x)
             ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
-                               color=INK, rotation=_XTICK_ROTATION, ha="right",
+                               color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
-            _apply_column_style(ax, max_val, series.statistic)
+            _apply_column_style(ax, ctx, max_val, series.statistic)
     else:
         fig, axes = new_figure_grid(ctx, len(groups), tall_in=n_cat * 0.42 + 2.0)
         y = np.arange(n_cat)[::-1]
@@ -511,13 +522,13 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
-            ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+            ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_yticks(y)
-            _apply_bar_style(ax, max_val, series.statistic)
+            _apply_bar_style(ax, ctx, max_val, series.statistic)
             # y-axis is SHARED (sharey) → set the category labels ONCE, then hide their
             # DISPLAY on the other panels (clearing them would clear the shared axis).
             if k == 0:
-                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=INK)
+                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=(k == 0))
 
     if ctx.spec.elements.legend:
@@ -753,6 +764,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     fig, axes = new_figure_grid(ctx, len(groups),
                                 tall_in=(tall * rows if not vertical else v_tall),
                                 rows=rows)
+    ink, _muted, _grid = chart_furniture(ctx)
 
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
@@ -768,9 +780,9 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                        edgecolor="none", zorder=3)
             ax.set_xticks(x)
             ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
-                               color=INK, rotation=_XTICK_ROTATION, ha="right",
+                               color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
-            _apply_column_style(ax, max_val, series.statistic)
+            _apply_column_style(ax, ctx, max_val, series.statistic)
         else:
             y = np.arange(n_cat)[::-1]
             h = 0.82 / n if n > 1 else 0.6
@@ -780,7 +792,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
             ax.set_yticks(y)
-            _apply_bar_style(ax, max_val, series.statistic)
+            _apply_bar_style(ax, ctx, max_val, series.statistic)
             # The y-axis is SHARED (sharey=True in new_figure_grid), so all axes
             # share ONE tick formatter/label set — calling set_yticklabels once at
             # k==0 propagates to every panel; `labelleft` then controls only which
@@ -795,10 +807,10 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
             # variable is ever added and cols > 1 while rows > 1.
             first_in_row = (k == 0) if rows == 1 else True
             if k == 0:
-                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=INK)
+                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=first_in_row)
         # Each panel is titled with its VARIABLE, not with a group of the first one.
-        ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+        ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
         if ctx.spec.elements.legend:
             names = [_secondary_tick(s) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
@@ -855,6 +867,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
 
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
     max_val = max(all_vals, default=0.0)
+    ink, _muted, _grid = chart_furniture(ctx)
 
     # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
     grouped = _grouped_offsets(segs, ctx.series.segment_primary)
@@ -882,20 +895,20 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                     bar.get_height() + off,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     ha="center", va="bottom",
-                    fontsize=9.5, fontweight="bold", color=INK, zorder=5,
+                    fontsize=9.5, fontweight="bold", color=ink, zorder=5,
                 )
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
     display_cats = [_wrap_xtick_label(c) for c in cats]
     ax.set_xticks(x)
     ax.set_xticklabels(
-        display_cats, fontsize=10.5, color=INK,
+        display_cats, fontsize=10.5, color=ink,
         rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
     )
-    _apply_column_style(ax, max_val, ctx.series.statistic)
+    _apply_column_style(ax, ctx, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _place_series_legend(fig, ax, segs, vertical=True)
+        _place_series_legend(fig, ax, segs, ctx, vertical=True)
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -940,6 +953,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
 
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
     max_val = max(all_vals, default=0.0)
+    ink, _muted, _grid = chart_furniture(ctx)
 
     # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
     grouped = _grouped_offsets(segs, ctx.series.segment_primary)
@@ -981,7 +995,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     va="center", ha="left",
-                    fontsize=value_fs, fontweight="bold", color=INK, zorder=5,
+                    fontsize=value_fs, fontweight="bold", color=ink, zorder=5,
                 )
 
     # Wrap y-axis labels; cap to the lines that fit the band (ellipsis last resort).
@@ -989,12 +1003,12 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines) for c in cats
     ]
     ax.set_yticks(y)
-    ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=INK)
+    ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=ink)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-    _apply_bar_style(ax, max_val, ctx.series.statistic)
+    _apply_bar_style(ax, ctx, max_val, ctx.series.statistic)
 
     if ctx.spec.elements.legend and n_segs > 1:
-        _place_series_legend(fig, ax, segs, vertical=False)
+        _place_series_legend(fig, ax, segs, ctx, vertical=False)
 
     png = render_png(fig)
     # Aspect-preserving placement, top-aligned so the chart hugs the question
@@ -1162,6 +1176,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     tall_in = (max_bars * _HBAR_ROW_IN + 2.0) * rows
     fig, axes = new_figure_grid(ctx, len(groups), tall_in=tall_in, rows=rows,
                                 sharey=False)   # panels draw DIFFERENT bars, not a shared axis
+    ink, _muted, _grid = chart_furniture(ctx)
 
     for ax, (p, bars) in zip(axes, groups):
         # `bars_all` (from `_stacked_layout`) is base-filtered and may drop a
@@ -1177,16 +1192,16 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
                             normalise=normalise, axis_max=axis_max)
         ax.set_yticks(y)
         ax.set_yticklabels([_wrap_label(_secondary_tick(b)) for b in bars],
-                           fontsize=10.5, color=INK)
+                           fontsize=10.5, color=ink)
         ax.tick_params(axis="y", labelleft=True)
         ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
-        _apply_bar_style(ax, axis_max, "pct" if normalise else series.statistic)
-        ax.set_title(p, fontsize=12.5, fontweight="bold", color=INK, pad=6)
+        _apply_bar_style(ax, ctx, axis_max, "pct" if normalise else series.statistic)
+        ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
         # per panel, keyed by bar — placed against the axis the bars were drawn on
         _draw_row_summary(ctx, ax, y, bars, ax.get_xlim()[1])
 
     if ctx.spec.elements.legend and len(stack) > 1:
-        _legend_below(axes[-1], len(stack))
+        _legend_below(axes[-1], len(stack), ctx)
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
     place_picture(ctx, render_png(fig))
@@ -1204,6 +1219,7 @@ def build_image_column_stacked(ctx) -> None:
         _render_stacked_variable_panels(ctx, cats)
         return
     fig, ax = new_figure(ctx)
+    ink, _muted, _grid = chart_furniture(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
     clrs = scale_colors(len(segs), chart_accent(ctx))
 
@@ -1247,22 +1263,22 @@ def build_image_column_stacked(ctx) -> None:
     if grouped:
         # Per-bar tick = the SECONDARY value; the primary is shown once as a group label
         # centred under each group, so both classifiers read clearly.
-        ax.set_xticklabels([_secondary_tick(c) for c in cats], fontsize=9.5, color=INK)
+        ax.set_xticklabels([_secondary_tick(c) for c in cats], fontsize=9.5, color=ink)
         for glabel, gx in grouped[1]:
             ax.text(gx, -0.075, glabel, transform=ax.get_xaxis_transform(),
-                    ha="center", va="top", fontsize=11.5, fontweight="bold", color=INK)
+                    ha="center", va="top", fontsize=11.5, fontweight="bold", color=ink)
     else:
         # Wrap + rotate x-axis labels so they are shown in full and never overlap.
         ax.set_xticklabels(
-            [_wrap_xtick_label(c) for c in cats], fontsize=10.5, color=INK,
+            [_wrap_xtick_label(c) for c in cats], fontsize=10.5, color=ink,
             rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
         )
     # Normalised → the axis IS the 0-100 composition scale, whatever statistic the
     # columns carry. True heights → the axis must read the data's own statistic.
-    _apply_column_style(ax, axis_max, "pct" if normalise else ctx.series.statistic)
+    _apply_column_style(ax, ctx, axis_max, "pct" if normalise else ctx.series.statistic)
 
     if ctx.spec.elements.legend and len(segs) > 1:
-        _legend_below(ax, len(segs))
+        _legend_below(ax, len(segs), ctx)
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -1322,6 +1338,7 @@ def build_image_bar_stacked(ctx) -> None:
         _render_stacked_variable_panels(ctx, cats)
         return
     fig, ax = new_figure(ctx)
+    ink, _muted, _grid = chart_furniture(ctx)
     # Stack segments are ordered scale levels → monotonic light→dark gradient.
     clrs = scale_colors(len(segs), chart_accent(ctx))
 
@@ -1342,23 +1359,23 @@ def build_image_bar_stacked(ctx) -> None:
     ax.set_yticks(y)
     if grouped:
         # Per-bar tick = the SECONDARY value; the primary is a group label to the left.
-        ax.set_yticklabels([_secondary_tick(c) for c in cats], fontsize=10.5, color=INK)
+        ax.set_yticklabels([_secondary_tick(c) for c in cats], fontsize=10.5, color=ink)
         for glabel, gpos in grouped[1]:
             ax.text(-0.13, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
                     ha="center", va="center", rotation=90,
-                    fontsize=11.5, fontweight="bold", color=INK)
+                    fontsize=11.5, fontweight="bold", color=ink)
     else:
         # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
-        ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=INK)
+        ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=11.5, color=ink)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
     # Normalised → the axis IS the 0-100 composition scale, whatever statistic the
     # bars carry. True widths → the axis must read the data's own statistic.
-    _apply_bar_style(ax, axis_max, "pct" if normalise else ctx.series.statistic)
+    _apply_bar_style(ax, ctx, axis_max, "pct" if normalise else ctx.series.statistic)
     # right-hand per-row column (if configured), against the axis just applied
     _draw_row_summary(ctx, ax, y, cats, ax.get_xlim()[1])
 
     if ctx.spec.elements.legend and len(segs) > 1:
-        _legend_below(ax, len(segs))
+        _legend_below(ax, len(segs), ctx)
 
     png = render_png(fig)
     place_picture(ctx, png)
@@ -1368,6 +1385,6 @@ def build_image_bar_stacked(ctx) -> None:
 # Shared legend styler (thin wrapper around the shared helper in _mpl)
 # ---------------------------------------------------------------------------
 
-def _style_legend(ax, loc: str = "best") -> None:
+def _style_legend(ax, ctx, loc: str = "best") -> None:
     """Apply house-style formatting to an axes legend."""
-    style_legend(ax, loc)
+    style_legend(ax, ctx, loc)

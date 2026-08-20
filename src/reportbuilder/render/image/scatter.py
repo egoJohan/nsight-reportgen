@@ -3,10 +3,14 @@
 Builder: build_image_scatter.
 
 House style:
-- Cream bg, Liberation Sans, TEAL scatter points
-- INK bold category labels near each point
-- Bottom + left spines (house style), GRIDC gridlines
+- Slide-background bg, Liberation Sans, TEAL scatter points
+- Ink-tone bold category labels near each point
+- Bottom + left spines (house style), grid-tone gridlines
 - No matplotlib title (handled by slide chrome, REQ-D-04)
+
+Furniture colours (ink/muted/grid, point-edge halo) are derived from the
+slide's own background via `chart_furniture`/`chart_background` — unchanged on
+a light slide, flipped for legibility on a dark one.
 
 Renders to PNG via matplotlib (Agg) and places the image with add_picture.
 Returns None. Requires ctx.spec.scatter_xy to be set.
@@ -15,8 +19,9 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
+    chart_background, chart_furniture,
 )
-from reportbuilder.render.house_style import TEAL, INK, MUTED, GRIDC
+from reportbuilder.render.house_style import TEAL
 
 
 def build_image_scatter(ctx) -> None:
@@ -35,7 +40,9 @@ def build_image_scatter(ctx) -> None:
     ys = data[y_seg]
 
     fig, ax = new_figure(ctx)
-    ax.scatter(xs, ys, color=TEAL, s=70, edgecolors="#FFFFFF", linewidths=0.8, zorder=3)
+    bg = chart_background(ctx)
+    ink, muted, grid = chart_furniture(ctx)
+    ax.scatter(xs, ys, color=TEAL, s=70, edgecolors=bg, linewidths=0.8, zorder=3)
 
     if ctx.spec.elements.data_labels:
         for cat, x, y in zip(cats, xs, ys):
@@ -44,12 +51,12 @@ def build_image_scatter(ctx) -> None:
                 xy=(x, y),
                 xytext=(4, 4),
                 textcoords="offset points",
-                fontsize=9.5, color=INK,
+                fontsize=9.5, color=ink,
             )
 
     if ctx.spec.elements.axis_names:
-        ax.set_xlabel(x_seg, fontsize=10.5, color=INK)
-        ax.set_ylabel(y_seg, fontsize=10.5, color=INK)
+        ax.set_xlabel(x_seg, fontsize=10.5, color=ink)
+        ax.set_ylabel(y_seg, fontsize=10.5, color=ink)
 
     # House-style spines
     for spine in ax.spines.values():
@@ -62,12 +69,12 @@ def build_image_scatter(ctx) -> None:
     ax.spines["left"].set_linewidth(1.0)
 
     ax.tick_params(axis="both", length=0)
-    ax.xaxis.label.set_color(MUTED)
-    ax.yaxis.label.set_color(MUTED)
-    ax.tick_params(colors=MUTED, labelsize=9.5)
+    ax.xaxis.label.set_color(muted)
+    ax.yaxis.label.set_color(muted)
+    ax.tick_params(colors=muted, labelsize=9.5)
 
     # Light grid
-    ax.grid(color=GRIDC, linewidth=0.7, zorder=0)
+    ax.grid(color=grid, linewidth=0.7, zorder=0)
 
     png = render_png(fig)
     place_picture(ctx, png)

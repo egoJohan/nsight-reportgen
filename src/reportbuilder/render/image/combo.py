@@ -5,9 +5,13 @@ y-axis via twinx (second segment). Falls back to bars-only if only 1 segment
 is present.
 
 House style:
-- Cream bg, Liberation Sans
+- Slide-background bg, Liberation Sans
 - First segment → TEAL bars; second segment → TEAL_LT line with circles
-- Bottom spine; GRIDC gridlines; no top/right spines
+- Bottom spine; grid-tone gridlines; no top/right spines
+
+Furniture (ink/muted/grid, bar/marker edges, legend frame) is derived from the
+slide's own background via `chart_furniture`/`chart_background` — unchanged on
+a light slide, flipped for legibility on a dark one.
 - No matplotlib title (handled by slide chrome, REQ-D-04)
 
 Returns None.
@@ -16,9 +20,9 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, render_png, place_picture, series_values,
-    format_value,
+    format_value, chart_background, chart_furniture,
 )
-from reportbuilder.render.house_style import TEAL, TEAL_LT, INK, MUTED, GRIDC, CREAM
+from reportbuilder.render.house_style import TEAL, TEAL_LT
 
 
 def build_image_combo(ctx) -> None:
@@ -28,6 +32,8 @@ def build_image_combo(ctx) -> None:
     """
     cats, segs, data = series_values(ctx.series)
     fig, ax = new_figure(ctx)
+    bg = chart_background(ctx)
+    ink, muted, grid = chart_furniture(ctx)
 
     x = list(range(len(cats)))
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
@@ -36,7 +42,7 @@ def build_image_combo(ctx) -> None:
     # the question itself, whose text already sits in the slide's subtitle — a legend
     # entry just repeats it. The legend keeps only the LINE (the secondary variable),
     # which the reader can't otherwise identify.
-    bars = ax.bar(x, data[segs[0]], color=TEAL, edgecolor=CREAM,
+    bars = ax.bar(x, data[segs[0]], color=TEAL, edgecolor=bg,
                   linewidth=0.8, zorder=3)
 
     # Data labels on bars
@@ -46,7 +52,7 @@ def build_image_combo(ctx) -> None:
             bar.get_height() + max(0.5, bar.get_height() * 0.01),
             format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
             ha="center", va="bottom",
-            fontsize=9.5, fontweight="bold", color=INK, zorder=5,
+            fontsize=9.5, fontweight="bold", color=ink, zorder=5,
         )
 
     # House-style spines for primary axis
@@ -57,28 +63,28 @@ def build_image_combo(ctx) -> None:
     ax.spines["bottom"].set_linewidth(1.0)
     ax.tick_params(axis="both", length=0)
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, fontsize=11.5, color=INK)
-    ax.yaxis.set_tick_params(labelcolor=MUTED, labelsize=9.5)
+    ax.set_xticklabels(cats, fontsize=11.5, color=ink)
+    ax.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
-    # GRIDC gridlines
+    # Grid-tone gridlines
     all_bar_vals = data[segs[0]]
     max_bar = max(all_bar_vals, default=0.0)
     for yv in [20, 40, 60, 80, 100]:
         if yv <= max_bar * 1.20:
-            ax.axhline(yv, color=GRIDC, lw=0.8, zorder=1)
+            ax.axhline(yv, color=grid, lw=0.8, zorder=1)
 
     if len(segs) >= 2:
         # Secondary line (segment 1 → TEAL_LT)
         ax2 = ax.twinx()
         ax2.plot(x, data[segs[1]], color=TEAL_LT, marker="o",
                  linewidth=2.2, markersize=5, label=segs[1],
-                 markeredgecolor=CREAM, markeredgewidth=1.0, zorder=4)
+                 markeredgecolor=bg, markeredgewidth=1.0, zorder=4)
         for spine in ax2.spines.values():
             spine.set_visible(False)
         ax2.spines["right"].set_visible(True)
         ax2.spines["right"].set_color("#C9C1B4")
         ax2.spines["right"].set_linewidth(1.0)
-        ax2.yaxis.set_tick_params(labelcolor=MUTED, labelsize=9.5)
+        ax2.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
         if ctx.spec.elements.legend:
             # Legend shows ONLY the line (the secondary variable) — the bars are the
@@ -88,11 +94,11 @@ def build_image_combo(ctx) -> None:
             lines2, labels2 = ax2.get_legend_handles_labels()
             if labels2:
                 leg = ax.legend(lines2, labels2, fontsize=9.5, frameon=True, loc="best")
-                leg.get_frame().set_facecolor("#FFFFFF")
-                leg.get_frame().set_edgecolor(GRIDC)
+                leg.get_frame().set_facecolor(bg)
+                leg.get_frame().set_edgecolor(grid)
                 leg.get_frame().set_linewidth(0.8)
                 for t in leg.get_texts():
-                    t.set_color(INK)
+                    t.set_color(ink)
     # Bars-only combo (no secondary line) → no legend: the question is in the subtitle.
 
     png = render_png(fig)

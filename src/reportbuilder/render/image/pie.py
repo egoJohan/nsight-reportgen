@@ -3,13 +3,18 @@
 Builders: build_image_pie, build_image_doughnut.
 
 House style:
-- Cream figure background, Liberation Sans font
+- Slide-background bg, Liberation Sans font
 - Teal ramp for slice colours (single series → TEAL, multi-slice → spread)
 - Percentage labels on slices that are large enough; a category legend (with the
   value) sits beside the pie so labels are ALWAYS readable and NEVER overlap,
   even when several slices are tiny / near-zero.
 - No matplotlib title (handled by slide chrome, REQ-D-04)
 - Only suitable for single-choice parts-of-whole questions
+
+Furniture (legend frame/text, wedge separators) is derived from the slide's own
+background via `chart_furniture`/`chart_background` — INK/MUTED/GRIDC/CREAM
+unchanged on a light slide (byte-identical to before this existed), flipped for
+legibility on a dark one.
 
 Circular aspect & fit (Task A): the pie is drawn on a square axes with
 ``set_aspect("equal")`` so the wedges form a true circle.  The category legend
@@ -32,9 +37,10 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (chart_accent,
     render_png, place_picture_square, series_values, format_value,
+    chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import (
-    register_fonts, series_colors, contrast_ink, INK, MUTED, CREAM, GRIDC,
+    register_fonts, series_colors, contrast_ink, MUTED,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.render.image._mpl import template_palette
@@ -56,7 +62,7 @@ def _wrap_legend_label(text: str) -> str:
     return textwrap.fill(text, width=_LEGEND_WRAP, break_long_words=True)
 
 
-def _make_square_fig_ax(ctx):
+def _make_square_fig_ax(ctx, bg: str):
     """Create a wide figure filling the slot, with the (square, set_aspect=equal)
     pie axes on the LEFT and room for the legend on the right.
 
@@ -69,14 +75,15 @@ def _make_square_fig_ax(ctx):
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     fig = Figure(figsize=(w_in, h_in), dpi=200)
     FigureCanvasAgg(fig)
-    fig.patch.set_facecolor(CREAM)
+    fig.patch.set_facecolor(bg)
     # Pie axes: left ~62% of the width, full height — the circle fills the height.
     ax = fig.add_axes([0.0, 0.0, 0.62, 1.0])
-    ax.set_facecolor(CREAM)
+    ax.set_facecolor(bg)
     return fig, ax
 
 
-def _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt) -> None:
+def _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt,
+                          bg: str, ink: str, grid: str) -> None:
     """Add a house-style category legend to the right of the pie (no overlap, full text).
     Category names ONLY — the percentages live on the slices, so repeating them in the
     legend is redundant."""
@@ -87,11 +94,11 @@ def _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt) -> None:
         frameon=True, fontsize=10.5, labelspacing=0.8, handlelength=1.2,
         borderpad=0.8, handletextpad=0.7,
     )
-    leg.get_frame().set_facecolor(CREAM)
-    leg.get_frame().set_edgecolor(GRIDC)
+    leg.get_frame().set_facecolor(bg)
+    leg.get_frame().set_edgecolor(grid)
     leg.get_frame().set_linewidth(0.8)
     for t in leg.get_texts():
-        t.set_color(INK)
+        t.set_color(ink)
 
 
 def _render_pie(ctx, *, donut: bool) -> None:
@@ -108,7 +115,9 @@ def _render_pie(ctx, *, donut: bool) -> None:
     total = sum(v or 0.0 for v in vals) or 1.0
     fracs = [(v or 0.0) / total * 100.0 for v in vals]
 
-    fig, ax = _make_square_fig_ax(ctx)
+    bg = chart_background(ctx)
+    ink, _muted, grid = chart_furniture(ctx)
+    fig, ax = _make_square_fig_ax(ctx, bg)
 
     def _autopct(pct: float) -> str:
         # Only annotate slices large enough to hold the label cleanly; tiny/zero
@@ -116,7 +125,11 @@ def _render_pie(ctx, *, donut: bool) -> None:
         # still shown in the legend.
         return format_value(pct, statistic, fmt, fracs) if pct >= _MIN_WEDGE_PCT else ""
 
-    wedgeprops = dict(linewidth=1.4, edgecolor=CREAM)
+    # Wedge edges match the SLIDE background (a thin gap between adjacent
+    # slices, not a hard border) — CREAM on the house default, the template's
+    # own background otherwise, so the gap never reads as a stray light ring
+    # on a dark slide.
+    wedgeprops = dict(linewidth=1.4, edgecolor=bg)
     if donut:
         wedgeprops["width"] = 0.42
 
@@ -140,7 +153,8 @@ def _render_pie(ctx, *, donut: bool) -> None:
         t.set_color(contrast_ink(wedge.get_facecolor()))
 
     if ctx.spec.elements.axis_names or ctx.spec.elements.legend:
-        _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt)
+        _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt,
+                              bg, ink, grid)
 
     png = render_png(fig)
     place_picture_square(ctx, png)

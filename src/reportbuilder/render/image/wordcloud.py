@@ -29,8 +29,10 @@ from matplotlib import font_manager as _fm  # noqa: E402
 
 from wordcloud import WordCloud  # noqa: E402
 
-from reportbuilder.render.image._mpl import new_figure, place_picture, render_png
-from reportbuilder.render.house_style import register_fonts, CREAM, _LIBERATION_PATHS
+from reportbuilder.render.image._mpl import (
+    new_figure, place_picture, render_png, chart_background,
+)
+from reportbuilder.render.house_style import register_fonts, _LIBERATION_PATHS
 
 # Teal ramp ordered darkest → lightest. The top-frequency word gets the darkest
 # (most prominent) teal; the long tail fades to lighter tints.
@@ -91,8 +93,15 @@ def build_image_wordcloud(ctx) -> None:
     width_px = 1600
     height_px = max(400, int(round(width_px / aspect)))
 
+    # The template's own background (house cream when none applies) — baked
+    # straight into the cloud's pixel raster by the wordcloud library itself,
+    # which is NOT covered by render_png's transparent=True save (that only
+    # blanks the matplotlib figure/axes patches, not an imshow'd array), so
+    # this is the one builder where painting the real background is not
+    # optional cosmetics: without it a cream rectangle would sit under every
+    # word on a dark slide regardless of what the figure/axes are set to.
     wc = WordCloud(
-        background_color=CREAM,
+        background_color=chart_background(ctx),
         color_func=_color_func,
         font_path=_resolve_font_path(),
         random_state=42,            # deterministic layout

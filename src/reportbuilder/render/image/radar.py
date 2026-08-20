@@ -3,12 +3,16 @@
 Builder: build_image_radar.
 
 House style:
-- Cream figure/axes background, Liberation Sans font
+- Slide-background bg, Liberation Sans font
 - Teal ramp colours per segment (single series → TEAL; multi → spread)
 - Filled polygon at 15 % alpha; thick lines at 2.0–2.5 pt
-- GRIDC polar grid lines; no default matplotlib colours
-- Legend with house style (INK text, GRIDC frame) when multi-series
+- Grid-tone polar grid lines; no default matplotlib colours
+- Legend with house style (ink-tone text) when multi-series
 - No matplotlib title (handled by slide chrome, REQ-D-04)
+
+Furniture (ink/muted/grid, figure/axes background) is derived from the
+slide's own background via `chart_furniture`/`chart_background` — unchanged on
+a light slide, flipped for legibility on a dark one.
 
 Renders to PNG via matplotlib (Agg) and places the image with add_picture.
 Returns None.
@@ -23,10 +27,9 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (chart_accent,
     render_png, place_picture_square, series_values, style_legend, wrap_label,
+    chart_background, chart_furniture,
 )
-from reportbuilder.render.house_style import (
-    register_fonts, series_colors, CREAM, INK, MUTED, GRIDC,
-)
+from reportbuilder.render.house_style import register_fonts, series_colors
 from reportbuilder.render.image._mpl import template_palette
 
 _EMU_PER_IN = 914400.0
@@ -44,6 +47,8 @@ def build_image_radar(ctx) -> None:
     cats, segs, data = series_values(ctx.series)
     clrs = series_colors(len(segs), palette=template_palette(ctx),
                           accent=chart_accent(ctx))
+    bg = chart_background(ctx)
+    ink, muted, grid = chart_furniture(ctx)
 
     # Square figure: min slot dimension → circular polar axes, not oval
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
@@ -51,9 +56,9 @@ def build_image_radar(ctx) -> None:
     sq = min(w_in, h_in)
     fig = Figure(figsize=(sq, sq), dpi=200)
     FigureCanvasAgg(fig)
-    fig.patch.set_facecolor(CREAM)
+    fig.patch.set_facecolor(bg)
     ax = fig.add_subplot(111, polar=True)
-    ax.set_facecolor(CREAM)
+    ax.set_facecolor(bg)
 
     n_cats = len(cats)
     angles = np.linspace(0, 2 * np.pi, n_cats, endpoint=False).tolist()
@@ -80,7 +85,7 @@ def build_image_radar(ctx) -> None:
     # polygon or run off the figure. Shrink the font a touch as categories grow.
     fs = 10.0 if n_cats <= 8 else (9.0 if n_cats <= 12 else 8.0)
     ax.set_xticks(angles)
-    ax.set_xticklabels([wrap_label(c, 16) for c in cats], fontsize=fs, color=INK)
+    ax.set_xticklabels([wrap_label(c, 16) for c in cats], fontsize=fs, color=ink)
     ax.tick_params(axis="x", pad=10)
 
     # Radial grid
@@ -92,8 +97,8 @@ def build_image_radar(ctx) -> None:
     else:
         r_ticks = [v for v in [20, 40, 60, 80, 100] if v <= r_max]
     ax.set_yticks(r_ticks)
-    ax.set_yticklabels([str(v) for v in r_ticks], fontsize=8.0, color=MUTED)
-    ax.grid(color=GRIDC, linewidth=0.8)
+    ax.set_yticklabels([str(v) for v in r_ticks], fontsize=8.0, color=muted)
+    ax.grid(color=grid, linewidth=0.8)
     ax.spines["polar"].set_color("#C9C1B4")
     ax.spines["polar"].set_linewidth(1.0)
 
@@ -107,7 +112,7 @@ def build_image_radar(ctx) -> None:
         )
         if leg is not None:
             for t in leg.get_texts():
-                t.set_color(INK)
+                t.set_color(ink)
 
     png = render_png(fig)
     place_picture_square(ctx, png)

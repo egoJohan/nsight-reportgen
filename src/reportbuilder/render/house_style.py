@@ -219,13 +219,63 @@ _RED_RAMP: list[str] = ["#F0CBC6", "#E08C82", "#C55A4C", "#B23A2E"]
 _CATEGORICAL: list[str] = _TEAL_RAMP + _BLUE_RAMP + _RED_RAMP
 
 
+def _relative_luminance(color) -> float:
+    """WCAG-style relative luminance of *color* (hex string or (r,g,b[,a]) tuple)."""
+    r, g, b = to_rgb(color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+# Below this luminance a fill/ground reads as "dark" for every colour decision in
+# this file — one number so contrast_ink and furniture_colors can never disagree
+# about what counts as dark.
+_DARK_LUMINANCE_THRESHOLD = 0.55
+
+
 def contrast_ink(color) -> str:
     """Label colour for text placed ON a coloured fill: white on dark fills, INK on
     light — so a percentage stays legible on any slice/segment/bar, including the
     darkest teal/blue/red. Accepts a hex string or an (r,g,b[,a]) tuple. (REQ-C-27a)"""
-    r, g, b = to_rgb(color)
-    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return "#FFFFFF" if lum < 0.55 else INK
+    return "#FFFFFF" if _relative_luminance(color) < _DARK_LUMINANCE_THRESHOLD else INK
+
+
+def _mix(base: str, target: str, t: float) -> str:
+    """Blend *base* toward *target* by fraction *t* (0 = base, 1 = target)."""
+    br, bg, bb = to_rgb(base)
+    tr, tg, tb = to_rgb(target)
+    r = br + (tr - br) * t
+    g = bg + (tg - bg) * t
+    b = bb + (tb - bb) * t
+    return "#%02X%02X%02X" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+def furniture_colors(background: str = "") -> tuple[str, str, str]:
+    """(ink, muted, grid) chart furniture colours for a SLIDE background.
+
+    Chart furniture — legend text, tick labels, gridlines — is drawn ON the
+    slide's own background, not on a coloured wedge/bar, so it needs the
+    background's contrast, not a wedge's (REQ dark-template legibility).
+
+    A LIGHT ground (the house default, and any template that doesn't state a
+    dark one) resolves to exactly INK/MUTED/GRIDC — today's constants, untouched
+    — so a light template renders byte-identical to before this function existed.
+    Only a DARK ground gets a derived set: ink flips to white (contrast_ink's own
+    rule), and muted/grid are blended toward that white by fixed fractions —
+    grid closer to the ground (subtle, the way GRIDC sits close to CREAM on the
+    light side) and muted further from it (readable secondary text) — so the grid
+    is LIGHTER than a dark ground exactly as it is DARKER than a light one, and
+    the three-way ink > muted > grid contrast ordering holds on both sides.
+    Shares contrast_ink's luminance threshold, so the whole module agrees on
+    what "dark" means.
+    """
+    bg = (background or "").strip() or CREAM
+    if not bg.startswith("#"):
+        bg = f"#{bg}"
+    if _relative_luminance(bg) >= _DARK_LUMINANCE_THRESHOLD:
+        return INK, MUTED, GRIDC
+    ink = "#FFFFFF"
+    muted = _mix(bg, ink, 0.62)
+    grid = _mix(bg, ink, 0.28)
+    return ink, muted, grid
 
 
 def series_colors(n: int, palette: list[str] | None = None,

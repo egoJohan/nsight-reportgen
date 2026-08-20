@@ -187,7 +187,11 @@ def _grid_ctx():
     from types import SimpleNamespace
 
     from suite._helpers import make_slot
-    return SimpleNamespace(slot=make_slot())
+    # `style` is empty on purpose: new_figure_grid derives its background via
+    # chart_background(ctx), which getattr()s ctx.style.background and falls
+    # back to house CREAM when either is absent — this fixture is exactly that
+    # "no template opinion" case, not the shape this test is about.
+    return SimpleNamespace(slot=make_slot(), style=SimpleNamespace())
 
 
 @pytest.mark.parametrize("n,rows", [(1, 1), (1, 2), (2, 1), (2, 2), (3, 2)])

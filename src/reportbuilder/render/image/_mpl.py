@@ -13,7 +13,9 @@ import numpy as np
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
-from reportbuilder.render.house_style import register_fonts, CREAM, INK, GRIDC, MUTED
+from reportbuilder.render.house_style import (
+    register_fonts, CREAM, INK, GRIDC, MUTED, furniture_colors,
+)
 
 
 def _new_agg_figure(w_in: float, h_in: float, dpi: int = 200) -> Figure:
@@ -88,8 +90,9 @@ def render_empty_chart(ctx, message: str = "Ei tietoja näytettäväksi") -> Non
     instead of crashing the deck. Counts as the chart's one picture."""
     fig, ax = new_figure(ctx)
     ax.axis("off")
+    _ink, muted, _grid = chart_furniture(ctx)
     ax.text(0.5, 0.5, message, ha="center", va="center",
-            fontsize=13, color=MUTED, transform=ax.transAxes)
+            fontsize=13, color=muted, transform=ax.transAxes)
     place_picture(ctx, render_png(fig))
 
 
@@ -163,9 +166,12 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     for extra in axes[n:]:                        # an odd count leaves a blank cell
         extra.set_visible(False)
     axes = axes[:n]
-    fig.patch.set_facecolor(CREAM)
+    # The template's own background — see new_figure's identical comment; a
+    # small-multiples/separate-panel grid is still one chart on one slide.
+    bg = chart_background(ctx)
+    fig.patch.set_facecolor(bg)
     for ax in axes:
-        ax.set_facecolor(CREAM)
+        ax.set_facecolor(bg)
     return fig, axes
 
 
@@ -302,6 +308,15 @@ def template_palette(ctx) -> list[str] | None:
         return None
 
 
+def chart_furniture(ctx) -> tuple[str, str, str]:
+    """(ink, muted, grid) for THIS chart's slide background (house_style.furniture_colors).
+
+    One call per builder instead of re-deriving contrast against
+    chart_background(ctx) piecemeal in eight files — see house_style.py for why
+    a light background is untouched and only a dark one gets a derived set."""
+    return furniture_colors(chart_background(ctx))
+
+
 def chart_accent(ctx) -> str:
     """The colour this deck's charts lead with: the template's, else house teal.
 
@@ -407,8 +422,9 @@ def new_square_figure(ctx):
     sq = min(w_in, h_in)
     fig = _new_agg_figure(sq, sq)
     ax = fig.subplots()
-    fig.patch.set_facecolor(CREAM)
-    ax.set_facecolor(CREAM)
+    bg = chart_background(ctx)
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
     return fig, ax
 
 
@@ -457,19 +473,20 @@ def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
             pass
 
 
-def style_legend(ax, loc: str = "best") -> None:
+def style_legend(ax, ctx, loc: str = "best") -> None:
     """Apply house-style formatting to an axes legend (shared by all image builders).
 
-    White frame, GRIDC edge, INK text, 9.5 pt font.
+    Transparent frame, a grid-tone edge, ink text (both derived from *ctx*'s
+    slide background — light on dark, INK/GRIDC unchanged on light), 9.5 pt font.
     """
-    from reportbuilder.render.house_style import GRIDC as _GC, INK as _INK
+    ink, _muted, grid = chart_furniture(ctx)
     leg = ax.legend(fontsize=9.5, loc=loc, frameon=True)
     if leg is None:
         return
-    # Transparent to match the figure: a white pill would reintroduce exactly
-    # the opaque panel the transparent save exists to avoid.
+    # Transparent to match the figure: an opaque pill would reintroduce exactly
+    # the panel the transparent save exists to avoid.
     leg.get_frame().set_facecolor("none")
-    leg.get_frame().set_edgecolor(_GC)
+    leg.get_frame().set_edgecolor(grid)
     leg.get_frame().set_linewidth(0.8)
     for t in leg.get_texts():
-        t.set_color(_INK)
+        t.set_color(ink)
