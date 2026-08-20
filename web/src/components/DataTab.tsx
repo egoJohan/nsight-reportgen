@@ -51,7 +51,7 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
   return q;
 }
 
-// Compact status: one icon — OK, warning (has "Ei vastattu"/missing codes to
+// Compact status: one icon — OK, warning (has "Not answered"/missing codes to
 // check), or error (can't be charted at all).
 function StatusIcon({ q }: { q: Question }) {
   // Filled shape + white symbol so the status colour reads at a glance.
@@ -161,7 +161,7 @@ function QuestionTable({
         <div className="relative flex-1 max-w-sm">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Hae kysymyksiä…"
+            placeholder="Search questions…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -169,7 +169,7 @@ function QuestionTable({
         </div>
         <Select
           items={{
-            default: "Oletusjärjestys",
+            default: "Default order",
             text_asc: "A → Z",
             text_desc: "Z → A",
             kind: "By type",
@@ -178,10 +178,10 @@ function QuestionTable({
           onValueChange={(v) => setSort(v as SortKey)}
         >
           <SelectTrigger className="w-40">
-            <SelectValue placeholder="Järjestä…" />
+            <SelectValue placeholder="Sort…" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="default">Oletusjärjestys</SelectItem>
+            <SelectItem value="default">Default order</SelectItem>
             <SelectItem value="text_asc">A → Z</SelectItem>
             <SelectItem value="text_desc">Z → A</SelectItem>
             <SelectItem value="kind">Tyypin mukaan</SelectItem>
@@ -203,7 +203,7 @@ function QuestionTable({
           <Table className="table-fixed">
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="py-3">Kysymys</TableHead>
+                <TableHead className="py-3">Question</TableHead>
                 <TableHead className="w-24 whitespace-nowrap py-3 text-center">Tila</TableHead>
               </TableRow>
             </TableHeader>
@@ -255,7 +255,7 @@ function UploadArea({
 
   function handleFile(file: File) {
     if (!file.name.match(/\.(sav|zsav)$/i)) {
-      toast.error("Lataa .sav- tai .zsav-muotoinen SPSS-tiedosto");
+      toast.error("Upload an SPSS .sav or .zsav file");
       return;
     }
     upload.mutate(file, {
@@ -287,7 +287,7 @@ function UploadArea({
         <UploadCloudIcon className="size-6 text-muted-foreground" />
       </div>
       <p className="text-sm font-medium">
-        {upload.isPending ? "Ladataan…" : "Pudota SPSS-tiedosto tähän"}
+        {upload.isPending ? "Loading…" : "Drop an SPSS file here"}
       </p>
       <p className="mt-1 text-xs text-muted-foreground">
         .sav or .zsav — or{" "}
@@ -315,7 +315,7 @@ function UploadArea({
         <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-background/80 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-2">
             <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <p className="text-xs text-muted-foreground">Käsitellään…</p>
+            <p className="text-xs text-muted-foreground">Processing…</p>
           </div>
         </div>
       )}
@@ -339,7 +339,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
       {!materialId || replacing ? (
         <>
           <div className="mb-6">
-            <h3 className={PANEL_TITLE}>Tietolähde</h3>
+            <h3 className={PANEL_TITLE}>Data source</h3>
             <p className="mt-1 text-sm text-muted-foreground">
               Upload an SPSS file to extract and browse the curated questions.
             </p>
@@ -357,7 +357,7 @@ export default function DataTab({ caseId }: { caseId: string }) {
         <>
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h3 className={PANEL_TITLE}>Kysymykset</h3>
+              <h3 className={PANEL_TITLE}>Questions</h3>
               <p className="mt-0.5 text-sm text-muted-foreground flex items-center gap-1.5">
                 <DatabaseIcon className="size-3.5" />
                 <span className="font-mono text-xs">{materialId}</span>

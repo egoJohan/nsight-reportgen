@@ -49,8 +49,8 @@ export default function ChatPanel({
       const { reply } = await api.materials.chat(materialId, next);
       setMessages((m) => [...m, { role: "assistant", content: reply }]);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Keskustelu epäonnistui";
-      setError(/503/.test(msg) ? "AI-palvelu ei ole juuri nyt käytettävissä." : msg);
+      const msg = e instanceof Error ? e.message : "The chat failed";
+      setError(/503/.test(msg) ? "The AI service is unavailable right now." : msg);
     } finally {
       setLoading(false);
     }
@@ -74,12 +74,12 @@ export default function ChatPanel({
           open ? "translate-x-0" : "translate-x-full"
         )}
         role="dialog"
-        aria-label="Keskustele datasta"
+        aria-label="Chat with the data"
       >
         <div className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <SparklesIcon className="size-4 text-primary" />
-            <h2 className={SECTION_TITLE}>Keskustele datasta</h2>
+            <h2 className={SECTION_TITLE}>Chat with the data</h2>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Sulje">
             <XIcon className="size-4" />
@@ -109,9 +109,7 @@ export default function ChatPanel({
           ))}
           {loading && (
             <div className="mr-auto flex items-center gap-2 rounded-2xl bg-muted px-3 py-2 text-sm text-muted-foreground">
-              <Loader2Icon className="size-4 animate-spin" />
-              Mietitään…
-            </div>
+              <Loader2Icon className="size-4 animate-spin" />Thinking…</div>
           )}
           {error && (
             <div className="mr-auto rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -133,14 +131,14 @@ export default function ChatPanel({
                 }
               }}
               rows={1}
-              placeholder="Kysy datasta…"
+              placeholder="Ask about the data…"
               className="max-h-32 min-h-9 flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <Button
               size="icon"
               onClick={() => void send()}
               disabled={loading || !input.trim()}
-              aria-label="Lähetä"
+              aria-label="Send"
             >
               <SendIcon className="size-4" />
             </Button>

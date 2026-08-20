@@ -68,13 +68,13 @@ function FontRow({
             <p className="mt-1 text-xs text-muted-foreground">{font.reason}</p>
           )}
           <div className="mt-2 flex items-center gap-2">
-            <label className="text-xs text-muted-foreground">Korvaa fontilla</label>
+            <label className="text-xs text-muted-foreground">Substitute with</label>
             <select
               className="h-8 min-w-0 flex-1 rounded-md border bg-surface px-2 text-sm"
               value={chosen}
               onChange={(e) => onChoose(e.target.value)}
             >
-              <option value="">Ei korvausta</option>
+              <option value="">No substitute</option>
               {available.map((f) => (
                 <option key={f} value={f}>
                   {f}
@@ -124,7 +124,7 @@ export default function TemplateSettingsDialog({
       <Button
         size="icon-sm"
         variant="ghost"
-        title="Pohjan asetukset"
+        title="Template settings"
         onClick={() => setOpen(true)}
       >
         <SettingsIcon className="size-4" />
@@ -134,7 +134,7 @@ export default function TemplateSettingsDialog({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="truncate">
-              {data?.name ?? "Pohjan asetukset"}
+              {data?.name ?? "Template settings"}
             </DialogTitle>
             <DialogDescription>
               Pohjan tiedot ja fontit. Korvaus koskee esikatselua ja PDF:ää —
@@ -143,15 +143,15 @@ export default function TemplateSettingsDialog({
           </DialogHeader>
 
           {!data ? (
-            <p className="text-sm text-muted-foreground">Ladataan…</p>
+            <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
             <div className="space-y-4">
               <div className="rounded-lg border px-3 py-1">
-                <Field label="Kuvaajalayout">{data.layout_name || "—"}</Field>
-                <Field label="Otsikkofontti">{data.heading_font || "—"}</Field>
-                <Field label="Leipäfontti">{data.body_font || "—"}</Field>
-                <Field label="Koko">{bytes(data.size)}</Field>
-                <Field label="Väripaletti">
+                <Field label="Chart layout">{data.layout_name || "—"}</Field>
+                <Field label="Heading font">{data.heading_font || "—"}</Field>
+                <Field label="Body font">{data.body_font || "—"}</Field>
+                <Field label="Size">{bytes(data.size)}</Field>
+                <Field label="Colour palette">
                   <span className="inline-flex gap-0.5 align-middle">
                     {data.palette.map((c) => (
                       <span
@@ -166,12 +166,10 @@ export default function TemplateSettingsDialog({
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold">Fontit</h4>
+                <h4 className="text-sm font-semibold">Fonts</h4>
                 <div className="mt-1">
                   {data.fonts.length === 0 && (
-                    <p className="py-2 text-xs text-muted-foreground">
-                      Pohja ei nimeä fontteja.
-                    </p>
+                    <p className="py-2 text-xs text-muted-foreground">The template names no fonts.</p>
                   )}
                   {data.fonts.map((f) => (
                     <FontRow

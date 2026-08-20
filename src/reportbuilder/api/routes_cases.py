@@ -82,7 +82,7 @@ def delete_case(
             status_code=409,
             detail={
                 "error": "consent_required",
-                "message": "Poisto vaatii vahvistuksen datahivessä.",
+                "message": "Deleting needs approval in datahive.",
                 "request_id": exc.request_id,
                 "target": exc.target,
                 "approve": exc.envelope.get("approval_urls", {}),

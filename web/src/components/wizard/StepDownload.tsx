@@ -93,7 +93,7 @@ export default function StepDownload({
     try {
       const ok = await save();
       if (!ok) {
-        setError("Raportin tallennus ennen renderöintiä epäonnistui. Yritä uudelleen.");
+        setError("Could not save the report before rendering. Try again.");
         return;
       }
       const out = await render.mutateAsync({
@@ -109,10 +109,10 @@ export default function StepDownload({
         setCancelled(true);
         return;
       }
-      const msg = e instanceof Error ? e.message : "Renderöinti epäonnistui";
+      const msg = e instanceof Error ? e.message : "Rendering failed";
       // 503 → LibreOffice missing
       if (/503/.test(msg) || /libreoffice/i.test(msg)) {
-        setError("Kuvaajien renderöinti vaatii LibreOfficen palvelimelle.");
+        setError("Rendering charts needs LibreOffice on the server.");
       } else {
         setError(msg);
       }
@@ -130,13 +130,13 @@ export default function StepDownload({
           : await api.reports.previewPptx(caseId, reportId);
       downloadBlob(blob, `${fileBase}.${kind}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lataus epäonnistui");
+      setError(e instanceof Error ? e.message : "Download failed");
     } finally {
       setDownloading(null);
     }
   }
 
-  // Deck generation is DELIBERATE (a "Luo esitys" click), not automatic on entering
+  // Deck generation is DELIBERATE (a "Generate deck" click), not automatic on entering
   // this step — a full render can be very resource-heavy (a large deck of slides), so it
   // must never run just because the user navigated here.
   const pending = render.isPending;
@@ -149,7 +149,7 @@ export default function StepDownload({
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h3 className={PANEL_TITLE}>Luo esitys</h3>
+          <h3 className={PANEL_TITLE}>Generate deck</h3>
           <p className="mt-0.5 text-sm text-muted-foreground">
             Assemble {deckCharts.length}{" "}
             {deckCharts.length === 1 ? "slide" : "slides"} into a PowerPoint
@@ -188,7 +188,7 @@ export default function StepDownload({
           ) : (
             <Button className="min-w-[150px]" onClick={handleGenerate} disabled={noCharts}>
               <SparklesIcon className="size-4" />
-              {rendered ? "Luo esitys uudelleen" : "Luo esitys"}
+              {rendered ? "Generate again" : "Generate deck"}
             </Button>
           )}
         </div>
@@ -229,9 +229,7 @@ export default function StepDownload({
         <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
           <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-amber-600" />
           <div className="leading-snug">
-            <p className="font-medium">
-              Esikatselu ja PDF käyttävät korvaavaa fonttia
-            </p>
+            <p className="font-medium">The preview and the PDF use a substitute font</p>
             <p className="mt-1 text-muted-foreground">
               PowerPoint-tiedosto viittaa pohjan omaan fonttiin, joten se
               näyttää oikealta koneella jolle fontti on asennettu.
@@ -260,7 +258,7 @@ export default function StepDownload({
         <div className="flex h-[640px] w-full flex-col items-center justify-center gap-4 rounded-xl border bg-muted/30 text-center">
           <Loader2Icon className="size-7 animate-spin text-primary" />
           <div>
-            <p className="text-sm font-medium">Luodaan esitystä…</p>
+            <p className="text-sm font-medium">Generating the deck…</p>
             <p className="mt-1 text-sm text-muted-foreground">
               Rendering charts and assembling slides — this can take a moment.
             </p>
@@ -272,7 +270,7 @@ export default function StepDownload({
       ) : pdfUrl ? (
         <iframe
           src={pdfUrl}
-          title="Raportin PDF-esikatselu"
+          title="Report PDF preview"
           className="h-[640px] w-full rounded-xl border"
         />
       ) : null}

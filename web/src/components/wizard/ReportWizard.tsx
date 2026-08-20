@@ -80,7 +80,7 @@ function replaceSpecialGroup(
 const STEPS = [
   { id: "select", label: "Valinta" },
   { id: "configure", label: "Suunnittelu" },
-  { id: "download", label: "Esikatselu" },
+  { id: "download", label: "Preview" },
 ];
 
 // Index of the Design step — the Preview grid jumps here when a slide is clicked.
@@ -687,13 +687,13 @@ export default function ReportWizard({
 
   // ── Special (non-chart) slides: Overview / Conclusion / Demographics ──────
   const SPECIAL_HEADINGS: Record<string, string> = {
-    special_overview: "Tutkimuksen taustaa",
-    special_conclusion: "Johtopäätökset",
-    special_demographics: "Vastaajat",
+    special_overview: "Study background",
+    special_conclusion: "Conclusions",
+    special_demographics: "Respondents",
     // Blank: placeholder heading. An entirely empty slide renders as a blank
     // cream page and reads as "nothing was added" — give the author something
     // visible to overwrite.
-    special_blank: "Otsikko",
+    special_blank: "Title",
   };
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
   const reportQuestionRefs = useCallback(
@@ -803,7 +803,7 @@ export default function ReportWizard({
         // A blank slide is never filled in by AI, so it needs starter content or
         // it renders empty. Markdown: "*" starts a bullet, two spaces nest one.
         ...(type === "special_blank"
-          ? { bullets: ["* Kirjoita sisältö tähän", "  * Sisennetty alakohta"] }
+          ? { bullets: ["* Write your content here", "  * An indented sub-point"] }
           : {}),
       });
       const group = placeholder.question_ref;

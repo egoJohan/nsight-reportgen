@@ -38,7 +38,7 @@ export default function TemplateUploadButton({
       }
     } catch (e) {
       // The server rejects a template it cannot render into, with the reason.
-      toast.error(e instanceof Error ? e.message : "Pohjan lataus epäonnistui");
+      toast.error(e instanceof Error ? e.message : "Template upload failed");
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";

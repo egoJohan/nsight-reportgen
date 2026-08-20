@@ -95,7 +95,7 @@ function CaseHeading({
           setDraft(name);
           setEditing(true);
         }}
-        title="Muuta tutkimuksen nimeä"
+        title="Rename study"
       >
         <PencilIcon className="size-4" />
       </Button>
@@ -151,7 +151,7 @@ export default function CaseDetailPage() {
     deleteCase.mutate(id, {
       onSuccess: () => {
         clearWorkspace(id);
-        toast.success("Tutkimus poistettu");
+        toast.success("Study deleted");
         // One level up — the asiakas whose tutkimus this was — not the landing
         // page. Deleting one study of several should leave you looking at the
         // rest of them. A pre-hierarchy case has no customer page to go to.
@@ -208,9 +208,7 @@ export default function CaseDetailPage() {
             className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
             onClick={() => setConfirmDelete(true)}
           >
-            <Trash2Icon className="size-4" />
-            Poista tutkimus
-          </Button>
+            <Trash2Icon className="size-4" />Delete study</Button>
         </div>
       </div>
 
@@ -232,16 +230,14 @@ export default function CaseDetailPage() {
       <Dialog open={confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(false)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Poistetaanko tutkimus?</DialogTitle>
+            <DialogTitle>Delete this study?</DialogTitle>
             <DialogDescription>
               Tämä poistaa pysyvästi tutkimuksen “{caseName || id}”, sen ladatun
               datan ja sen raportit. Toimintoa ei voi perua.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Peruuta
-            </Button>
+            <Button variant="outline" onClick={() => setConfirmDelete(false)}>Cancel</Button>
             <Button
               variant="destructive"
               onClick={handleDelete}

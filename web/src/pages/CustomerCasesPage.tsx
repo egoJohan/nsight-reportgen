@@ -55,7 +55,7 @@ export default function CustomerCasesPage() {
       setName("");
       navigate(`/cases/${created.id}`);
     } catch {
-      toast.error("Tutkimuksen luonti epäonnistui");
+      toast.error("Could not create the study");
     }
   }
 
@@ -67,7 +67,7 @@ export default function CustomerCasesPage() {
         <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
       </div>
 
-      {/* Its own section, headed like "Tutkimukset" below: the pohjat belong to
+      {/* Its own section, headed like "Studies" below: the pohjat belong to
           the asiakas, and every tutkimus under it picks from this list. */}
       {customerId && (
         <>
@@ -75,7 +75,7 @@ export default function CustomerCasesPage() {
               a page with two lists has no single button whose target you have
               to work out. */}
           <div className={SECTION_HEADER}>
-            <h2 className={SECTION_TITLE}>Esityspohjat</h2>
+            <h2 className={SECTION_TITLE}>Templates</h2>
             <TemplateUploadButton
               customerId={customerId}
               // The FIRST one becomes the asiakas's pohja, so a customer set
@@ -99,31 +99,25 @@ export default function CustomerCasesPage() {
         </>
       )}
 
-      {/* SECTION_TITLE, the same as "Raportit" on the tutkimus page: this
+      {/* SECTION_TITLE, the same as "Reports" on the tutkimus page: this
           divides the page, it is not a muted label inside a dialog. */}
       <div className={SECTION_HEADER}>
-        <h2 className={SECTION_TITLE}>Tutkimukset</h2>
+        <h2 className={SECTION_TITLE}>Studies</h2>
         <Button onClick={() => setOpen(true)}>
-          <PlusIcon className="mr-2 size-4" />
-          Uusi tutkimus
-        </Button>
+          <PlusIcon className="mr-2 size-4" />New study</Button>
       </div>
 
       <div className="mt-3 space-y-2">
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
-          <p className={ERROR}>
-            Tutkimusten haku epäonnistui.
-          </p>
+          <p className={ERROR}>Could not load the studies.</p>
         )}
 
         {cases?.length === 0 && (
           <div className={EMPTY}>
             <FolderIcon className="mx-auto size-8 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              Tällä asiakkaalla ei ole vielä tutkimuksia.
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">This customer has no studies yet.</p>
           </div>
         )}
 
@@ -145,7 +139,7 @@ export default function CustomerCasesPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Uusi tutkimus</DialogTitle>
+            <DialogTitle>New study</DialogTitle>
             <DialogDescription>
               Tutkimus kuuluu asiakkaaseen {customer?.name}.
             </DialogDescription>
@@ -153,17 +147,13 @@ export default function CustomerCasesPage() {
           <Input
             autoFocus
             value={name}
-            placeholder="Tutkimuksen nimi"
+            placeholder="Study name"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Peruuta
-            </Button>
-            <Button onClick={submit} disabled={!name.trim() || createCase.isPending}>
-              Luo
-            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={submit} disabled={!name.trim() || createCase.isPending}>Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -32,7 +32,7 @@ function MissingFonts({ missing }: { missing: MissingFont[] }) {
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
       <div className="flex items-center gap-2">
         <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
-        <h3 className={PANEL_TITLE}>Puuttuvat fontit</h3>
+        <h3 className={PANEL_TITLE}>Missing fonts</h3>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         Nämä fontit puuttuvat palvelimelta. PowerPoint-tiedosto viittaa silti
@@ -74,14 +74,14 @@ function FontRow({ font }: { font: InstalledFont }) {
           <p className="truncate text-sm font-medium">{font.family}</p>
           <p className="truncate text-xs text-muted-foreground">
             {font.filename} · {bytes(font.size)}
-            {!font.on_host && " · ei tällä palvelimella"}
+            {!font.on_host && " · not on this server"}
           </p>
         </div>
       </div>
       <Button
         size="icon-sm"
         variant="ghost"
-        title="Poista fontti"
+        title="Remove font"
         disabled={actions.remove.isPending}
         onClick={() =>
           actions.remove.mutate(font.id, {
@@ -112,7 +112,7 @@ function ChartFontSetting() {
 
   return (
     <div className={`${PANEL} p-4`}>
-      <h3 className={PANEL_TITLE}>Kuvaajien fontti</h3>
+      <h3 className={PANEL_TITLE}>Chart font</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         Kuvaajien teksti piirretään tällä fontilla. Se on tarkoituksella eri
         asetus kuin esityspohjan fontti: kapeampi fontti mahtuu paremmin pitkiin
@@ -173,7 +173,7 @@ function FontsTab() {
       <ChartFontSetting />
 
       <div className={`${PANEL} p-4`}>
-        <h3 className={PANEL_TITLE}>Asennetut fontit</h3>
+        <h3 className={PANEL_TITLE}>Installed fonts</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           nSight asentaa avoimen lisenssin fontit automaattisesti Google
           Fontsista. Kaupallisia fontteja (esim. Century Gothic, Calibri,
@@ -204,8 +204,8 @@ function FontsTab() {
           )}
           <p className="mt-2 text-sm">
             {actions.upload.isPending
-              ? "Asennetaan…"
-              : "Pudota .ttf- tai .otf-fontti tähän"}
+              ? "Installing…"
+              : "Drop a .ttf or .otf font here"}
           </p>
           <Button
             variant="outline"
@@ -213,9 +213,7 @@ function FontsTab() {
             className="mt-3"
             disabled={actions.upload.isPending}
             onClick={() => fileRef.current?.click()}
-          >
-            Valitse tiedosto
-          </Button>
+          >Choose a file</Button>
           <input
             ref={fileRef}
             type="file"
@@ -231,7 +229,7 @@ function FontsTab() {
 
         <div className="mt-4 space-y-1">
           {isLoading && (
-            <p className="text-xs text-muted-foreground">Ladataan…</p>
+            <p className="text-xs text-muted-foreground">Loading…</p>
           )}
           {data?.fonts.length === 0 && !isLoading && (
             <p className={`${EMPTY} text-sm text-muted-foreground`}>
@@ -251,11 +249,11 @@ function FontsTab() {
 export default function SettingsPage() {
   return (
     <div className={PAGE}>
-      <h1 className={PAGE_TITLE}>Asetukset</h1>
+      <h1 className={PAGE_TITLE}>Settings</h1>
 
       <Tabs defaultValue="fonts" className="mt-6">
         <TabsList>
-          <TabsTrigger value="fonts">Fontit</TabsTrigger>
+          <TabsTrigger value="fonts">Fonts</TabsTrigger>
         </TabsList>
         <TabsContent value="fonts" className="mt-4">
           <FontsTab />

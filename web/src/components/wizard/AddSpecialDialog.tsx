@@ -42,34 +42,34 @@ const SLIDE_CHOICES: {
     type: "special_overview",
     label: "Yhteenveto",
     description:
-      "Taustaa tutkimuksesta, tekoälyn kirjoittamana saatavilla olevasta tiedosta.",
+      "Background on the study, written by AI from what is available.",
     Icon: FileTextIcon,
   },
   {
     type: "special_conclusion",
-    label: "Johtopäätökset",
+    label: "Conclusions",
     description:
-      "Raportin kysymyksistä vedetyt keskeiset johtopäätökset, tekoälyn kirjoittamana.",
+      "The key conclusions drawn from the report's questions, written by AI.",
     Icon: ListChecksIcon,
   },
   {
     type: "special_demographics",
     label: "Taustatiedot",
     description:
-      "Tietoa vastaajista sekä kuvaaja jokaisesta taustakysymyksestä, tekoälyn kirjoittamana.",
+      "Who answered, plus a chart per background question, written by AI.",
     Icon: UsersIcon,
   },
   {
     type: "special_blank",
-    label: "Tyhjä dia",
+    label: "Blank slide",
     description:
-      "Otsikko ja omat ranskalaiset viivat markdownina — mitään ei generoida.",
+      "A heading and your own bullets in markdown — nothing is generated.",
     Icon: PencilLineIcon,
     repeatable: true,
   },
   {
     type: "compare_groups",
-    label: "Vertaa ryhmiä",
+    label: "Compare groups",
     description:
       "Yksi dia per kysymys, jaettuna valitsemasi muuttujan ryhmiin — esim. kahteen pakkausvaihtoehtoon.",
     Icon: ColumnsIcon,
@@ -123,12 +123,12 @@ export function AddSpecialDialog({
       >
         <DialogHeader className="min-w-0">
           <DialogTitle>
-            {mode === "compare" ? "Vertaa ryhmiä" : "Lisää dia"}
+            {mode === "compare" ? "Compare groups" : "Add slide"}
           </DialogTitle>
           <DialogDescription>
             {mode === "compare"
               ? "Lisää yhden dian per kysymys, jaettuna valitun muuttujan ryhmiin. Nykyiset kokonaistason diat säilyvät ennallaan."
-              : "Lisää dia yksi-per-kysymys-oletusten lisäksi."}
+              : "Add a slide beyond the one-per-question defaults."}
           </DialogDescription>
         </DialogHeader>
 
@@ -260,7 +260,7 @@ function CompareGroupsForm({
         <Label className="text-xs font-medium text-muted-foreground">Ryhmittele</Label>
         <Select value={clf} onValueChange={(v) => setClf(v ?? "")}>
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Valitse muuttuja…" />
+            <SelectValue placeholder="Choose a variable…" />
           </SelectTrigger>
           <SelectContent>
             {segmenters.map((v) => (
@@ -278,7 +278,7 @@ function CompareGroupsForm({
             Questions
           </Label>
           {/* Only the questions this variable SPLITS can be selected, so
-              "Valitse kaikki" means all selectable ones — never a disabled row. */}
+              "Select all" means all selectable ones — never a disabled row. */}
           {clf && !loading && selectable.length > 0 && (
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -357,7 +357,7 @@ function CompareGroupsForm({
         <Button disabled={!clf || chosen.length === 0} onClick={() => onSubmit(clf, chosen)}>
           {chosen.length
             ? `Add ${chosen.length} slide${chosen.length === 1 ? "" : "s"}`
-            : "Lisää diat"}
+            : "Add slides"}
         </Button>
       </DialogFooter>
     </>

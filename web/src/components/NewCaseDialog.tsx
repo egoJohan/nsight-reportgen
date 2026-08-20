@@ -34,7 +34,7 @@ export default function NewCaseDialog({
 
   async function handleFile(file: File) {
     if (!file.name.match(/\.(sav|zsav)$/i)) {
-      setError("Valitse .sav- tai .zsav-muotoinen SPSS-tiedosto.");
+      setError("Choose an SPSS .sav or .zsav file.");
       return;
     }
     setError(null);
@@ -72,7 +72,7 @@ export default function NewCaseDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Uusi tutkimus</DialogTitle>
+          <DialogTitle>New study</DialogTitle>
           <DialogDescription>
             Upload an SPSS file — it becomes a new case, named from the survey's
             title. You can rename it later.
@@ -92,7 +92,7 @@ export default function NewCaseDialog({
             <UploadCloudIcon className="size-6 text-muted-foreground" />
           </div>
           <p className="text-sm font-medium">
-            {busy ? "Importing…" : "Pudota SPSS-tiedosto tähän"}
+            {busy ? "Importing…" : "Drop an SPSS file here"}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             .sav or .zsav — or{" "}

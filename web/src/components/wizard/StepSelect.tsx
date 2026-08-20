@@ -24,9 +24,9 @@ import { slideTitle } from "@/components/wizard/SlideGrid";
 // Human labels for the special-slide types (for the deck-row info dialog).
 const SPECIAL_KIND: Record<string, string> = {
   special_overview: "Yhteenveto",
-  special_conclusion: "Johtopäätökset",
+  special_conclusion: "Conclusions",
   special_demographics: "Taustatiedot",
-  special_blank: "Tyhjä dia",
+  special_blank: "Blank slide",
 };
 
 // Lightweight details for a special (non-question) slide — special slides have no
@@ -48,7 +48,7 @@ function SpecialSlideInfoDialog({
             {chart ? slideTitle(chart, questionMap) : ""}
           </DialogTitle>
           <DialogDescription className="text-left">
-            {chart ? (SPECIAL_KIND[chart.chart_type] ?? "Erikoisdia") : ""}
+            {chart ? (SPECIAL_KIND[chart.chart_type] ?? "Special slide") : ""}
           </DialogDescription>
         </DialogHeader>
         <p className="text-sm leading-relaxed text-muted-foreground">
@@ -129,7 +129,7 @@ export default function StepSelect({
   onGroupingChange: (override: GroupingOverride) => void;
   onPruneRefs: (validQids: Set<string>) => void;
 }) {
-  // Needed by the "Vertaa ryhmiä" form's Group-by picker.
+  // Needed by the "Compare groups" form's Group-by picker.
   const { data: variables } = useVariables(materialId);
   const { data: questions, isLoading, isError } = useRegroupedQuestions(
     materialId,
@@ -187,7 +187,7 @@ export default function StepSelect({
 
   function groupAsBattery(s: BatterySuggestion) {
     // Open the grouping dialog with the suggested variables PRE-SELECTED — the user sees
-    // them highlighted and clicks "Ryhmitä patteristoksi" to create it (nothing auto-groups).
+    // them highlighted and clicks "Group as a battery" to create it (nothing auto-groups).
     setDialogSelection([...s.variables]);
     setGroupingOpen(true);
   }
@@ -292,7 +292,7 @@ export default function StepSelect({
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-24 text-center">
         <AlertCircleIcon className="mb-3 size-8 text-muted-foreground/50" />
-        <p className="text-sm font-medium">Kysymysten lataus ei onnistunut</p>
+        <p className="text-sm font-medium">Could not load the questions</p>
         <p className="mt-1 max-w-xs text-sm text-muted-foreground">
           It may have been removed. Re-import the data for this case.
         </p>
@@ -312,7 +312,7 @@ export default function StepSelect({
         <div className="relative max-w-sm flex-1">
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Hae kysymyksiä…"
+            placeholder="Search questions…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -324,7 +324,7 @@ export default function StepSelect({
             size="icon-sm"
             className="shrink-0"
             onClick={() => setSearch("")}
-            title="Tyhjennä haku"
+            title="Clear search"
           >
             <XIcon className="size-4" />
           </Button>
@@ -429,14 +429,14 @@ export default function StepSelect({
 
       {/* Title + Select all / Unselect all (right-aligned). Always shown. */}
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm font-medium">Kysymykset</p>
+        <p className="text-sm font-medium">Questions</p>
         <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
             disabled={allChartable.length <= addedQuestions.length}
             onClick={() => onSelectMany(allChartable, true)}
-            title="Valitse kaikki kysymykset"
+            title="Select all questions"
           >
             <CheckCheckIcon className="size-4" /> Select all
           </Button>
@@ -445,7 +445,7 @@ export default function StepSelect({
             size="sm"
             disabled={addedQuestions.length === 0}
             onClick={() => onSelectMany(addedQuestions, false)}
-            title="Poista kaikkien kysymysten valinta (erikoisdiat säilyvät)"
+            title="Deselect every question (special slides stay)"
           >
             <XIcon className="size-4" /> Unselect all
           </Button>
@@ -466,7 +466,7 @@ export default function StepSelect({
                 <button
                   type="button"
                   onClick={() => onToggleExcluded(i)}
-                  title={c.excluded ? "Lisää tähän raporttiin klikkaamalla" : "Mukana — poista valinta klikkaamalla"}
+                  title={c.excluded ? "Click to add to this report" : "Included — click to remove"}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg border py-2.5 pr-11 pl-3 text-left transition-colors",
                     c.excluded
@@ -499,7 +499,7 @@ export default function StepSelect({
                 <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                   <button
                     type="button"
-                    title="Lisää…"
+                    title="Add…"
                     onClick={() =>
                       setMenuQid(menuQid === c.question_ref ? null : c.question_ref)
                     }
@@ -612,7 +612,7 @@ export default function StepSelect({
               <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                 <button
                   type="button"
-                  title="Lisää…"
+                  title="Add…"
                   onClick={() => setMenuQid(menuQid === q.qid ? null : q.qid)}
                   className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
@@ -676,7 +676,7 @@ export default function StepSelect({
                     <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                       <button
                         type="button"
-                        title="Lisää…"
+                        title="Add…"
                         onClick={() => setMenuQid(menuQid === rowKey ? null : rowKey)}
                         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                       >

@@ -288,7 +288,7 @@ def case_template(customer_id: str, case_id: str,
         name = next((t.name for t in repo.list_templates(auth, customer_id)
                      if t.id == template_id), "")
     return {"template_id": template_id, "level": level,
-            "name": name or ("nSight-oletuspohja" if not template_id else template_id)}
+            "name": name or ("nSight default template" if not template_id else template_id)}
 
 
 @templates_router.get(
@@ -307,7 +307,7 @@ def report_template(customer_id: str, case_id: str, report_id: str,
         name = next((t.name for t in repo.list_templates(auth, customer_id)
                      if t.id == template_id), "")
     return {"template_id": template_id, "level": level,
-            "name": name or ("nSight-oletuspohja" if not template_id else template_id)}
+            "name": name or ("nSight default template" if not template_id else template_id)}
 
 
 @templates_router.post(

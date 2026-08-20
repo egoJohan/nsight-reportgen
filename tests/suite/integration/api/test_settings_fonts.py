@@ -249,7 +249,7 @@ def test_a_font_this_host_lacks_is_refused(client_store, host):
                             json={"family": "Definitely Not Installed"})
 
     assert resp.status_code == 422
-    assert "ei ole asennettu" in resp.json()["detail"]
+    assert "is not installed" in resp.json()["detail"]
     assert client_store.get("/settings/chart-font").json()["family"] == ""
 
 

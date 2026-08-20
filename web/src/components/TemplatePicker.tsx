@@ -48,13 +48,13 @@ export default function TemplatePicker({
   return (
     <div className={`${PANEL} px-3 py-2.5`}>
       <div className="space-y-0.5">
-        {isLoading && <p className="text-xs text-muted-foreground">Ladataan…</p>}
+        {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
 
         {templates?.length === 0 && !isLoading && (
           <p className="text-xs text-muted-foreground">
             {manageLibrary
-              ? "Ei vielä pohjia. Lataa asiakkaan oma PowerPoint-pohja."
-              : "Asiakkaalle ei ole lisätty pohjia. Lisää ne asiakkaan sivulla."}
+              ? "No templates yet. Upload the customer's own PowerPoint template."
+              : "This customer has no templates. Add them on the customer's page."}
           </p>
         )}
 
@@ -68,7 +68,7 @@ export default function TemplatePicker({
               <button
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 onClick={() => onBind(active ? null : t.id)}
-                title={active ? "Poista valinta (peri ylemmältä)" : "Ota käyttöön"}
+                title={active ? "Clear selection (inherit from above)" : "Use this one"}
               >
                 {/* Always visible, selected or not. An invisible checkmark
                     left an unselected list looking like a read-only display —
@@ -132,7 +132,7 @@ export default function TemplatePicker({
                   size="icon-sm"
                   variant="ghost"
                   className="text-muted-foreground hover:text-destructive"
-                  title="Poista pohja asiakkaalta"
+                  title="Delete template from the customer"
                   onClick={() => setConfirmDelete(t)}
                 >
                   <Trash2Icon className="size-4" />
@@ -149,7 +149,7 @@ export default function TemplatePicker({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Poistetaanko pohja?</DialogTitle>
+            <DialogTitle>Delete this template?</DialogTitle>
             <DialogDescription>
               “{confirmDelete?.name}” poistetaan asiakkaalta kokonaan, myös
               niistä tutkimuksista ja raporteista, jotka käyttävät sitä. Ne
@@ -161,18 +161,14 @@ export default function TemplatePicker({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(null)}>
-              Peruuta
-            </Button>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
             <Button
               variant="destructive"
               onClick={() => {
                 if (confirmDelete) actions.remove.mutate(confirmDelete.id);
                 setConfirmDelete(null);
               }}
-            >
-              Poista pohja
-            </Button>
+            >Delete template</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -47,7 +47,7 @@ export default function TemplateSelect({
   const labels: Record<string, string> = {
     [INHERIT]: inherited
       ? `Käytä yläpuolen asetusta (${inherited.name})`
-      : "Käytä yläpuolen asetusta",
+      : "Use parent setting",
     ...Object.fromEntries((templates ?? []).map((t) => [t.id, t.name])),
   };
 
@@ -62,8 +62,8 @@ export default function TemplateSelect({
         <SelectValue
           placeholder={
             templates?.length
-              ? "Valitse pohja"
-              : "Ei pohjia — lisää asiakkaan sivulla"
+              ? "Choose a template"
+              : "No templates — add one on the customer's page"
           }
         />
       </SelectTrigger>

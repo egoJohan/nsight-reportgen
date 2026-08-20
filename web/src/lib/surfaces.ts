@@ -37,7 +37,7 @@ export const PAGE_TITLE = "text-2xl font-semibold tracking-tight";
 export const PAGE_SUB = "mt-1 text-sm text-muted-foreground";
 export const SECTION_TITLE = "text-base font-semibold tracking-tight";
 export const PANEL_TITLE = "text-sm font-semibold";
-/** A section heading with its own action beside it — "Tutkimukset" + "Uusi
+/** A section heading with its own action beside it — "Studies" + "Uusi
  *  tutkimus". One per list, so a page with several lists never has a single
  *  button whose target the reader has to infer. */
 export const SECTION_HEADER =

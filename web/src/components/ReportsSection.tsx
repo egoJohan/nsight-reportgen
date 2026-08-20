@@ -39,11 +39,11 @@ function ReportRow({
 }) {
   const { data: doc, isLoading } = useReport(caseId, report.id);
   const n = doc?.charts?.length ?? null;
-  const status = n == null ? null : n === 0 ? "Tyhjä" : "Luonnos";
+  const status = n == null ? null : n === 0 ? "Empty" : "Draft";
   const created = formatReportDate(report.createdAt);
   const base =
     n == null
-      ? "Ladataan…"
+      ? "Loading…"
       : n === 0
         ? "No charts yet"
         : `${n} chart${n === 1 ? "" : "s"} · ${n} slide${n === 1 ? "" : "s"}`;
@@ -60,14 +60,14 @@ function ReportRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{report.name}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {isLoading ? "Ladataan…" : stat}
+          {isLoading ? "Loading…" : stat}
         </p>
       </div>
       {status && (
         <Badge
           variant="outline"
           className={
-            status === "Tyhjä"
+            status === "Empty"
               ? "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
               : "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
           }
@@ -91,7 +91,7 @@ function ReportRow({
 }
 
 /**
- * The Reports section: a list (like the Questions list) with "Luo uusi raportti"
+ * The Reports section: a list (like the Questions list) with "New report"
  * as the top row, then each report showing its status + statistics.
  */
 export default function ReportsSection({
@@ -152,7 +152,7 @@ export default function ReportsSection({
         removeReport(id);
         qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
         setConfirmDelete(null);
-        toast.success("Raportti poistettu");
+        toast.success("Report deleted");
       },
       onError: (e) => {
         if (e instanceof Error && e.message.startsWith("404")) removeReport(id);
@@ -166,7 +166,7 @@ export default function ReportsSection({
   return (
     <section>
       <div className="mb-3">
-        <h2 className={SECTION_TITLE}>Raportit</h2>
+        <h2 className={SECTION_TITLE}>Reports</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           Build chart reports from this case's survey data.
         </p>
@@ -188,7 +188,7 @@ export default function ReportsSection({
             )}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium">Luo uusi raportti</p>
+            <p className="text-sm font-medium">New report</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Pick questions and build charts
             </p>
@@ -212,7 +212,7 @@ export default function ReportsSection({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Poistetaanko raportti?</DialogTitle>
+            <DialogTitle>Delete this report?</DialogTitle>
             <DialogDescription>
               This permanently removes the report and its charts. This cannot be
               undone.

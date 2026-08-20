@@ -435,7 +435,7 @@ export function makeDemographicsGrid(
     show_empty_categories: false,
     not_answered_codes: null,
     category_label_overrides: [],
-    slide_title: opts?.slide_title ?? "Vastaajat",
+    slide_title: opts?.slide_title ?? "Respondents",
     slide_description: null,
     footer_note: null,
     options: { charts: cells, ...(opts?.group ? { group: opts.group } : {}) },
@@ -453,7 +453,7 @@ export function buildDemographicsGrids(
   for (let p = 0; p < pages; p++) {
     out.push(
       makeDemographicsGrid(cells.slice(p * per, (p + 1) * per), {
-        slide_title: pages > 1 ? `Vastaajat (${p + 1}/${pages})` : "Vastaajat",
+        slide_title: pages > 1 ? `Vastaajat (${p + 1}/${pages})` : "Respondents",
         group,
       })
     );

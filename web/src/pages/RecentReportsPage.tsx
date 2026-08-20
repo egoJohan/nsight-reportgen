@@ -53,23 +53,19 @@ export default function RecentReportsPage() {
 
         {/* Recent reports */}
         <div className="mt-16">
-          <h2 className={`${OVERLINE} mb-3`}>
-            Viimeisimmät raportit
-          </h2>
+          <h2 className={`${OVERLINE} mb-3`}>Recent reports</h2>
 
           <div className="space-y-2">
             {isLoading &&
               [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
 
-            {isError && <p className={ERROR}>Raporttien haku epäonnistui.</p>}
+            {isError && <p className={ERROR}>Could not load the reports.</p>}
 
             {reports?.length === 0 && (
               <div className={EMPTY}>
                 <FileTextIcon className="mx-auto size-7 text-muted-foreground/50" />
-                <p className="mt-3 text-sm font-medium">Ei vielä raportteja</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Aloita luomalla asiakas ja tuomalla sille tutkimus.
-                </p>
+                <p className="mt-3 text-sm font-medium">No reports yet</p>
+                <p className="mt-1 text-sm text-muted-foreground">Start by creating a customer and importing a study for it.</p>
               </div>
             )}
 

@@ -44,7 +44,7 @@ export default function CustomersPage() {
       setName("");
       navigate(`/customers/${created.id}`);
     } catch {
-      toast.error("Asiakkaan luonti epäonnistui");
+      toast.error("Could not create the customer");
     }
   }
 
@@ -52,34 +52,26 @@ export default function CustomersPage() {
     <div className={PAGE}>
       <div className={PAGE_HEADER}>
         <div className="min-w-0">
-          <h1 className={PAGE_TITLE}>Asiakkaat</h1>
-          <p className={PAGE_SUB}>Jokainen tutkimus kuuluu yhteen asiakkaaseen.</p>
+          <h1 className={PAGE_TITLE}>Customers</h1>
+          <p className={PAGE_SUB}>Every study belongs to one customer.</p>
         </div>
         <Button onClick={() => setOpen(true)}>
-          <PlusIcon className="mr-2 size-4" />
-          Uusi asiakas
-        </Button>
+          <PlusIcon className="mr-2 size-4" />New customer</Button>
       </div>
 
       <div className="space-y-2">
         {isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
 
         {isError && (
-          <p className={ERROR}>
-            Asiakaslistan haku epäonnistui.
-          </p>
+          <p className={ERROR}>Could not load the customers.</p>
         )}
 
         {customers?.length === 0 && (
           <div className={EMPTY}>
             <Building2Icon className="mx-auto size-8 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              Ei vielä asiakkaita. Luo ensimmäinen aloittaaksesi.
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">No customers yet. Create the first one to get started.</p>
             <Button className="mt-4" onClick={() => setOpen(true)}>
-              <PlusIcon className="mr-2 size-4" />
-              Uusi asiakas
-            </Button>
+              <PlusIcon className="mr-2 size-4" />New customer</Button>
           </div>
         )}
 
@@ -101,25 +93,19 @@ export default function CustomersPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Uusi asiakas</DialogTitle>
-            <DialogDescription>
-              Asiakkaan nimi annetaan luotaessa; sen voi muuttaa myöhemmin.
-            </DialogDescription>
+            <DialogTitle>New customer</DialogTitle>
+            <DialogDescription>The name is given at creation and can be changed later.</DialogDescription>
           </DialogHeader>
           <Input
             autoFocus
             value={name}
-            placeholder="Asiakkaan nimi"
+            placeholder="Customer name"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Peruuta
-            </Button>
-            <Button onClick={submit} disabled={!name.trim() || createCustomer.isPending}>
-              Luo
-            </Button>
+            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={submit} disabled={!name.trim() || createCustomer.isPending}>Create</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

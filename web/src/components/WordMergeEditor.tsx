@@ -67,7 +67,7 @@ export default function WordMergeEditor({
     save.mutate(
       { qid, merges: groups },
       {
-        onSuccess: () => toast.success("Sanapilven yhdistämiset tallennettu"),
+        onSuccess: () => toast.success("Word-cloud merges saved"),
         onError: (e) =>
           toast.error(`Save failed: ${e instanceof Error ? e.message : "unknown error"}`),
       }
@@ -96,7 +96,7 @@ export default function WordMergeEditor({
                 type="button"
                 onClick={() => setGroups((gs) => gs.filter((x) => x !== g))}
                 className="text-muted-foreground hover:text-destructive"
-                title="Pura tämä yhdistäminen"
+                title="Undo this merge"
               >
                 <Undo2Icon className="size-3.5" />
               </button>

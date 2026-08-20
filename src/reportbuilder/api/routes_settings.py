@@ -139,7 +139,7 @@ def put_substitutions(payload: dict = Body(...),
     for missing, use in mapping.items():
         if use and use not in available:
             raise HTTPException(
-                422, f"Fonttia '{use}' ei ole asennettu tälle palvelimelle.")
+                422, f"The font '{use}' is not installed on this server.")
     applied = F.apply_substitutions(mapping)
     repo.set_setting(auth, SUBSTITUTIONS_KEY, {"map": applied})
     return {"map": applied}
@@ -172,7 +172,7 @@ def set_chart_font(payload: dict = Body(...),
     available = set(H.available_chart_fonts())
     if family and family not in available:
         raise HTTPException(
-            422, f"Fonttia '{family}' ei ole asennettu tälle palvelimelle.")
+            422, f"The font '{family}' is not installed on this server.")
     repo.set_setting(auth, CHART_FONT_KEY, {"family": family})
     _cached = None                       # the next render must see the change
     return {"family": family, "effective": H.use_chart_font(family)}
@@ -212,7 +212,7 @@ def delete_font(font_id: str, auth: AuthContext = Depends(get_auth),
         # instead of seeing a delete that silently did nothing.
         raise HTTPException(409, {
             "error": "consent_required",
-            "message": "Fontin poisto vaatii vahvistuksen datahivessä.",
+            "message": "Deleting a font needs approval in datahive.",
             "request_id": exc.request_id,
             "target": exc.target,
             "approve": exc.envelope.get("approval_urls", {}),

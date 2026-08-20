@@ -55,7 +55,7 @@ function CustomerCases({ customerId }: { customerId: string }) {
     return (
       <SidebarMenuSub>
         <SidebarMenuSubItem>
-          <span className="px-2 text-xs text-muted-foreground">Ladataan…</span>
+          <span className="px-2 text-xs text-muted-foreground">Loading…</span>
         </SidebarMenuSubItem>
       </SidebarMenuSub>
     );
@@ -71,7 +71,7 @@ function CustomerCases({ customerId }: { customerId: string }) {
           className="text-primary"
         >
           <PlusIcon className="size-4" />
-          <span>Uusi tutkimus</span>
+          <span>New study</span>
         </SidebarMenuSubButton>
       </SidebarMenuSubItem>
 
@@ -89,7 +89,7 @@ function CustomerCases({ customerId }: { customerId: string }) {
 
       {cases?.length === 0 && (
         <SidebarMenuSubItem>
-          <span className="px-2 text-xs text-muted-foreground">Ei vielä tutkimuksia</span>
+          <span className="px-2 text-xs text-muted-foreground">No studies yet</span>
         </SidebarMenuSubItem>
       )}
     </SidebarMenuSub>
@@ -108,12 +108,12 @@ function LegacyCasesGroup() {
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton onClick={() => setOpen((v) => !v)} tooltip="Ilman asiakasta">
+      <SidebarMenuButton onClick={() => setOpen((v) => !v)} tooltip="No customer">
         <ChevronRightIcon
           className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
         />
         <FolderOpenIcon className="size-4" />
-        <span className="truncate text-muted-foreground">Ilman asiakasta</span>
+        <span className="truncate text-muted-foreground">No customer</span>
       </SidebarMenuButton>
       {open && (
         <SidebarMenuSub>
@@ -152,16 +152,16 @@ function CustomersNav() {
 
   return (
     <SidebarMenu>
-      {/* First, like "Uusi tutkimus" one level down: a create action should not
+      {/* First, like "New study" one level down: a create action should not
           drift down the page as the list it feeds grows. */}
       <SidebarMenuItem>
         <SidebarMenuButton
           render={<NavLink to="/customers?new=customer" />}
-          tooltip="Uusi asiakas"
+          tooltip="New customer"
           className="text-primary"
         >
           <PlusIcon className="size-4" />
-          <span>Uusi asiakas</span>
+          <span>New customer</span>
         </SidebarMenuButton>
       </SidebarMenuItem>
 
@@ -193,7 +193,7 @@ function CustomersNav() {
 /** Where you actually are.
  *
  *  Derived from the route rather than hardcoded: the previous version always
- *  began with "Asiakkaat", which was a lie on the front page and on any page
+ *  began with "Customers", which was a lie on the front page and on any page
  *  outside the customer tree. */
 function Breadcrumb() {
   const location = useLocation();
@@ -208,13 +208,13 @@ function Breadcrumb() {
   const path = location.pathname;
 
   if (path === "/") {
-    crumbs.push({ label: "Etusivu" });
+    crumbs.push({ label: "Home" });
   } else if (path.startsWith("/customers")) {
-    crumbs.push({ label: "Asiakkaat", to: "/customers" });
+    crumbs.push({ label: "Customers", to: "/customers" });
     const c = customers?.find((x) => x.id === customerId);
     if (c) crumbs.push({ label: c.name, to: `/customers/${customerId}` });
   } else if (path.startsWith("/cases/") && id) {
-    crumbs.push({ label: "Asiakkaat", to: "/customers" });
+    crumbs.push({ label: "Customers", to: "/customers" });
     if (resolved) {
       crumbs.push({ label: resolved.customer_name, to: `/customers/${resolved.customer_id}` });
       // Linked WITHOUT the ?report= param, which is how you leave an open
@@ -223,7 +223,7 @@ function Breadcrumb() {
       crumbs.push({ label: resolved.name, to: `/cases/${id}` });
     } else {
       // A legacy case has no customer; say so rather than inventing one.
-      crumbs.push({ label: "Ilman asiakasta" });
+      crumbs.push({ label: "No customer" });
       crumbs.push({
         label: legacyCases?.find((c) => c.id === id)?.name ?? id,
         to: `/cases/${id}`,
@@ -234,7 +234,7 @@ function Breadcrumb() {
     const openReport = searchParams.get("report");
     if (openReport) {
       const name = caseReports?.reports?.find((r) => r.report_id === openReport)?.name;
-      crumbs.push({ label: name || "Raportti" });
+      crumbs.push({ label: name || "Report" });
     }
   }
 
@@ -284,11 +284,9 @@ function ChatLauncher() {
         size="sm"
         className="text-muted-foreground"
         onClick={() => setOpen(true)}
-        title="Keskustele datasta"
+        title="Chat with the data"
       >
-        <MessageSquareTextIcon className="size-4" />
-        Chat
-      </Button>
+        <MessageSquareTextIcon className="size-4" />Chat</Button>
       <ChatPanel materialId={materialId} open={open} onClose={() => setOpen(false)} />
     </>
   );
@@ -340,9 +338,9 @@ export default function AppShell() {
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
-                  <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Etusivu">
+                  <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Home">
                     <ClockIcon className="size-4" />
-                    <span>Etusivu</span>
+                    <span>Home</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -353,9 +351,7 @@ export default function AppShell() {
               management page; the tree is for getting somewhere. */}
           <SidebarGroup className="min-h-0 flex-1 overflow-y-auto group-data-[collapsible=icon]:hidden">
             <SidebarGroupLabel>
-              <NavLink to="/customers" className="transition-colors hover:text-foreground">
-                Asiakkaat
-              </NavLink>
+              <NavLink to="/customers" className="transition-colors hover:text-foreground">Customers</NavLink>
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <CustomersNav />
@@ -369,10 +365,10 @@ export default function AppShell() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={<NavLink to="/settings" />}
-                tooltip="Asetukset"
+                tooltip="Settings"
               >
                 <SettingsIcon className="size-4" />
-                <span>Asetukset</span>
+                <span>Settings</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

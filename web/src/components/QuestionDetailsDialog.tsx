@@ -33,7 +33,7 @@ function Distribution({ s }: { s: QuestionSummary }) {
   return (
     <div>
       <p className="mb-2 text-sm font-medium">
-        {isMean ? "Keskiarvo per väittämä" : "Vastausjakauma"}
+        {isMean ? "Mean per statement" : "Vastausjakauma"}
       </p>
       <div className="space-y-1.5">
         {rows.map((r, i) => (
@@ -111,7 +111,7 @@ export default function QuestionDetailsDialog({
     setLabel.mutate(
       { qid, label: name },
       {
-        onSuccess: () => toast.success("Kysymyksen nimi päivitetty"),
+        onSuccess: () => toast.success("Question name updated"),
         onError: (e) =>
           toast.error(
             `Rename failed: ${e instanceof Error ? e.message : "unknown error"}`
@@ -125,7 +125,7 @@ export default function QuestionDetailsDialog({
       <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="pr-6 text-left text-base leading-snug">
-            {s?.text ?? "Kysymyksen tiedot"}
+            {s?.text ?? "Question details"}
           </DialogTitle>
           <DialogDescription className="text-left font-mono text-xs">
             {qid}
@@ -154,7 +154,7 @@ export default function QuestionDetailsDialog({
                 )}
                 {s.missing_values && s.missing_values.length > 0 && (
                   <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
-                    <TriangleAlertIcon className="size-3.5" /> Has "Ei vastattu" values
+                    <TriangleAlertIcon className="size-3.5" /> Has "Not answered" values
                   </span>
                 )}
               </div>
@@ -164,7 +164,7 @@ export default function QuestionDetailsDialog({
                 Hidden in read-only mode (rename is material-wide → case page only). */}
             {!readOnly && (
             <div>
-              <label className="text-sm font-medium">Kysymyksen nimi</label>
+              <label className="text-sm font-medium">Question name</label>
               <p className="mb-1.5 text-xs text-muted-foreground">
                 Shown above the chart in every report. Clear the field to restore
                 the original.
@@ -193,7 +193,7 @@ export default function QuestionDetailsDialog({
                 Also a material-wide edit → hidden in read-only mode. */}
             {!readOnly && s.measurement === "text" && qid && (
               <div>
-                <p className="text-sm font-medium">Yhdistettävät sanat</p>
+                <p className="text-sm font-medium">Merged words</p>
                 <p className="mb-2 text-xs text-muted-foreground">
                   Combine variants that mean the same thing (e.g. Esperi + esper)
                   so the word cloud counts and sizes them as one.
@@ -249,7 +249,7 @@ export default function QuestionDetailsDialog({
             {/* Value labels (codes) */}
             {s.value_labels.length > 0 && (
               <div>
-                <p className="mb-2 text-sm font-medium">Arvojen selitteet</p>
+                <p className="mb-2 text-sm font-medium">Value labels</p>
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border bg-muted/20 p-2">
                   {s.value_labels.map((v) => (
                     <div key={v.code} className="flex gap-3 px-1.5 py-0.5 text-sm">
@@ -275,7 +275,7 @@ export default function QuestionDetailsDialog({
                 <p className="mb-2 text-xs leading-snug text-muted-foreground">
                   Answer codes the data marks as a non-response — e.g. "Don't
                   know"/EOS, skipped, or not asked. Percentages are calculated
-                  over valid answers; these can be shown as a "Ei vastattu"
+                  over valid answers; these can be shown as a "Not answered"
                   category per chart.
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -299,7 +299,7 @@ export default function QuestionDetailsDialog({
             <div>
               <p className="mb-1.5 text-sm font-medium">
                 {s.variables.length === 1
-                  ? "Muuttuja"
+                  ? "Variable"
                   : `Variables · ${s.variables.length}`}
               </p>
               {s.variables.length === 1 ? (
