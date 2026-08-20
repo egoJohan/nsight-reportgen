@@ -80,7 +80,8 @@ def customer_meta_path(asiakas: str) -> str:
     The path segment is an id, not a name — a name in the path would make
     renaming a customer a data migration. So each container entity keeps a small
     JSON sidecar, and "list every customer" is `?label=nsight:customer` with no
-    prefix: server-side, permission-filtered, and no directory concept needed.
+    prefix: server-side, filtered by the caller's grants (not by datahive), and
+    no directory concept needed.
     """
     return f"{customer_prefix(asiakas)}customer.json"
 

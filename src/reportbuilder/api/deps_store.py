@@ -1,9 +1,9 @@
 """Dependencies for the path-addressed store (design §5).
 
 Auth is per-request and comes from the caller's own `Authorization` header,
-because nSight talks to datahive AS THE LOGGED-IN USER — datahive then enforces
-which paths that user may touch, rather than nSight's own code being the only
-thing keeping customers apart.
+because nSight talks to datahive with its own service credential, which is
+read-write across the tenant. datahive no longer narrows anything per user;
+reportbuilder/auth/permissions.py does. See spec §5.3.
 
 Until login exists there is a dev fallback to `NSIGHT_DATAHIVE_TOKEN`. It is a
 fallback, not a design: the routes are already shaped so that when the OIDC flow

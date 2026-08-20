@@ -21,10 +21,11 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Sequence
 
+from reportbuilder.auth.permissions import Grant, User, may_read
 from reportbuilder.store import paths as P
 from reportbuilder.store.seam import AuthContext, NotFound, ObjectStore
 
@@ -116,6 +117,14 @@ def _natural_key(name: str) -> list:
             for part in re.split(r"(\d+)", name or "")]
 
 
+def _admits(user, path: str) -> bool:
+    """Does *user* admit this path? A None user is unfiltered — see the
+    `user=` parameter on the listing methods."""
+    if user is None:
+        return True
+    return may_read(user, path)
+
+
 class Repository:
     """Domain operations over the seam. Every call carries the caller's auth,
     so datahive decides what this user may see — never this class."""
@@ -131,15 +140,17 @@ class Repository:
                          [P.LABEL_CUSTOMER])
         return Customer(id=cid, name=name)
 
-    def list_customers(self, auth: AuthContext) -> list[Customer]:
-        """Every customer this caller may see.
+    def list_customers(self, auth: AuthContext, user=None) -> list[Customer]:
+        """Every customer this user may see.
 
-        No path prefix — the label alone selects them, and datahive has already
-        filtered the listing to admitted paths. A caller granted one case sees
-        that case's customer and no other.
+        Filtered HERE, not by datahive. nSight holds a tenant-wide token, so
+        the store returns the whole tenant (spec §5.3). A user granted one case
+        sees no customer at all — the customer object is above their grant.
         """
         out = []
         for info in self.store.list(auth, "", labels=[P.LABEL_CUSTOMER]):
+            if not _admits(user, info.path):
+                continue
             d = self._read_json(auth, info.path)
             out.append(Customer(id=d["id"], name=d.get("name", d["id"]),
                                 template_id=d.get("template_id", "")))
@@ -170,10 +181,12 @@ class Repository:
                          [P.LABEL_CASE])
         return Case(id=case_id, customer_id=customer_id, name=name)
 
-    def list_cases(self, auth: AuthContext, customer_id: str) -> list[Case]:
+    def list_cases(self, auth: AuthContext, customer_id: str, user=None) -> list[Case]:
         out = []
         for info in self.store.list(auth, P.customer_prefix(customer_id),
                                     labels=[P.LABEL_CASE]):
+            if not _admits(user, info.path):
+                continue
             d = self._read_json(auth, info.path)
             out.append(Case(id=d["id"], customer_id=customer_id,
                             name=d.get("name", d["id"]),
@@ -190,7 +203,7 @@ class Repository:
                     name=d.get("name", d["id"]),
                     template_id=d.get("template_id", ""))
 
-    def find_case(self, auth: AuthContext, case_id: str) -> Case | None:
+    def find_case(self, auth: AuthContext, case_id: str, user=None) -> Case | None:
         """Locate a case by id alone, without knowing its customer.
 
         The URL surface is still case-rooted (`/cases/{id}/...`) from before the
@@ -205,6 +218,8 @@ class Repository:
         for info in self.store.list(auth, "", labels=[P.LABEL_CASE]):
             segments = info.path.split("/")
             if len(segments) >= 2 and segments[1] == case_id:
+                if not _admits(user, info.path):
+                    return None
                 d = self._read_json(auth, info.path)
                 return Case(id=d["id"], customer_id=segments[0],
                             name=d.get("name", d["id"]),
@@ -245,11 +260,13 @@ class Repository:
         return self.store.get(auth, P.material_path(customer_id, case_id, material_id))
 
     def list_materials(self, auth: AuthContext, customer_id: str,
-                       case_id: str) -> list[Material]:
+                       case_id: str, user=None) -> list[Material]:
         """Reads sidecars, not .sav bodies — a listing must never pull megabytes."""
         out = []
         for info in self.store.list(auth, P.materials_prefix(customer_id, case_id),
                                     labels=[P.LABEL_CONFIG]):
+            if not _admits(user, info.path):
+                continue
             try:
                 d = self._read_json(auth, info.path)
             except (NotFound, ValueError, UnicodeDecodeError):
@@ -286,18 +303,22 @@ class Repository:
         d["config"] = config
         self._write_json(auth, path, d, [P.LABEL_CONFIG])
 
-    def find_material(self, auth: AuthContext, material_id: str) -> Material | None:
+    def find_material(self, auth: AuthContext, material_id: str,
+                      user=None) -> Material | None:
         """Locate a material by id alone, without its customer or case.
 
         The question/preview/render routes are all keyed by a bare material id
         from before the hierarchy existed. Rather than rewrite every one of them
         and the UI that calls them, this resolves the path the same way
-        find_case does — one labelled listing, already permission-filtered.
+        find_case does — one labelled listing, filtered here by the caller's
+        grants — the store returns the whole tenant.
         """
         for info in self.store.list(auth, "", labels=[P.LABEL_CONFIG]):
             segments = info.path.split("/")
             # {asiakas}/{case}/material/{id}.config
             if len(segments) == 4 and segments[3] == f"{material_id}.config":
+                if not _admits(user, info.path):
+                    return None
                 try:
                     d = self._read_json(auth, info.path)
                 except (NotFound, ValueError, UnicodeDecodeError):
@@ -354,18 +375,21 @@ class Repository:
         ).decode("utf-8")
 
     def list_reports(self, auth: AuthContext, customer_id: str,
-                     case_id: str) -> list[ReportRef]:
+                     case_id: str, user=None) -> list[ReportRef]:
         """Newest first — reads sidecars, never report bodies."""
         refs = [
             self._ref_from_meta(auth, info.path)
             for info in self.store.list(auth,
                                         P.reports_prefix(customer_id, case_id),
                                         labels=[P.LABEL_REPORT_META])
+            if _admits(user, info.path)
         ]
         return sorted([r for r in refs if r], key=lambda r: r.modified_at, reverse=True)
 
-    def recent_reports(self, auth: AuthContext, limit: int = 10) -> list[ReportRef]:
-        """The caller's most recently modified reports, across every customer.
+    def recent_reports(self, auth: AuthContext, limit: int = 10,
+                       user=None) -> list[ReportRef]:
+        """The most recently modified reports this user may see, across every
+        customer.
 
         No path prefix: the listing is already restricted to paths this caller
         may see, so "accessible to this person" is the store's answer rather
@@ -379,6 +403,7 @@ class Repository:
         refs = [
             self._ref_from_meta(auth, info.path)
             for info in self.store.list(auth, "", labels=[P.LABEL_REPORT_META])
+            if _admits(user, info.path)
         ]
         ordered = sorted([r for r in refs if r],
                          key=lambda r: r.modified_at, reverse=True)
@@ -539,8 +564,6 @@ class Repository:
 
     def save_user(self, auth: AuthContext, user: "User") -> "User":
         """Create or replace. An empty id means create."""
-        from dataclasses import replace  # noqa: PLC0415
-
         uid = user.id or _new_id("usr")
         self._write_json(auth, P.user_path(uid),
                          {"id": uid, "email": user.email.strip(),
@@ -555,8 +578,6 @@ class Repository:
                          [P.LABEL_GRANTS])
 
     def _grants(self, auth: AuthContext, user_id: str) -> tuple:
-        from reportbuilder.auth.permissions import Grant  # noqa: PLC0415
-
         try:
             d = self._read_json(auth, P.user_grants_path(user_id))
         except (NotFound, ValueError, UnicodeDecodeError):
@@ -577,8 +598,6 @@ class Repository:
         return tuple(grants)
 
     def get_user(self, auth: AuthContext, user_id: str) -> "User | None":
-        from reportbuilder.auth.permissions import User  # noqa: PLC0415
-
         try:
             d = self._read_json(auth, P.user_path(user_id))
         except (NotFound, ValueError, UnicodeDecodeError):
