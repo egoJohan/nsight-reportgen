@@ -15,7 +15,8 @@ import {
   useTemplateActions,
 } from "@/lib/queries";
 import TemplatePicker from "@/components/TemplatePicker";
-import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_TITLE } from "@/lib/surfaces";
+import TemplateUploadButton from "@/components/TemplateUploadButton";
+import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
@@ -60,26 +61,27 @@ export default function CustomerCasesPage() {
       {/* No back-link here: the shell's breadcrumb already carries the way
           back, and two of them side by side is one too many. */}
       <div className={PAGE_HEADER}>
-        <div>
-          <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Oletusnimenä on tiedoston nimi.
-          </p>
-        </div>
-        <Button onClick={() => setOpen(true)}>
-          <PlusIcon className="mr-2 size-4" />
-          Uusi tutkimus
-        </Button>
+        <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
       </div>
 
       {/* Its own section, headed like "Tutkimukset" below: the pohjat belong to
           the asiakas, and every tutkimus under it picks from this list. */}
       {customerId && (
         <>
-          <h2 className={`${SECTION_TITLE} mt-8`}>Esityspohjat</h2>
+          {/* Each section's "add one of these" sits beside its own heading, so
+              a page with two lists has no single button whose target you have
+              to work out. */}
+          <div className={SECTION_HEADER}>
+            <h2 className={SECTION_TITLE}>Esityspohjat</h2>
+            <TemplateUploadButton
+              customerId={customerId}
+              onUploaded={(id) => templates.bindCustomer.mutate(id)}
+            />
+          </div>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Asiakkaan PowerPoint-pohjat. Tutkimukset ja raportit valitsevat
-            näistä; ilman valintaa käytetään listan ensimmäistä.
+            Asiakkaan PowerPoint-pohjat; nimenä on tiedoston nimi. Tutkimukset
+            ja raportit valitsevat näistä, ja ilman valintaa käytetään listan
+            ensimmäistä.
           </p>
           <div className="mt-3">
             <TemplatePicker
@@ -92,11 +94,15 @@ export default function CustomerCasesPage() {
         </>
       )}
 
-      {/* The template panel sits between the header and the list, so the list
-          needs its own heading to stay recognisable as the page's content.
-          SECTION_TITLE, the same as "Raportit" on the tutkimus page: this
+      {/* SECTION_TITLE, the same as "Raportit" on the tutkimus page: this
           divides the page, it is not a muted label inside a dialog. */}
-      <h2 className={`${SECTION_TITLE} mt-8`}>Tutkimukset</h2>
+      <div className={SECTION_HEADER}>
+        <h2 className={SECTION_TITLE}>Tutkimukset</h2>
+        <Button onClick={() => setOpen(true)}>
+          <PlusIcon className="mr-2 size-4" />
+          Uusi tutkimus
+        </Button>
+      </div>
 
       <div className="mt-3 space-y-2">
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}

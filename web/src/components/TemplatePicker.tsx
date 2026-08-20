@@ -1,13 +1,10 @@
-import { useRef, useState } from "react";
-import {
-  UploadIcon, Trash2Icon, CheckIcon, Loader2Icon, AlertTriangleIcon,
-} from "lucide-react";
-import { toast } from "sonner";
+import { useState } from "react";
+import { Trash2Icon, CheckIcon, AlertTriangleIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { PANEL, PANEL_TITLE } from "@/lib/surfaces";
+import { PANEL } from "@/lib/surfaces";
 import { useTemplates, useTemplateActions } from "@/lib/queries";
 import TemplateSettingsDialog from "@/components/TemplateSettingsDialog";
 import type { Template, TemplateFont } from "@/lib/api";
@@ -28,18 +25,12 @@ function missingFonts(t: Template): TemplateFont[] {
 export default function TemplatePicker({
   customerId,
   currentId,
-  inheritedFrom,
   onBind,
   manageLibrary = false,
 }: {
   customerId: string;
   /** The template bound AT THIS LEVEL, or "" when inheriting. */
   currentId: string;
-  /** WHERE the pohja comes from when nothing is bound here — the asiakas's
-   *  name, not the template's file name, because that is what tells you where
-   *  to go and change it. There is no `level` prop: the panel is identical
-   *  wherever it appears, and this is the only thing that differs. */
-  inheritedFrom?: string;
   onBind: (templateId: string | null) => void;
   /** May this panel change the ASIAKAS's library — upload, configure, delete?
    *
@@ -52,76 +43,11 @@ export default function TemplatePicker({
 }) {
   const { data: templates, isLoading } = useTemplates(customerId);
   const actions = useTemplateActions(customerId);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Template | null>(null);
-
-  async function upload(file: File) {
-    setBusy(true);
-    try {
-      const created = await actions.upload.mutateAsync(file);
-      // Uploading here means "use this one" — otherwise the file lands in a
-      // list and nothing visibly happens, which reads as a failure.
-      onBind(created.id);
-      if (created.warnings?.length) {
-        // Every warning, not just the first: a deck naming two unavailable
-        // fonts has two separate things for someone to act on.
-        created.warnings.forEach((w) => toast.warning(w, { duration: 12000 }));
-      } else {
-        toast.success(`${created.name} otettu käyttöön`);
-      }
-    } catch (e) {
-      // The server rejects a template it cannot render into, with the reason.
-      toast.error(e instanceof Error ? e.message : "Pohjan lataus epäonnistui");
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
 
   return (
     <div className={`${PANEL} px-3 py-2.5`}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className={PANEL_TITLE}>Esityspohja</h3>
-          {/* Only says something when the pohja is NOT set here: where it IS
-              set, the panel's own position already says so. */}
-          <p className="text-xs text-muted-foreground">
-            {currentId
-              ? "Valittu tälle. Poista valinta palataksesi perittyyn pohjaan."
-              : inheritedFrom
-                ? `Peritty asiakkaalta ${inheritedFrom}. Valitse alta, jos haluat käyttää tässä toista pohjaa.`
-                : "Käytössä nSightin oletuspohja. Valitse alta ottaaksesi pohjan käyttöön."}
-          </p>
-        </div>
-        {manageLibrary && (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          {busy ? (
-            <Loader2Icon className="mr-2 size-4 animate-spin" />
-          ) : (
-            <UploadIcon className="mr-2 size-4" />
-          )}
-          Lataa pohja
-        </Button>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".pptx"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) upload(f);
-          }}
-        />
-      </div>
-
-      <div className="mt-2 space-y-0.5">
+      <div className="space-y-0.5">
         {isLoading && <p className="text-xs text-muted-foreground">Ladataan…</p>}
 
         {templates?.length === 0 && !isLoading && (
