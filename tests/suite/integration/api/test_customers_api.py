@@ -7,8 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reportbuilder.api.app import create_app
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.store import paths as P
+from reportbuilder.auth.permissions import Grant, User
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -92,7 +93,13 @@ class TestCaseUnderCustomer:
 
 class TestListingIsPermissionFiltered:
     """The UI must never be the security boundary: a caller scoped to one
-    customer gets a SHORT list from the server, not a full list to filter."""
+    customer gets a SHORT list from the server, not a full list to filter.
+
+    Post-D3, nSight holds one tenant-wide service credential — datahive no
+    longer scopes anything per caller, so the caller's own Grant/User record is
+    what narrows the view, not a token caveat (see `Repository._admits`). A
+    caller with a grant on one customer sees only that customer.
+    """
 
     def test_a_scoped_caller_sees_only_their_customer(self, store):
         seed = create_app()
@@ -107,15 +114,18 @@ class TestListingIsPermissionFiltered:
 
         scoped_app = create_app()
         scoped_app.dependency_overrides[get_repository] = lambda: repo
-        scoped_app.dependency_overrides[get_auth] = lambda: AuthContext(token="only-acme")
-        store.caveats["only-acme"] = [P.customer_prefix(a["id"])]
+        scoped_app.dependency_overrides[get_auth] = lambda: AuthContext(token="admin")
+        scoped_user = User(id="scoped", email="scoped@acme.test", name="Scoped",
+                           grants=(Grant(a["id"], "edit"),))
+        scoped_app.dependency_overrides[current_user] = lambda: scoped_user
         scoped = TestClient(scoped_app)
 
         assert [c["id"] for c in scoped.get("/customers").json()] == [a["id"]]
         assert len(scoped.get(f"/customers/{a['id']}/cases").json()) == 1
-        # Beta is invisible, and indistinguishable from absent.
+        # Beta is invisible, and indistinguishable from absent — for the
+        # customer itself and for anything scoped under it.
         assert scoped.get(f"/customers/{b['id']}").status_code == 404
-        assert scoped.get(f"/customers/{b['id']}/cases").json() == []
+        assert scoped.get(f"/customers/{b['id']}/cases").status_code == 404
 
 
 class TestAuthRequired:

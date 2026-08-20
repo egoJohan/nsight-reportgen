@@ -49,5 +49,9 @@ def test_case_materials_and_reports_are_scoped(client_memory, synthetic_bytes):
 
 
 def test_case_listing_empty_for_unknown_case(client_memory):
-    assert client_memory.get("/cases/does-not-exist/materials").json()["materials"] == []
-    assert client_memory.get("/cases/does-not-exist/reports").json()["reports"] == []
+    """Pre-guards, an unknown case id degraded to an empty listing. `require_case`
+    (5547ab6) now resolves the case before the handler runs, so a case that
+    does not exist is 404 here too — indistinguishable from one that exists but
+    is out of scope, same as `/customers/{id}/cases` (test_customers_api.py)."""
+    assert client_memory.get("/cases/does-not-exist/materials").status_code == 404
+    assert client_memory.get("/cases/does-not-exist/reports").status_code == 404
