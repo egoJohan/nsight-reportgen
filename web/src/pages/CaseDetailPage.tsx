@@ -24,9 +24,10 @@ import {
   useTemplateActions,
   useDeleteCase,
   useCaseMaterials,
+  useCustomer,
 } from "@/lib/queries";
 import { useWorkspace, clearWorkspace } from "@/lib/workspace";
-import TemplateButton from "@/components/wizard/TemplateButton";
+import TemplatePicker from "@/components/TemplatePicker";
 
 function CaseHeading({
   caseId,
@@ -110,6 +111,11 @@ export default function CaseDetailPage() {
   // id; without this the heading fell back to rendering the raw case id.
   const { data: resolved } = useResolvedCase(id);
   const templates = useTemplateActions(resolved?.customer_id);
+  // Who this tutkimus inherits its pohja FROM, when it binds none of its own.
+  // The asiakas's NAME, not the template's file name: "Peritty: Attendo" says
+  // where to go to change it, which the file name does not.
+  const { data: customer } = useCustomer(resolved?.customer_id);
+  const inheritedFrom = customer?.template_id ? customer.name : undefined;
   const legacyCase = cases?.find((c) => c.id === id);
   const caseName = resolved?.name ?? legacyCase?.name ?? "";
   const { workspace, removeReport } = useWorkspace(id ?? "");
@@ -184,10 +190,7 @@ export default function CaseDetailPage() {
           <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
-        {/* Same compact control as the report toolbar: the pohja is a setting
-            you check at a glance, not a panel that competes with the data. */}
         <div className="flex shrink-0 items-center gap-2">
-          {id && <TemplateButton caseId={id} />}
           <Button
             variant="outline"
             size="sm"
@@ -199,6 +202,22 @@ export default function CaseDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* The same panel the customer page shows, at the same place on the page:
+          choosing a pohja is the same task here, and the only difference is
+          scope — what is set here overrides the asiakas's for this tutkimus. */}
+      {resolved?.customer_id && (
+        <div className="mt-8">
+          <TemplatePicker
+            customerId={resolved.customer_id}
+            currentId={resolved.template_id ?? ""}
+            inheritedFrom={inheritedFrom}
+            onBind={(templateId) =>
+              templates.bindCase.mutate({ caseId: id, templateId })
+            }
+          />
+        </div>
+      )}
 
       {!materialId ? (
         // No data yet (e.g. a legacy case): let the user import a SAV into it.

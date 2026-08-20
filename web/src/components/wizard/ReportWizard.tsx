@@ -32,7 +32,6 @@ import {
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepDownload from "./StepDownload";
-import TemplateButton from "@/components/wizard/TemplateButton";
 import { PAGE_TITLE, PANEL_TITLE } from "@/lib/surfaces";
 
 /** Move an item within an array, returning a new array. */
@@ -1031,7 +1030,6 @@ export default function ReportWizard({
           {/* Left of Save: which pohja this report comes out on. Visible on
               every step, because it changes what Design previews AND what the
               export produces. */}
-          <TemplateButton caseId={caseId} reportId={reportId} />
           <Button
             variant="outline"
             size="sm"

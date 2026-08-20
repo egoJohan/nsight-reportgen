@@ -143,9 +143,9 @@ export default function StepDownload({
 
   return (
     <div className="space-y-5">
-      {/* The pohja control lives in the wizard toolbar (TemplateButton), where
-          it is visible on every step — it changes what Design previews as well
-          as what this step exports, so it does not belong to Preview alone. */}
+      {/* The pohja is chosen on the tutkimus (or the asiakas), not per report:
+          every report of a study is delivered in the same template, and a
+          per-report override was one more place for them to disagree. */}
       {/* Action bar */}
       <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">

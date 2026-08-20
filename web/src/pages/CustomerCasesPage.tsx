@@ -15,7 +15,7 @@ import {
   useTemplateActions,
 } from "@/lib/queries";
 import TemplatePicker from "@/components/TemplatePicker";
-import { EMPTY, ERROR, OVERLINE, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
+import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
@@ -78,7 +78,6 @@ export default function CustomerCasesPage() {
         <div className="mt-8">
           <TemplatePicker
             customerId={customerId}
-            level="customer"
             currentId={customer?.template_id ?? ""}
             onBind={(id) => templates.bindCustomer.mutate(id)}
           />
@@ -86,10 +85,10 @@ export default function CustomerCasesPage() {
       )}
 
       {/* The template panel sits between the header and the list, so the list
-          needs its own heading to stay recognisable as the page's content. */}
-      <h2 className={`${OVERLINE} mt-8`}>
-        Tutkimukset
-      </h2>
+          needs its own heading to stay recognisable as the page's content.
+          SECTION_TITLE, the same as "Raportit" on the tutkimus page: this
+          divides the page, it is not a muted label inside a dialog. */}
+      <h2 className={`${SECTION_TITLE} mt-8`}>Tutkimukset</h2>
 
       <div className="mt-3 space-y-2">
         {isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-16 w-full" />)}

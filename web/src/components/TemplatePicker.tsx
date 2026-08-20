@@ -4,6 +4,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { PANEL, PANEL_TITLE } from "@/lib/surfaces";
 import { useTemplates, useTemplateActions } from "@/lib/queries";
 import TemplateSettingsDialog from "@/components/TemplateSettingsDialog";
@@ -19,25 +22,22 @@ function missingFonts(t: Template): TemplateFont[] {
   return (t.fonts ?? []).filter((f) => !f.ok);
 }
 
-/** Where a binding is being made. The wording differs per level because
- *  "inherited" means something different at each one. */
-export type TemplateLevel = "customer" | "case" | "report";
-
 /** Templates are stored per CUSTOMER even when bound to a tutkimus or a report:
  *  the same client deck is reused across their studies, and uploading it once
  *  per report would be absurd. So every level picks from the customer's list. */
 export default function TemplatePicker({
   customerId,
-  level,
   currentId,
   inheritedFrom,
   onBind,
 }: {
   customerId: string;
-  level: TemplateLevel;
   /** The template bound AT THIS LEVEL, or "" when inheriting. */
   currentId: string;
-  /** Human text for what applies when nothing is bound here. */
+  /** WHERE the pohja comes from when nothing is bound here — the asiakas's
+   *  name, not the template's file name, because that is what tells you where
+   *  to go and change it. There is no `level` prop: the panel is identical
+   *  wherever it appears, and this is the only thing that differs. */
   inheritedFrom?: string;
   onBind: (templateId: string | null) => void;
 }) {
@@ -45,6 +45,7 @@ export default function TemplatePicker({
   const actions = useTemplateActions(customerId);
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Template | null>(null);
 
   async function upload(file: File) {
     setBusy(true);
@@ -79,7 +80,7 @@ export default function TemplatePicker({
           {!currentId && (
             <p className="text-xs text-muted-foreground">
               {inheritedFrom
-                ? `Peritty: ${inheritedFrom}`
+                ? `Peritty asiakkaalta ${inheritedFrom}.`
                 : "Käytössä nSightin oletuspohja."}
             </p>
           )}
@@ -167,12 +168,17 @@ export default function TemplatePicker({
                   the time, and putting it left of the bin keeps a destructive
                   button from being the default target. */}
               <TemplateSettingsDialog customerId={customerId} templateId={t.id} />
+              {/* This deletes the FILE from the asiakas, not "stop using it
+                  here" — that is the checkmark above, which unbinds and falls
+                  back to what is inherited. The two are one click apart and
+                  read alike, so the destructive one asks first and names what
+                  it takes with it. */}
               <Button
                 size="icon-sm"
                 variant="ghost"
                 className="text-muted-foreground hover:text-destructive"
-                title="Poista pohja"
-                onClick={() => actions.remove.mutate(t.id)}
+                title="Poista pohja asiakkaalta"
+                onClick={() => setConfirmDelete(t)}
               >
                 <Trash2Icon className="size-4" />
               </Button>
@@ -180,6 +186,40 @@ export default function TemplatePicker({
           );
         })}
       </div>
+
+      <Dialog
+        open={confirmDelete !== null}
+        onOpenChange={(v) => !v && setConfirmDelete(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Poistetaanko pohja?</DialogTitle>
+            <DialogDescription>
+              “{confirmDelete?.name}” poistetaan asiakkaalta kokonaan, myös
+              niistä tutkimuksista ja raporteista, jotka käyttävät sitä. Ne
+              siirtyvät käyttämään ylemmän tason pohjaa. Toimintoa ei voi perua.
+              <br />
+              <br />
+              Jos haluat vain lopettaa tämän pohjan käytön täällä, poista
+              valinta listasta.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+              Peruuta
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (confirmDelete) actions.remove.mutate(confirmDelete.id);
+                setConfirmDelete(null);
+              }}
+            >
+              Poista pohja
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
