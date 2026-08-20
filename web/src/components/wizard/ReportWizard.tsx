@@ -16,7 +16,15 @@ import { Input } from "@/components/ui/input";
 import { cn, formatReportDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
-import { useReport, useUpdateReport, useRegroupedQuestions } from "@/lib/queries";
+import TemplateSelect from "@/components/TemplateSelect";
+import {
+  useReport,
+  useUpdateReport,
+  useRegroupedQuestions,
+  useResolvedCase,
+  useCaseTemplate,
+  useTemplateActions,
+} from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import {
   buildDemographicsGrids,
@@ -150,6 +158,11 @@ export default function ReportWizard({
   onMissing?: () => void;
 }) {
   const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
+  // Which pohja this report renders with, and what it would inherit without a
+  // choice of its own — so the dropdown names the one actually in use.
+  const { data: resolvedCase } = useResolvedCase(caseId);
+  const { data: caseTemplate } = useCaseTemplate(resolvedCase?.customer_id, caseId);
+  const bindReport = useTemplateActions(resolvedCase?.customer_id).bindReport;
   const updateReport = useUpdateReport(caseId);
   const { workspace, renameReport } = useWorkspace(caseId);
   const createdAt = workspace.reports.find((r) => r.id === reportId)?.createdAt;
@@ -1030,6 +1043,18 @@ export default function ReportWizard({
           {/* Left of Save: which pohja this report comes out on. Visible on
               every step, because it changes what Design previews AND what the
               export produces. */}
+          <TemplateSelect
+            customerId={resolvedCase?.customer_id}
+            value={draft?.template_ref ?? ""}
+            inheritedId={caseTemplate?.template_id}
+            label=""
+            onChange={(templateId) => {
+              bindReport.mutate({ caseId, reportId, templateId });
+              // Kept in the draft too: the deck is built from the report's own
+              // template_ref, and the Design previews read it from there.
+              mutate((d) => ({ ...d, template_ref: templateId ?? "" }));
+            }}
+          />
           <Button
             variant="outline"
             size="sm"

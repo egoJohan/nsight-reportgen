@@ -476,6 +476,29 @@ class TestTemplateResolution:
         cid, kid, rid = self._tree(repo, auth)
         assert repo.resolve_template(auth, cid, kid, rid) == ("", "default")
 
+    def test_the_first_uploaded_template_applies_without_being_bound(self, repo, auth):
+        """Uploading a pohja is choosing it, when it is the only one.
+
+        A customer with exactly one template is the common case, and having to
+        upload it AND then select it read as the upload not having worked.
+        """
+        cid, kid, rid = self._tree(repo, auth)
+        repo.upload_template(auth, cid, "attendo.pptx", b"PK\x03\x04")
+        template_id, level = repo.resolve_template(auth, cid, kid, rid)
+        assert (template_id, level) == (repo.list_templates(auth, cid)[0].id, "first")
+
+    def test_a_bound_template_still_beats_the_first_one(self, repo, auth):
+        """"First in the list" is a fallback, not a decision — anything actually
+        chosen outranks it."""
+        cid, kid, rid = self._tree(repo, auth)
+        repo.upload_template(auth, cid, "a.pptx", b"PK\x03\x04")
+        repo.set_template(auth, "tpl-case", customer_id=cid, case_id=kid)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("tpl-case", "case")
+
+    def test_a_customer_with_no_templates_still_gets_the_house_default(self, repo, auth):
+        cid, kid, rid = self._tree(repo, auth)
+        assert repo.resolve_template(auth, cid, kid, rid) == ("", "default")
+
     def test_a_customer_template_reaches_its_reports(self, repo, auth):
         cid, kid, rid = self._tree(repo, auth)
         repo.set_template(auth, "tpl-attendo", customer_id=cid)

@@ -99,7 +99,11 @@ def _now() -> str:
 
 # Smaller number = more specific. A choice at a more specific level overrides a
 # pin made at a broader one.
-_SPECIFICITY = {"report": 0, "case": 1, "customer": 2, "default": 3}
+# How specific a binding is; lower wins. "first" is the asiakas's first template
+# standing in when nothing is bound anywhere — no more specific than the asiakas
+# itself, and it must be present here or resolve_template raises comparing it
+# against a report's pinned level.
+_SPECIFICITY = {"report": 0, "case": 1, "customer": 2, "first": 2, "default": 3}
 
 
 def _new_id(prefix: str) -> str:
@@ -662,7 +666,12 @@ class Repository:
         This is the inheritance half of `resolve_template`, split out because
         the tutkimus page has to answer it with no report in hand. Same order,
         lowest wins: the tutkimus's own choice, then its asiakas, then the
-        house default.
+        asiakas's first template, then the house default.
+
+        The first-template step is what makes an uploaded pohja take effect
+        without anyone binding it: a customer who has exactly one is the common
+        case, and having to upload it AND then select it read as the upload not
+        having worked.
         """
         for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
                             (P.customer_meta_path(customer_id), "customer")):
@@ -672,6 +681,9 @@ class Repository:
                 continue
             if d.get("template_id"):
                 return d["template_id"], level
+        first = self.list_templates(auth, customer_id)
+        if first:
+            return first[0].id, "first"
         return "", "default"
 
     def resolve_template(self, auth: AuthContext, customer_id: str, case_id: str,

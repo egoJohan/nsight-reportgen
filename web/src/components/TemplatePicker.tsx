@@ -86,13 +86,13 @@ export default function TemplatePicker({
           <h3 className={PANEL_TITLE}>Esityspohja</h3>
           {/* Only says something when the pohja is NOT set here: where it IS
               set, the panel's own position already says so. */}
-          {!currentId && (
-            <p className="text-xs text-muted-foreground">
-              {inheritedFrom
-                ? `Peritty asiakkaalta ${inheritedFrom}.`
-                : "Käytössä nSightin oletuspohja."}
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            {currentId
+              ? "Valittu tälle. Poista valinta palataksesi perittyyn pohjaan."
+              : inheritedFrom
+                ? `Peritty asiakkaalta ${inheritedFrom}. Valitse alta, jos haluat käyttää tässä toista pohjaa.`
+                : "Käytössä nSightin oletuspohja. Valitse alta ottaaksesi pohjan käyttöön."}
+          </p>
         </div>
         {manageLibrary && (
         <Button
@@ -144,9 +144,20 @@ export default function TemplatePicker({
                 onClick={() => onBind(active ? null : t.id)}
                 title={active ? "Poista valinta (peri ylemmältä)" : "Ota käyttöön"}
               >
-                <CheckIcon
-                  className={`size-4 shrink-0 ${active ? "text-primary" : "opacity-0"}`}
-                />
+                {/* Always visible, selected or not. An invisible checkmark
+                    left an unselected list looking like a read-only display —
+                    on the tutkimus page, where the upload/settings/delete
+                    buttons are absent, there was then nothing at all to say the
+                    rows could be clicked. */}
+                <span
+                  className={`flex size-4 shrink-0 items-center justify-center rounded-full border ${
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-muted-foreground/40"
+                  }`}
+                >
+                  {active && <CheckIcon className="size-3" />}
+                </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm">{t.name}</span>
                   {missingFonts(t).length > 0 && (

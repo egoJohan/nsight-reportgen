@@ -72,17 +72,24 @@ export default function CustomerCasesPage() {
         </Button>
       </div>
 
-      {/* Every tutkimus under this customer inherits this unless it sets its
-          own. */}
+      {/* Its own section, headed like "Tutkimukset" below: the pohjat belong to
+          the asiakas, and every tutkimus under it picks from this list. */}
       {customerId && (
-        <div className="mt-8">
-          <TemplatePicker
-            customerId={customerId}
-            currentId={customer?.template_id ?? ""}
-            manageLibrary
-            onBind={(id) => templates.bindCustomer.mutate(id)}
-          />
-        </div>
+        <>
+          <h2 className={`${SECTION_TITLE} mt-8`}>Esityspohjat</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Asiakkaan PowerPoint-pohjat. Tutkimukset ja raportit valitsevat
+            näistä; ilman valintaa käytetään listan ensimmäistä.
+          </p>
+          <div className="mt-3">
+            <TemplatePicker
+              customerId={customerId}
+              currentId={customer?.template_id ?? ""}
+              manageLibrary
+              onBind={(id) => templates.bindCustomer.mutate(id)}
+            />
+          </div>
+        </>
       )}
 
       {/* The template panel sits between the header and the list, so the list
