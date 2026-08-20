@@ -103,7 +103,7 @@ export default function CustomerCasesPage() {
           divides the page, it is not a muted label inside a dialog. */}
       <div className={SECTION_HEADER}>
         <h2 className={SECTION_TITLE}>Studies</h2>
-        <Button onClick={() => setOpen(true)}>
+        <Button variant="outline" onClick={() => setOpen(true)}>
           <PlusIcon className="mr-2 size-4" />New study</Button>
       </div>
 

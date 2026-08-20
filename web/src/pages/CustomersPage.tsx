@@ -55,7 +55,7 @@ export default function CustomersPage() {
           <h1 className={PAGE_TITLE}>Customers</h1>
           <p className={PAGE_SUB}>Every study belongs to one customer.</p>
         </div>
-        <Button onClick={() => setOpen(true)}>
+        <Button variant="outline" onClick={() => setOpen(true)}>
           <PlusIcon className="mr-2 size-4" />New customer</Button>
       </div>
 
@@ -70,7 +70,7 @@ export default function CustomersPage() {
           <div className={EMPTY}>
             <Building2Icon className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">No customers yet. Create the first one to get started.</p>
-            <Button className="mt-4" onClick={() => setOpen(true)}>
+            <Button variant="outline" className="mt-4" onClick={() => setOpen(true)}>
               <PlusIcon className="mr-2 size-4" />New customer</Button>
           </div>
         )}

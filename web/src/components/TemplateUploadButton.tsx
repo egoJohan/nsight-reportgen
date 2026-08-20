@@ -47,13 +47,13 @@ export default function TemplateUploadButton({
 
   return (
     <>
-      <Button disabled={busy} onClick={() => fileRef.current?.click()}>
+      <Button variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
         {busy ? (
           <Loader2Icon className="mr-2 size-4 animate-spin" />
         ) : (
           <PlusIcon className="mr-2 size-4" />
         )}
-        Uusi pohja
+        New template
       </Button>
       <input
         ref={fileRef}
