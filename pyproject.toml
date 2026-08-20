@@ -21,6 +21,7 @@ dependencies = [
     "anthropic>=0.40",
     "pdfplumber>=0.11",
     "httpx>=0.27",
+    "argon2-cffi>=23.1,<26",
 ]
 
 [project.optional-dependencies]
