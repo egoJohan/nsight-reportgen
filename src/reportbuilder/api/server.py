@@ -30,6 +30,14 @@ def build_server_app():
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        # The fast chart preview reports the template's title box in response
+        # headers instead of the body (the body is PNG bytes) — without this,
+        # the browser drops them before JS ever sees them, and the frontend's
+        # title overlay silently never appears.
+        expose_headers=[
+            "X-Title-Box", "X-Title-Font", "X-Title-Size-Pt", "X-Title-Color",
+            "X-Title-Align", "X-Title-Caps", "X-Slide-Aspect",
+        ],
     )
     return app
 

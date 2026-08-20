@@ -212,6 +212,45 @@ def _font_file(family: str, *, bold: bool = False, italic: bool = False) -> str:
     return path
 
 
+def title_box_headers(style) -> dict[str, str]:
+    """Where the template puts its title, as response headers for a caller that
+    draws the title itself (routes_questions's fast preview path).
+
+    The compositor never draws a title of its own on the fast path — the slide
+    it is handed has none, because the caller only takes this path when the
+    frontend owns that region. So the box has to travel out of band, and the
+    template's own harvested profile (`TemplateStyleSpec.profile`) is the one
+    place it is known: see style_spec.py and template_profile.py for how it
+    got there. Nothing here re-derives or guesses a position.
+
+    Empty when the template states no title box — no template, no profile, or
+    a profile whose title was never positioned (`TextStyle.positioned`). The
+    caller then sends no headers, and the frontend draws no title, same as
+    today when a preview carries none.
+    """
+    from reportbuilder.render.image.slide_chrome import TITLE_PT
+
+    profile = getattr(style, "profile", None)
+    title = getattr(profile, "title", None) if profile is not None else None
+    if title is None or not title.positioned:
+        return {}
+    sw = int(getattr(style, "slide_width", 0) or 0)
+    sh = int(getattr(style, "slide_height", 0) or 0)
+    if sw <= 0 or sh <= 0:
+        return {}
+    colour = (title.colour or getattr(style, "ink", "") or "2B2B2B").lstrip("#").upper()
+    return {
+        "X-Title-Box": "{:.4f},{:.4f},{:.4f},{:.4f}".format(
+            title.left / sw, title.top / sh, title.width / sw, title.height / sh),
+        "X-Title-Font": title.font or getattr(style, "heading_font", "") or "Arial",
+        "X-Title-Size-Pt": f"{title.size_pt or TITLE_PT:g}",
+        "X-Title-Color": colour,
+        "X-Title-Align": title.align or "left",
+        "X-Title-Caps": "1" if title.caps else "0",
+        "X-Slide-Aspect": f"{sw / sh:.6f}",
+    }
+
+
 def compose_from_slide(style, slide, dpi: int = 110):
     """The finished preview: the cached ground with THIS slide's own shapes on it.
 

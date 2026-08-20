@@ -37,7 +37,7 @@ from reportbuilder.ingest.grouping_override import (
     apply_grouping_override,
     suggest_parallel_questions,
 )
-from reportbuilder.render.image.fast_preview import compose_from_slide
+from reportbuilder.render.image.fast_preview import compose_from_slide, title_box_headers
 from reportbuilder.ingest.battery_group import suggest_scale_batteries
 from reportbuilder.ingest.multi_group import _is_binary
 from reportbuilder.api.model_loader import (
@@ -1181,6 +1181,13 @@ class ChartSpecBody(BaseModel):
     # The report's grouping override, so a preview of a chart on a manually-grouped
     # question resolves the same way the rendered deck will. Absent = auto-detect.
     grouping: dict[str, Any] | None = None
+    # Which report this preview is for, so its OWN template choice (and any
+    # template it is pinned to) can outrank its tutkimus/asiakas's — without
+    # this, _preview_template had no report to resolve_template's two most
+    # specific rungs with, and a report-level template change never showed up
+    # in its own previews. Absent = resolve as if no report overrides anything
+    # (the material's tutkimus/asiakas/house default only).
+    report_id: str | None = None
 
 
 def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
@@ -1267,10 +1274,16 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
     return d
 
 
-def _preview_template(repo, auth, material_id: str) -> tuple[str | None, str]:
+def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
-    Keyed off the material because that is all the preview endpoint is given.
+    *report_id* is the report the preview belongs to, when the caller has one
+    (the wizard always does). Without it, resolve_template can only see the
+    tutkimus/asiakas/house-default rungs — a report's OWN explicit choice and
+    the template it is pinned to are BOTH keyed by report_id, so a preview
+    requested with none can never reflect either. That used to be every
+    preview: this endpoint took a material_id and nothing else, so changing a
+    report's template changed the deck but not what its own previews showed.
     Any failure returns (None, "") and the preview falls back to the house
     style: a styling problem must not stop an analyst seeing their chart.
     """
@@ -1278,10 +1291,8 @@ def _preview_template(repo, auth, material_id: str) -> tuple[str | None, str]:
         m = repo.find_material(auth, material_id)
         if m is None:
             return None, ""
-        # Reports under this tutkimus resolve through the same chain, so
-        # previewing the tutkimus's template is what the deck will use unless a
-        # single report overrides it.
-        template_id, _level = repo.resolve_template(auth, m.customer_id, m.case_id, "")
+        template_id, _level = repo.resolve_template(
+            auth, m.customer_id, m.case_id, report_id)
         blob = (repo.get_template_bytes(auth, m.customer_id, template_id)
                 if template_id else
                 repo.store.get(auth, _paths.default_template_path()))
@@ -1344,16 +1355,35 @@ def preview_chart(
     # here so the Design preview matches the deck — a preview built on the house
     # default while the deck comes out in the client's template is a WYSIWYG
     # guarantee that quietly stopped being true.
-    template_path, template_id = _preview_template(repo, auth, material_id)
+    template_path, template_id = _preview_template(
+        repo, auth, material_id, body.report_id or "")
 
     # The template is part of the cache identity: without it, changing the
     # template would keep serving the previously cached image and look like the
     # change had not taken effect.
     out_dir = _preview_out_dir(material_id, body.model_dump_json() + f"|{template_id}")
     cached_png = out_dir / "preview.png"
+
+    # Where the template puts its title, for a caller that draws the title
+    # itself (render_title=False). Only worth resolving on that path: the slow
+    # path bakes the title into the image and a cache hit there is not worth
+    # spending a python-pptx parse on headers nobody reads. `style` is kept
+    # (not just the headers) so the build step below reuses this same parse
+    # instead of loading the template twice.
+    fast_headers: dict[str, str] = {}
+    style = None
+    if not body.render_title and template_path:
+        try:
+            style = _load_style_spec(template_path)
+            fast_headers = title_box_headers(style)
+        except Exception:  # noqa: BLE001 — a bad header must not fail a preview
+            style = None
+            fast_headers = {}
+
     if cached_png.exists():
         log.info("preview %s %s: cached", material_id, body.chart_type)
-        return Response(content=cached_png.read_bytes(), media_type="image/png")
+        return Response(content=cached_png.read_bytes(), media_type="image/png",
+                         headers=fast_headers)
     started = time.monotonic()
 
     # 1. Load material data
@@ -1393,8 +1423,9 @@ def preview_chart(
     uid = uuid.uuid4().hex[:8]
     pptx_path = str(out_dir / f"preview.{uid}.pptx")
     try:
-        style = None
-        if template_path:
+        # Reuse the spec already loaded for fast_headers above (the common
+        # case, render_title=False) rather than parsing the template twice.
+        if style is None and template_path:
             try:
                 style = _load_style_spec(template_path)
             except Exception:  # noqa: BLE001
@@ -1425,7 +1456,8 @@ def preview_chart(
                 os.replace(tmp_png, cached_png)
                 log.info("preview %s %s: %.1fs (composited)", material_id,
                          body.chart_type, time.monotonic() - started)
-                return Response(content=png_bytes, media_type="image/png")
+                return Response(content=png_bytes, media_type="image/png",
+                                 headers=fast_headers)
         build_pptx(report, model, df, pptx_path, style=style)
         built = time.monotonic()
         # The selected slide (priority) takes the reserved soffice slot so it never

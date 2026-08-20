@@ -77,6 +77,13 @@ class TextStyle:
     top: int = 0
     width: int = 0
     height: int = 0
+    #: `algn` off the paragraph: "left" | "center" | "right". "" means unstated —
+    #: `_title_style` settles it at "left" once it has looked everywhere. Nothing
+    #: today draws a harvested title at anything but the left
+    #: (`draw_template_heading` does not read this), but the fast preview reports
+    #: it so the frontend's DOM overlay — which DOES draw the title — lands text
+    #: the way the template set it.
+    align: str = ""
 
     @property
     def positioned(self) -> bool:
@@ -132,6 +139,7 @@ class TemplateProfile:
         return {"source": self.source, "layout_index": self.layout_index,
                 "title_font": self.title.font,
                 "title_pt": self.title.size_pt, "title_colour": self.title.colour,
+                "title_align": self.title.align,
                 "title_box_in": [round(Emu(v).inches, 2) for v in
                                  (self.title.left, self.title.top,
                                   self.title.width, self.title.height)],
@@ -228,6 +236,8 @@ def _style_of(shape) -> TextStyle:
     st = TextStyle(left=int(shape.left or 0), top=int(shape.top or 0),
                    width=int(shape.width or 0), height=int(shape.height or 0))
     run, para = _first_run(shape)
+    if para is not None:
+        st.align = _algn(para._p.find("a:pPr", _A))
     holder = run.font if run is not None else (para.font if para is not None else None)
     if holder is None:
         return st
@@ -249,6 +259,15 @@ def _style_of(shape) -> TextStyle:
     except (AttributeError, ValueError):
         pass
     return st
+
+
+def _algn(ppr) -> str:
+    """A paragraph properties element's stated `algn`, normalised. "" if unstated
+    (`just` and `justLow` are not one of the three the frontend draws, so they
+    fall through to the "" -> "left" default like anything else unstated)."""
+    if ppr is None:
+        return ""
+    return {"l": "left", "ctr": "center", "r": "right"}.get(ppr.get("algn") or "", "")
 
 
 def _line_spacing(ppr) -> float:
@@ -301,6 +320,15 @@ def _own_list_style(shape):
     try:
         return shape._element.find(
             "./p:txBody/a:lstStyle/a:lvl1pPr/a:defRPr", _P)
+    except AttributeError:
+        return None
+
+
+def _own_list_ppr(shape):
+    """A shape's own `lstStyle` paragraph properties. `algn` lives on this
+    element, one level up from the `defRPr` that `_own_list_style` returns."""
+    try:
+        return shape._element.find("./p:txBody/a:lstStyle/a:lvl1pPr", _P)
     except AttributeError:
         return None
 
@@ -374,18 +402,24 @@ def _title_style(prs, shape, brand: _Brand) -> TextStyle:
     """
     st = _style_of(shape)
     st = _merge(st, _from_rpr(_own_list_style(shape), brand))
+    if not st.align:
+        st.align = _algn(_own_list_ppr(shape))
     if _looks_like_title(shape):
         st = _merge(st, _from_rpr(_master_title_rpr(prs), brand))
         try:
-            st.line_spacing = st.line_spacing or _line_spacing(
-                prs.slide_master._element.find(
-                    "./p:txStyles/p:titleStyle/a:lvl1pPr", _P))
+            master_ppr = prs.slide_master._element.find(
+                "./p:txStyles/p:titleStyle/a:lvl1pPr", _P)
+            st.line_spacing = st.line_spacing or _line_spacing(master_ppr)
+            if not st.align:
+                st.align = _algn(master_ppr)
         except AttributeError:
             pass
     if not st.font:
         st.font = brand.font("+mj-lt")
     if not st.line_spacing:
         st.line_spacing = 1.0
+    if not st.align:
+        st.align = "left"
     return st
 
 
