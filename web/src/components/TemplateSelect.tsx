@@ -60,7 +60,7 @@ export default function TemplateSelect({
     >
       {/* Wide enough for a real template file name — "attendo_agent_deck.pptx"
           truncated at 16rem told you nothing about which one you had. */}
-      <SelectTrigger className="h-9 w-[24rem] max-w-[60vw]">
+      <SelectTrigger className="w-[24rem] max-w-[60vw]">
         <SelectValue
           placeholder={
             templates?.length

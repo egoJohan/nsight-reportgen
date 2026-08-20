@@ -3,7 +3,6 @@ import { FileTextIcon, ArrowRightIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRecentReports, useCustomers } from "@/lib/queries";
 import { EMPTY, ERROR, OVERLINE, PAGE_TITLE, ROW } from "@/lib/surfaces";
-import TiledBackdrop from "@/components/layout/TiledBackdrop";
 
 /** Relative time at the granularity a report list actually needs. An exact
  *  timestamp is noise here — "3d ago" answers "what was I last working on?",
@@ -37,7 +36,6 @@ export default function RecentReportsPage() {
 
   return (
     <div className="relative isolate min-h-full">
-      <TiledBackdrop />
 
       <div className="mx-auto w-full max-w-4xl px-6 py-16">
         {/* Welcome hero */}

@@ -70,7 +70,7 @@ function FontRow({
           <div className="mt-2 flex items-center gap-2">
             <label className="text-xs text-muted-foreground">Substitute with</label>
             <select
-              className="h-8 min-w-0 flex-1 rounded-md border bg-surface px-2 text-sm"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-surface px-2.5 text-sm"
               value={chosen}
               onChange={(e) => onChoose(e.target.value)}
             >

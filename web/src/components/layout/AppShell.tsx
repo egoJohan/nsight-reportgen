@@ -44,6 +44,7 @@ import {
   MessageSquareTextIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import TiledBackdrop from "@/components/layout/TiledBackdrop";
 
 /** One customer's cases, fetched only while the group is open so opening the
  *  sidebar does not fan out a request per customer. */
@@ -388,8 +389,11 @@ export default function AppShell() {
           </div>
         </header>
 
-        {/* Main content */}
-        <main className="flex-1 overflow-auto">
+        {/* Main content. `relative isolate` is what makes the backdrop's
+            negative z-index resolve against THIS pane instead of sliding
+            behind the shell's own background. */}
+        <main className="relative isolate flex-1 overflow-auto">
+          <TiledBackdrop />
           <Outlet />
         </main>
       </SidebarInset>

@@ -994,13 +994,13 @@ export default function ReportWizard({
                   if (e.key === "Enter") commitName();
                   if (e.key === "Escape") setEditingName(false);
                 }}
-                className="h-9 max-w-sm text-base font-semibold"
+                className="max-w-sm text-base font-semibold"
               />
-              <Button size="icon-sm" onClick={commitName}>
+              <Button size="icon" onClick={commitName}>
                 <CheckIcon className="size-4" />
               </Button>
               <Button
-                size="icon-sm"
+                size="icon"
                 variant="ghost"
                 onClick={() => setEditingName(false)}
               >

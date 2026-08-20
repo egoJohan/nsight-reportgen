@@ -121,7 +121,7 @@ function ChartFontSetting() {
 
       <div className="mt-3 flex items-center gap-2">
         <select
-          className="h-9 min-w-0 flex-1 rounded-md border bg-surface px-2 text-sm"
+          className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-surface px-2.5 text-sm"
           value={data.family}
           disabled={set.isPending}
           onChange={(e) =>

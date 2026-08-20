@@ -72,12 +72,12 @@ function CaseHeading({
             if (e.key === "Enter") save();
             if (e.key === "Escape") setEditing(false);
           }}
-          className="h-10 max-w-md text-lg font-semibold"
+          className="max-w-md text-lg font-semibold"
         />
-        <Button size="icon-sm" onClick={save} disabled={rename.isPending || renameInCustomer.isPending}>
+        <Button size="icon" onClick={save} disabled={rename.isPending || renameInCustomer.isPending}>
           <CheckIcon className="size-4" />
         </Button>
-        <Button size="icon-sm" variant="ghost" onClick={() => setEditing(false)}>
+        <Button size="icon" variant="ghost" onClick={() => setEditing(false)}>
           <XIcon className="size-4" />
         </Button>
       </div>
