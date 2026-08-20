@@ -180,6 +180,12 @@ export interface ChartSpec {
   // Ordered [full_label, short_label] display overrides.
   category_label_overrides: [string, string][];
   slide_title: string | null;
+  // The data fingerprint the title above was generated FOR (see charts.ts::titleDataKey).
+  // null/absent means either no AI title has ever been generated for this slide, OR the
+  // title is hand-typed — both cases must be left alone, so this only ever GATES a
+  // regeneration, it never triggers one by itself. Set together with slide_title by the
+  // AI response; cleared the instant the user edits the title field by hand.
+  slide_title_key?: string | null;
   slide_description: string | null;
   // Per-chart identity. question_ref says WHICH QUESTION a chart shows and is no
   // longer unique: a comparison section adds a second slide for a question that

@@ -45,6 +45,14 @@ class ChartSpec:
     classifying_var_2: str | None = None        # secondary classifier → cross-tab combos (REQ-C-14b)
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
     slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
+    # Opaque fingerprint of the DATA slide_title was generated for (question_ref,
+    # classifiers, the grouping's effect on this question, label overrides — see
+    # web/src/lib/charts.ts::titleDataKey, the source of truth for what goes in).
+    # Purely a round-tripped string to the backend; only the frontend computes or
+    # compares it. None means either no AI title yet, or the title is hand-typed —
+    # both must be left alone, so this field only ever GATES a regeneration on the
+    # client, it never triggers one by its absence alone.
+    slide_title_key: str | None = None
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
     footer_note: str | None = None              # override methodology footer; None = auto ("<stat> · n = N"). "{n}" expands to the base.
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
@@ -233,6 +241,7 @@ def report_from_json(data: dict | str) -> Report:
             classifying_var_2=c.get("classifying_var_2"),
             show_not_answered=c.get("show_not_answered", False),
             slide_title=c.get("slide_title"),
+            slide_title_key=c.get("slide_title_key"),
             slide_description=c.get("slide_description"),
             footer_note=c.get("footer_note"),
             show_empty_categories=c.get("show_empty_categories", True),

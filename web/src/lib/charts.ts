@@ -77,6 +77,52 @@ export function rendersAsBullets(chart: { chart_type: string }): boolean {
   return isSpecialSlide(chart) || isThemes(chart);
 }
 
+// ── AI title staleness ─────────────────────────────────────────────────────
+// A generated slide title is tied to the DATA it was written about, never to the
+// design. Compare titleDataKey's return value against the chart's stored
+// slide_title_key: unequal (or absent) means the title needs a fresh look;
+// equal means don't touch it, no matter what else changed. Mirrors
+// previewContentKey in queries.ts, which does the same split for the PNG.
+//
+// IN, because each one changes what a good title would say:
+// - question_ref: a different question is a different topic outright.
+// - classifying_var / classifying_var_2: splitting the answers by a variable
+//   changes which findings even exist to summarise.
+// - resolved.text / resolved.variables: what this question_ref CURRENTLY
+//   resolves to under the report's grouping — a battery/multi's synthetic
+//   question can be renamed or re-scoped (regrouped) without question_ref
+//   itself changing, and text/variables is the one place that shows up.
+//   `resolved` comes from useRegroupedQuestions, the same call the caller
+//   already makes to render question text elsewhere, so no extra fetch.
+// - category_label_overrides: the AI endpoint doesn't read these YET, but a
+//   rename that merges/relabels categories is exactly the kind of edit a
+//   title should react to once it does — keying on it now costs nothing and
+//   avoids a second migration later.
+// - statistic / show_not_answered / not_answered_codes: all three are sent to
+//   POST .../ai/slide-title (see runTitle in ReportWizard) and feed compute()
+//   directly — switching "% of respondents" to "mean" changes the very number
+//   the title reports on, not how it's drawn.
+//
+// OUT, because none of them change the ANSWER, only how it's presented:
+// template_ref, chart_type, colours/elements, sort order, number_format,
+// footer_note, row_summary_* (a display column, not a different finding).
+export function titleDataKey(
+  chart: ChartSpec,
+  resolved: Pick<Question, "text" | "variables"> | undefined
+): string {
+  return JSON.stringify([
+    chart.question_ref,
+    chart.classifying_var ?? null,
+    chart.classifying_var_2 ?? null,
+    resolved?.text ?? null,
+    resolved?.variables ?? null,
+    chart.category_label_overrides,
+    chart.statistic,
+    chart.show_not_answered,
+    chart.not_answered_codes ?? null,
+  ]);
+}
+
 /** A multi-chart demographics grid slide (options.charts = [{question_ref,chart_type}]). */
 export function isDemographicsGrid(chart: { chart_type: string }): boolean {
   return chart.chart_type === "demographics_grid";
@@ -250,6 +296,7 @@ export function makeChart(
     not_answered_codes: null,
     category_label_overrides: [],
     slide_title: null,
+    slide_title_key: null,
     slide_description: null,
     footer_note: null,
     // Auto-detect the cross-tab percentage direction from the variables' roles.
@@ -315,6 +362,7 @@ export function makeComparisonSlide(
       ? source.chart_type
       : "horizontal_bar",
     slide_title: null,
+    slide_title_key: null,
   };
 }
 

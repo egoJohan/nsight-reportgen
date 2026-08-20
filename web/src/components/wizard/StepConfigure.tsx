@@ -42,6 +42,7 @@ import {
   slideSubtitle,
   SLIDE_ASPECT,
   defaultRowSummaryLabel,
+  titleDataKey,
 } from "@/lib/charts";
 
 // The report's grouping override, shared with the leaf preview components so a
@@ -916,7 +917,11 @@ function SlideTitleField({
         placeholder={questionText}
         rows={3}
         className="resize-y"
-        onChange={(e) => onChange({ slide_title: e.target.value })}
+        onChange={(e) =>
+          // Hand-typed always wins: clear slide_title_key so this title is never
+          // mistaken for stale AI output and silently regenerated over.
+          onChange({ slide_title: e.target.value, slide_title_key: null })
+        }
       />
       <p className="text-xs text-muted-foreground">
         The headline shown on the slide. Leave blank to use the question text; press
@@ -1602,14 +1607,20 @@ function StepConfigureInner({
     return m;
   }, [questions]);
 
-  // Auto-generate AI slide titles for every chart once Design is open (batched
-  // in the background, just like the thumbnails) — not on report load, and not
-  // gated on opening each chart.
-  const chartRefsKey = charts.map((c) => c.question_ref).join(" ");
+  // Auto-generate AI slide titles for every chart once Design is open (batched,
+  // just like the thumbnails) — not on report load, and not gated on opening each
+  // chart. The dependency below is a per-chart DATA fingerprint (titleDataKey), not
+  // just the ref list, so it re-fires within the SAME mount the instant a
+  // classifying variable, a grouping, or a label override changes — while a
+  // template swap, a re-sort, or a colour change never touch it, so no title
+  // regenerates and no AI call fires.
+  const titleFingerprint = charts
+    .map((c) => titleDataKey(c, questionMap.get(c.question_ref)))
+    .join("|");
   useEffect(() => {
     if (charts.length) onEnsureTitles?.(charts.map((c) => c.question_ref));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartRefsKey, onEnsureTitles]);
+  }, [titleFingerprint, onEnsureTitles]);
 
   if (isError) {
     return (
