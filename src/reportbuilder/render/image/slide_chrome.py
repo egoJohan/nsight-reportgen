@@ -195,7 +195,12 @@ def slide_headline(spec, question: str) -> str:
 # height (rather than a fraction of the slide) keeps the rule proportional to
 # how much room the customer actually drew for a title, whether that's a
 # generous banner or a tight one-liner.
-_TITLE_MAX_GROWTH = 2.0
+# The title may grow past the box the customer drew — their headline fits on one
+# line because they wrote it to, ours is a survey question and wraps — but only
+# this far. Past it the type scales down instead. At 2.0 a four-line question
+# still "fit" and swallowed the slide, which is the complaint this bound exists
+# to answer: there is a maximum height, and the title scales into it.
+_TITLE_MAX_GROWTH = 1.35
 
 # The font never steps down past this share of the template's own size. Below
 # it the deck looks broken in a different way than an oversized title did, and
@@ -233,13 +238,63 @@ def fit_title_size(st, text: str) -> float:
         # An all-caps title wraps sooner than the same string in mixed case,
         # and Holiday Club's is `cap="all"` — measure it as if it were a size
         # larger.
-        measured = size * 1.12 if st.caps else size
-        lines = wrapped_line_count(text, int(st.width), int(measured))
+        # Measured, not estimated: the criterion is how much SPACE the text
+        # takes, and uppercase is measured as uppercase rather than approximated
+        # by inflating the size 12%.
+        lines = measured_line_count(text, int(st.width), size, st)
         height = lines * _title_line_height(size, st)
         if height <= max_height or size <= floor:
             break
         size -= _TITLE_STEP_PT
     return max(size, floor)
+
+
+def measured_line_count(text: str, box_width_emu: int, size_pt: float, st) -> int:
+    """How many lines *text* really wraps to, measured with the host's own font.
+
+    `wrapped_line_count` divides by an average character width (0.55em), which
+    is a fine approximation for sizing an accent bar and a poor one for deciding
+    whether a title fits: "WWW" and "iii" are the same length to it, and the
+    caps case had to be fudged with a 1.12 multiplier. Fitting is about the
+    SPACE the text takes, so measure the space — with the same PIL font
+    resolution the preview compositor uses, so the two agree about wrapping.
+
+    Falls back to the approximation when no font can be resolved (a headless
+    host with no fontconfig match); a rough answer beats no title at all.
+    """
+    if not text:
+        return 1
+    body = text.upper() if getattr(st, "caps", False) else text
+    try:
+        from reportbuilder.render.image.fast_preview import _font
+
+        # Any DPI works — only the ratio of text width to box width matters.
+        px_per_pt = 96 / 72
+        font = _font(getattr(st, "font", "") or "", size_pt * px_per_pt,
+                     bold=bool(getattr(st, "bold", False)))
+        if font is None:
+            raise RuntimeError("no font")
+        box_px = box_width_emu / 914400 * 96
+        if box_px <= 0:
+            raise RuntimeError("no box")
+        lines = 0
+        for para in body.split("\n"):
+            words, cur = para.split(), ""
+            if not words:
+                lines += 1
+                continue
+            n = 1
+            for w in words:
+                trial = f"{cur} {w}".strip()
+                if font.getlength(trial) <= box_px or not cur:
+                    cur = trial
+                else:
+                    n += 1
+                    cur = w
+            lines += n
+        return max(1, lines)
+    except Exception:  # noqa: BLE001 — measurement is best-effort, never fatal
+        return wrapped_line_count(text, box_width_emu, int(round(size_pt)))
 
 
 def harvested_title_box(profile, text: str) -> tuple[int, int, int, int]:
