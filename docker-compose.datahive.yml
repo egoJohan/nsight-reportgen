@@ -1,0 +1,42 @@
+# The local datahive's own backing services.
+#
+#   docker compose -f docker-compose.datahive.yml up -d
+#
+# Why this file exists: the previous local hive kept its state directory and
+# port to itself but pointed at the SHARED `datahive` database on :5433, which
+# another project's migration emptied — every table gone, every object
+# unreachable. Dedicated process, shared storage, is not dedicated.
+#
+# So: its own Postgres, its own volume, its own port. Nothing outside this file
+# can migrate or reset it.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nsight-datahive-postgres
+    environment:
+      POSTGRES_USER: datahive
+      POSTGRES_PASSWORD: datahive
+      POSTGRES_DB: nsight_datahive
+    ports:
+      - "127.0.0.1:5434:5432"      # loopback only, and NOT 5433
+    volumes:
+      - nsight-datahive-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datahive -d nsight_datahive"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.1
+    container_name: nsight-datahive-qdrant
+    ports:
+      - "127.0.0.1:6340:6333"
+    volumes:
+      - nsight-datahive-qdrant:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  nsight-datahive-pg:
+  nsight-datahive-qdrant:
