@@ -4,8 +4,6 @@ This is the security-critical file: with nSight holding a tenant-wide datahive
 token, these functions are the only thing separating one customer's data from
 another's. Every case below is a customer-visible failure if it regresses.
 """
-import pytest
-
 from reportbuilder.auth.permissions import Grant, User, may_read, may_write, visible_scopes
 
 
@@ -98,3 +96,76 @@ class TestVisibleScopes:
 
     def test_no_grants_is_empty_not_everything(self):
         assert visible_scopes(user()) == ()
+
+
+class TestMalformedGrants:
+    def test_empty_scope_is_rejected(self):
+        """An empty scope is a tenant-wide wildcard. Reviewer's repro:
+        Grant('', 'edit') -> may_read(u, 'attendo/customer.json') == True
+        Grant('', 'edit') -> may_read(u, 'synsam/case-1/report/rep-1') == True
+        This must raise, not silently breach."""
+        try:
+            Grant("", "edit")
+            assert False, "Grant('', 'edit') should raise ValueError"
+        except ValueError:
+            pass
+
+    def test_scope_with_trailing_slash_is_rejected(self):
+        """Global constraints: never a trailing slash."""
+        try:
+            Grant("attendo/", "edit")
+            assert False, "Grant with trailing slash should raise ValueError"
+        except ValueError:
+            pass
+
+    def test_scope_with_dot_segment_is_rejected(self):
+        """Defence in depth: reject . segments in scope."""
+        try:
+            Grant("attendo/./case-9b32", "edit")
+            assert False, "Grant with . segment should raise ValueError"
+        except ValueError:
+            pass
+
+    def test_scope_with_dotdot_segment_is_rejected(self):
+        """Defence in depth: reject .. segments in scope."""
+        try:
+            Grant("attendo/..", "edit")
+            assert False, "Grant with .. segment should raise ValueError"
+        except ValueError:
+            pass
+
+    def test_invalid_mode_view_is_rejected(self):
+        """Mode must be exactly 'view' or 'edit', case-sensitive."""
+        try:
+            Grant("attendo", "View")
+            assert False, "Grant with invalid mode 'View' should raise ValueError"
+        except ValueError:
+            pass
+
+    def test_invalid_mode_is_rejected(self):
+        """Mode must be exactly 'view' or 'edit'."""
+        try:
+            Grant("attendo", "admin")
+            assert False, "Grant with invalid mode 'admin' should raise ValueError"
+        except ValueError:
+            pass
+
+
+class TestMalformedPaths:
+    def test_path_with_dotdot_traversal_is_not_covered(self):
+        """Reviewer's repro: Grant('attendo/case-9b32','edit') must not cover
+        'attendo/case-9b32/../../synsam/customer.json'. While _seg() in
+        store/paths.py rejects this today, covers() must defend in depth and
+        return False for any path with . or .. segments."""
+        g = Grant("attendo/case-9b32", "edit")
+        assert not g.covers("attendo/case-9b32/../../synsam/customer.json")
+
+    def test_path_with_dot_segment_is_not_covered(self):
+        """Defence in depth: a path with . segments is not covered."""
+        g = Grant("attendo", "edit")
+        assert not g.covers("attendo/./case-9b32/report")
+
+    def test_path_with_dotdot_segment_is_not_covered(self):
+        """Defence in depth: a path with .. segments is not covered."""
+        g = Grant("attendo", "edit")
+        assert not g.covers("attendo/case-9b32/../case-0000/report")

@@ -31,14 +31,43 @@ class Grant:
     scope: str
     mode: str = VIEW
 
+    def __post_init__(self) -> None:
+        """Validate scope and mode. A bad scope is a configuration error (raises);
+        a bad path in a request returns False (see covers()).
+
+        Reject:
+        - empty scope: Grant("", "edit").covers(x) returns True for any x
+          (both want and have[:0] are [], so the prefix check always wins)
+        - trailing slash: violates Global Constraints
+        - . or .. segments: defence in depth against traversal if datahive's
+          _seg() is bypassed
+        - mode outside {"view", "edit"}: case-sensitive; "Edit" silently
+          degrades to read-only instead of raising
+        """
+        if not self.scope:
+            raise ValueError("scope must not be empty")
+        if self.scope.endswith("/"):
+            raise ValueError("scope must not have a trailing slash")
+        if self.mode not in (VIEW, EDIT):
+            raise ValueError(f"mode must be 'view' or 'edit', not {self.mode!r}")
+
+        segments = [s for s in self.scope.split("/") if s]
+        if "." in segments or ".." in segments:
+            raise ValueError("scope must not contain . or .. segments")
+
     def covers(self, path: str) -> bool:
         """Does this grant's prefix contain *path*?
 
         Segment-wise, so "attendo" does not admit "attendo-oy": a path prefix is
-        a prefix of the SEGMENTS, not of the string.
+        a prefix of the SEGMENTS, not of the string. Reject paths with . or ..
+        segments — a hostile path is a request, not a configuration error, so
+        return False rather than raise.
         """
-        want = [s for s in self.scope.split("/") if s]
         have = [s for s in path.split("/") if s]
+        if "." in have or ".." in have:
+            return False
+
+        want = [s for s in self.scope.split("/") if s]
         return len(have) >= len(want) and have[: len(want)] == want
 
 
