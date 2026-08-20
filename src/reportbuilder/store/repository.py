@@ -601,6 +601,11 @@ class Repository:
         `maija@egoiq.com` tomorrow, and they are the same person.
         """
         wanted = (email or "").strip().lower()
+        if not wanted:
+            # An empty or whitespace-only query must fail safe: it cannot match
+            # a user with an empty email (a misconfigured IdP claim or upstream
+            # bug). This is the load-bearing path into a user record per spec §4.
+            return None
         return next((u for u in self.list_users(auth) if u.email.lower() == wanted), None)
 
     def delete_user(self, auth: AuthContext, user_id: str) -> None:
