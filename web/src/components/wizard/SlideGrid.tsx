@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { chartTypeLabel, isSpecialSlide, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
+import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";
 
 /** The display title for a slide: a question's text, or a special slide's heading. */
@@ -15,6 +16,8 @@ export function slideTitle(c: ChartSpec, questionMap: Map<string, Question>): st
 export function SlideGrid({
   charts,
   materialId,
+  reportId,
+  templateRef,
   grouping,
   questionMap,
   activeRef,
@@ -22,6 +25,11 @@ export function SlideGrid({
 }: {
   charts: ChartSpec[];
   materialId: string;
+  // Which report (and its own template choice) these previews are for — see
+  // SlideThumb. Optional only so a caller mid-migration doesn't have to know
+  // about this; every current caller has both.
+  reportId?: string;
+  templateRef?: string;
   grouping: GroupingOverride;
   questionMap: Map<string, Question>;
   // The active slide's slide_id (question_ref is not unique across slides).
@@ -34,6 +42,8 @@ export function SlideGrid({
         <SlideThumb
           key={`${c.question_ref}-${i}`}
           materialId={materialId}
+          reportId={reportId}
+          templateRef={templateRef}
           chart={c}
           index={i}
           isActive={c.slide_id === activeRef}
@@ -46,9 +56,11 @@ export function SlideGrid({
   );
 }
 
-// ── One thumbnail (calls useChartPreview → hits DeckPrefetch's warm cache) ──────
+// ── One thumbnail ─────────────────────────────────────────────────────────
 function SlideThumb({
   materialId,
+  reportId,
+  templateRef,
   chart,
   index,
   isActive,
@@ -57,6 +69,8 @@ function SlideThumb({
   onClick,
 }: {
   materialId: string;
+  reportId?: string;
+  templateRef?: string;
   chart: ChartSpec;
   index: number;
   isActive: boolean;
@@ -64,12 +78,17 @@ function SlideThumb({
   questionMap: Map<string, Question>;
   onClick: () => void;
 }) {
-  // renderTitle:true shows the FULL slide (title baked in), so the grid faithfully
-  // reflects the deck. MUST match DeckPrefetch's renderTitle to reuse its warm cache.
-  const { data: url } = useChartPreview(materialId, chart, {
-    renderTitle: true,
+  // renderTitle:false takes the fast composited path (no LibreOffice per
+  // thumbnail — see routes_questions.py) and the title is drawn in DOM below,
+  // over the image, from the box the template's own profile states.
+  const { data } = useChartPreview(materialId, chart, {
+    renderTitle: false,
     grouping,
+    reportId,
+    templateRef,
   });
+  const url = data?.dataUrl;
+  const titleMeta = data?.titleMeta;
 
   return (
     <div
@@ -83,8 +102,15 @@ function SlideThumb({
       <button onClick={onClick} className="flex flex-1 flex-col text-left">
         {/* Same box as the Design preview (relative aspect box + absolutely
             positioned filling image) so the slide keeps its exact proportions and
-            charts aren't stretched. */}
-        <div className={`relative w-full overflow-hidden bg-muted/30 ${SLIDE_ASPECT}`}>
+            charts aren't stretched. The aspect ratio itself follows the template's
+            own (X-Slide-Aspect) when known, so the image fills the box exactly and
+            the title overlay's percentage-based box lines up with it — otherwise
+            `object-contain` can letterbox a non-16:9 template inside this box and
+            the two would no longer agree on where "the box" is. */}
+        <div
+          className={`relative w-full overflow-hidden bg-muted/30 ${SLIDE_ASPECT}`}
+          style={titleMeta ? { aspectRatio: titleMeta.aspect } : undefined}
+        >
           {url ? (
             <img src={url} alt="" className="absolute inset-0 size-full object-contain" />
           ) : (
@@ -92,6 +118,7 @@ function SlideThumb({
               {chartTypeLabel(chart.chart_type)}
             </span>
           )}
+          <SlideTitleOverlay title={chart.slide_title} meta={titleMeta} />
           <span className="absolute bottom-1.5 right-1.5 z-10 flex size-5 items-center justify-center rounded bg-background/85 text-xs tabular-nums shadow-sm">
             {index + 1}
           </span>

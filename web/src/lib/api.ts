@@ -142,6 +142,25 @@ export interface ChartElements {
   data_labels: boolean;
 }
 
+// Where the template puts its title, read off the fast preview's response
+// headers (X-Title-*, X-Slide-Aspect — see routes_questions.py). Sent only on
+// the fast (render_title=false) path, and only when the template's profile
+// actually positions a title; null otherwise, same as a preview with no title
+// info today. The frontend draws the title itself from this — never guesses
+// a position — so it lands where the template's own title sits.
+export interface ChartPreviewTitleMeta {
+  // [left, top, width, height], each a fraction of the slide's own size.
+  box: [number, number, number, number];
+  font: string;
+  sizePt: number;
+  color: string; // "RRGGBB", no '#'
+  align: "left" | "center" | "right";
+  caps: boolean;
+  // slide width / height, so text can be sized against the rendered box
+  // without the backend also having to send an absolute slide size.
+  aspect: number;
+}
+
 export interface ChartSpec {
   question_ref: string;
   chart_type: string;
@@ -374,6 +393,31 @@ function serializePreview<T>(task: () => Promise<T>, key = ""): Promise<T> {
     previewQueue.push({ start, key });
     pumpPreview();
   });
+}
+
+// The fast preview path (render_title=false) reports the template's title box
+// in response headers rather than the body, which is PNG bytes — see
+// routes_questions.py and title_box_headers() in fast_preview.py. Absent
+// headers (slow path, or a template with no title box) mean null: the same
+// "draw nothing" fallback as a preview with no title today.
+function readTitleMeta(headers: Headers): ChartPreviewTitleMeta | null {
+  const raw = headers.get("X-Title-Box");
+  if (!raw) return null;
+  const box = raw.split(",").map(Number);
+  if (box.length !== 4 || box.some((n) => Number.isNaN(n))) return null;
+  const aspect = Number(headers.get("X-Slide-Aspect"));
+  const sizePt = Number(headers.get("X-Title-Size-Pt"));
+  if (!aspect || !sizePt) return null;
+  const align = headers.get("X-Title-Align");
+  return {
+    box: box as [number, number, number, number],
+    font: headers.get("X-Title-Font") ?? "",
+    sizePt,
+    color: headers.get("X-Title-Color") ?? "2B2B2B",
+    align: align === "center" || align === "right" ? align : "left",
+    caps: headers.get("X-Title-Caps") === "1",
+    aspect,
+  };
 }
 
 export interface GroupSpec {
@@ -807,8 +851,17 @@ export const api = {
     previewChart: (
       materialId: string,
       chart: ChartSpec,
-      opts?: { renderTitle?: boolean; key?: string; grouping?: GroupingOverride }
-    ): Promise<Blob> => {
+      opts?: {
+        renderTitle?: boolean;
+        key?: string;
+        grouping?: GroupingOverride;
+        // Which report this preview belongs to, so the backend's
+        // resolve_template can see ITS template choice (and any pin) rather
+        // than only the material's tutkimus/asiakas/house default. See
+        // _preview_template in routes_questions.py.
+        reportId?: string;
+      }
+    ): Promise<{ blob: Blob; titleMeta: ChartPreviewTitleMeta | null }> => {
       const key = opts?.key ?? "";
       return serializePreview(async () => {
         // When renderTitle is false the PNG omits the baked title block, so the
@@ -819,6 +872,7 @@ export const api = {
           ...chart,
           ...(opts?.renderTitle === undefined ? {} : { render_title: opts.renderTitle }),
           ...(opts?.grouping ? { grouping: opts.grouping } : {}),
+          ...(opts?.reportId ? { report_id: opts.reportId } : {}),
         };
         // If this render IS the slide the user is currently viewing (its key is the
         // active one when it starts), ask the backend to use its RESERVED soffice
@@ -843,7 +897,7 @@ export const api = {
           }
           throw new Error(detail);
         }
-        return res.blob();
+        return { blob: await res.blob(), titleMeta: readTitleMeta(res.headers) };
       }, key);
     },
 

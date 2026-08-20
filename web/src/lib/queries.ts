@@ -7,7 +7,13 @@ import {
 import { useEffect } from "react";
 import { api, setActivePreviewKey } from "./api";
 import type { Substitutions } from "./api";
-import type { ChartSpec, ReportDoc, GroupingOverride, WordMerge } from "./api";
+import type {
+  ChartSpec,
+  ChartPreviewTitleMeta,
+  ReportDoc,
+  GroupingOverride,
+  WordMerge,
+} from "./api";
 
 // ---- Query keys ----
 export const qk = {
@@ -365,10 +371,26 @@ function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
+export interface ChartPreviewResult {
+  dataUrl: string;
+  // Where the template puts its title, for a caller that draws it itself
+  // (renderTitle: false). Null on the slow path and on a template with no
+  // title box — see readTitleMeta in api.ts.
+  titleMeta: ChartPreviewTitleMeta | null;
+}
+
 /**
- * A cached chart preview (data URL). Keyed by material + render-affecting chart
- * fields + renderTitle, with staleTime Infinity, so the same chart never
- * re-renders: formed once, reused everywhere (Configure, Review, Slides).
+ * A cached chart preview (data URL + the template's title box, when known).
+ * Keyed by material + render-affecting chart fields + renderTitle, with
+ * staleTime Infinity, so the same chart never re-renders: formed once, reused
+ * everywhere (Configure, Review, Slides).
+ *
+ * renderTitle defaults to false: the fast (composited) preview path is only
+ * ever taken when nothing bakes a title into the PNG, and nothing did before
+ * this default changed — every caller asked for the baked title explicitly,
+ * which is why every preview used to start LibreOffice. A caller that still
+ * wants the full baked slide (the Design step's own live pane) passes
+ * renderTitle: true.
  */
 export function useChartPreview(
   materialId: string,
@@ -378,13 +400,26 @@ export function useChartPreview(
     enabled?: boolean;
     priority?: boolean;
     grouping?: GroupingOverride;
+    // Which report this preview is for. reportId goes to the backend so
+    // resolve_template can see the report's own template/pin (see
+    // _preview_template in routes_questions.py). templateRef — the report's
+    // OWN explicit choice, "" when it inherits one — is NOT sent; it exists
+    // here purely to bust this cache entry the instant the user picks a new
+    // template, same tick as the (separately fired) request that persists it.
+    // Without it, picking a new template kept showing the old one's preview:
+    // same content, same renderTitle, so the query key never changed and
+    // nothing re-rendered.
+    reportId?: string;
+    templateRef?: string;
   }
 ) {
-  const renderTitle = opts?.renderTitle ?? true;
+  const renderTitle = opts?.renderTitle ?? false;
   const groupingKey = JSON.stringify(opts?.grouping ?? {});
   const queryKey = [
     "chart-preview",
     materialId,
+    opts?.reportId ?? "",
+    opts?.templateRef ?? "",
     renderTitle,
     previewContentKey(chart, renderTitle),
     groupingKey,
@@ -400,12 +435,20 @@ export function useChartPreview(
     setActivePreviewKey(gateKey);
     return () => setActivePreviewKey(null);
   }, [priority, gateKey]);
-  return useQuery({
+  return useQuery<ChartPreviewResult>({
     queryKey,
     queryFn: () =>
       api.materials
-        .previewChart(materialId, chart, { renderTitle, key: gateKey, grouping: opts?.grouping })
-        .then(blobToDataURL),
+        .previewChart(materialId, chart, {
+          renderTitle,
+          key: gateKey,
+          grouping: opts?.grouping,
+          reportId: opts?.reportId,
+        })
+        .then(async ({ blob, titleMeta }) => ({
+          dataUrl: await blobToDataURL(blob),
+          titleMeta,
+        })),
     enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,
     gcTime: 30 * 60_000,

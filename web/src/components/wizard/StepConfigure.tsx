@@ -48,6 +48,15 @@ import {
 // chart on a manually-grouped question previews the way it renders.
 const GroupingCtx = createContext<GroupingOverride>({ groups: [], singles: [] });
 
+// Which report is being previewed, and its own template choice — shared the same
+// way as GroupingCtx, for the same reason: the leaf preview components call
+// useChartPreview several levels down and shouldn't each take these as an
+// explicit prop. reportId lets the backend's resolve_template see the report's
+// own template/pin (see routes_questions.py::_preview_template); templateRef is
+// in the query cache key so PICKING a new template invalidates the preview
+// immediately instead of going on showing the old template's PNG.
+const PreviewTemplateCtx = createContext<{ reportId?: string; templateRef?: string }>({});
+
 // Per-chart pending flags (keyed by question_ref) from the auto-AI orchestrator.
 export type AiPendingMap = Record<
   string,
@@ -83,11 +92,13 @@ function ChartPreview({
   // preview is IDENTICAL to the Overview grid and the exported deck (WYSIWYG).
   void questionText;
   const grouping = useContext(GroupingCtx);
-  const { data: url, error: qError, isFetching: loading } = useChartPreview(
+  const { reportId, templateRef } = useContext(PreviewTemplateCtx);
+  const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: true, priority: true, grouping }
+    { renderTitle: true, priority: true, grouping, reportId, templateRef }
   );
+  const url = data?.dataUrl;
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   // Any pending state (re-rendering, or AI title / label generation) shows the single
@@ -1309,11 +1320,13 @@ function SpecialPreview({
   // The whole slide (heading + bullets) is baked server-side → render the full
   // PNG (renderTitle:true) and show it plainly.
   const grouping = useContext(GroupingCtx);
-  const { data: url, error: qError, isFetching: loading } = useChartPreview(
+  const { reportId, templateRef } = useContext(PreviewTemplateCtx);
+  const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     chart,
-    { renderTitle: true, priority: true, grouping }
+    { renderTitle: true, priority: true, grouping, reportId, templateRef }
   );
+  const url = data?.dataUrl;
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   // Re-rendering OR bullet (re)generation → the single "Updating…" animation over a
@@ -1460,9 +1473,16 @@ function PrefetchOne({
   chart: ChartSpec;
 }) {
   const grouping = useContext(GroupingCtx);
+  const { reportId, templateRef } = useContext(PreviewTemplateCtx);
   // Warm the full-slide preview (renderTitle:true) — used by BOTH the Design
   // preview and the Overview grid — so nothing waits on focus.
-  useChartPreview(materialId, chart, { renderTitle: true, enabled: true, grouping });
+  useChartPreview(materialId, chart, {
+    renderTitle: true,
+    enabled: true,
+    grouping,
+    reportId,
+    templateRef,
+  });
   return null;
 }
 
@@ -1526,6 +1546,12 @@ function StepConfigureInner({
   // Regenerate a special (non-chart) slide's AI content. Adding/removing/reordering
   // slides lives in the Select step now — Design only edits slide CONTENT.
   onRegenerateSpecial?: (chart: ChartSpec) => void;
+  // Not read here — only by the wrapper below, which puts them in
+  // PreviewTemplateCtx for the leaf preview components. Typed on this props
+  // object anyway so `Parameters<typeof StepConfigureInner>[0]` (the wrapper's
+  // own prop type) includes them.
+  reportId?: string;
+  templateRef?: string;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
   const [editQid, setEditQid] = useState<string | null>(null);
@@ -1801,14 +1827,19 @@ function StepConfigureInner({
   );
 }
 
-// Provide the report's grouping to the leaf preview components (via context) so
-// they don't need it prop-drilled through the whole Design tree.
+// Provide the report's grouping — and which report/template it's previewing —
+// to the leaf preview components (via context) so they don't need any of it
+// prop-drilled through the whole Design tree.
 export default function StepConfigure(
   props: Parameters<typeof StepConfigureInner>[0]
 ) {
   return (
     <GroupingCtx.Provider value={props.grouping}>
-      <StepConfigureInner {...props} />
+      <PreviewTemplateCtx.Provider
+        value={{ reportId: props.reportId, templateRef: props.templateRef }}
+      >
+        <StepConfigureInner {...props} />
+      </PreviewTemplateCtx.Provider>
     </GroupingCtx.Provider>
   );
 }

@@ -1138,6 +1138,8 @@ export default function ReportWizard({
         {step === 1 && (
           <StepConfigure
             materialId={materialId}
+            reportId={reportId}
+            templateRef={draft.template_ref}
             charts={includedCharts}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}

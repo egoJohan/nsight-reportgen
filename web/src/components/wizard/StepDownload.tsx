@@ -204,6 +204,8 @@ export default function StepDownload({
           <SlideGrid
             charts={deckCharts}
             materialId={materialId}
+            reportId={reportId}
+            templateRef={draft.template_ref}
             grouping={grouping}
             questionMap={questionMap}
             activeRef={active}

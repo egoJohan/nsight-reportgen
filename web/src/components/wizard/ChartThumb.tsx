@@ -3,6 +3,7 @@ import { AlertCircleIcon, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
+import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 
 /**
  * A cached chart preview thumbnail. Backed by the shared useChartPreview cache,
@@ -20,14 +21,21 @@ export default function ChartThumb({
   className,
   renderTitle,
   grouping,
+  reportId,
+  templateRef,
 }: {
   materialId: string;
   chart: ChartSpec;
   className?: string;
-  // When false, shares the Design preview's cache entry (title-less PNG) so the
-  // thumbnail and the large preview render only ONCE per chart.
+  // Fast (composited, no LibreOffice) by default: the title is drawn in DOM
+  // below over the image instead of baked into the PNG. A caller that needs
+  // the exact baked slide (WYSIWYG against the deck) passes renderTitle: true.
   renderTitle?: boolean;
   grouping?: GroupingOverride;
+  // Which report (and its own template choice) this is a preview for — see
+  // SlideGrid.tsx's SlideThumb for why both matter.
+  reportId?: string;
+  templateRef?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [seen, setSeen] = useState(false);
@@ -48,11 +56,15 @@ export default function ChartThumb({
     return () => io.disconnect();
   }, [seen]);
 
-  const { data: url, error, isFetching } = useChartPreview(materialId, chart, {
+  const { data, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
     enabled: seen,
     grouping,
+    reportId,
+    templateRef,
   });
+  const url = data?.dataUrl;
+  const titleMeta = data?.titleMeta;
   const message =
     error instanceof Error ? error.message : error ? "Preview failed" : null;
 
@@ -65,11 +77,23 @@ export default function ChartThumb({
       )}
     >
       {url ? (
-        <img
-          src={url}
-          alt="Chart preview"
-          className="max-h-full max-w-full rounded-md object-contain shadow-sm"
-        />
+        // With a title box to draw (the fast path), the frame takes the
+        // template's own aspect ratio and fills the available width so
+        // `object-contain` never letterboxes it — otherwise the overlay's
+        // percentage box and the image's actual rendered box would disagree
+        // about where "the box" is. Without one (renderTitle:true, no overlay
+        // to align), the image keeps its old free-scaling box.
+        <div
+          className="relative max-h-full max-w-full"
+          style={titleMeta ? { aspectRatio: titleMeta.aspect, width: "100%" } : undefined}
+        >
+          <img
+            src={url}
+            alt="Chart preview"
+            className="size-full rounded-md object-contain shadow-sm"
+          />
+          <SlideTitleOverlay title={chart.slide_title} meta={titleMeta} />
+        </div>
       ) : (
         !message && (
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
