@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from reportbuilder.api.deps import get_client
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.store.datahive_client import DataHiveClient
+from reportbuilder.store.seam import NotFound
 
 
 materials_router = APIRouter()
@@ -19,8 +20,15 @@ def list_case_materials(
 
     Server-side so any user/device opening the case sees its material(s), instead
     of relying on the uploader's browser-local state. (REQ-C-04)
+
+    An unknown case_id lists empty rather than 404ing: a case a caller has never
+    heard of and a case with nothing in it look the same from here, and the UI
+    reads this before it knows which one it has.
     """
-    return {"materials": client.list_materials(case_id)}
+    try:
+        return {"materials": client.list_materials(case_id)}
+    except (KeyError, NotFound):
+        return {"materials": []}
 
 
 @materials_router.post("/cases/{case_id}/materials")
@@ -90,7 +98,10 @@ def material_usage(
     count them: "this empties Report 1, Report 2 and Report 3" is something an
     analyst can weigh, "3 reports affected" is not.
     """
-    return {"reports": client.reports_using_material(case_id, material_id)}
+    try:
+        return {"reports": client.reports_using_material(case_id, material_id)}
+    except (KeyError, NotFound):
+        return {"reports": []}
 
 
 @materials_router.delete("/cases/{case_id}/materials/{material_id}")

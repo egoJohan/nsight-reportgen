@@ -67,8 +67,15 @@ def list_case_reports(
 
     Server-side so reports are visible to any user/device, not just the creator's
     browser. (REQ-C-08)
+
+    An unknown case_id lists empty rather than 404ing: a case a caller has never
+    heard of and a case with nothing in it look the same from here, and the UI
+    reads this before it knows which one it has.
     """
-    return {"reports": client.list_reports(case_id)}
+    try:
+        return {"reports": client.list_reports(case_id)}
+    except (KeyError, NotFound):
+        return {"reports": []}
 
 
 @reports_router.put("/cases/{case_id}/reports/{report_id}")
