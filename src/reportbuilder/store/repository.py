@@ -758,13 +758,20 @@ class Repository:
 
         The material bytes are excluded deliberately — a re-upload mints a new
         material id, so identity already covers them.
+
+        Host rendering settings count too: a font stand-in changes what the deck
+        LOOKS like without changing the report, so a deck stored before the
+        change must not be handed back after it.
         """
+        from reportbuilder.render.fonts import rendering_fingerprint
+
         h = hashlib.sha256()
         for part in (
             self.load_report(auth, customer_id, case_id, report_id),
             json.dumps(self.load_material_config(auth, customer_id, case_id,
                                                  material_id), sort_keys=True),
             material_id,
+            rendering_fingerprint(),
         ):
             h.update(part.encode("utf-8"))
             h.update(b"\x00")

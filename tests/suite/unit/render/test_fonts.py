@@ -228,3 +228,43 @@ def test_status_serialises_for_the_api(monkeypatch):
     d = fonts.ensure_font("Verdana", fetch=_fetcher({"metadata/fonts": LIBRARY})).as_dict()
     assert d == {"family": "Verdana", "state": "present", "source": "system",
                  "reason": "", "substitute": "", "ok": True}
+
+
+class TestRenderingFingerprint:
+    """Every cached rendered image is a picture of a slide AS THIS HOST DRAWS IT.
+
+    A font stand-in changes that while changing neither the chart nor the
+    template, so an admin who chose a new stand-in kept being served the image
+    drawn with the old one — the setting looked like it did nothing.
+    """
+
+    def test_a_substitution_changes_it(self):
+        from reportbuilder.render import fonts as F
+
+        before = F.rendering_fingerprint()
+        F.apply_substitutions({"Calibri": "DejaVu Sans"})
+        try:
+            assert F.rendering_fingerprint() != before
+        finally:
+            F.apply_substitutions({})
+
+    def test_reverting_restores_it(self):
+        """So switching a stand-in back reuses the images already rendered
+        rather than making the host draw them all again."""
+        from reportbuilder.render import fonts as F
+
+        before = F.rendering_fingerprint()
+        F.apply_substitutions({"Calibri": "DejaVu Sans"})
+        F.apply_substitutions({})
+        assert F.rendering_fingerprint() == before
+
+    def test_the_preview_cache_directory_follows_it(self):
+        from reportbuilder.api.routes_questions import _preview_out_dir
+        from reportbuilder.render import fonts as F
+
+        first = _preview_out_dir("mat-1", '{"chart_type":"pie"}')
+        F.apply_substitutions({"Calibri": "DejaVu Sans"})
+        try:
+            assert _preview_out_dir("mat-1", '{"chart_type":"pie"}') != first
+        finally:
+            F.apply_substitutions({})

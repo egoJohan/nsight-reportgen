@@ -277,6 +277,28 @@ def substitutions() -> dict[str, str]:
     return dict(_substitutions)
 
 
+def rendering_fingerprint() -> str:
+    """A short hash of every host setting that changes how a slide is drawn.
+
+    Belongs in every cache key for a rendered image. A cached preview is a
+    picture of a chart in a template AS THIS HOST DRAWS IT, and a stand-in font
+    changes that without changing the chart or the template — so an admin who
+    picked a new stand-in kept being served the picture drawn with the old one.
+    """
+    import hashlib
+    import json
+
+    from reportbuilder.render import house_style as H
+
+    try:
+        chart_font = H.current_chart_font()
+    except Exception:  # noqa: BLE001 — a fingerprint must never break a render
+        chart_font = ""
+    raw = json.dumps({"subs": substitutions(), "chart_font": chart_font},
+                     sort_keys=True)
+    return hashlib.md5(raw.encode()).hexdigest()[:8]
+
+
 def apply_substitutions(mapping: dict[str, str]) -> dict[str, str]:
     """Install fontconfig rules so *mapping* takes effect for rendering.
 

@@ -1249,9 +1249,18 @@ _PREVIEW_CACHE_SALT = uuid.uuid4().hex[:8]
 
 
 def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
-    """Return a per-(process, material, spec) temp directory for preview artifacts."""
+    """Return a per-(process, material, spec, host-rendering) temp directory.
+
+    The rendering fingerprint is part of the identity because a font stand-in
+    changes what a preview LOOKS like while changing neither the chart nor the
+    template: without it, choosing a new stand-in kept serving the image drawn
+    with the old one, and the setting appeared to do nothing.
+    """
+    from reportbuilder.render.fonts import rendering_fingerprint
+
     key = hashlib.md5(
-        f"{_PREVIEW_CACHE_SALT}:{material_id}:{spec_json}".encode()
+        f"{_PREVIEW_CACHE_SALT}:{material_id}:{spec_json}:"
+        f"{rendering_fingerprint()}".encode()
     ).hexdigest()[:16]
     d = pathlib.Path(tempfile.gettempdir()) / "nsight-preview" / key
     d.mkdir(parents=True, exist_ok=True)

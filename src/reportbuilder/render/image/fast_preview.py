@@ -41,14 +41,22 @@ _CACHE = Path(tempfile.gettempdir()) / "nsight-preview-ground"
 
 
 def _key(style, dpi: int) -> str:
-    """Identity of a ground: which template file, as it is right now, at what dpi."""
+    """Identity of a ground: which template file, as it is right now, at what
+    dpi, drawn the way this host currently draws text.
+
+    The last part matters: the ground carries the template's own text, so a new
+    font stand-in changes it while the template file is untouched.
+    """
+    from reportbuilder.render.fonts import rendering_fingerprint
+
     source = str(getattr(style, "spec_source", "") or "generic")
     stamp = ""
     try:
         stamp = str(os.path.getmtime(source))
     except OSError:
         pass
-    raw = f"{source}|{stamp}|{dpi}|{getattr(style, 'slide_width', 0)}"
+    raw = (f"{source}|{stamp}|{dpi}|{getattr(style, 'slide_width', 0)}"
+           f"|{rendering_fingerprint()}")
     return hashlib.md5(raw.encode()).hexdigest()[:16]
 
 
