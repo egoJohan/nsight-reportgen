@@ -79,6 +79,7 @@ export default function CustomerCasesPage() {
           <TemplatePicker
             customerId={customerId}
             currentId={customer?.template_id ?? ""}
+            manageLibrary
             onBind={(id) => templates.bindCustomer.mutate(id)}
           />
         </div>

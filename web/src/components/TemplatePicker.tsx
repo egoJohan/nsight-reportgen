@@ -30,6 +30,7 @@ export default function TemplatePicker({
   currentId,
   inheritedFrom,
   onBind,
+  manageLibrary = false,
 }: {
   customerId: string;
   /** The template bound AT THIS LEVEL, or "" when inheriting. */
@@ -40,6 +41,14 @@ export default function TemplatePicker({
    *  wherever it appears, and this is the only thing that differs. */
   inheritedFrom?: string;
   onBind: (templateId: string | null) => void;
+  /** May this panel change the ASIAKAS's library — upload, configure, delete?
+   *
+   *  True only on the asiakas's own page. The templates belong to the asiakas
+   *  and are shared by every tutkimus under it, so deleting one from a single
+   *  study would take it away from the others, and its font settings are the
+   *  asiakas's too. From a tutkimus you choose which of them applies; you do
+   *  not edit the library you are choosing from. */
+  manageLibrary?: boolean;
 }) {
   const { data: templates, isLoading } = useTemplates(customerId);
   const actions = useTemplateActions(customerId);
@@ -85,6 +94,7 @@ export default function TemplatePicker({
             </p>
           )}
         </div>
+        {manageLibrary && (
         <Button
           size="sm"
           variant="outline"
@@ -98,6 +108,7 @@ export default function TemplatePicker({
           )}
           Lataa pohja
         </Button>
+        )}
         <input
           ref={fileRef}
           type="file"
@@ -115,7 +126,9 @@ export default function TemplatePicker({
 
         {templates?.length === 0 && !isLoading && (
           <p className="text-xs text-muted-foreground">
-            Ei vielä pohjia. Lataa asiakkaan oma PowerPoint-pohja.
+            {manageLibrary
+              ? "Ei vielä pohjia. Lataa asiakkaan oma PowerPoint-pohja."
+              : "Asiakkaalle ei ole lisätty pohjia. Lisää ne asiakkaan sivulla."}
           </p>
         )}
 
@@ -166,22 +179,28 @@ export default function TemplatePicker({
               </button>
               {/* Settings before delete: the gear is the one you want most of
                   the time, and putting it left of the bin keeps a destructive
-                  button from being the default target. */}
-              <TemplateSettingsDialog customerId={customerId} templateId={t.id} />
+                  button from being the default target. Both belong to the
+                  asiakas — a font stand-in is set once for the template, not
+                  per tutkimus — so neither appears when choosing. */}
+              {manageLibrary && (
+                <TemplateSettingsDialog customerId={customerId} templateId={t.id} />
+              )}
               {/* This deletes the FILE from the asiakas, not "stop using it
                   here" — that is the checkmark above, which unbinds and falls
                   back to what is inherited. The two are one click apart and
                   read alike, so the destructive one asks first and names what
                   it takes with it. */}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
-                title="Poista pohja asiakkaalta"
-                onClick={() => setConfirmDelete(t)}
-              >
-                <Trash2Icon className="size-4" />
-              </Button>
+              {manageLibrary && (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-destructive"
+                  title="Poista pohja asiakkaalta"
+                  onClick={() => setConfirmDelete(t)}
+                >
+                  <Trash2Icon className="size-4" />
+                </Button>
+              )}
             </div>
           );
         })}
