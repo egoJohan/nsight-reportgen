@@ -134,6 +134,21 @@ class Repository:
 
     def __init__(self, store: ObjectStore):
         self.store = store
+        # material id -> (customer_id, case_id). Resolving one otherwise lists
+        # every config object in the tenant, and the material routes are called
+        # per chart (spec §5.1). Location only — never the permission answer,
+        # which differs per user and is re-checked on every hit.
+        #
+        # Lifetime is the process: get_repository() memoises one Repository per
+        # process, so this cache lives as long as the backend does and is
+        # shared by every request — correct for a location that only changes
+        # when a material is attached or deleted, both of which go through
+        # this class. It is NOT correct across processes: a material deleted by
+        # worker A stays in worker B's cache until B tries to read it, at which
+        # point the NotFound branch below evicts it. That self-healing path is
+        # why a stale entry falls through to a listing rather than returning
+        # what it remembered.
+        self._material_location: dict[str, tuple[str, str]] = {}
 
     # -- Asiakas ----------------------------------------------------------
 
@@ -274,6 +289,7 @@ class Repository:
                          {"id": mid, "case_id": case_id, "customer_id": customer_id,
                           "name": name, "size": len(data), "config": {}},
                          [P.LABEL_CONFIG])
+        self._material_location[mid] = (customer_id, case_id)
         return Material(id=mid, case_id=case_id, customer_id=customer_id,
                         name=name, size=len(data))
 
@@ -334,12 +350,37 @@ class Repository:
         from before the hierarchy existed. Rather than rewrite every one of them
         and the UI that calls them, this resolves the path the same way
         find_case does — one labelled listing, filtered here by the caller's
-        grants — the store returns the whole tenant.
+        grants, since the store returns the whole tenant.
+
+        Cached by location. A hit still goes through _admits, so warming the
+        cache as one user tells another user nothing.
         """
+        hit = self._material_location.get(material_id)
+        if hit is not None:
+            customer_id, case_id = hit
+            path = P.material_config_path(customer_id, case_id, material_id)
+            if not _admits(user, path):
+                return None
+            try:
+                d = self._read_json(auth, path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                # Gone from under us — drop the stale entry and fall through to
+                # a full listing rather than reporting a material that is not
+                # there.
+                self._material_location.pop(material_id, None)
+            else:
+                return Material(id=material_id, case_id=case_id,
+                                customer_id=customer_id,
+                                name=d.get("name") or material_id,
+                                size=int(d.get("size") or 0))
+
         for info in self.store.list(auth, "", labels=[P.LABEL_CONFIG]):
             segments = info.path.split("/")
             # {asiakas}/{case}/material/{id}.config
             if len(segments) == 4 and segments[3] == f"{material_id}.config":
+                # Remember the location before the permission check, so a user
+                # who may not see it does not force the next user to list again.
+                self._material_location[material_id] = (segments[0], segments[1])
                 if not _admits(user, info.path):
                     return None
                 try:
@@ -350,6 +391,7 @@ class Repository:
                                 customer_id=segments[0],
                                 name=d.get("name") or material_id,
                                 size=int(d.get("size") or 0))
+        # A miss is NOT cached: the id may be attached a moment from now.
         return None
 
     # -- Raportti ---------------------------------------------------------
@@ -533,6 +575,7 @@ class Repository:
         # and by then the objects it removed on the first pass do not exist.
         # "Does this dataset exist at all" is the caller's question, asked once
         # before it starts — see routes_materials.delete_material.
+        self._material_location.pop(material_id, None)
         removed = 0
         for path in (P.material_path(customer_id, case_id, material_id),
                      P.material_config_path(customer_id, case_id, material_id)):
