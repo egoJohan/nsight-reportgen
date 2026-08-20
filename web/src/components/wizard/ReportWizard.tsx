@@ -209,6 +209,22 @@ export default function ReportWizard({
     }
   }, [loaded, draft]);
 
+  // What the server already holds, as we last sent or received it. A save is a
+  // full-document PUT of a 60-chart report, so "did anything actually change?"
+  // is worth answering before making the round trip.
+  const savedPayload = useRef<string | null>(null);
+
+  // The baseline for "has anything changed?": what the server just gave us,
+  // normalised the way a save would send it. Without this the first save of a
+  // session always goes through, even when the visit changed nothing.
+  useEffect(() => {
+    if (!draft || savedPayload.current !== null) return;
+    savedPayload.current = JSON.stringify({
+      ...draft,
+      charts: normalizeSlots(draft.charts),
+    });
+  }, [draft]);
+
   // "Is this question in the report?" — ANY slide showing it counts, comparison
   // slides included. Counting only primaries left a question that has comparison
   // slides looking un-added, which emptied the Compare groups question list.
@@ -219,8 +235,15 @@ export default function ReportWizard({
 
   const mutate = useCallback(
     (fn: (d: ReportDoc) => ReportDoc) => {
-      setDraft((prev) => (prev ? fn(prev) : prev));
-      setDirty(true);
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const next = fn(prev);
+        // A pass that rebuilt the document without changing anything is not an
+        // edit. `save()` checks the same thing again against what the server
+        // holds; this just keeps the "Unsaved changes" indicator honest.
+        if (next !== prev) setDirty(true);
+        return next;
+      });
     },
     []
   );
@@ -442,8 +465,18 @@ export default function ReportWizard({
     const d = draftRef.current;
     if (!d) return false;
     const payload: ReportDoc = { ...d, charts: normalizeSlots(d.charts) };
+    const serialized = JSON.stringify(payload);
+    if (serialized === savedPayload.current) {
+      // Nothing to write. Passes that touch every chart — pruning refs, the AI
+      // title batch, auto-formatting — mark the draft dirty even when they
+      // produce the values already there, and leaving the step then wrote the
+      // document back unchanged.
+      setDirty(false);
+      return true;
+    }
     try {
       await updateReport.mutateAsync({ reportId, report: payload });
+      savedPayload.current = serialized;
       setDirty(false);
       setSavedAt(Date.now());
       return true;

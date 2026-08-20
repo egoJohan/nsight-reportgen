@@ -203,6 +203,13 @@ export function useTemplateActions(customerId: string | undefined) {
     qc.invalidateQueries({ queryKey: ["customer"] });
     qc.invalidateQueries({ queryKey: ["customers"] });
     qc.invalidateQueries({ queryKey: ["case"] });
+    // Every chart preview is a picture of a slide IN a template — its ground,
+    // its title font, its palette — so changing the template makes all of them
+    // wrong. They are not keyed on the template (the chart's own content is the
+    // key), so they are REMOVED rather than invalidated: dropped from the cache
+    // and re-rendered on demand, instead of showing the old template's slide
+    // until something else happens to refetch them.
+    qc.removeQueries({ queryKey: ["chart-preview"] });
   };
   return {
     upload: useMutation({
