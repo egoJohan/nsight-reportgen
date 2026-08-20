@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -105,6 +106,12 @@ def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _natural_key(name: str) -> list:
+    """Sort key where digit runs compare as numbers, not as text."""
+    return [int(part) if part.isdigit() else part.lower()
+            for part in re.split(r"(\d+)", name or "")]
+
+
 class Repository:
     """Domain operations over the seam. Every call carries the caller's auth,
     so datahive decides what this user may see — never this class."""
@@ -132,7 +139,9 @@ class Repository:
             d = self._read_json(auth, info.path)
             out.append(Customer(id=d["id"], name=d.get("name", d["id"]),
                                 template_id=d.get("template_id", "")))
-        return sorted(out, key=lambda c: c.name.lower())
+        # A customer list is a directory: alphabetical is how you find a name
+        # in it. Only the CASE list is newest-first.
+        return sorted(out, key=lambda c: _natural_key(c.name))
 
     def get_customer(self, auth: AuthContext, customer_id: str) -> Customer:
         d = self._read_json(auth, P.customer_meta_path(customer_id))
@@ -165,7 +174,11 @@ class Repository:
             out.append(Case(id=d["id"], customer_id=customer_id,
                             name=d.get("name", d["id"]),
                             template_id=d.get("template_id", "")))
-        return sorted(out, key=lambda c: c.name.lower())
+        # Newest first. Studies are named by wave — "Brändiseuranta 2025",
+        # "…tutkimus 3" — so descending puts the current one at the top, which
+        # is the one being worked on. Numbers sort as numbers, or "10" would
+        # come before "9".
+        return sorted(out, key=lambda c: _natural_key(c.name), reverse=True)
 
     def get_case(self, auth: AuthContext, customer_id: str, case_id: str) -> Case:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))

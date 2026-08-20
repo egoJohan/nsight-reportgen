@@ -79,13 +79,6 @@ const STEPS = [
 // Index of the Design step — the Preview grid jumps here when a slide is clicked.
 const CONFIGURE_STEP = STEPS.findIndex((s) => s.id === "configure");
 
-// Per-phase instruction shown centered under the stepper (report-specific).
-const STEP_INSTRUCTIONS = [
-  "Toggle a question to add or remove its chart from the report, then press Next.",
-  "",
-  "",
-];
-
 function Stepper({
   current,
   onJump,
@@ -1086,11 +1079,6 @@ export default function ReportWizard({
             <ArrowRightIcon className="size-4" />
           </Button>
         </div>
-        {STEP_INSTRUCTIONS[step] && (
-          <p className="mt-1.5 text-center text-xs text-muted-foreground">
-            {STEP_INSTRUCTIONS[step]}
-          </p>
-        )}
       </div>
 
       {/* Step body */}

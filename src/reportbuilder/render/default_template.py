@@ -6,9 +6,16 @@ deck is rendered into some template, and "no template chosen" simply selects
 this one. A branch for "no template" would be a second rendering path that only
 the default exercises, and it would drift.
 
-It encodes what render/house_style.py already draws — cream ground, teal
-series, ink text — as a theme, so template_check reads it back exactly as it
-reads a client's brand.
+Deliberately plain: a white ground, one very common typeface, no decoration.
+A deck with no template chosen is either a draft or headed for a customer whose
+own template has not been set up yet, and in both cases nSight's own branding on
+the slide is wrong — it is not the analyst's brand and not the client's. Plain
+also carries anywhere: white and Arial survive being pasted into whatever deck
+the slides end up in.
+
+The chart SERIES keep the house palette. Those are not decoration — they have to
+be distinguishable from each other, and a set of greys would make a chart harder
+to read rather than more neutral.
 """
 from __future__ import annotations
 
@@ -25,11 +32,16 @@ _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 # house colour; the alternating light variants keep adjacent bands legible.
 _ACCENTS = [hs.TEAL, hs.TEAL_LT, hs.BLUE, hs.BLUE_LT, hs.RED, hs.RED_LT]
 
-# Liberation Sans is what house_style registers for matplotlib and is present on
-# the render host, so the deck and the chart images inside it agree. Naming a
-# font the host lacks is the failure mode this avoids.
-_HEADING_FONT = "Liberation Sans"
-_BODY_FONT = "Liberation Sans"
+# Arial: the safest name to write into a .pptx. It is on every Windows and Mac
+# that will open the deck, and on this Linux host fontconfig answers it with
+# Liberation Sans — metric-compatible, so the slide keeps its layout either way.
+# Naming a font the OPENER lacks is the failure mode that matters here; naming
+# one the render host lacks is handled by that substitution.
+_HEADING_FONT = "Arial"
+_BODY_FONT = "Arial"
+
+# Plain white, not the house cream: see the module docstring.
+_BACKGROUND = "#FFFFFF"
 
 
 _TITLE_PT = 18  # matches render.image.slide_chrome.TITLE_PT
@@ -60,7 +72,7 @@ def _set_scheme(theme_root) -> None:
             srgb.set("val", _hex(colour))
         # dk1/lt1 drive default text and background, so the deck reads as the
         # house style even before a chart is placed.
-        for tag, colour in (("dk1", hs.INK), ("lt1", hs.CREAM)):
+        for tag, colour in (("dk1", hs.INK), ("lt1", _BACKGROUND)):
             el = scheme.find(f"{{{_A}}}{tag}")
             if el is None:
                 continue
@@ -110,7 +122,7 @@ def _set_placeholder_style(ph, *, size_pt: int, bold: bool, colour: str) -> None
 
 
 def _bake_house_furniture(prs, layout) -> None:
-    """Draw the house background and accent bar INTO *layout*.
+    """Draw the default background INTO *layout*.
 
     The house look used to be painted onto every slide by
     `render.image.slide_chrome`. That is why a customer's template appeared
@@ -129,21 +141,16 @@ def _bake_house_furniture(prs, layout) -> None:
 
     bg = scratch.shapes.add_shape(1, 0, 0, sw, sh)
     bg.fill.solid()
-    bg.fill.fore_color.rgb = _rgb(hs.CREAM)
+    bg.fill.fore_color.rgb = _rgb(_BACKGROUND)
     bg.line.fill.background()
     bg.shadow.inherit = False
 
-    acc = scratch.shapes.add_shape(1, Inches(0.55), Inches(0.42),
-                                   Inches(0.10), Inches(0.72))
-    acc.fill.solid()
-    acc.fill.fore_color.rgb = _rgb(hs.TEAL)
-    acc.line.fill.background()
-    acc.shadow.inherit = False
+    # No accent bar. A teal stripe beside every title is nSight's own branding,
+    # and a deck with no template chosen belongs to whoever is making it.
 
-    # Place the layout's own placeholders where the chrome used to draw, so the
-    # house deck keeps the geometry it had when nSight painted every slide by
-    # hand. PowerPoint's stock positions are indented far to the right and would
-    # leave the title floating away from the accent bar.
+    # Place the layout's own placeholders where the renderer expects them.
+    # PowerPoint's stock positions are indented far to the right and would leave
+    # the title adrift from the slide's left margin.
     sw_i, sh_i = sw, sh
     for ph in layout.placeholders:
         idx = ph.placeholder_format.idx
@@ -159,8 +166,7 @@ def _bake_house_furniture(prs, layout) -> None:
     spTree = layout.shapes._spTree
     # After nvGrpSpPr + grpSpPr (the two mandatory heads), i.e. behind
     # everything the layout already defines.
-    for offset, shape in enumerate((bg, acc)):
-        spTree.insert(2 + offset, deepcopy(shape._element))
+    spTree.insert(2, deepcopy(bg._element))
 
     # Drop the scratch slide: it was only a place to build the XML.
     rid = prs.slides._sldIdLst[-1].rId
