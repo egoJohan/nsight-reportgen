@@ -78,11 +78,6 @@ export default function CustomerCasesPage() {
               onUploaded={(id) => templates.bindCustomer.mutate(id)}
             />
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Asiakkaan PowerPoint-pohjat; nimenä on tiedoston nimi. Tutkimukset
-            ja raportit valitsevat näistä, ja ilman valintaa käytetään listan
-            ensimmäistä.
-          </p>
           <div className="mt-3">
             <TemplatePicker
               customerId={customerId}
