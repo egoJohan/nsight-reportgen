@@ -373,7 +373,7 @@ export function makeComparisonSlide(
  */
 // A unique id per special slide. The backend identifies special slides by
 // chart_type (not question_ref), so a non-empty ref is safe — and it's required
-// so that per-slide state (preview cache, AI-pending flags, updateChartByRef)
+// so that per-slide state (preview cache, AI-pending flags, updateChartById)
 // never collides when a report holds more than one special slide.
 function specialRef(type: string): string {
   const rand =

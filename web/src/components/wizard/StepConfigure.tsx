@@ -1545,9 +1545,9 @@ function StepConfigureInner({
   // Drag-reorder the report's slides in the left list (affects this report only).
   onReorder: (from: number, to: number) => void;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
-  // Called with every chart's ref when Design opens so AI slide titles are
+  // Called with every chart's slide_id when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
-  onEnsureTitles?: (refs: string[]) => void;
+  onEnsureTitles?: (slideIds: string[]) => void;
   // Regenerate a special (non-chart) slide's AI content. Adding/removing/reordering
   // slides lives in the Select step now — Design only edits slide CONTENT.
   onRegenerateSpecial?: (chart: ChartSpec) => void;
@@ -1618,7 +1618,8 @@ function StepConfigureInner({
     .map((c) => titleDataKey(c, questionMap.get(c.question_ref)))
     .join("|");
   useEffect(() => {
-    if (charts.length) onEnsureTitles?.(charts.map((c) => c.question_ref));
+    if (charts.length)
+      onEnsureTitles?.(charts.map((c) => c.slide_id ?? c.question_ref));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [titleFingerprint, onEnsureTitles]);
 
@@ -1660,7 +1661,7 @@ function StepConfigureInner({
   const activeThemes = activeChart ? isThemes(activeChart) : false;
   const activeGrid = activeChart ? isDemographicsGrid(activeChart) : false;
   const activeBulletsPending =
-    aiPending?.[activeChart?.question_ref ?? ""]?.bulletsPending ?? false;
+    aiPending?.[activeChart?.slide_id ?? ""]?.bulletsPending ?? false;
 
   // Update the active chart; when the type switches TO themes with no bullets yet,
   // kick off theme-bullet generation so the slide isn't empty (a plain updateChart
@@ -1750,10 +1751,10 @@ function StepConfigureInner({
                 materialId={materialId}
                 chart={activeChart}
                 titlePending={
-                  aiPending?.[activeChart.question_ref]?.titlePending ?? false
+                  aiPending?.[activeChart.slide_id ?? ""]?.titlePending ?? false
                 }
                 labelsPending={
-                  aiPending?.[activeChart.question_ref]?.labelsPending ?? false
+                  aiPending?.[activeChart.slide_id ?? ""]?.labelsPending ?? false
                 }
                 questionText={
                   questionMap.get(activeChart.question_ref)?.text ??

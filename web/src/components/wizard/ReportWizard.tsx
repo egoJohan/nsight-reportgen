@@ -403,14 +403,19 @@ export default function ReportWizard({
     [mutate]
   );
 
-  // Update a chart found by its question_ref (indices can shift while async
-  // AI work is in flight, so the auto-formatter addresses charts by ref).
-  const updateChartByRef = useCallback(
-    (ref: string, patch: Partial<ChartSpec>) => {
+  // Update ONE chart, found by its slide_id (indices can shift while async
+  // AI work is in flight, so the auto-formatter addresses charts by id, not
+  // position). question_ref is NOT unique enough for this: a "Compare
+  // groups" slide shares its question_ref with the question's total-level
+  // slide (see newSlideId's comment in lib/charts.ts), so matching on
+  // question_ref here used to patch BOTH slides with whichever one's AI
+  // title happened to resolve last.
+  const updateChartById = useCallback(
+    (slideId: string, patch: Partial<ChartSpec>) => {
       mutate((d) => ({
         ...d,
         charts: d.charts.map((c) =>
-          c.question_ref === ref ? { ...c, ...patch } : c
+          c.slide_id === slideId ? { ...c, ...patch } : c
         ),
       }));
     },
@@ -550,11 +555,10 @@ export default function ReportWizard({
   const [aiSaveTick, setAiSaveTick] = useState(0);
 
   const runTitle = useCallback(
-    async (ref: string) => {
-      const chart = draftRef.current?.charts.find(
-        (c) => c.question_ref === ref
-      );
+    async (slideId: string) => {
+      const chart = draftRef.current?.charts.find((c) => c.slide_id === slideId);
       if (!chart) return;
+      const ref = chart.question_ref;
       // Recomputed here (not just trusted from the caller) because runTitle is
       // also reached for a themes chart's bullets alone — the title half of the
       // work below still needs its own up-to-date needs-it check.
@@ -574,7 +578,7 @@ export default function ReportWizard({
           : api.materials
               .aiThemes(materialId, { question_ref: ref })
               .then(({ bullets }) =>
-                updateChartByRef(ref, {
+                updateChartById(slideId, {
                   options: { ...(chart.options ?? {}), bullets },
                 })
               )
@@ -584,7 +588,7 @@ export default function ReportWizard({
               .finally(() =>
                 setAiPending((prev) => ({
                   ...prev,
-                  [ref]: { ...prev[ref], bulletsPending: false },
+                  [slideId]: { ...prev[slideId], bulletsPending: false },
                 }))
               );
         const titleP = !needsTitleNow
@@ -597,7 +601,7 @@ export default function ReportWizard({
               })
               .then(({ title }) => {
                 if (title)
-                  updateChartByRef(ref, {
+                  updateChartById(slideId, {
                     slide_title: title,
                     slide_title_key: currentKey,
                   });
@@ -608,7 +612,7 @@ export default function ReportWizard({
               .finally(() =>
                 setAiPending((prev) => ({
                   ...prev,
-                  [ref]: { ...prev[ref], titlePending: false },
+                  [slideId]: { ...prev[slideId], titlePending: false },
                 }))
               );
         await Promise.all([bulletsP, titleP]);
@@ -633,17 +637,17 @@ export default function ReportWizard({
           patch.slide_title = title;
           patch.slide_title_key = currentKey;
         }
-        if (Object.keys(patch).length) updateChartByRef(ref, patch);
+        if (Object.keys(patch).length) updateChartById(slideId, patch);
       } catch {
         /* graceful: fall back to the question text */
       } finally {
         setAiPending((prev) => ({
           ...prev,
-          [ref]: { ...prev[ref], titlePending: false },
+          [slideId]: { ...prev[slideId], titlePending: false },
         }));
       }
     },
-    [materialId, updateChartByRef, questionByRef]
+    [materialId, updateChartById, questionByRef]
   );
 
   const pumpTitles = useCallback(() => {
@@ -651,9 +655,9 @@ export default function ReportWizard({
       titleActive.current < TITLE_CONCURRENCY &&
       titleQueue.current.length > 0
     ) {
-      const ref = titleQueue.current.shift()!;
+      const slideId = titleQueue.current.shift()!;
       titleActive.current += 1;
-      void runTitle(ref).finally(() => {
+      void runTitle(slideId).finally(() => {
         titleActive.current -= 1;
         if (titleActive.current === 0 && titleQueue.current.length === 0) {
           // Batch settled — persist all generated titles in one save.
@@ -673,19 +677,17 @@ export default function ReportWizard({
   // Mark the title regions pending up front so their placeholders appear
   // immediately, then drain through the bounded queue.
   const ensureTitles = useCallback(
-    (refs: string[]) => {
+    (slideIds: string[]) => {
       let added = false;
-      for (const ref of refs) {
-        if (!ref) continue;
-        const chart = draftRef.current?.charts.find(
-          (c) => c.question_ref === ref
-        );
+      for (const id of slideIds) {
+        if (!id) continue;
+        const chart = draftRef.current?.charts.find((c) => c.slide_id === id);
         if (!chart) continue;
         if (isSpecialSlide(chart)) continue; // special slides carry bullets, not a title
         // titleDataKey needs the question as the CURRENT grouping resolves it;
         // hold off until useRegroupedQuestions has it rather than key against a
         // guess that would just flip (and re-fire) the moment the real one lands.
-        const resolved = questionByRef.get(ref);
+        const resolved = questionByRef.get(chart.question_ref);
         if (!resolved) continue;
         const themes = isThemes(chart);
         const needsBullets =
@@ -697,25 +699,23 @@ export default function ReportWizard({
         // Themes charts generate BOTH bullets and an AI heading; other charts
         // generate a title (unless they already have one, at its current key).
         if (themes ? !needsBullets && !needsTitle : !needsTitle) continue;
-        // One attempt per (ref, data key) per session: dedupes retries against a
-        // FIXED data shape (e.g. after a failed call) without blocking a retry
-        // once the data shape — and so the key — actually changes.
-        const attemptToken = `${ref}${currentKey}`;
+        // One attempt per (slide, data key) per session.
+        const attemptToken = `${id}${currentKey}`;
         if (titlesAttempted.current.has(attemptToken)) continue;
         titlesAttempted.current.add(attemptToken);
-        titleQueue.current.push(ref);
+        titleQueue.current.push(id);
         added = true;
         setAiPending((prev) => ({
           ...prev,
-          [ref]: themes
+          [id]: themes
             ? {
                 titlePending: needsTitle,
-                labelsPending: prev[ref]?.labelsPending ?? false,
+                labelsPending: prev[id]?.labelsPending ?? false,
                 bulletsPending: needsBullets,
               }
             : {
                 titlePending: true,
-                labelsPending: prev[ref]?.labelsPending ?? false,
+                labelsPending: prev[id]?.labelsPending ?? false,
               },
         }));
       }
@@ -904,16 +904,17 @@ export default function ReportWizard({
       // Themes charts (open-ended) just refresh their bullets in place.
       if (isThemes(chart)) {
         const ref = chart.question_ref;
-        setBulletsPending(ref, true);
+        const slideId = chart.slide_id ?? ref;
+        setBulletsPending(slideId, true);
         try {
           const { bullets } = await api.materials.aiThemes(materialId, {
             question_ref: ref,
           });
-          updateChartByRef(ref, { options: { ...(chart.options ?? {}), bullets } });
+          updateChartById(slideId, { options: { ...(chart.options ?? {}), bullets } });
         } catch (e) {
           toast.error(`Could not regenerate themes: ${errMsg(e)}`);
         } finally {
-          setBulletsPending(ref, false);
+          setBulletsPending(slideId, false);
           setAiSaveTick((t) => t + 1);
         }
         return;
@@ -950,7 +951,7 @@ export default function ReportWizard({
       fetchBullets,
       setBulletsPending,
       applySpecialPages,
-      updateChartByRef,
+      updateChartById,
     ]
   );
 
