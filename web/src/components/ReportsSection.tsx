@@ -32,7 +32,6 @@ import { api } from "@/lib/api";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { EMPTY, PANEL, SECTION_TITLE } from "@/lib/surfaces";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PdfIcon, PptxIcon } from "@/components/FileFormatIcons";
 
 // A viewer's row has no status and no delete — a half-built report is the
 // analyst's working state, not something to hand a viewer. PDF/PPTX download
@@ -71,37 +70,31 @@ function DownloadButtons({ caseId, reportId, name }: {
       // (A viewer's row is not clickable, so there it is merely harmless.)
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Icon-only, so a row carries the format rather than a sentence. The
-          title is what a screen reader and a hovering cursor get instead of the
-          label — an unlabelled icon button with no accessible name is a button
-          nobody can name. */}
+      {/* Text, not icons: "PDF" and "PPTX" are the words people actually use
+          for these files, and a glyph made you decode which was which. Both
+          buttons are the same width so the pair reads as one control rather
+          than two ragged ones, and the label is set in the UI's own font at a
+          heavier weight with a little tracking — a file format is a short word
+          that has to stay legible small. */}
       <Button
         variant="outline"
-        size="icon-sm"
+        size="sm"
+        className="w-[4.25rem] shrink-0 font-semibold tracking-wide"
         disabled={downloading !== null}
         title={`Download ${fileBase}.pdf`}
-        aria-label={`Download ${fileBase}.pdf`}
         onClick={() => handleDownload("pdf")}
       >
-        {downloading === "pdf" ? (
-          <Loader2Icon className="size-4 animate-spin" />
-        ) : (
-          <PdfIcon className="size-4" />
-        )}
+        {downloading === "pdf" ? <Loader2Icon className="size-3.5 animate-spin" /> : "PDF"}
       </Button>
       <Button
         variant="outline"
-        size="icon-sm"
+        size="sm"
+        className="w-[4.25rem] shrink-0 font-semibold tracking-wide"
         disabled={downloading !== null}
         title={`Download ${fileBase}.pptx`}
-        aria-label={`Download ${fileBase}.pptx`}
         onClick={() => handleDownload("pptx")}
       >
-        {downloading === "pptx" ? (
-          <Loader2Icon className="size-4 animate-spin" />
-        ) : (
-          <PptxIcon className="size-4" />
-        )}
+        {downloading === "pptx" ? <Loader2Icon className="size-3.5 animate-spin" /> : "PPTX"}
       </Button>
     </div>
   );

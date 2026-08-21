@@ -660,6 +660,15 @@ export const api = {
      *  (NoAccessCustomer.tsx) has to say WHICH customer it is refusing you,
      *  and `get` 404s before it can. Do not use this anywhere `get` would
      *  work instead. */
+    /** Id and name for EVERY customer in the tenant, to any signed-in user.
+     *  The sidebar lists customers you cannot open, so that a colleague can
+     *  find one and ask for access — without it the request flow is
+     *  unreachable. Same deliberate crack in the absence rule as `getName`,
+     *  and the same limit: id and name, nothing else. */
+    listNames: (): Promise<{ id: string; name: string }[]> =>
+      fetch(`${API_BASE}/customers/names`).then((r) =>
+        json<{ id: string; name: string }[]>(r)),
+
     getName: (customerId: string): Promise<{ id: string; name: string }> =>
       fetch(`${API_BASE}/customers/${customerId}/name`).then((r) =>
         json<{ id: string; name: string }>(r)

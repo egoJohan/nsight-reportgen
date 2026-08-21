@@ -263,6 +263,17 @@ export function useCustomers() {
   return useQuery({ queryKey: ["customers"], queryFn: api.customers.list });
 }
 
+/** Every customer's id and name, including ones this user cannot open.
+ *  Paired with useCustomers (which is grant-filtered) the difference is
+ *  exactly the set they may request access to. */
+export function useCustomerNames() {
+  return useQuery({
+    queryKey: ["customers", "names"],
+    queryFn: () => api.customers.listNames(),
+    staleTime: 60_000,
+  });
+}
+
 export function useCustomer(customerId: string | undefined) {
   return useQuery({
     queryKey: ["customer", customerId],
