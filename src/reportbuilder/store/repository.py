@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -103,6 +104,27 @@ class Session:
     expires: str
 
 
+@dataclass(frozen=True)
+class Invite:
+    """An admin's offer of access to one email address (spec §6).
+
+    Persists PAST acceptance: `accepted_user_id`/`accepted_at`, once set,
+    are what let `auth.invites.revoke_invitation` (Task 5) find and remove
+    the user an accepted invite became, so revoking access an admin
+    granted by mistake works even after the invitee has signed in. The
+    record is removed only by an explicit `delete_invite` (a revoke),
+    never automatically on acceptance or expiry.
+    """
+    id: str
+    email: str
+    grants: tuple[Grant, ...]
+    invited_by: str
+    invited_at: str
+    expires: str
+    accepted_user_id: str | None = None
+    accepted_at: str | None = None
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -118,6 +140,18 @@ _SPECIFICITY = {"report": 0, "case": 1, "customer": 2, "first": 2, "default": 3}
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+def _new_invite_id() -> str:
+    """An invite's id doubles as its token (`P.invite_path`'s docstring):
+    holding it is what lets `get_invite`/`delete_invite` find the record
+    with no email involved, and once an invite is accepted it names the
+    account it became. That makes it a credential, not merely a lookup
+    key, so it is drawn from `secrets` rather than `_new_id`'s uuid4 --
+    192 bits, comfortably beyond guessing -- and this value must never be
+    logged.
+    """
+    return f"inv-{secrets.token_urlsafe(24)}"
 
 
 def _natural_key(name: str) -> list:
@@ -818,6 +852,142 @@ class Repository:
                 continue
             if d.get("user_id") == user_id:
                 self.delete_session(auth, d["id"])
+
+    # --- invitations --------------------------------------------------------
+    #
+    # An admin adds someone by email (spec §6): this record is what
+    # "pending"/"accepted" MEANS, and it outlives acceptance so a later
+    # revoke can find and remove the user it produced (Invite's docstring).
+    # Keyed by the invite's own (unguessable) id rather than by email --
+    # see `P.invite_path` -- so a lookup needs only the id, not the email.
+
+    def create_invite(self, auth: AuthContext, email: str, grants,
+                      invited_by: str, lifetime_seconds: int) -> Invite:
+        iid = _new_invite_id()
+        # Microsecond precision, unlike the shared `_now()`: `list_invites`
+        # sorts newest-first by this field, and two invites sent by an
+        # admin moments apart must not tie at one-second resolution --
+        # `expires` keeps `_now()`'s coarser, comparison-only precision
+        # since nothing sorts by it.
+        now = datetime.now(timezone.utc).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds)) \
+            .isoformat(timespec="seconds")
+        normalized = (email or "").strip().lower()
+        grant_tuple = tuple(grants)
+        self._write_json(auth, P.invite_path(iid),
+                         {"id": iid, "email": normalized,
+                          "grants": [{"scope": g.scope, "mode": g.mode} for g in grant_tuple],
+                          "invited_by": invited_by, "invited_at": now, "expires": expires,
+                          "accepted_user_id": None, "accepted_at": None},
+                         [P.LABEL_INVITE])
+        return Invite(id=iid, email=normalized, grants=grant_tuple,
+                      invited_by=invited_by, invited_at=now, expires=expires)
+
+    def _invite_from(self, d: dict) -> Invite:
+        grants = []
+        for g in d.get("grants", []):
+            if not g.get("scope"):
+                continue
+            try:
+                grants.append(Grant(g["scope"], g.get("mode", "view")))
+            except ValueError:
+                # One malformed grant must cost the invite that one grant,
+                # not the whole record -- same reasoning as `_grants` for
+                # a user's grants.
+                continue
+        return Invite(id=d["id"], email=d.get("email", ""), grants=tuple(grants),
+                      invited_by=d.get("invited_by", ""), invited_at=d.get("invited_at", ""),
+                      expires=d.get("expires", ""),
+                      accepted_user_id=d.get("accepted_user_id"),
+                      accepted_at=d.get("accepted_at"))
+
+    def get_invite(self, auth: AuthContext, invite_id: str) -> "Invite | None":
+        """The record for *invite_id*, or None if it does not exist or is
+        unreadable -- never for having expired or already been accepted.
+
+        Unlike `get_session`, this does NOT hide an expired (or accepted)
+        invite: an admin's invitations list (Task 6) has to show "expired"
+        and "accepted" as statuses, and `revoke_invitation` (Task 5) has to
+        find an already-accepted invite by id to revoke it. Expiry only
+        changes whether sign-in treats the invite as live -- that check
+        lives in `find_pending_invite_by_email`, the read sign-in actually
+        uses, the same way `get_session` guards session authority.
+        """
+        try:
+            d = self._read_json(auth, P.invite_path(invite_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        return self._invite_from(d)
+
+    def list_invites(self, auth: AuthContext) -> list[Invite]:
+        """Every invite, newest first -- an admin cares most about what was
+        just sent. One unreadable row is skipped, not fatal to the rest,
+        the same tolerance `_grants` gives a user's grants."""
+        out = []
+        for info in self.store.list(auth, P.SETTINGS_ROOT + "/", labels=[P.LABEL_INVITE]):
+            invite = self.get_invite(auth, info.path.rsplit("/", 1)[-1])
+            if invite is not None:
+                out.append(invite)
+        return sorted(out, key=lambda i: i.invited_at, reverse=True)
+
+    def find_pending_invite_by_email(self, auth: AuthContext, email: str) -> "Invite | None":
+        """The live invitation for *email*, if any: not yet accepted, not
+        yet expired. Sign-in has a verified email and nothing else --
+        same shape as `find_user_by_email`, and the same
+        expiry-reads-as-absent rule `get_session` applies to sessions.
+        """
+        wanted = (email or "").strip().lower()
+        if not wanted:
+            return None
+        now = _now()
+        return next((i for i in self.list_invites(auth)
+                    if i.email == wanted and i.accepted_user_id is None and i.expires > now),
+                   None)
+
+    def mark_invite_accepted(self, auth: AuthContext, invite_id: str, user_id: str) -> None:
+        """Single-use: once `accepted_user_id` is set, the invite can never
+        again satisfy `find_pending_invite_by_email`, so it cannot be
+        replayed into a second account. The record itself is kept, not
+        deleted -- see `Invite`'s docstring."""
+        invite = self.get_invite(auth, invite_id)
+        if invite is None:
+            return
+        self._write_json(auth, P.invite_path(invite_id),
+                         {"id": invite.id, "email": invite.email,
+                          "grants": [{"scope": g.scope, "mode": g.mode} for g in invite.grants],
+                          "invited_by": invite.invited_by, "invited_at": invite.invited_at,
+                          "expires": invite.expires, "accepted_user_id": user_id,
+                          "accepted_at": _now()},
+                         [P.LABEL_INVITE])
+
+    def delete_invite(self, auth: AuthContext, invite_id: str) -> None:
+        """Revoke. Does NOT swallow `ConsentRequired` -- unlike
+        `delete_session`, and deliberately so.
+
+        An admin revoking an invitation is an ATTENDED action: there is a
+        human at the other end of the request who can answer a consent
+        prompt, the same as `users.remove_user`'s `delete_user` call (see
+        its docstring) -- so the gate (floor rule 4) is left to propagate,
+        same as every other destructive delete in this codebase.
+        `delete_session` swallows `ConsentRequired` only because ITS
+        callers -- idle/expiry cleanup and sign-out (`auth/session.py`) --
+        run with nobody present to answer one; that swallow is also safe
+        only because `get_session` treats an undeleted-but-expired session
+        as gone, so a delete that could not physically complete still cost
+        the session its authority. An invite has no such fallback (an
+        unrevoked invite is a live credential whether or not the delete
+        landed), so it does not get the same treatment. Two deletes in
+        this file behaving differently is not one of them being wrong --
+        it tracks whether anyone is there to grant consent.
+
+        Reaches production only in theory: nSight's own admin bearer
+        already carries this authority, so the call just succeeds there
+        (`scripts/dev-stack.sh`). An unknown id is a no-op.
+        """
+        try:
+            self.store.delete(auth, P.invite_path(invite_id))
+        except NotFound:
+            pass
 
     # --- fonts ------------------------------------------------------------
     #

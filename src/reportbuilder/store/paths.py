@@ -20,6 +20,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/user/{user_id}.grants                   nsight:grants
     settings/user/{user_id}.password                 nsight:password
     settings/session/{session_id}                    nsight:session
+    settings/invite/{invite_id}                      nsight:invite
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -53,6 +54,7 @@ LABEL_USER = "nsight:user"
 LABEL_GRANTS = "nsight:grants"
 LABEL_SESSION = "nsight:session"
 LABEL_PASSWORD = "nsight:password"
+LABEL_INVITE = "nsight:invite"
 
 SETTINGS_ROOT = "settings"
 
@@ -224,3 +226,20 @@ def user_password_path(user_id: str) -> str:
 
 def session_path(session_id: str) -> str:
     return f"{SETTINGS_ROOT}/session/{_seg(session_id, 'session_id')}"
+
+
+def invite_path(invite_id: str) -> str:
+    """Keyed by the invite's own id, not the invited email.
+
+    The id doubles as the invitation's token: `get_invite`/`delete_invite`
+    take only this id, so whoever holds it can look the record up (and,
+    once accepted, could be handed the account it names) without ever
+    knowing the email it was sent to -- the id must therefore be generated
+    unguessably (`Repository.create_invite` uses `secrets`, not `_new_id`'s
+    uuid4). Keying by email instead would put a second copy of the
+    invited person's address in the path segment for no benefit, since
+    admin lookup by email is already served by scanning
+    `list_invites`/`find_pending_invite_by_email` the same way
+    `find_user_by_email` scans `list_users`.
+    """
+    return f"{SETTINGS_ROOT}/invite/{_seg(invite_id, 'invite_id')}"
