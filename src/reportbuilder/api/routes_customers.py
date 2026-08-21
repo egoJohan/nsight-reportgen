@@ -15,7 +15,8 @@ from reportbuilder.api.deps_auth import (
     require_customer_write, require_material,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth.permissions import EDIT, User, may_write
+from reportbuilder.auth import session
+from reportbuilder.auth.permissions import EDIT, Grant, User, may_write
 from reportbuilder.store.repository import Repository, ReportRef
 from reportbuilder.store.seam import AuthContext, NotFound
 
@@ -60,7 +61,23 @@ def _report_stats(reports: list[ReportRef]) -> tuple[int, int]:
 def create_customer(body: NameBody, auth: AuthContext = Depends(get_auth),
                     repo: Repository = Depends(get_repository),
                     user: User = Depends(current_user)) -> dict:
-    c = repo.create_customer(auth, _name(body))
+    # The creator is the owner, recorded here and never recomputed.
+    c = repo.create_customer(auth, _name(body), owner_id=user.id)
+    # ...and the creator can work in what they just made. Without this the
+    # customer exists but is invisible to the person who created it: grants
+    # are the only thing that admits anyone to a customer (admin is the right
+    # to manage users, not a key to their data), and a brand-new customer has
+    # none. The redirect landed on a page that answered 404.
+    #
+    # Grants are re-read from the store rather than taken from `user`, whose
+    # own copy can be up to CACHE_TTL_SECONDS old — writing that back would
+    # quietly undo a grant made in the meantime.
+    stored = repo.get_user(auth, user.id)
+    if stored is not None:
+        repo.set_grants(auth, stored.id, tuple(stored.grants) + (Grant(c.id, EDIT),))
+        # The next request must see it. Waiting out the cache would leave the
+        # creator staring at their own new customer's 404 for half a minute.
+        session.forget_user(stored.id)
     return {"id": c.id, "name": c.name}
 
 
@@ -76,24 +93,31 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     link right here in the listing — creating a study is a write against the
     CUSTOMER, so the answer has to be per-row, not a single flag for the page.
 
-    Study count, report stats and owners ride along too, for the same
+    Study count, report stats and the owner ride along too, for the same
     reason: the customer page shows all three under each name, and a
     second round trip per customer for each would just move the cost from
     here to there.
 
+    ONE owner, the user who created the customer (`Customer.owner_id`), not
+    everyone holding `edit`. Those are different questions: "who owns this"
+    is settled once at creation, while "who may write here" changes every
+    time access is granted — keying the first off the second turned every
+    colleague given access into another owner. Deciding who may APPROVE an
+    access request is still the second question, and stays where it is
+    (`access_request_mail.decision_makers`): a person who can write to a
+    customer can act on it, whether or not they created it.
+
     `list_users` is fetched ONCE, outside the loop, and reused for every
-    row's owners — filtering the same in-memory list per customer instead
-    of a users listing per customer. `EDIT` on the customer's own scope is
-    this app's only notion of "owns a customer" (see
-    `access_request_mail.decision_makers`, the access-request approval
-    flow, which already keys "owner" the exact same way — this does not
-    invent a second definition). Only a display NAME rides along per owner,
-    falling back to email only when a user has never set one, and nothing
-    else about them (no email otherwise, no is_admin, no other grants) —
-    `GET /users` is admin-only precisely because a user listing is not
-    public, and this is a deliberately narrow crack in that: any signed-in
-    user who can already see a customer (this route is grant-filtered, see
-    above) can now also see who owns it, nothing more.
+    row — an id lookup in the same in-memory list instead of a users
+    listing per customer. Only a display NAME rides along, falling back to
+    email only when a user has never set one, and nothing else about them
+    (no email otherwise, no is_admin, no grants) — `GET /users` is
+    admin-only precisely because a user listing is not public, and this is
+    a deliberately narrow crack in that: any signed-in user who can already
+    see a customer (this route is grant-filtered, see above) can now also
+    see who owns it, nothing more. A customer created before ownership was
+    recorded has no owner, and says so by omission rather than by guessing
+    at one.
 
     Cost note: for each customer this is one `list_cases` and one
     `list_reports_for_customer` — both single listing calls regardless of
@@ -107,21 +131,21 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     trade `recent_reports` already documents for its own listing.
     """
     customers = repo.list_customers(auth, user=user)
-    users = repo.list_users(auth)
+    by_id = {u.id: u for u in repo.list_users(auth)}
     out = []
     for c in customers:
         cases = repo.list_cases(auth, c.id, user=user)
         completed, draft = _report_stats(
             repo.list_reports_for_customer(auth, c.id, user=user))
-        owners = [u for u in users
-                 if any(g.scope == c.id and g.mode == EDIT for g in u.grants)]
+        owner = by_id.get(c.owner_id)
         out.append({
             "id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
             "case_count": len(cases),
             "completed_reports": completed,
             "draft_reports": draft,
-            "owners": [{"id": o.id, "name": o.name or o.email} for o in owners],
+            "owner": ({"id": owner.id, "name": owner.name or owner.email}
+                      if owner else None),
         })
     return out
 

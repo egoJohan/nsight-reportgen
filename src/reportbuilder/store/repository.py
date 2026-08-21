@@ -41,6 +41,13 @@ class Customer:
     # The template bound AT THIS LEVEL, "" when none. Surfaced because the UI
     # must distinguish "set here" from "inherited" to show the right thing.
     template_id: str = ""
+    # Who created it. One person, decided once and never recomputed — a
+    # customer has an owner the way a document has an author. Deriving it
+    # from who holds `edit` answered a different question ("who may write
+    # here"), so granting a colleague access made them a second owner.
+    # "" for customers created before this was recorded, and for those the
+    # UI says nothing rather than guessing.
+    owner_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -228,11 +235,18 @@ class Repository:
 
     # -- Asiakas ----------------------------------------------------------
 
-    def create_customer(self, auth: AuthContext, name: str) -> Customer:
+    def create_customer(self, auth: AuthContext, name: str,
+                        owner_id: str = "") -> Customer:
+        """*owner_id* is the creating user, stamped once and never rewritten.
+
+        Optional because the store is also driven by tests and scripts with no
+        signed-in user behind them; the API route always passes one.
+        """
         cid = _new_id("cust")
-        self._write_json(auth, P.customer_meta_path(cid), {"id": cid, "name": name},
+        self._write_json(auth, P.customer_meta_path(cid),
+                         {"id": cid, "name": name, "owner_id": owner_id},
                          [P.LABEL_CUSTOMER])
-        return Customer(id=cid, name=name)
+        return Customer(id=cid, name=name, owner_id=owner_id)
 
     def list_customers(self, auth: AuthContext, user=None) -> list[Customer]:
         """Every customer this user may see.
@@ -247,7 +261,8 @@ class Repository:
                 continue
             d = self._read_json(auth, info.path)
             out.append(Customer(id=d["id"], name=d.get("name", d["id"]),
-                                template_id=d.get("template_id", "")))
+                                template_id=d.get("template_id", ""),
+                                owner_id=d.get("owner_id", "")))
         # A customer list is a directory: alphabetical is how you find a name
         # in it. Only the CASE list is newest-first.
         return sorted(out, key=lambda c: _natural_key(c.name))
@@ -255,7 +270,8 @@ class Repository:
     def get_customer(self, auth: AuthContext, customer_id: str) -> Customer:
         d = self._read_json(auth, P.customer_meta_path(customer_id))
         return Customer(id=d["id"], name=d.get("name", d["id"]),
-                        template_id=d.get("template_id", ""))
+                        template_id=d.get("template_id", ""),
+                        owner_id=d.get("owner_id", ""))
 
     def find_customer(self, auth: AuthContext, customer_id: str,
                       user=None) -> Customer | None:
@@ -275,7 +291,8 @@ class Repository:
         if not _admits(user, path):
             return None
         return Customer(id=d["id"], name=d.get("name", d["id"]),
-                        template_id=d.get("template_id", ""))
+                        template_id=d.get("template_id", ""),
+                        owner_id=d.get("owner_id", ""))
 
     def rename_customer(self, auth: AuthContext, customer_id: str, name: str) -> Customer:
         """A metadata write, not a move — which is why ids are in the path and
@@ -283,7 +300,11 @@ class Repository:
         d = self._read_json(auth, P.customer_meta_path(customer_id))
         d["name"] = name
         self._write_json(auth, P.customer_meta_path(customer_id), d, [P.LABEL_CUSTOMER])
-        return Customer(id=customer_id, name=name)
+        # Everything but the name is unchanged — return it, rather than a
+        # Customer whose other fields are silently defaulted.
+        return Customer(id=customer_id, name=name,
+                        template_id=d.get("template_id", ""),
+                        owner_id=d.get("owner_id", ""))
 
     # -- Case -------------------------------------------------------------
 

@@ -152,8 +152,74 @@ class TestStudyReportStats:
         assert listed[k2["id"]]["completed_reports"] == 0
 
 
+class TestCreatingGrantsTheCreator:
+    """Creating a customer has to leave you able to open it.
+
+    Grants are the only thing that admits anyone to a customer, and a new one
+    has none — so before this, POST /customers redirected the creator to a
+    page that answered 404 for them.
+    """
+
+    def test_the_creator_can_read_what_they_just_created(self, store):
+        from reportbuilder.api.deps_auth import current_user as _cu
+
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        # A real, stored, grantless user — NOT the all-seeing test override,
+        # which would hide exactly the bug this guards.
+        maker = repo.save_user(auth, User(id="", email="maker@example.com",
+                                          name="Maker", is_admin=True))
+        app = create_app()
+        app.dependency_overrides[get_repository] = lambda: repo
+        app.dependency_overrides[get_auth] = lambda: auth
+        # Re-read per request, the way session resolution does, so the grant
+        # written during POST is visible to the GET that follows.
+        app.dependency_overrides[_cu] = lambda: repo.get_user(auth, maker.id)
+        client = TestClient(app)
+
+        c = _customer(client, "Egoiq")
+        assert client.get(f"/customers/{c['id']}").status_code == 200
+        assert [x["id"] for x in client.get("/customers").json()] == [c["id"]]
+
+    def test_the_creator_may_write_to_it_too(self, store):
+        from reportbuilder.api.deps_auth import current_user as _cu
+
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        maker = repo.save_user(auth, User(id="", email="maker@example.com",
+                                          name="Maker", is_admin=True))
+        app = create_app()
+        app.dependency_overrides[get_repository] = lambda: repo
+        app.dependency_overrides[get_auth] = lambda: auth
+        app.dependency_overrides[_cu] = lambda: repo.get_user(auth, maker.id)
+        client = TestClient(app)
+
+        c = _customer(client, "Egoiq")
+        r = client.post(f"/customers/{c['id']}/cases", json={"name": "First study"})
+        assert r.status_code in (200, 201), r.text
+
+    def test_an_existing_grant_is_not_clobbered(self, store):
+        from reportbuilder.api.deps_auth import current_user as _cu
+
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        other = repo.create_customer(auth, "Already Oy")
+        maker = repo.save_user(auth, User(id="", email="maker@example.com",
+                                          name="Maker", is_admin=True,
+                                          grants=(Grant(other.id, "view"),)))
+        app = create_app()
+        app.dependency_overrides[get_repository] = lambda: repo
+        app.dependency_overrides[get_auth] = lambda: auth
+        app.dependency_overrides[_cu] = lambda: repo.get_user(auth, maker.id)
+        client = TestClient(app)
+
+        c = _customer(client, "Egoiq")
+        grants = {(g.scope, g.mode) for g in repo.get_user(auth, maker.id).grants}
+        assert grants == {(other.id, "view"), (c["id"], "edit")}
+
+
 class TestCustomerListStats:
-    """The same statistics, aggregated, plus study count and owners, on
+    """The same statistics, aggregated, plus study count and the owner, on
     `GET /customers`."""
 
     def test_case_count_and_report_stats_are_aggregated_across_studies(
@@ -178,31 +244,53 @@ class TestCustomerListStats:
         assert row["completed_reports"] == 1
         assert row["draft_reports"] == 2  # the K1 draft + the K2 empty
 
-    def test_owners_are_edit_grant_holders_named_where_possible(self, client, store):
-        from reportbuilder.auth.permissions import Grant as PermGrant
-        from reportbuilder.auth.permissions import User as PermUser
+    def _creator(self, store, name="Development"):
+        """The `client` fixture signs in as id "dev" (suite/_helpers.py). Give
+        that id a stored user record so the owner can be resolved to a name."""
+        repo = Repository(store)
+        return repo.save_user(AuthContext(token="user-1"),
+                              User(id="dev", email="dev@localhost", name=name,
+                                   is_admin=True))
 
+    def test_the_owner_is_whoever_created_the_customer(self, client, store):
+        self._creator(store)
+        c = _customer(client)
+
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        assert row["owner"] == {"id": "dev", "name": "Development"}
+
+    def test_the_owner_falls_back_to_email_when_they_have_no_name(self, client, store):
+        self._creator(store, name="")
+        c = _customer(client)
+
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        assert row["owner"]["name"] == "dev@localhost"
+
+    def test_granting_edit_to_a_colleague_does_not_make_them_an_owner(
+        self, client, store
+    ):
+        """The bug this replaced: the owner was derived from who held `edit`,
+        so every colleague given access became another owner."""
+        self._creator(store)
         c = _customer(client)
         repo = Repository(store)
-        auth = AuthContext(token="user-1")
-        # Named -> shown by name, not email.
-        repo.save_user(auth, PermUser(id="", email="alice@example.com", name="Alice A",
-                                      grants=(PermGrant(c["id"], "edit"),)))
-        # No name on file -> falls back to email.
-        repo.save_user(auth, PermUser(id="", email="cara@example.com", name="",
-                                      grants=(PermGrant(c["id"], "edit"),)))
-        # View only -> not an owner, must not appear.
-        repo.save_user(auth, PermUser(id="", email="viewer@example.com", name="Viewer",
-                                      grants=(PermGrant(c["id"], "view"),)))
+        repo.save_user(AuthContext(token="user-1"),
+                       User(id="", email="bob@example.com", name="Bob B",
+                            grants=(Grant(c["id"], "edit"),)))
 
         row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
-        names = {o["name"] for o in row["owners"]}
-        assert names == {"Alice A", "cara@example.com"}
+        assert row["owner"] == {"id": "dev", "name": "Development"}
 
-    def test_a_customer_with_no_edit_holders_has_no_owners(self, client):
-        c = _customer(client)
-        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
-        assert row["owners"] == []
+    def test_a_customer_from_before_ownership_was_recorded_has_no_owner(
+        self, client, store
+    ):
+        """The owner is read off the customer, so one written without the
+        field reports none rather than guessing at a plausible person."""
+        repo = Repository(store)
+        c = repo.create_customer(AuthContext(token="user-1"), "Legacy Oy")
+
+        row = next(x for x in client.get("/customers").json() if x["id"] == c.id)
+        assert row["owner"] is None
 
 
 class TestListingIsPermissionFiltered:

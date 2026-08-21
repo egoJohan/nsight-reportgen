@@ -609,8 +609,8 @@ export interface ResolvedCase {
   can_edit: boolean;
 }
 
-/** One user holding `edit` on a customer — this app's only notion of
- *  "owner" (see routes_customers.py's `list_customers`). `name` is already
+/** The user who created a customer — its one owner (see
+ *  routes_customers.py's `list_customers`). `name` is already
  *  resolved server-side to a display name, falling back to the user's email
  *  only when they have never set one — never a raw email field here on
  *  purpose, since this rides on a route any signed-in user with access to
@@ -638,8 +638,10 @@ export interface Customer {
   /** Every other report, across every study — including one with no charts
    *  at all, folded in because neither is a deliverable. */
   draft_reports: number;
-  /** Every user holding `edit` on this customer. */
-  owners: CustomerOwner[];
+  /** Who created this customer. One person, fixed at creation — NOT everyone
+   *  who can write to it. Null for customers created before ownership was
+   *  recorded, and for those the UI says nothing rather than guessing. */
+  owner: CustomerOwner | null;
 }
 
 /** A case now belongs to exactly one customer, so its id alone is no longer a

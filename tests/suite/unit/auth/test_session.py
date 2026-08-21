@@ -173,3 +173,56 @@ class TestRevocationCache:
         # than serving the stale cached User.
         approve_all(repo.store, lambda: repo.delete_user(auth, user.id))
         assert session.resolve(repo, auth, sid) is None
+
+
+class TestForgetUser:
+    """`forget_user` is the escape hatch from the TTL for a grant change the
+    user must see at once — the customer they just created, in their own
+    sidebar."""
+
+    def test_a_forgotten_users_next_resolve_re_reads_their_grants(
+        self, repo, auth, user
+    ):
+        from reportbuilder.auth.permissions import Grant
+
+        sid = session.create(repo, auth, user.id)
+        assert session.resolve(repo, auth, sid).grants == ()  # warms the cache
+
+        repo.set_grants(auth, user.id, (Grant("cust-new", "edit"),))
+        # Still the cached identity: the grant is in the store, unseen.
+        assert session.resolve(repo, auth, sid).grants == ()
+
+        session.forget_user(user.id)
+        assert [(g.scope, g.mode) for g in session.resolve(repo, auth, sid).grants] == [
+            ("cust-new", "edit")
+        ]
+
+    def test_forgetting_one_user_leaves_another_users_session_alone(
+        self, repo, auth, user, monkeypatch
+    ):
+        other = repo.save_user(auth, User(id="", email="other@example.com",
+                                          name="Other"))
+        mine, theirs = (session.create(repo, auth, user.id),
+                        session.create(repo, auth, other.id))
+        session.resolve(repo, auth, mine)
+        session.resolve(repo, auth, theirs)
+
+        session.forget_user(user.id)
+
+        def _boom(*a, **k):
+            raise AssertionError("the other session's cache entry was dropped")
+        monkeypatch.setattr(repo, "get_session", _boom)
+        assert session.resolve(repo, auth, theirs) is not None
+
+    def test_forgetting_a_user_does_not_resurrect_a_revoked_session(
+        self, repo, auth, user
+    ):
+        """A tombstone outlives forget_user on purpose: `delete_session` can be
+        blocked by the consent gate, so the tombstone IS sign-out."""
+        sid = session.create(repo, auth, user.id)
+        session.resolve(repo, auth, sid)
+        session.revoke(repo, auth, sid)
+
+        session.forget_user(user.id)
+
+        assert session.resolve(repo, auth, sid) is None

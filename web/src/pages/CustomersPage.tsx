@@ -12,7 +12,7 @@ import { useCustomers, useCustomerNames, useCreateCustomer } from "@/lib/queries
 import type { Customer } from "@/lib/api";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
-/** "3 studies · 4 completed, 2 drafts · Owned by Alice, Bob +1" under a
+/** "3 studies · 4 completed, 2 drafts · Owned by Alice" under a
  *  customer's name — quiet, secondary information, the same idea as a
  *  report row's own statistic line (ReportsSection.tsx) and the studies
  *  list's per-study line (CustomerCasesPage.tsx), which this must agree
@@ -21,10 +21,10 @@ import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces
  *
  *  Each clause appears only once there is something to say: a customer
  *  with no studies yet gets no clause at all rather than "0 studies", and
- *  one with studies but no reports yet skips straight to owners — an
- *  empty customer should read as empty, not as a row of zeroes. Owners
- *  are capped at two names before folding the rest into "+N", so a
- *  customer with five editors does not grow the row into a paragraph. */
+ *  one with studies but no reports yet skips straight to the owner — an
+ *  empty customer should read as empty, not as a row of zeroes. One owner,
+ *  the creator; a customer from before ownership was recorded has none and
+ *  simply omits the clause. */
 function customerSubtitle(c: Customer): string | null {
   const parts: string[] = [];
   if (c.case_count > 0) {
@@ -36,11 +36,7 @@ function customerSubtitle(c: Customer): string | null {
       );
     }
   }
-  if (c.owners.length > 0) {
-    const shown = c.owners.slice(0, 2).map((o) => o.name);
-    const extra = c.owners.length - shown.length;
-    parts.push(`Owned by ${shown.join(", ")}${extra > 0 ? ` +${extra}` : ""}`);
-  }
+  if (c.owner) parts.push(`Owned by ${c.owner.name}`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -122,10 +118,13 @@ export default function CustomersPage() {
         )}
 
         {merged.map((c) => {
-          // Only ever set for an accessible row (see `merged` above) — a
-          // customer this caller cannot open shows its name and nothing
-          // else, same as before.
-          const subtitle = c.customer ? customerSubtitle(c.customer) : null;
+          // Stats only exist for a row this caller can open (see `merged`
+          // above). A locked one gets a line too, saying what to do about
+          // it — the lock icon alone shows the door is shut without saying
+          // it can be opened.
+          const subtitle = c.customer
+            ? customerSubtitle(c.customer)
+            : "Open to request access";
           return (
             <button
               key={c.id}

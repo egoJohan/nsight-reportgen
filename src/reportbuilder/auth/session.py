@@ -114,8 +114,31 @@ class _Cache:
     def revoke(self, session_id: str) -> None:
         self._entries[session_id] = (None, time.monotonic(), ABSOLUTE_LIFETIME_SECONDS)
 
+    def forget_user(self, user_id: str) -> None:
+        """Drop every live entry for one user, so their next request re-reads
+        their grants instead of waiting out the TTL.
+
+        Only positive entries: a tombstone means "this session is gone" and
+        must keep standing until it expires on its own terms (see above).
+        """
+        for sid, (value, _, _) in list(self._entries.items()):
+            if value is not None and value.id == user_id:
+                self._entries.pop(sid, None)
+
 
 _cache = _Cache()
+
+
+def forget_user(user_id: str) -> None:
+    """Invalidate this node's cached identity for *user_id*.
+
+    For a grant change the user must see AT ONCE — the customer they just
+    created appearing in their own sidebar — rather than within
+    CACHE_TTL_SECONDS. Same single-process caveat as the TTL itself: with more
+    than one process the TTL remains the guarantee, and this is an
+    optimisation on the node that made the change.
+    """
+    _cache.forget_user(user_id)
 
 
 def create(repo: Repository, auth: AuthContext, user_id: str) -> str:
