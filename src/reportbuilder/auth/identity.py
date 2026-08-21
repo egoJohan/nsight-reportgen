@@ -14,7 +14,7 @@ bootstrap admin or an allowed domain.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from reportbuilder.auth.permissions import Grant, User
 from reportbuilder.store.repository import Repository
@@ -30,6 +30,17 @@ class SignInRefused:
     """Spec §10: "Verified email matches nothing" -> refused, no session, an
     audit line. `reason` is for the log, not the browser."""
     reason: str
+
+
+def _any_admin(repo: Repository, auth: AuthContext) -> bool:
+    """Whether the hive already has at least one admin -- the actual
+    condition spec §3.1 promises recovery from ("a hive with no ADMIN
+    exists," not "no users at all"). A hive can easily have users with
+    none of them admin: every domain-auto-joined user is created with
+    is_admin=False (see the branch below), so a colleague joining first
+    must never block the break-glass path an operator needs after losing
+    every admin."""
+    return any(u.is_admin for u in repo.list_users(auth))
 
 
 def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
@@ -63,7 +74,8 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
         return SignInRefused(f"'{email}' is not an email address")
 
     existing = repo.find_user_by_email(auth, normalized)
-    if existing is not None:
+    if existing is not None and existing.is_admin:
+        # Already an admin: nothing for break-glass to do, ordinary sign-in.
         return existing
 
     # NOTE for whoever implements Plan 3 (pending invitations): consuming an
@@ -74,18 +86,38 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
     # same as the `existing` check above, and the task spec for xms_edov
     # explicitly allows it.
     if not email_domain_proven:
+        if existing is not None:
+            return existing
         log.warning(
             "sign-in refused: '%s' has no proven domain ownership and is not a known user "
             "(new-account creation is refused for an unproven email; see oidc.py's module "
             "docstring on xms_edov)", normalized)
         return SignInRefused(f"'{normalized}' is not a known user and its domain ownership is unproven")
 
-    if not repo.list_users(auth) and normalized in bootstrap_admins:
+    # Break-glass: spec §3.1 promises recovery whenever the hive has NO ADMIN
+    # (see _any_admin), not merely when it has no users at all -- a hive can
+    # easily have only non-admin users (every domain-auto-joined colleague is
+    # one). This is deliberately wide open to anyone NSIGHT_BOOTSTRAP_ADMINS
+    # names, with no other check, because it costs an attacker nothing they
+    # don't already have: setting that variable requires control of the
+    # server's environment, which is already full control of the machine.
+    # Don't narrow this back thinking it tightens security -- it doesn't.
+    if not _any_admin(repo, auth) and normalized in bootstrap_admins:
+        if existing is not None:
+            # The bootstrap email may already have an account -- e.g. domain
+            # auto-join created it before any admin existed. Promote that
+            # record in place rather than mint a colliding second one.
+            log.warning("sign-in: '%s' is promoted to admin in place (NSIGHT_BOOTSTRAP_ADMINS)",
+                       normalized)
+            return repo.save_user(auth, replace(existing, is_admin=True))
         log.warning("sign-in: '%s' becomes the first admin (NSIGHT_BOOTSTRAP_ADMINS)",
                    normalized)
         return repo.save_user(auth, User(id="", email=normalized,
                                          name=normalized.split("@", 1)[0],
                                          is_admin=True, grants=()))
+
+    if existing is not None:
+        return existing
 
     domain = normalized.rsplit("@", 1)[-1]
     access = repo.get_setting(auth, _ACCESS_KEY) or {}

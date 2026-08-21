@@ -41,15 +41,63 @@ def test_the_first_bootstrap_admin_is_created_with_no_grants(repo, auth):
     assert got.grants == ()
 
 
-def test_bootstrap_is_ignored_once_any_user_exists(repo, auth):
-    repo.save_user(auth, User(id="", email="someone@egoiq.com"))
+def test_bootstrap_still_fires_once_a_non_admin_user_exists(repo, auth):
+    """Spec §3.1's promise is recovery from NO ADMIN, not from an empty
+    hive. A colleague who joined by domain auto-join, or any other
+    non-admin record, must not block it."""
+    repo.save_user(auth, User(id="", email="someone@egoiq.com", is_admin=False))
     got = resolve_signed_in_user(repo, auth, "admin@egoiq.com", frozenset({"admin@egoiq.com"}))
+    assert isinstance(got, User)
+    assert got.is_admin is True
+
+
+def test_bootstrap_is_refused_once_a_real_admin_exists(repo, auth):
+    repo.save_user(auth, User(id="", email="existing-admin@egoiq.com", is_admin=True))
+    got = resolve_signed_in_user(repo, auth, "second@egoiq.com", frozenset({"second@egoiq.com"}))
     assert isinstance(got, SignInRefused)
 
 
-def test_an_email_not_in_bootstrap_is_refused_on_an_empty_hive(repo, auth):
+def test_unlisted_email_never_becomes_admin_on_an_empty_hive(repo, auth):
     got = resolve_signed_in_user(repo, auth, "nobody@egoiq.com", frozenset({"admin@egoiq.com"}))
     assert isinstance(got, SignInRefused)
+
+
+def test_unlisted_email_never_becomes_admin_when_only_non_admins_exist(repo, auth):
+    repo.save_user(auth, User(id="", email="someone@egoiq.com", is_admin=False))
+    got = resolve_signed_in_user(repo, auth, "nobody@egoiq.com", frozenset({"admin@egoiq.com"}))
+    assert isinstance(got, SignInRefused)
+
+
+def test_unlisted_email_never_becomes_admin_when_an_admin_already_exists(repo, auth):
+    repo.save_user(auth, User(id="", email="existing-admin@egoiq.com", is_admin=True))
+    got = resolve_signed_in_user(repo, auth, "nobody@egoiq.com", frozenset({"admin@egoiq.com"}))
+    assert isinstance(got, SignInRefused)
+
+
+def test_bootstrap_email_tolerates_case_and_whitespace(repo, auth):
+    """`NSIGHT_BOOTSTRAP_ADMINS` is a human-set environment variable; the
+    caller (routes_auth._bootstrap_admins) normalizes each entry to
+    stripped-lowercase before this function ever sees it, so a sign-in
+    email that itself needs normalizing must still match."""
+    got = resolve_signed_in_user(repo, auth, "  Boss@Egoiq.com  ", frozenset({"boss@egoiq.com"}))
+    assert isinstance(got, User)
+    assert got.is_admin is True
+    assert got.email == "boss@egoiq.com"
+
+
+def test_bootstrap_promotes_an_existing_non_admin_user_in_place(repo, auth):
+    """The bootstrap email may already have an account -- e.g. domain
+    auto-join created it before any admin existed. Recovery PROMOTES that
+    record rather than minting a colliding second one for the same
+    email."""
+    created = repo.save_user(auth, User(id="", email="boss@egoiq.com", name="Boss",
+                                        is_admin=False, grants=(Grant("attendo", "view"),)))
+    got = resolve_signed_in_user(repo, auth, "boss@egoiq.com", frozenset({"boss@egoiq.com"}))
+    assert isinstance(got, User)
+    assert got.id == created.id
+    assert got.is_admin is True
+    assert got.grants == (Grant("attendo", "view"),)
+    assert len(repo.list_users(auth)) == 1
 
 
 def test_domain_auto_join_creates_a_user_with_default_grants(repo, auth):
@@ -84,13 +132,17 @@ def test_not_an_email_is_refused(repo, auth):
     assert isinstance(got, SignInRefused)
 
 
-def test_domain_auto_join_does_not_reactivate_bootstrap(repo, auth):
-    """A hive with one real user is no longer "empty" even if that user came
-    from domain auto-join, not the bootstrap path."""
+def test_domain_auto_join_does_not_block_bootstrap_recovery(repo, auth):
+    """Corrected from the OLD "no users at all" rule: domain auto-join
+    never creates an admin (spec §5), so a hive that has ONLY auto-joined
+    users still has no admin, and NSIGHT_BOOTSTRAP_ADMINS must still be
+    able to recover it (spec §3.1) -- this is the exact operational
+    scenario the break-glass path exists for."""
     repo.set_setting(auth, "access.json", {"allowed_domains": ["egoiq.com"], "default_grants": []})
     resolve_signed_in_user(repo, auth, "first@egoiq.com", frozenset())
     got = resolve_signed_in_user(repo, auth, "admin@other.com", frozenset({"admin@other.com"}))
-    assert isinstance(got, SignInRefused)
+    assert isinstance(got, User)
+    assert got.is_admin is True
 
 
 class TestEmailDomainProven:
@@ -120,6 +172,17 @@ class TestEmailDomainProven:
                                      frozenset({"admin@egoiq.com"}),
                                      email_domain_proven=False)
         assert isinstance(got, SignInRefused)
+
+    def test_an_unproven_email_cannot_promote_an_existing_user_to_admin(self, repo, auth):
+        """Promoting an existing account in place is still MINTING a new
+        privilege from an unproven claim, the same hazard as minting a new
+        account -- it must be refused the same way."""
+        repo.save_user(auth, User(id="", email="boss@egoiq.com", is_admin=False))
+        got = resolve_signed_in_user(repo, auth, "boss@egoiq.com",
+                                     frozenset({"boss@egoiq.com"}),
+                                     email_domain_proven=False)
+        assert isinstance(got, User)
+        assert got.is_admin is False
 
     def test_a_proven_email_still_auto_joins_as_before(self, repo, auth):
         repo.set_setting(auth, "access.json",
