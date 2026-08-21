@@ -66,10 +66,9 @@ function DownloadButtons({ caseId, reportId, name }: {
   return (
     <div
       className="flex shrink-0 items-center gap-2"
-      // Rows in edit mode are clickable to open the wizard; a viewer's row is
-      // not (see ReportRow), so this is defensive rather than load-bearing —
-      // but a nested button inside a future clickable ancestor must never
-      // double-fire that ancestor's handler.
+      // Load-bearing: an editor's row IS clickable and opens the wizard, so
+      // without this, downloading a deck would also open the report behind it.
+      // (A viewer's row is not clickable, so there it is merely harmless.)
       onClick={(e) => e.stopPropagation()}
     >
       <Button
@@ -111,7 +110,7 @@ function ReportRow({
   onDelete,
 }: {
   caseId: string;
-  report: { id: string; name: string; createdAt?: string; renderedAt?: string };
+  report: { id: string; name: string; createdAt?: string; renderedAt?: string; rendered?: boolean };
   canEdit: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
@@ -168,6 +167,13 @@ function ReportRow({
             >
               {status}
             </Badge>
+          )}
+          {/* An editor wants the deck too, without opening the wizard to get
+              it. Only once one exists: the download routes 404 on a report
+              that has never been rendered, and a button that cannot work is
+              worse than no button. */}
+          {report.rendered && (
+            <DownloadButtons caseId={caseId} reportId={report.id} name={report.name} />
           )}
           <Button
             variant="ghost"
