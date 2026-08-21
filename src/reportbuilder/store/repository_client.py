@@ -111,7 +111,7 @@ class RepositoryClient:
         k = self._case(case_id)
         # "rendered" rides along so the read-only view can filter to finished
         # reports without a round trip per report (see ReportsSection.tsx).
-        return [{"report_id": r.id, "name": r.name, "rendered": r.rendered}
+        return [{"report_id": r.id, "name": r.name, "rendered": r.rendered, "rendered_at": r.rendered_at}
                 for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
                                                 user=self.user)]
 

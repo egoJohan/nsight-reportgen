@@ -111,7 +111,7 @@ function ReportRow({
   onDelete,
 }: {
   caseId: string;
-  report: { id: string; name: string; createdAt?: string };
+  report: { id: string; name: string; createdAt?: string; renderedAt?: string };
   canEdit: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
@@ -126,7 +126,17 @@ function ReportRow({
       : n === 0
         ? "No charts yet"
         : `${n} chart${n === 1 ? "" : "s"} · ${n} slide${n === 1 ? "" : "s"}`;
-  const stat = created ? `${base} · ${created}` : base;
+  // A viewer is looking at a deliverable, not a work in progress: the useful
+  // fact is when the deck was generated, not how many charts went into it.
+  // ("No charts yet" on a finished, downloadable report reads as broken.)
+  const generated = formatReportDate(report.renderedAt);
+  const stat = canEdit
+    ? created
+      ? `${base} · ${created}`
+      : base
+    : generated
+      ? `Generated ${generated}`
+      : "Generated";
 
   return (
     <div
@@ -142,7 +152,7 @@ function ReportRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{report.name}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {isLoading ? "Loading…" : stat}
+          {canEdit && isLoading ? "Loading…" : stat}
         </p>
       </div>
       {canEdit ? (
@@ -218,6 +228,7 @@ export default function ReportsSection({
     name: r.name,
     createdAt: wsById.get(r.report_id)?.createdAt,
     rendered: r.rendered,
+    renderedAt: r.rendered_at,
   }));
   const orderedReports = canEdit ? allReports : allReports.filter((r) => r.rendered);
 

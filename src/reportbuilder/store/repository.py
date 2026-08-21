@@ -98,6 +98,9 @@ class ReportRef:
     #: A report doc with no render behind it is the analyst's working state,
     #: not something finished.
     rendered: bool = False
+    #: When that render happened, ISO 8601. Empty for decks rendered before
+    #: this was recorded — treat absence as "unknown", not as "never".
+    rendered_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -559,6 +562,7 @@ class Repository:
                          customer_id=d.get("customer_id", ""),
                          name=d.get("name") or d.get("id", ""),
                          modified_at=d.get("modified_at", ""),
+                         rendered_at=d.get("rendered_at", ""),
                          # A render stamps "render_key" onto this same sidecar
                          # (save_render) — its presence means an artefact
                          # exists for the report's CURRENT content, since
@@ -1519,6 +1523,11 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
         d["render_key"] = key
+        # When, not only what from. A finished report's most useful fact to
+        # someone who did not build it is the day the deck was generated —
+        # "12 charts" is the author's business, "generated 3 March" is the
+        # reader's. Absent on decks rendered before this was recorded.
+        d["rendered_at"] = _now()
         self._write_json(auth, meta_path, d, [P.LABEL_REPORT_META])
 
     def load_render(self, auth: AuthContext, customer_id: str, case_id: str,

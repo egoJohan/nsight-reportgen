@@ -531,6 +531,9 @@ export interface CaseReportInfo {
    *  the deliverable a viewer may download. A report with no render behind it
    *  is the analyst's working state, not a finished report. */
   rendered: boolean;
+  /** When that render happened, ISO 8601. Empty on decks rendered before the
+   *  backend recorded it — absence means "unknown", not "never". */
+  rendered_at?: string;
 }
 
 export interface Template {
