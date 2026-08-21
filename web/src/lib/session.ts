@@ -3,6 +3,7 @@
 // for the exact class of attack the cookie exists to prevent), so there is no
 // client-side flag to check first. `/auth/me` IS the check.
 import { useQuery } from "@tanstack/react-query";
+import { clearLegacyWorkspaceStorage } from "./workspace";
 
 export interface Me {
   id: string;
@@ -38,4 +39,10 @@ export function useSession() {
 
 export async function signOut(): Promise<void> {
   await fetch(`${API_BASE}/auth/logout`, { method: "POST" });
+  // Per-case state now lives server-side and dies with the in-memory
+  // react-query cache on the hard navigation that follows sign-out. The one
+  // thing that can outlive that is a pre-§8 localStorage leftover (see
+  // workspace.ts) -- sweep it so a colleague signing in on this machine next
+  // never inherits it.
+  clearLegacyWorkspaceStorage();
 }

@@ -301,6 +301,35 @@ async function json<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Like json(), but on failure prefers the server's `detail` string over a
+ *  bare status line -- the reason ("the last admin cannot be removed") IS
+ *  the message the toast should show. */
+async function detailedJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // not JSON — keep status text
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function detailedVoid(res: Response): Promise<void> {
+  if (res.ok) return;
+  let detail = `${res.status} ${res.statusText}`;
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // not JSON — keep status text
+  }
+  throw new Error(detail);
+}
+
 // All egoHive-backed AI calls (titles, short-labels, special slides) share one
 // bounded concurrency gate so the title auto-batch + special-slide generation
 // never collectively overload egoHive (which returns 503 under load). Transient
@@ -1171,6 +1200,42 @@ export const api = {
         throw new Error(detail);
       }
     },
+
+    workspace: (): Promise<Record<string, WorkspaceCaseState>> =>
+      fetch(`${API_BASE}/settings/workspace`).then((r) =>
+        json<Record<string, WorkspaceCaseState>>(r)
+      ),
+
+    setCaseWorkspace: (
+      caseId: string,
+      state: WorkspaceCaseState
+    ): Promise<WorkspaceCaseState> =>
+      fetch(`${API_BASE}/settings/workspace/${caseId}`, jsonPut(state)).then((r) =>
+        json<WorkspaceCaseState>(r)
+      ),
+  },
+
+  users: {
+    list: (): Promise<StudioUser[]> =>
+      fetch(`${API_BASE}/users`).then((r) => json<StudioUser[]>(r)),
+
+    setGrants: (userId: string, grants: UserGrantInput[]): Promise<StudioUser> =>
+      fetch(`${API_BASE}/users/${userId}/grants`, jsonPut({ grants })).then((r) => detailedJson<StudioUser>(r)),
+
+    setAdmin: (userId: string, isAdmin: boolean): Promise<StudioUser> =>
+      fetch(`${API_BASE}/users/${userId}`, jsonPatch({ is_admin: isAdmin })).then((r) => detailedJson<StudioUser>(r)),
+
+    remove: (userId: string): Promise<void> =>
+      fetch(`${API_BASE}/users/${userId}`, { method: "DELETE" }).then(detailedVoid),
+
+    invite: (email: string, grants: UserGrantInput[]): Promise<InvitationResult> =>
+      fetch(`${API_BASE}/users/invite`, jsonPost({ email, grants })).then((r) => detailedJson<InvitationResult>(r)),
+
+    listInvites: (): Promise<Invite[]> =>
+      fetch(`${API_BASE}/invites`).then((r) => json<Invite[]>(r)),
+
+    revokeInvite: (inviteId: string): Promise<void> =>
+      fetch(`${API_BASE}/invites/${inviteId}`, { method: "DELETE" }).then(detailedVoid),
   },
 };
 
@@ -1204,4 +1269,51 @@ export interface ChartFontSettings {
 export interface FontsSettings {
   fonts: InstalledFont[];
   missing: MissingFont[];
+}
+
+/** One entry in a case's report list -- what `workspace.ts` used to keep in
+ *  localStorage, now round-tripped through `/settings/workspace` (spec §8). */
+export interface WorkspaceReport {
+  id: string;
+  name: string;
+  materialId?: string;
+  createdAt?: string;
+}
+
+export interface WorkspaceCaseState {
+  materialId: string | null;
+  reports: WorkspaceReport[];
+}
+
+export interface UserGrantInput {
+  scope: string;
+  mode: "view" | "edit";
+}
+
+export interface UserGrant extends UserGrantInput {
+  customer_name: string | null;
+  case_name: string | null;
+}
+
+export interface StudioUser {
+  id: string;
+  email: string;
+  name: string;
+  is_admin: boolean;
+  grants: UserGrant[];
+}
+
+export interface Invite {
+  id: string;
+  email: string;
+  invited_by: string;
+  invited_at: string;
+  expires: string;
+  status: "pending" | "accepted" | "expired";
+  grants: UserGrantInput[];
+}
+
+export interface InvitationResult extends Invite {
+  link: string;
+  emailed: boolean;
 }

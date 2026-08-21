@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/queries";
-import { setMaterial } from "@/lib/workspace";
+import type { WorkspaceCaseState } from "@/lib/workspace";
 
 /**
  * New case = upload. Picking a SAV creates the case (named from the SAV study
@@ -43,7 +43,14 @@ export default function NewCaseDialog({
     try {
       const { case_id } = await api.cases.create(base);
       const res = await api.materials.upload(case_id, file);
-      setMaterial(case_id, res.material_id);
+      qc.setQueryData<Record<string, WorkspaceCaseState>>(
+        ["settings", "workspace"],
+        (old) => ({ ...old, [case_id]: { materialId: res.material_id, reports: [] } })
+      );
+      void api.settings.setCaseWorkspace(case_id, {
+        materialId: res.material_id,
+        reports: [],
+      });
       // Prefer the SAV's embedded study title for the case name.
       const label = (res.file_label ?? "").trim();
       if (label && label !== base) {

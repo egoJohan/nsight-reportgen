@@ -26,7 +26,7 @@ import {
   useCaseMaterials,
   useCaseTemplate,
 } from "@/lib/queries";
-import { useWorkspace, clearWorkspace } from "@/lib/workspace";
+import { useWorkspace, useClearWorkspace } from "@/lib/workspace";
 import TemplateSelect from "@/components/TemplateSelect";
 
 function CaseHeading({
@@ -120,6 +120,7 @@ export default function CaseDetailPage() {
   const legacyCase = cases?.find((c) => c.id === id);
   const caseName = resolved?.name ?? legacyCase?.name ?? "";
   const { workspace, removeReport } = useWorkspace(id ?? "");
+  const clearWorkspace = useClearWorkspace();
   // The case→material link is server-side; fall back to it when this browser has
   // no local pointer (e.g. the case was created by someone else / another device).
   const { data: caseMaterials } = useCaseMaterials(id ?? null);
