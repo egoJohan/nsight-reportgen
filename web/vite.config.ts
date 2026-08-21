@@ -51,6 +51,9 @@ export default defineConfig({
       '/users': { target: backend, xfwd: true },
       '/invites': { target: backend, xfwd: true },
       '/access-requests': { target: backend, xfwd: true },
+      // Settings > Backup. No bypass: /admin is not an SPA route, and the
+      // backup response is a zip, not a page.
+      '/admin': { target: backend, xfwd: true },
     },
   },
 })

@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { RestoreResult } from "@/lib/api";
-import { PANEL } from "@/lib/surfaces";
+import { PANEL, PANEL_TITLE } from "@/lib/surfaces";
 
 /** Settings > Backup — admin only (see SettingsPage).
  *
@@ -78,8 +78,8 @@ export default function BackupTab() {
 
   return (
     <div className="space-y-6">
-      <section className={PANEL}>
-        <h2 className="text-sm font-semibold">Create backup</h2>
+      <section className={`${PANEL} p-4`}>
+        <h2 className={PANEL_TITLE}>Create backup</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Downloads everything nSight keeps as one zip: settings, users and
           their permissions, customers, studies, the SPSS files that were
@@ -106,8 +106,8 @@ export default function BackupTab() {
         </Button>
       </section>
 
-      <section className={PANEL}>
-        <h2 className="text-sm font-semibold">Restore backup</h2>
+      <section className={`${PANEL} p-4`}>
+        <h2 className={PANEL_TITLE}>Restore backup</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
           Writes a backup's contents back into the store. Anything at the same
           place is overwritten; anything not in the backup is left alone — so
