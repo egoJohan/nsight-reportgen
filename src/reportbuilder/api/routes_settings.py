@@ -302,12 +302,11 @@ def put_oidc(payload: dict = Body(...),
     never repeats the secret back — see get_oidc.
 
     `tenant_id` is accepted for Microsoft only (Google has no tenant
-    concept). It is optional HERE — the same way `oidc.py` accepts a
-    Microsoft config with client_id/client_secret and no tenant_id — but
-    `oidc.begin`/`complete` refuse to start a Microsoft sign-in without one
-    rather than falling back to a multi-tenant discovery endpoint; see
-    `reportbuilder.auth.oidc`'s module docstring for why that fallback is a
-    real hole, not just a stricter default.
+    concept), and is OPTIONAL: absent, `oidc.py` discovers against
+    Microsoft's multi-tenant `organizations` endpoint (any Entra work/school
+    account, any tenant); present, discovery stays pinned to that one
+    tenant. See `reportbuilder.auth.oidc`'s module docstring for how
+    multi-tenant issuer validation and the `xms_edov` claim keep that safe.
     """
     if not isinstance(payload, dict) or not set(payload) <= set(_OIDC_PROVIDERS):
         raise HTTPException(422, f"providers must be a subset of {_OIDC_PROVIDERS}")

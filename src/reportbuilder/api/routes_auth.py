@@ -272,8 +272,8 @@ async def oidc_callback(provider: str, request: Request,
         raise HTTPException(400, "OAuth state mismatch")
 
     try:
-        email = await oidc.complete(repo, auth, provider, _callback_url(request, provider),
-                                    code, saved["nonce"])
+        verified = await oidc.complete(repo, auth, provider, _callback_url(request, provider),
+                                       code, saved["nonce"])
     except oidc.InvalidIdentityToken as exc:
         # Never a token, secret, code, state, or nonce in this log line --
         # just the provider and the (non-secret) reason string oidc.py
@@ -285,7 +285,9 @@ async def oidc_callback(provider: str, request: Request,
     except oidc.ProviderNotConfigured as exc:
         raise HTTPException(503, str(exc)) from exc
 
-    resolved = identity.resolve_signed_in_user(repo, auth, email, _bootstrap_admins())
+    resolved = identity.resolve_signed_in_user(
+        repo, auth, verified.email, _bootstrap_admins(),
+        email_domain_proven=verified.email_domain_proven)
     if isinstance(resolved, identity.SignInRefused):
         # SignInRefused is RETURNED, not raised -- no session is minted, and
         # the user lands somewhere that explains it, not a stack trace or a

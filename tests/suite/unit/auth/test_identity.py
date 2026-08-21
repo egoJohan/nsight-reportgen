@@ -91,3 +91,47 @@ def test_domain_auto_join_does_not_reactivate_bootstrap(repo, auth):
     resolve_signed_in_user(repo, auth, "first@egoiq.com", frozenset())
     got = resolve_signed_in_user(repo, auth, "admin@other.com", frozenset({"admin@other.com"}))
     assert isinstance(got, SignInRefused)
+
+
+class TestEmailDomainProven:
+    """Task 12c: multi-tenant Microsoft sign-in can hand this function an
+    email whose DOMAIN ownership is not proven (see oidc.py's module
+    docstring on `xms_edov`). An unproven email may resolve to an account
+    that already exists, but must never mint a new one -- whether via
+    domain auto-join or the bootstrap-admin path, both of which are ways
+    of trusting a self-asserted email to create an account nobody vetted."""
+
+    def test_an_unproven_email_still_resolves_an_existing_user(self, repo, auth):
+        repo.save_user(auth, User(id="", email="maija@egoiq.com", name="Maija"))
+        got = resolve_signed_in_user(repo, auth, "maija@egoiq.com", frozenset(),
+                                     email_domain_proven=False)
+        assert isinstance(got, User) and got.email == "maija@egoiq.com"
+
+    def test_an_unproven_email_is_refused_for_an_unknown_user_even_on_an_allowed_domain(
+            self, repo, auth):
+        repo.set_setting(auth, "access.json",
+                         {"allowed_domains": ["egoiq.com"], "default_grants": []})
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset(),
+                                     email_domain_proven=False)
+        assert isinstance(got, SignInRefused)
+
+    def test_an_unproven_email_cannot_become_the_bootstrap_admin(self, repo, auth):
+        got = resolve_signed_in_user(repo, auth, "admin@egoiq.com",
+                                     frozenset({"admin@egoiq.com"}),
+                                     email_domain_proven=False)
+        assert isinstance(got, SignInRefused)
+
+    def test_a_proven_email_still_auto_joins_as_before(self, repo, auth):
+        repo.set_setting(auth, "access.json",
+                         {"allowed_domains": ["egoiq.com"], "default_grants": []})
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset(),
+                                     email_domain_proven=True)
+        assert isinstance(got, User)
+
+    def test_email_domain_proven_defaults_to_true(self, repo, auth):
+        """Password sign-in and every other pre-existing caller never passed
+        this parameter -- it must keep behaving exactly as before."""
+        repo.set_setting(auth, "access.json",
+                         {"allowed_domains": ["egoiq.com"], "default_grants": []})
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        assert isinstance(got, User)

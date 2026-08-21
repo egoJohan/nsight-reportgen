@@ -33,10 +33,30 @@ class SignInRefused:
 
 
 def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
-                           bootstrap_admins: frozenset[str]) -> User | SignInRefused:
+                           bootstrap_admins: frozenset[str], *,
+                           email_domain_proven: bool = True) -> User | SignInRefused:
     """*email* MUST already be verified by an identity provider — never a
     value a browser supplied directly. This function only decides what
     happens once that proof exists.
+
+    *email_domain_proven* is a SEPARATE, weaker-by-default promise than
+    "verified": whether whoever vouched for *email* also proved they
+    control its DOMAIN, not merely that the token carrying it was
+    authentic. Password sign-in and Google OIDC have no gap here (Google's
+    `email_verified` is required True or `oidc.complete` never returns),
+    so both default this to True. Microsoft's `organizations` (multi-tenant)
+    discovery is the one caller that can pass False — see oidc.py's module
+    docstring for `xms_edov` and exactly why: an attacker's own free Entra
+    tenant can mint a token with a genuine signature and a genuine `email`
+    claim set to ANYONE'S address, so an unproven email must never be trusted to
+    MINT a new account (bootstrap admin or domain auto-join, below) the way
+    a proven one is. It may still resolve to an account that already
+    exists — see the guard right below — because that requires the
+    attacker to have already guessed a real nSight user's exact email, and
+    even then only takes over that account if the real owner's tenant is
+    *also* not asserting ownership. Fail closed: only `True` counts as
+    proven, so callers that don't know any better (and every caller other
+    than the Microsoft OIDC path) get the safe default.
     """
     normalized = (email or "").strip().lower()
     if not normalized or "@" not in normalized:
@@ -45,6 +65,20 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
     existing = repo.find_user_by_email(auth, normalized)
     if existing is not None:
         return existing
+
+    # NOTE for whoever implements Plan 3 (pending invitations): consuming an
+    # invitation belongs ABOVE this guard, not below it. Fulfilling an
+    # invitation an admin already issued for this exact email is not "minting
+    # an account from an unproven claim" the way bootstrap-admin/domain
+    # auto-join below are -- it is closer to "matches an existing record",
+    # same as the `existing` check above, and the task spec for xms_edov
+    # explicitly allows it.
+    if not email_domain_proven:
+        log.warning(
+            "sign-in refused: '%s' has no proven domain ownership and is not a known user "
+            "(new-account creation is refused for an unproven email; see oidc.py's module "
+            "docstring on xms_edov)", normalized)
+        return SignInRefused(f"'{normalized}' is not a known user and its domain ownership is unproven")
 
     if not repo.list_users(auth) and normalized in bootstrap_admins:
         log.warning("sign-in: '%s' becomes the first admin (NSIGHT_BOOTSTRAP_ADMINS)",

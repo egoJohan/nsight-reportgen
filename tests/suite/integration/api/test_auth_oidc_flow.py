@@ -242,3 +242,97 @@ class _AsyncResult:
         async def _coro():
             return self._value
         return _coro().__await__()
+
+
+_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def _ms_multitenant_transport(rsa_key, nonce_box: dict, *, xms_edov=None):
+    """Microsoft `organizations` discovery end-to-end: a template `issuer`
+    (see oidc.py's module docstring -- confirmed against Microsoft's real
+    discovery document) and a token from an arbitrary tenant, proving the
+    full HTTP round trip (routes_auth.py -> oidc.py -> identity.py), not
+    just oidc.complete() in isolation (see test_oidc.py for that)."""
+    jwks = {"keys": [rsa_key.as_dict()]}
+
+    def _token():
+        now = int(time.time())
+        claims = {"iss": f"{ISSUER}{_TENANT_ID}/v2.0", "aud": CLIENT_ID, "sub": "user-123",
+                 "email": "maija@egoiq.com", "tid": _TENANT_ID,
+                 "iat": now, "exp": now + 3600, "nonce": nonce_box["nonce"]}
+        if xms_edov is not None:
+            claims["xms_edov"] = xms_edov
+        return joserfc_jwt.encode({"alg": "RS256", "kid": "test-1"}, claims, rsa_key)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/.well-known/openid-configuration"):
+            return httpx.Response(200, json={
+                "issuer": f"{ISSUER}{{tenantid}}/v2.0", "authorization_endpoint": f"{ISSUER}auth",
+                "token_endpoint": f"{ISSUER}token", "jwks_uri": f"{ISSUER}jwks"})
+        if request.url.path == "/jwks":
+            return httpx.Response(200, json=jwks)
+        if request.url.path == "/token":
+            return httpx.Response(200, json={
+                "access_token": "at-1", "token_type": "Bearer", "id_token": _token()})
+        return httpx.Response(404)
+
+    return httpx.MockTransport(handler)
+
+
+class TestMicrosoftMultiTenantSignIn:
+    """Task 12c end-to-end: a genuine token from an arbitrary Entra tenant,
+    via the `organizations` endpoint, over the real HTTP routes."""
+
+    @pytest.fixture(autouse=True)
+    def _configure_microsoft_multitenant(self, repo, auth):
+        stored = repo.get_setting(auth, "oidc.json") or {}
+        stored["microsoft"] = {"client_id": CLIENT_ID, "client_secret": "s3cr3t"}
+        repo.set_setting(auth, "oidc.json", stored)
+
+    def _round_trip(self, client, monkeypatch, rsa_key, *, xms_edov):
+        nonce_box = {"nonce": None}
+        transport = _ms_multitenant_transport(rsa_key, nonce_box, xms_edov=xms_edov)
+        monkeypatch.setattr(oidc, "_MICROSOFT_MULTITENANT_METADATA_URL",
+                            f"{ISSUER}.well-known/openid-configuration")
+        monkeypatch.setattr(oidc, "_client",
+                            lambda config, redirect_uri, _ignored: oidc.AsyncOAuth2Client(
+                                config.client_id, config.client_secret, scope=oidc._SCOPE,
+                                redirect_uri=redirect_uri, transport=transport))
+        login = client.get("/auth/login/microsoft", follow_redirects=False)
+        parsed = urlparse(login.headers["location"])
+        nonce_box["nonce"] = parse_qs(parsed.query)["nonce"][0]
+        state = parse_qs(parsed.query)["state"][0]
+        return client.get(f"/auth/callback/microsoft?code=fake-code&state={state}",
+                          follow_redirects=False)
+
+    def test_xms_edov_true_lets_an_unknown_email_auto_join(
+            self, client, repo, auth, monkeypatch, rsa_key):
+        repo.set_setting(auth, "access.json",
+                         {"allowed_domains": ["egoiq.com"], "default_grants": []})
+        callback = self._round_trip(client, monkeypatch, rsa_key, xms_edov=True)
+        assert callback.status_code == 302
+        assert client.cookies.get("nsight_session")
+
+        me = client.get("/auth/me")
+        assert me.status_code == 200 and me.json()["email"] == "maija@egoiq.com"
+
+    def test_xms_edov_absent_refuses_an_unknown_email_even_on_an_allowed_domain(
+            self, client, repo, auth, monkeypatch, rsa_key):
+        repo.set_setting(auth, "access.json",
+                         {"allowed_domains": ["egoiq.com"], "default_grants": []})
+        callback = self._round_trip(client, monkeypatch, rsa_key, xms_edov=None)
+        assert callback.status_code == 302
+        assert "/login" in callback.headers["location"]
+        assert not client.cookies.get("nsight_session")
+
+    def test_xms_edov_absent_still_signs_in_a_known_user(
+            self, client, repo, auth, monkeypatch, rsa_key):
+        from reportbuilder.auth.permissions import User  # noqa: PLC0415
+
+        repo.save_user(auth, User(id="", email="maija@egoiq.com", name="Maija"))
+        callback = self._round_trip(client, monkeypatch, rsa_key, xms_edov=None)
+        assert callback.status_code == 302
+        assert client.cookies.get("nsight_session")
+
+        me = client.get("/auth/me")
+        assert me.status_code == 200 and me.json()["email"] == "maija@egoiq.com"
