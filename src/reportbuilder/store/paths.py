@@ -19,6 +19,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/user/{user_id}                          nsight:user
     settings/user/{user_id}.grants                   nsight:grants
     settings/user/{user_id}.password                 nsight:password
+    settings/user/{user_id}.workspace                 nsight:workspace
     settings/session/{session_id}                    nsight:session
     settings/invite/{invite_id}                      nsight:invite
 
@@ -55,6 +56,7 @@ LABEL_GRANTS = "nsight:grants"
 LABEL_SESSION = "nsight:session"
 LABEL_PASSWORD = "nsight:password"
 LABEL_INVITE = "nsight:invite"
+LABEL_WORKSPACE = "nsight:workspace"
 
 SETTINGS_ROOT = "settings"
 
@@ -222,6 +224,13 @@ def user_password_path(user_id: str) -> str:
     """A sibling of the user, like grants — rewritten independently of the
     identity it belongs to."""
     return f"{user_path(user_id)}.password"
+
+
+def user_workspace_path(user_id: str) -> str:
+    """Per-case UI state -- the material pointer and report timestamps
+    that used to live in the browser's localStorage (spec §8). A sibling
+    of the user record, like grants and password."""
+    return f"{user_path(user_id)}.workspace"
 
 
 def session_path(session_id: str) -> str:

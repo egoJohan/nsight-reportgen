@@ -797,6 +797,31 @@ class Repository:
             return None
         return d.get("hash") or None
 
+    # --- per-user workspace state --------------------------------------------
+    #
+    # spec §8: the material pointer and report timestamps that used to live
+    # in web/src/lib/workspace.ts's localStorage. Moved here so attaching a
+    # different hive brings a user's UI state with it (spec §2: nSight
+    # keeps nothing of its own it cannot rebuild). One JSON object per
+    # user, keyed by case inside it -- small, per-user, read/written whole
+    # every time a case is opened.
+
+    def get_workspace(self, auth: AuthContext, user_id: str) -> dict:
+        try:
+            d = self._read_json(auth, P.user_workspace_path(user_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return {}
+        return d if isinstance(d, dict) else {}
+
+    def set_case_workspace(self, auth: AuthContext, user_id: str, case_id: str,
+                           state: dict) -> dict:
+        """Replace the state for ONE case, leaving every other case's
+        entry in this user's workspace untouched."""
+        whole = self.get_workspace(auth, user_id)
+        whole[case_id] = state
+        self._write_json(auth, P.user_workspace_path(user_id), whole, [P.LABEL_WORKSPACE])
+        return state
+
     # --- sessions -------------------------------------------------------------
     #
     # A cookie names a session id; this record decides who that is and whether

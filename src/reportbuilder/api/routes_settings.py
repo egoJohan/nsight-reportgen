@@ -65,6 +65,28 @@ def _font_dict(f, *, on_host: bool) -> dict:
             "size": f.size, "on_host": on_host}
 
 
+@settings_router.get("/settings/workspace")
+def get_workspace_route(auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(current_user)) -> dict:
+    """This signed-in user's own per-case UI state (spec §8) -- never
+    another user's; there is no user_id parameter to spoof."""
+    return repo.get_workspace(auth, user.id)
+
+
+@settings_router.put("/settings/workspace/{case_id}")
+def put_case_workspace_route(case_id: str, payload: dict = Body(...),
+                             auth: AuthContext = Depends(get_auth),
+                             repo: Repository = Depends(get_repository),
+                             user: User = Depends(current_user)) -> dict:
+    """Replace this user's state for ONE case. Deliberately NOT gated by
+    require_case: this is private UI preference data keyed by a case id,
+    not a view of the case itself, so a user with no grant on `case_id`
+    setting one here leaks nothing -- there is nothing here to read back
+    except their own record."""
+    return repo.set_case_workspace(auth, user.id, case_id, payload)
+
+
 @settings_router.get("/settings/fonts")
 def list_fonts(auth: AuthContext = Depends(get_auth),
                repo: Repository = Depends(get_repository),
