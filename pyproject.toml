@@ -23,6 +23,7 @@ dependencies = [
     "httpx>=0.27",
     "argon2-cffi>=23.1,<26",
     "itsdangerous>=2.2",
+    "authlib>=1.7,<2",
 ]
 
 [project.optional-dependencies]
