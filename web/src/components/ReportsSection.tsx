@@ -32,6 +32,7 @@ import { formatReportDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { EMPTY, PANEL, SECTION_TITLE } from "@/lib/surfaces";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // A viewer's row has no status and no delete — a half-built report is the
 // analyst's working state, not something to hand a viewer. PDF/PPTX download
@@ -210,7 +211,7 @@ export default function ReportsSection({
 
   // Reports come from the SERVER (visible to any user/device), newest first.
   // Enrich with this browser's locally-remembered createdAt when we have it.
-  const { data: serverReports } = useCaseReports(caseId);
+  const { data: serverReports, isPending: reportsPending } = useCaseReports(caseId);
   const wsById = new Map(workspace.reports.map((r) => [r.id, r]));
   const allReports = (serverReports?.reports ?? []).map((r) => ({
     id: r.report_id,
@@ -277,7 +278,18 @@ export default function ReportsSection({
         </p>
       </div>
 
-      {!canEdit && orderedReports.length === 0 ? (
+      {/* Placeholders while the reports are in flight. Rendering the empty
+          state instead told a viewer there were no finished reports a moment
+          before showing them several — an empty answer and an unanswered
+          question are not the same thing. Three rows, pulsing, matching the
+          customers and studies lists. */}
+      {reportsPending ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-lg" />
+          ))}
+        </div>
+      ) : !canEdit && orderedReports.length === 0 ? (
         <div className={EMPTY}>
           <FileTextIcon className="mx-auto size-8 text-muted-foreground" />
           <p className="mt-3 text-sm text-muted-foreground">
