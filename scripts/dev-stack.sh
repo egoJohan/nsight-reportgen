@@ -70,7 +70,11 @@ start_backend() {
   # NSIGHT_DEMO keeps the legacy case/material/report routes on the JSON store
   # while the new customer routes go to datahive. Both run side by side until
   # the call sites finish moving.
+  # The first person to sign in on an EMPTY hive whose verified email is
+  # listed here becomes an admin (spec 3.1). Inert once the hive has
+  # users, so it is safe to leave set — it matters on a fresh store.
   ( cd "$ROOT" && NSIGHT_DEMO=1 \
+      NSIGHT_BOOTSTRAP_ADMINS=johan@egoiq.com \
       NSIGHT_DATAHIVE_URL="http://127.0.0.1:$DH_PORT" \
       NSIGHT_DATAHIVE_TOKEN="$token" \
       NSIGHT_HOST=127.0.0.1 NSIGHT_PORT=$API_PORT PYTHONPATH=src \
