@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   useCases,
   useCustomers,
+  useCustomerNames,
   useCustomerCases,
   useResolvedCase,
   useCaseReports,
@@ -40,6 +41,7 @@ import {
   Building2Icon,
   ChevronRightIcon,
   ClockIcon,
+  LockIcon,
   SettingsIcon,
   XIcon,
   MessageSquareTextIcon,
@@ -108,6 +110,7 @@ function CustomerCases({ customerId, canEdit }: { customerId: string; canEdit: b
  *  reachable through the customer that owns it. */
 function CustomersNav() {
   const { data: customers } = useCustomers();
+  const { data: allNames } = useCustomerNames();
   const { customerId: routeCustomerId } = useParams();
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 
@@ -171,6 +174,27 @@ function CustomersNav() {
         );
       })}
 
+      {/* Customers this user cannot open. Listed deliberately: without them
+          there is no way to FIND a customer to ask about, and the request flow
+          is unreachable. They carry no chevron (there is nothing to expand)
+          and lead to the no-access page, which is where the asking happens.
+          Only id and name are known here — see api.customers.listNames. */}
+      {(allNames ?? [])
+        .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
+        .map((n) => (
+          <SidebarMenuItem key={n.id}>
+            <SidebarMenuButton
+              render={<NavLink to={`/customers/${n.id}`} />}
+              isActive={routeCustomerId === n.id}
+              tooltip={`${n.name} — no access`}
+              className="text-muted-foreground"
+            >
+              <LockIcon className="size-3.5 shrink-0 opacity-70" />
+              <Building2Icon className="size-4" />
+              <span className="truncate">{n.name}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ))}
     </SidebarMenu>
   );
 }
