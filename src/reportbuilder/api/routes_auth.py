@@ -1,23 +1,47 @@
-"""Sign-in over HTTP: password today (Part A), Google and Microsoft once
-Part B lands (spec §4). Every route here is either in PUBLIC_ROUTES or
-guarded by `current_user` like anything else — see deps_auth.py.
+"""Sign-in over HTTP: password (Part A), and Google/Microsoft SSO (Part B,
+spec §4). Every route here is either in PUBLIC_ROUTES or guarded by
+`current_user` like anything else — see deps_auth.py.
 """
 from __future__ import annotations
 
 import logging
 import os
 
+import itsdangerous
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
 from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth import identity, password, session
+from reportbuilder.auth import identity, oidc, password, session
 from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
 log = logging.getLogger(__name__)
+
+_OIDC_PROVIDERS = ("google", "microsoft")
+
+# The OIDC-state cookie: carries {state, nonce, next} across the redirect to
+# the provider and back. HttpOnly/Secure like the session cookie, but
+# SameSite=Lax rather than Strict -- the callback is a top-level GET
+# navigation arriving FROM Google/Microsoft, a cross-site request, and a
+# Strict cookie is never attached to that; only Lax survives a cross-site
+# top-level GET. Scoped to /auth (never sent to a data route), 10-minute
+# Max-Age (long enough for a consent screen), single-use -- cleared in the
+# callback whether it succeeds or fails. Signed with the same key as the
+# session cookie, a different `salt` for domain separation.
+_OAUTH_COOKIE = "nsight_oauth"
+_OAUTH_SALT = "nsight-oauth-state-v1"
+_OAUTH_MAX_AGE = 600  # 10 minutes
+
+
+def _oauth_codec(key: bytes) -> itsdangerous.URLSafeTimedSerializer:
+    return itsdangerous.URLSafeTimedSerializer(key, salt=_OAUTH_SALT)
+
+
+def _callback_url(request: Request, provider: str) -> str:
+    return str(request.url_for("oidc_callback", provider=provider))
 
 auth_router = APIRouter(tags=["auth"], prefix="/auth")
 
@@ -123,3 +147,87 @@ def logout(request: Request, response: Response,
 @auth_router.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return _user_out(user)
+
+
+@auth_router.get("/login/{provider}")
+async def oidc_login(provider: str, request: Request, response: Response,
+                     next: str = "/",
+                     auth: AuthContext = Depends(get_auth),
+                     repo: Repository = Depends(get_repository)):
+    """Start a Google/Microsoft sign-in: redirect to the provider, having
+    generated `state`/`nonce` (via `secrets`, inside `oidc.begin`) and
+    stashed them in the OAuth-state cookie so the callback can check them.
+    """
+    if provider not in _OIDC_PROVIDERS:
+        raise HTTPException(404, "Unknown provider")
+    try:
+        url, state, nonce = await oidc.begin(repo, auth, provider, _callback_url(request, provider))
+    except oidc.ProviderNotConfigured as exc:
+        # A clean 503, not a 500 -- an unconfigured (or, for Microsoft,
+        # un-tenant-pinned) provider is an operator problem, not a bug.
+        raise HTTPException(503, str(exc)) from exc
+
+    key = get_or_create_signing_key(repo, auth)
+    payload = _oauth_codec(key).dumps({"state": state, "nonce": nonce, "next": next})
+    redirect = Response(status_code=302, headers={"Location": url})
+    redirect.set_cookie(_OAUTH_COOKIE, payload, max_age=_OAUTH_MAX_AGE,
+                        httponly=True, secure=True, samesite="lax", path="/auth")
+    return redirect
+
+
+@auth_router.get("/callback/{provider}", name="oidc_callback")
+async def oidc_callback(provider: str, request: Request,
+                        code: str = "", state: str = "",
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository)):
+    """Verify the provider's id_token, resolve its email to a user, and mint
+    a session -- or refuse, cleanly, without ever minting one.
+
+    The OAuth-state cookie is single-use: it is cleared here on every exit
+    path, success or failure, so a state/nonce pair can never be replayed
+    against a second callback.
+    """
+    if provider not in _OIDC_PROVIDERS:
+        raise HTTPException(404, "Unknown provider")
+
+    raw = request.cookies.get(_OAUTH_COOKIE)
+    if not raw:
+        raise HTTPException(400, "Missing OAuth state")
+    key = get_or_create_signing_key(repo, auth)
+    try:
+        saved = _oauth_codec(key).loads(raw, max_age=_OAUTH_MAX_AGE)
+    except itsdangerous.BadData as exc:
+        # Unknown, tampered, or expired (max_age) -- all the same refusal.
+        raise HTTPException(400, "Invalid or expired OAuth state") from exc
+    if not state or saved.get("state") != state:
+        raise HTTPException(400, "OAuth state mismatch")
+
+    try:
+        email = await oidc.complete(repo, auth, provider, _callback_url(request, provider),
+                                    code, saved["nonce"])
+    except oidc.InvalidIdentityToken as exc:
+        # Never a token, secret, code, state, or nonce in this log line --
+        # just the provider and the (non-secret) reason string oidc.py
+        # raised.
+        log.warning("oidc callback rejected for %s: %s", provider, exc)
+        redirect = Response(status_code=302, headers={"Location": "/login?error=sign_in_failed"})
+        redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+        return redirect
+    except oidc.ProviderNotConfigured as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+    resolved = identity.resolve_signed_in_user(repo, auth, email, _bootstrap_admins())
+    if isinstance(resolved, identity.SignInRefused):
+        # SignInRefused is RETURNED, not raised -- no session is minted, and
+        # the user lands somewhere that explains it, not a stack trace or a
+        # blank page.
+        log.info("oidc sign-in refused for %s: %s", provider, resolved.reason)
+        redirect = Response(status_code=302, headers={"Location": "/login?error=not_allowed"})
+        redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+        return redirect
+
+    next_path = saved.get("next") or "/"
+    redirect = Response(status_code=302, headers={"Location": next_path})
+    redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+    _issue_session(redirect, repo, auth, resolved.id)
+    return redirect

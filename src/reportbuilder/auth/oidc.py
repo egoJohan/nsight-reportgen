@@ -23,10 +23,38 @@ Authlib 2.0 in favour of joserfc (confirmed by reading the installed
 authlib 1.7.2 package: `authlib/jose/__init__.py` emits that deprecation,
 and Authlib's own `async_openid.py` already imports joserfc internally).
 
-Microsoft's discovery endpoint is `organizations`, not `common`: `common`
-also admits personal Microsoft accounts (outlook.com); `organizations`
-restricts sign-in to an Azure AD tenant — i.e. any O365 business account,
-matching spec §1's "Google and O365" rather than "any Microsoft account".
+Microsoft is pinned to a SINGLE tenant, not discovered against `organizations`
+or `common` (Task 12 addition, over Task 11's original design — read this
+before "helpfully" widening it back):
+
+`organizations` accepts a work/school account from ANY Entra tenant on
+earth, including one an attacker spins up for free. Microsoft's
+`/organizations` v2.0 id_tokens never carry `email_verified` (see
+`_EMAIL_VERIFIED_REQUIRED` below) — so with multi-tenant discovery, nothing
+stops an attacker from creating their own throwaway tenant, setting a
+user's `mail` attribute in THAT tenant's directory to an address at the
+victim's real domain, signing in, and handing nSight a token whose `email`
+claim is genuine (correctly signed, right audience, right issuer for
+`/organizations`) but utterly unverified as to WHO controls that address.
+Since users are resolved by email (`identity.resolve_signed_in_user`),
+that token would be handed the victim's account.
+
+Pinning discovery to `https://login.microsoftonline.com/<tenant_id>/v2.0/...`
+closes this: the issuer check in `complete()` already pins `iss` to
+whatever THIS discovery document claims (Task 11), and a tenant-scoped
+discovery document's issuer only accepts tokens minted by that one tenant's
+STS. An attacker's own tenant can never produce a token that verifies
+against a discovery document scoped to nSight's customer's tenant — full
+stop, no reliance on Microsoft to have verified the email itself.
+
+Widening this later without reopening the hole above requires ONE of:
+  - an explicit `tid` (tenant id) claim allow-list checked in `complete()`,
+    kept in sync with which tenants are actually trusted, or
+  - Microsoft's `xms_edov` claim ("email domain owner verified"), which (per
+    Microsoft's docs) is only asserted when `email_verified`-equivalent
+    proof exists for that specific email/tenant pairing.
+Neither exists in this codebase today. Do not switch back to
+`/organizations` or `/common` discovery without adding one of them first.
 """
 from __future__ import annotations
 
@@ -44,9 +72,12 @@ from reportbuilder.store.seam import AuthContext
 
 _METADATA_URL = {
     "google": "https://accounts.google.com/.well-known/openid-configuration",
-    # "organizations", not "common": any Azure AD tenant (any O365 business
-    # account), never a personal Microsoft account.
-    "microsoft": "https://login.microsoftonline.com/organizations/v2.0/.well-known/openid-configuration",
+    # {tenant_id} is substituted per-config in `_discovery_url` — there is
+    # no un-pinned fallback ("organizations" or "common"); see the module
+    # docstring for why. `.format(tenant_id=...)` is a no-op on a URL with
+    # no placeholder (e.g. google's, above), which is what keeps existing
+    # tests that monkeypatch this entry with a plain URL working unchanged.
+    "microsoft": "https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration",
 }
 
 _SETTINGS_KEY = "oidc.json"
@@ -75,15 +106,14 @@ _CLOCK_SKEW_LEEWAY_SECONDS = 5
 # - Google puts `email_verified` in every id_token, and a token CAN carry an
 #   unverified email (e.g. a Gmail alias someone typed but never confirmed)
 #   -- spec §4 step 2 requires this to be exactly True for Google.
-# - Microsoft's `/organizations` v2.0 endpoint (see module docstring) does
-#   not send an `email_verified` claim on ordinary id_tokens at all -- the
-#   equivalent guarantee there is structural, not a claim: only Azure AD
-#   organizational accounts can reach this endpoint in the first place (the
-#   `/common` endpoint, which also admits unverified personal Microsoft
-#   accounts, is never used -- see `_METADATA_URL`), and an org's email
-#   addresses are provisioned and controlled by that org's own directory
-#   admin, not self-asserted by the end user. So Microsoft is not in this
-#   set: requiring a claim it does not send would refuse every real
+# - Microsoft's tenant-pinned v2.0 endpoint (see module docstring) does not
+#   send an `email_verified` claim on ordinary id_tokens at all -- the
+#   equivalent guarantee there is structural, not a claim: only accounts in
+#   the ONE tenant `_config` pins discovery to can produce a token that
+#   verifies at all (no other tenant's STS shares that issuer), and that
+#   tenant's email addresses are provisioned and controlled by its own
+#   directory admin, not self-asserted by the end user. So Microsoft is not
+#   in this set: requiring a claim it does not send would refuse every real
 #   Microsoft sign-in, and there is no equivalent per-token claim to check.
 #   If Microsoft ever DOES send `email_verified: false` explicitly, that is
 #   still honoured -- see the unconditional check below.
@@ -91,8 +121,11 @@ _EMAIL_VERIFIED_REQUIRED = {"google"}
 
 
 class ProviderNotConfigured(Exception):
-    def __init__(self, provider: str):
-        super().__init__(f"{provider} sign-in is not configured")
+    def __init__(self, provider: str, detail: str | None = None):
+        message = f"{provider} sign-in is not configured"
+        if detail:
+            message = f"{message}: {detail}"
+        super().__init__(message)
         self.provider = provider
 
 
@@ -111,6 +144,9 @@ class InvalidIdentityToken(Exception):
 class _Config:
     client_id: str
     client_secret: str
+    # Only ever set for "microsoft" -- see module docstring. None for
+    # google, which has no tenant concept.
+    tenant_id: str | None = None
 
 
 def _config(repo: Repository, auth: AuthContext, provider: str) -> _Config:
@@ -118,7 +154,16 @@ def _config(repo: Repository, auth: AuthContext, provider: str) -> _Config:
     entry = stored.get(provider) or {}
     if not entry.get("client_id") or not entry.get("client_secret"):
         raise ProviderNotConfigured(provider)
-    return _Config(client_id=entry["client_id"], client_secret=entry["client_secret"])
+    tenant_id = (entry.get("tenant_id") or "").strip() or None
+    if provider == "microsoft" and not tenant_id:
+        # Fail CLOSED, deliberately: falling back to a multi-tenant
+        # discovery endpoint here is exactly the hole the module docstring
+        # describes. A missing tenant_id is a misconfiguration to fix in
+        # settings, not a default to paper over.
+        raise ProviderNotConfigured(
+            provider, "missing tenant_id (multi-tenant discovery is refused, not defaulted -- see oidc.py's module docstring)")
+    return _Config(client_id=entry["client_id"], client_secret=entry["client_secret"],
+                  tenant_id=tenant_id)
 
 
 def _client(config: _Config, redirect_uri: str, transport) -> AsyncOAuth2Client:
@@ -127,12 +172,21 @@ def _client(config: _Config, redirect_uri: str, transport) -> AsyncOAuth2Client:
                             scope=_SCOPE, redirect_uri=redirect_uri, **kwargs)
 
 
-async def _discover(client: AsyncOAuth2Client, provider: str) -> dict:
+def _discovery_url(provider: str, config: _Config) -> str:
+    """`_METADATA_URL[provider]` with `{tenant_id}` substituted in, if it has
+    one. A no-op on google's URL (no placeholder present) and on any test
+    fixture that monkeypatches the entry with a plain URL -- see
+    `_METADATA_URL`'s comment.
+    """
+    return _METADATA_URL[provider].format(tenant_id=config.tenant_id)
+
+
+async def _discover(client: AsyncOAuth2Client, provider: str, config: _Config) -> dict:
     # auth=None (not the "use client default" sentinel `.get()` normally
     # applies): AsyncOAuth2Client otherwise insists on attaching an OAuth
     # bearer token to every request, and raises MissingTokenError before we
     # have ever fetched one -- discovery is a plain, unauthenticated GET.
-    resp = await client.get(_METADATA_URL[provider], auth=None)
+    resp = await client.get(_discovery_url(provider, config), auth=None)
     resp.raise_for_status()
     return resp.json()
 
@@ -149,7 +203,7 @@ async def begin(repo: Repository, auth: AuthContext, provider: str,
     """
     config = _config(repo, auth, provider)
     async with _client(config, redirect_uri, transport) as client:
-        metadata = await _discover(client, provider)
+        metadata = await _discover(client, provider, config)
         nonce = secrets.token_urlsafe(20)
         state = secrets.token_urlsafe(20)
         url, state = client.create_authorization_url(
@@ -185,7 +239,7 @@ async def complete(repo: Repository, auth: AuthContext, provider: str,
     """
     config = _config(repo, auth, provider)
     async with _client(config, redirect_uri, transport) as client:
-        metadata = await _discover(client, provider)
+        metadata = await _discover(client, provider, config)
 
         token = await client.fetch_token(url=metadata["token_endpoint"],
                                          code=code, redirect_uri=redirect_uri)

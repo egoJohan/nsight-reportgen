@@ -299,14 +299,26 @@ def put_oidc(payload: dict = Body(...),
             repo: Repository = Depends(get_repository),
             user: User = Depends(require_admin)) -> dict:
     """Set a provider's client credentials. Admin only, and the response
-    never repeats the secret back — see get_oidc."""
+    never repeats the secret back — see get_oidc.
+
+    `tenant_id` is accepted for Microsoft only (Google has no tenant
+    concept). It is optional HERE — the same way `oidc.py` accepts a
+    Microsoft config with client_id/client_secret and no tenant_id — but
+    `oidc.begin`/`complete` refuse to start a Microsoft sign-in without one
+    rather than falling back to a multi-tenant discovery endpoint; see
+    `reportbuilder.auth.oidc`'s module docstring for why that fallback is a
+    real hole, not just a stricter default.
+    """
     if not isinstance(payload, dict) or not set(payload) <= set(_OIDC_PROVIDERS):
         raise HTTPException(422, f"providers must be a subset of {_OIDC_PROVIDERS}")
     stored = repo.get_setting(auth, OIDC_KEY) or {}
     for provider, entry in payload.items():
         if not isinstance(entry, dict) or not entry.get("client_id") or not entry.get("client_secret"):
             raise HTTPException(422, f"{provider} needs client_id and client_secret")
-        stored[provider] = {"client_id": entry["client_id"], "client_secret": entry["client_secret"]}
+        record = {"client_id": entry["client_id"], "client_secret": entry["client_secret"]}
+        if provider == "microsoft" and entry.get("tenant_id"):
+            record["tenant_id"] = entry["tenant_id"]
+        stored[provider] = record
     repo.set_setting(auth, OIDC_KEY, stored)
     return _oidc_status(stored)
 

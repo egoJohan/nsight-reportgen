@@ -19,7 +19,13 @@ from reportbuilder.store.seam import AuthContext
 #: tests/suite/integration/api/test_route_census.py.
 PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
                            "/docs/oauth2-redirect", "/redoc",
-                           "/auth/register", "/auth/login/password", "/auth/logout"})
+                           "/auth/register", "/auth/login/password", "/auth/logout",
+                           # Necessarily public: these ARE how a user becomes
+                           # known to nSight in the first place -- nothing
+                           # is served here but a redirect to the provider,
+                           # or a session mint gated by
+                           # identity.resolve_signed_in_user.
+                           "/auth/login/{provider}", "/auth/callback/{provider}"})
 
 
 def current_user(request: Request,

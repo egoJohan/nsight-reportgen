@@ -195,16 +195,19 @@ class TestComplete:
 
 
 class TestMicrosoftEmailVerification:
-    """Microsoft's `/organizations` v2.0 id_tokens do not carry an
+    """Microsoft's tenant-pinned v2.0 id_tokens do not carry an
     `email_verified` claim at all -- the equivalent guarantee is structural
-    (org-tenant-only, see oidc.py's module docstring), not a per-token
+    (single-tenant-only, see oidc.py's module docstring), not a per-token
     claim. Google DOES carry the claim and it must be exactly True."""
 
     @pytest.fixture(autouse=True)
     def _configure_microsoft(self, repo, auth, monkeypatch):
         stored = repo.get_setting(auth, "oidc.json") or {}
-        stored["microsoft"] = {"client_id": CLIENT_ID, "client_secret": "s3cr3t"}
+        stored["microsoft"] = {"client_id": CLIENT_ID, "client_secret": "s3cr3t",
+                               "tenant_id": "test-tenant"}
         repo.set_setting(auth, "oidc.json", stored)
+        # A plain URL with no `{tenant_id}` placeholder -- `.format` is a
+        # no-op on it, so this still points discovery at the fake IdP.
         monkeypatch.setitem(oidc._METADATA_URL, "microsoft",
                             f"{ISSUER}.well-known/openid-configuration")
 
@@ -227,3 +230,35 @@ class TestMicrosoftEmailVerification:
             await oidc.complete(repo, auth, "microsoft", "https://app/callback",
                                 code="c-1", nonce="n-1",
                                 transport=_transport(rsa_key, id_token=token))
+
+
+class TestMicrosoftTenantPinning:
+    """The Task 12 addition on top of Task 11's design: Microsoft discovery
+    is pinned to ONE tenant, never left to fall back to a multi-tenant
+    endpoint. See oidc.py's module docstring for why a multi-tenant
+    endpoint plus Microsoft's missing `email_verified` claim is an
+    exploitable combination, not merely a correctness nicety.
+    """
+
+    def test_a_tenant_pinned_config_produces_a_discovery_url_containing_the_tenant_id(
+            self, repo, auth):
+        stored = repo.get_setting(auth, "oidc.json") or {}
+        stored["microsoft"] = {"client_id": CLIENT_ID, "client_secret": "s3cr3t",
+                               "tenant_id": "my-tenant-abc"}
+        repo.set_setting(auth, "oidc.json", stored)
+
+        config = oidc._config(repo, auth, "microsoft")
+        url = oidc._discovery_url("microsoft", config)
+        assert "my-tenant-abc" in url
+        assert url == ("https://login.microsoftonline.com/my-tenant-abc/v2.0/"
+                       ".well-known/openid-configuration")
+
+    async def test_a_microsoft_config_lacking_a_tenant_id_is_refused(self, repo, auth):
+        # client_id/client_secret present, tenant_id deliberately absent --
+        # this must never silently fall back to a multi-tenant endpoint.
+        stored = repo.get_setting(auth, "oidc.json") or {}
+        stored["microsoft"] = {"client_id": CLIENT_ID, "client_secret": "s3cr3t"}
+        repo.set_setting(auth, "oidc.json", stored)
+
+        with pytest.raises(oidc.ProviderNotConfigured):
+            await oidc.begin(repo, auth, "microsoft", "https://app/callback")
