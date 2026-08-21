@@ -324,14 +324,16 @@ def test_me_only_ever_answers_for_the_calling_users_own_session(client, repo, au
 
 # --- /auth/register: the branch a same-account duplicate does not reach ----
 
-def test_registering_an_existing_passwordless_account_attaches_a_password(client, repo, auth):
+def test_registering_an_existing_passwordless_account_cannot_take_it_over(client, repo, auth):
     """An account that exists but has never had a password — the shape a
     first Google/O365 sign-in will leave behind once Part B lands. Simulated
     directly through identity.resolve_signed_in_user since there is no OIDC
     entry point yet. Distinct from test_auth_password.py's
     test_registering_twice_is_refused, which covers an account that already
-    HAS a password (409); this is the other branch of the same `if` in
-    routes_auth.register."""
+    HAS a password; this is the other branch of the same `if` in
+    routes_auth.register -- and the one that used to attach a caller-chosen
+    password to a stranger's account (the account-takeover vulnerability
+    this test now guards against instead of encoding)."""
     repo.set_setting(auth, "access.json",
                      {"allowed_domains": ["egoiq.com"], "default_grants": []})
     existing = identity.resolve_signed_in_user(repo, auth, "colleague@egoiq.com", frozenset())
@@ -339,9 +341,40 @@ def test_registering_an_existing_passwordless_account_attaches_a_password(client
 
     r = client.post("/auth/register", json={"email": "colleague@egoiq.com",
                                             "password": "correct horse battery staple"})
-    assert r.status_code == 201
-    assert r.json()["id"] == existing.id  # the SAME account, not a second one
-    assert repo.get_password_hash(auth, existing.id) is not None
-    assert len(repo.list_users(auth)) == 1
 
-    assert client.get("/auth/me").status_code == 200
+    assert r.status_code == 403
+    assert repo.get_password_hash(auth, existing.id) is None  # still no password
+    assert len(repo.list_users(auth)) == 1  # no second account either
+    assert not r.cookies.get(session.COOKIE_NAME)  # no session for the caller
+
+    assert client.get("/auth/me").status_code == 401
+
+
+def test_registering_someone_elses_email_does_not_reach_their_grants(client, repo, auth):
+    """The attack this whole fix exists for, reproduced end to end: a victim
+    exists passwordlessly via domain auto-join (exactly what nSight creates
+    today, and what an OIDC sign-in will create once Part B lands) and
+    already holds a grant on a real customer, "Attendo". Before the fix, an
+    unauthenticated attacker who merely knew the victim's email address could
+    POST it to /auth/register with a password of their own choosing, get
+    back a 201 and a session cookie, and then GET /customers and see
+    ['Attendo'] -- the victim's grant, inherited. After the fix the attacker
+    must come away with nothing: no session, no view of the victim's
+    customer, and the victim's account must be untouched."""
+    repo.set_setting(auth, "access.json",
+                     {"allowed_domains": ["egoiq.com"], "default_grants": []})
+    victim = identity.resolve_signed_in_user(repo, auth, "maija@egoiq.com", frozenset())
+    assert repo.get_password_hash(auth, victim.id) is None  # sanity: passwordless, as auto-join leaves it
+
+    attendo = repo.create_customer(auth, "Attendo")
+    repo.set_grants(auth, victim.id, (Grant(attendo.id, "view"),))
+
+    attacker = TestClient(client.app, base_url="https://testserver")
+    r = attacker.post("/auth/register", json={"email": "maija@egoiq.com",
+                                              "password": "attacker-chosen-pw"})
+
+    assert r.status_code == 403
+    assert not attacker.cookies.get(session.COOKIE_NAME)  # attacker gets no session
+
+    assert attacker.get("/customers").status_code == 401  # and no way to see the victim's grants
+    assert repo.get_password_hash(auth, victim.id) is None  # victim's account is untouched

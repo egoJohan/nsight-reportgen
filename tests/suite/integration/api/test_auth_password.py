@@ -46,10 +46,15 @@ def test_a_short_password_is_rejected(client):
 
 
 def test_registering_twice_is_refused(client):
+    """The second attempt must be refused with the SAME response an attacker
+    trying to claim someone else's passwordless account gets (see
+    test_sign_in_flow.py's takeover tests) -- registration is not an oracle
+    for "does this account already have a password"."""
     body = {"email": "admin@egoiq.com", "password": "correct horse battery staple"}
     client.post("/auth/register", json=body)
     r = client.post("/auth/register", json=body)
-    assert r.status_code == 409
+    assert r.status_code == 403
+    assert r.json() == {"detail": "Registration is not available for this email"}
 
 
 def test_login_with_the_right_password_sets_a_cookie(client):

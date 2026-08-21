@@ -4,6 +4,7 @@ guarded by `current_user` like anything else — see deps_auth.py.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
@@ -16,7 +17,11 @@ from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
+log = logging.getLogger(__name__)
+
 auth_router = APIRouter(tags=["auth"], prefix="/auth")
+
+_REGISTER_REFUSED_MESSAGE = "Registration is not available for this email"
 
 
 def _bootstrap_admins() -> frozenset[str]:
@@ -51,11 +56,32 @@ def register(response: Response, body: dict = Body(...),
     if len(pw) < 12:
         raise HTTPException(422, "Password must be at least 12 characters")
 
+    normalized = email.lower()
+    if repo.find_user_by_email(auth, normalized) is not None:
+        # An email that already resolves to an account -- with a password or
+        # without one -- can never be claimed here. A passwordless account is
+        # not an edge case: it's what domain auto-join creates today, and
+        # what every Google/O365 sign-in will create once Part B lands.
+        # Attaching a password to it from this anonymous, unauthenticated
+        # endpoint would let anyone who knows a colleague's email address
+        # sign in as them and inherit their grants. The only legitimate way
+        # for a passwordless account to get a password is a route that
+        # proves ownership -- an invitation (Plan 3) or an OIDC sign-in
+        # (Part B) -- never a claim made through /auth/register. Do not
+        # re-add a branch that sets a password here.
+        #
+        # The response below is deliberately identical, in status and body,
+        # to the "never existed" refusal a few lines down: this route must
+        # not become an oracle for "does this person have an account here",
+        # the same way /auth/login/password already takes care not to be.
+        log.warning("register: refused an attempt to claim the existing account for '%s'",
+                   normalized)
+        raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
+
     resolved = identity.resolve_signed_in_user(repo, auth, email, _bootstrap_admins())
     if isinstance(resolved, identity.SignInRefused):
-        raise HTTPException(403, resolved.reason)
-    if repo.get_password_hash(auth, resolved.id) is not None:
-        raise HTTPException(409, "This account already has a password")
+        log.info("register refused: %s", resolved.reason)
+        raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
 
     repo.set_password(auth, resolved.id, password.hash_password(pw))
     _issue_session(response, repo, auth, resolved.id)
