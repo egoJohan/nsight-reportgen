@@ -198,3 +198,62 @@ class TestEmailDomainProven:
                          {"allowed_domains": ["egoiq.com"], "default_grants": []})
         got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
         assert isinstance(got, User)
+
+
+class TestInvitationConsumption:
+    def test_a_pending_invite_creates_the_user_with_its_grants(self, repo, auth):
+        repo.create_invite(auth, "new@egoiq.com", (Grant("attendo", "edit"),),
+                           "usr-admin", lifetime_seconds=3600)
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        assert isinstance(got, User)
+        assert got.is_admin is False
+        assert got.grants == (Grant("attendo", "edit"),)
+
+    def test_consuming_marks_the_invite_accepted(self, repo, auth):
+        inv = repo.create_invite(auth, "new@egoiq.com", (), "usr-admin", lifetime_seconds=3600)
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        stored = repo.get_invite(auth, inv.id)
+        assert stored.accepted_user_id == got.id
+
+    def test_an_expired_invite_is_not_consumed(self, repo, auth):
+        repo.create_invite(auth, "new@egoiq.com", (), "usr-admin", lifetime_seconds=-1)
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        assert isinstance(got, SignInRefused)
+
+    def test_an_invite_is_consumed_even_when_the_email_domain_is_unproven(self, repo, auth):
+        """The xms_edov carve-out this branch was written for: an admin
+        already vetted this exact address by inviting it."""
+        repo.create_invite(auth, "new@egoiq.com", (Grant("attendo", "view"),),
+                           "usr-admin", lifetime_seconds=3600)
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset(),
+                                     email_domain_proven=False)
+        assert isinstance(got, User)
+
+    def test_an_invite_is_not_replayed_into_a_second_account(self, repo, auth):
+        """Single-use: once accepted, a second sign-in returns the SAME
+        user rather than minting another, because `mark_invite_accepted`
+        stops it from satisfying `find_pending_invite_by_email` again."""
+        repo.create_invite(auth, "new@egoiq.com", (Grant("attendo", "edit"),),
+                           "usr-admin", lifetime_seconds=3600)
+        first = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        second = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        assert isinstance(first, User) and isinstance(second, User)
+        assert first.id == second.id
+        assert len(repo.list_users(auth)) == 1
+
+    def test_an_existing_account_wins_over_a_pending_invite(self, repo, auth):
+        """Decision: an invite must never silently graft its grants onto
+        an account that already exists for that email -- that would be a
+        privilege-escalation path for anyone who can get (or guess) an
+        account created at an invited address. The existing account signs
+        in as itself; the invite is left pending, not consumed."""
+        existing = repo.save_user(auth, User(id="", email="new@egoiq.com",
+                                             grants=(Grant("attendo", "view"),)))
+        inv = repo.create_invite(auth, "new@egoiq.com", (Grant("attendo", "edit"),),
+                                 "usr-admin", lifetime_seconds=3600)
+        got = resolve_signed_in_user(repo, auth, "new@egoiq.com", frozenset())
+        assert isinstance(got, User)
+        assert got.id == existing.id
+        assert got.grants == (Grant("attendo", "view"),)
+        stored = repo.get_invite(auth, inv.id)
+        assert stored.accepted_user_id is None

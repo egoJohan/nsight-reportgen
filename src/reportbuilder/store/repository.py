@@ -749,7 +749,33 @@ class Repository:
         return next((u for u in self.list_users(auth) if u.email.lower() == wanted), None)
 
     def delete_user(self, auth: AuthContext, user_id: str) -> None:
-        for path in (P.user_path(user_id), P.user_grants_path(user_id)):
+        """Delete the user record, their grants, and their password hash if
+        they had one (the "passwords" section below calls it "a sibling of
+        the user record, like grants" -- it belongs here for the same
+        reason). Without this, removing a user left its password hash
+        behind forever: unreachable orphaned credential material, since
+        ids are never reused, but nothing that should be left lying
+        around in datahive either. A path that never existed (no grants
+        ever set, no password ever set) is not an error.
+
+        `user_path` is deleted LAST, deliberately. `users.remove_user`
+        looks the user up with `get_user` before doing anything, and
+        returns early (a no-op) once that lookup comes back empty -- the
+        idempotent-under-a-double-click behaviour its own docstring
+        promises. In production that guard and this loop both run under
+        one already-authorised bearer, so it never matters which path
+        goes first. But a caller that has to re-approve each destructive
+        delete one at a time (`InMemoryObjectStore`'s consent gate, and
+        so every test that drives it to completion by retrying the whole
+        `remove_user` call) would, with `user_path` deleted first, see
+        `get_user` come back empty on the very next retry and bail out
+        before the grants/password paths ever got their own turn --
+        orphaning exactly the credential material this method exists to
+        clean up. Deleting `user_path` last keeps the user "found" for
+        every retry until every sibling path has actually been removed.
+        """
+        for path in (P.user_grants_path(user_id), P.user_password_path(user_id),
+                    P.user_path(user_id)):
             try:
                 self.store.delete(auth, path)
             except NotFound:

@@ -33,11 +33,13 @@ def _admin_count(repo: Repository, auth: AuthContext) -> int:
 
 def remove_user(repo: Repository, auth: AuthContext,
                 user_id: str) -> "LastAdminRefused | None":
-    """Delete *user_id*, their grants and every live session of theirs
-    (spec §7: "deleting a user...ends it" -- sessions
-    are dropped here too, rather than left to the ordinary idle timeout,
-    so revocation does not wait on the 30s resolution cache the way a
-    plain sign-out would). A user already gone is a no-op, not an error --
+    """Delete *user_id*, their grants, their password hash if they had one,
+    and every live session of theirs (spec §7: "deleting a user...ends it"
+    -- sessions are dropped here too, rather than left to the ordinary idle
+    timeout, so revocation does not wait on the 30s resolution cache the
+    way a plain sign-out would). `Repository.delete_user` owns the grants
+    and password cleanup, so an orphaned password hash cannot outlive the
+    account it belonged to. A user already gone is a no-op, not an error --
     the route this backs is naturally idempotent under a double-click.
 
     `delete_user` does not swallow `ConsentRequired` -- it is a deliberate,

@@ -96,6 +96,14 @@ class TestRemoveUser:
     def test_removing_an_unknown_user_is_a_no_op(self, repo, auth):
         assert users.remove_user(repo, auth, "usr-nope") is None
 
+    def test_removes_the_users_password_too(self, repo, auth):
+        """No orphaned credential material left behind once the account
+        itself is gone -- see `Repository.delete_user`'s docstring."""
+        u = _make(repo, auth, "a@x.c")
+        repo.set_password(auth, u.id, "some-hash")
+        approve_all(repo.store, lambda: users.remove_user(repo, auth, u.id))
+        assert repo.get_password_hash(auth, u.id) is None
+
 
 class TestSetAdmin:
     def test_promotes_an_ordinary_user(self, repo, auth):

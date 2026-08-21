@@ -7,9 +7,12 @@ at the browser. What happens next is provider-agnostic, which is why it is
 not in oidc.py or routes_auth.py.
 
 Invitations (spec §4's middle branch, "a pending invitation -- consume it")
-are Plan 3: no settings/invite/* record exists yet, so there is nothing for
-that branch to consume. Until then, a new user's only way in is the
-bootstrap admin or an allowed domain.
+are handled below, right after the `existing`-admin short-circuit: an
+admin-issued invite for this exact address is fulfilled before the
+email_domain_proven gate, bootstrap-admin or domain auto-join ever get a
+look, and it only fires when no account for that address exists yet --
+see the comment at that branch for why an existing account always wins
+over a pending invite instead of silently absorbing its grants.
 """
 from __future__ import annotations
 
@@ -78,13 +81,32 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
         # Already an admin: nothing for break-glass to do, ordinary sign-in.
         return existing
 
-    # NOTE for whoever implements Plan 3 (pending invitations): consuming an
-    # invitation belongs ABOVE this guard, not below it. Fulfilling an
-    # invitation an admin already issued for this exact email is not "minting
-    # an account from an unproven claim" the way bootstrap-admin/domain
-    # auto-join below are -- it is closer to "matches an existing record",
-    # same as the `existing` check above, and the task spec for xms_edov
-    # explicitly allows it.
+    # A pending invitation is fulfilled here, ABOVE the email_domain_proven
+    # guard below and gated on `existing is None` -- consuming one an admin
+    # already issued for this exact address is not "minting an account from
+    # an unproven claim" the way bootstrap-admin/domain auto-join further
+    # down are; it is closer to "matches an existing record", same as the
+    # `existing` check above, and this is exactly the carve-out the
+    # xms_edov design allowed for (see oidc.py's module docstring).
+    #
+    # The `existing is None` gate matters on its own: if this exact email
+    # already has an account -- e.g. it auto-joined via an allowed domain
+    # after the invite was sent, or someone guessed/collided with an
+    # invited address -- a pending invite must never silently graft its
+    # grants onto that account. An existing account always wins; the
+    # invite is simply left pending (an admin can still see and revoke it
+    # explicitly) rather than becoming a way to escalate an account's
+    # access just by matching its email.
+    if existing is None:
+        pending = repo.find_pending_invite_by_email(auth, normalized)
+        if pending is not None:
+            user = repo.save_user(auth, User(id="", email=normalized,
+                                             name=normalized.split("@", 1)[0],
+                                             is_admin=False, grants=pending.grants))
+            repo.mark_invite_accepted(auth, pending.id, user.id)
+            log.info("sign-in: '%s' accepted its invitation (%s)", normalized, pending.id)
+            return user
+
     if not email_domain_proven:
         if existing is not None:
             return existing

@@ -94,6 +94,24 @@ def test_deleting_a_user_takes_its_grants(repo, store, auth):
     assert repo.list_users(auth) == []
 
 
+def test_deleting_a_user_takes_its_password_too(repo, store, auth):
+    """Orphaned credential material: leaving a password hash behind after
+    its account is gone serves no purpose and nothing else ever cleans it
+    up -- see `delete_user`'s docstring."""
+    u = repo.save_user(auth, User(id="", email="a@x.c"))
+    repo.set_password(auth, u.id, "some-hash")
+    approve_all(store, lambda: repo.delete_user(auth, u.id))
+    assert repo.get_password_hash(auth, u.id) is None
+
+
+def test_deleting_a_user_with_no_password_is_not_an_error(repo, store, auth):
+    """Most users never set one (Google/Microsoft sign-in only) -- the
+    missing password path must not turn deletion into a NotFound error."""
+    u = repo.save_user(auth, User(id="", email="a@x.c"))
+    approve_all(store, lambda: repo.delete_user(auth, u.id))
+    assert repo.get_user(auth, u.id) is None
+
+
 def test_malformed_grants_are_skipped_not_propagated(repo, auth):
     """A bad grant row must cost its owner that one grant, not their whole account.
 
