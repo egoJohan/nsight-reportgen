@@ -18,6 +18,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps_auth import current_user, require_admin
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.auth import mailer
 from reportbuilder.auth.permissions import User
 from reportbuilder.render import fonts as F
 from reportbuilder.render import house_style as H
@@ -320,6 +321,42 @@ def put_oidc(payload: dict = Body(...),
         stored[provider] = record
     repo.set_setting(auth, OIDC_KEY, stored)
     return _oidc_status(stored)
+
+
+@settings_router.get("/settings/email")
+def get_email_settings(auth: AuthContext = Depends(get_auth),
+                       repo: Repository = Depends(get_repository),
+                       user: User = Depends(require_admin)) -> dict:
+    """Whether and how nSight sends invitation email (spec §6). Never
+    echoes the password -- see get_oidc's identical rule for client
+    secrets."""
+    stored = repo.get_setting(auth, mailer.EMAIL_KEY) or {}
+    return {"host": stored.get("host", ""), "port": stored.get("port", 587),
+            "username": stored.get("username", ""), "from_addr": stored.get("from_addr", ""),
+            "use_tls": stored.get("use_tls", True),
+            "configured": mailer.config_from_settings(stored) is not None}
+
+
+@settings_router.put("/settings/email")
+def put_email_settings(payload: dict = Body(...),
+                       auth: AuthContext = Depends(get_auth),
+                       repo: Repository = Depends(get_repository),
+                       user: User = Depends(require_admin)) -> dict:
+    host = (payload.get("host") or "").strip()
+    from_addr = (payload.get("from_addr") or "").strip()
+    if not host or not from_addr:
+        raise HTTPException(422, "host and from_addr are required")
+    stored = repo.get_setting(auth, mailer.EMAIL_KEY) or {}
+    value = {"host": host, "port": int(payload.get("port") or 587),
+            "username": payload.get("username", ""),
+            # An empty password in the payload means "leave the stored one
+            # alone" -- the GET above never echoes it back, so a save that
+            # round-trips the form would otherwise blank it out.
+            "password": payload.get("password") or stored.get("password", ""),
+            "from_addr": from_addr, "use_tls": bool(payload.get("use_tls", True))}
+    repo.set_setting(auth, mailer.EMAIL_KEY, value)
+    return {**{k: v for k, v in value.items() if k != "password"},
+            "configured": mailer.config_from_settings(value) is not None}
 
 
 __all__ = ["settings_router", "sync_fonts_to_host", "apply_chart_font"]
