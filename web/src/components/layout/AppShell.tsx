@@ -111,10 +111,10 @@ function CustomersNav() {
   const { customerId: routeCustomerId } = useParams();
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 
-  // Browsing a customer expands it, so the tree agrees with the page.
-  useEffect(() => {
-    if (routeCustomerId) setOpenIds((prev) => ({ ...prev, [routeCustomerId]: true }));
-  }, [routeCustomerId]);
+  // Deliberately NOT expanding on navigation. Folding is the chevron's job and
+  // nothing else's: opening a customer used to force its subtree open, so
+  // clicking the name both navigated AND unfolded, which is indistinguishable
+  // from the old fold-on-label-click it replaced.
 
   function toggle(id: string) {
     setOpenIds((prev) => ({ ...prev, [id]: !prev[id] }));

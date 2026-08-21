@@ -39,6 +39,7 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-selected: var(--sidebar-selected);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
@@ -88,6 +89,9 @@
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.928 0.007 250);
+  /* Selected, a step beyond hover. They used to share --sidebar-accent, so the
+     current page looked exactly like whatever the cursor happened to be over. */
+  --sidebar-selected: oklch(0.893 0.008 250);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.902 0.005 250);
   --sidebar-ring: oklch(0.708 0 0);
@@ -125,6 +129,8 @@
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
+  /* Dark mode lifts instead of deepening, so selected sits above hover. */
+  --sidebar-selected: oklch(0.315 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
