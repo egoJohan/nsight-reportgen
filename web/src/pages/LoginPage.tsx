@@ -226,7 +226,7 @@ export default function LoginPage() {
               made the login screen visibly resize a moment after paint. */}
           {(showGoogle || showMicrosoft || providersPending) && (
             <div className={providersPending ? "invisible" : undefined} aria-hidden={providersPending}>
-              <div className="space-y-3">
+              <div className="space-y-6">
                 {(showGoogle || providersPending) && (
                   <ProviderButton
                     label="Continue with Google"
