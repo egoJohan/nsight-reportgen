@@ -72,6 +72,22 @@ export const ITEM_ROW =
 /** A question/item title inside an ITEM_ROW — same size, line-height and
  *  2-line clamp wherever a question is listed, so long text wraps the same
  *  way in the case list and the Select step alike. */
+/** A selected/included item row.
+ *
+ *  An OPAQUE tint, not `bg-primary/5`. An alpha tint replaces ITEM_ROW's
+ *  `bg-surface` rather than sitting on it, so the tiled page backdrop shows
+ *  through and the row reads as semi-transparent — while the same row on the
+ *  case page, which keeps bg-surface, reads solid. Mixing the tint INTO the
+ *  surface colour keeps one opaque surface everywhere.
+ */
+export const ITEM_ROW_SELECTED =
+  "border-primary/40 bg-[color-mix(in_oklch,var(--surface),var(--primary)_6%)]";
+
+/** The same idea for an item that cannot be chosen. */
+export const ITEM_ROW_DISABLED =
+  "cursor-not-allowed border-transparent opacity-60 " +
+  "bg-[color-mix(in_oklch,var(--surface),var(--muted)_60%)]";
+
 export const ITEM_TITLE = "text-sm leading-snug line-clamp-2 break-words";
 
 /** "Nothing here yet" — dashed, but still opaque. */

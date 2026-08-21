@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { ITEM_ROW, ITEM_TITLE } from "@/lib/surfaces";
+import { ITEM_ROW, ITEM_ROW_DISABLED, ITEM_ROW_SELECTED, ITEM_TITLE } from "@/lib/surfaces";
 import type { Question, GroupingOverride, BatterySuggestion, ChartSpec, Variable } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions, useVariables } from "@/lib/queries";
 import { isSpecialSlide } from "@/lib/charts";
@@ -343,7 +343,7 @@ export default function StepSelect({
           {activeSuggestions.map((s) => (
             <div
               key={sKey(s.variables)}
-              className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+              className="flex items-center gap-3 rounded-lg border border-primary/30 bg-[color-mix(in_oklch,var(--surface),var(--primary)_6%)] px-3 py-2"
             >
               <BarChart3Icon className="size-4 shrink-0 text-primary" />
               <div className="min-w-0 flex-1 text-sm">
@@ -455,8 +455,8 @@ export default function StepSelect({
                     ITEM_ROW,
                     "pr-11",
                     c.excluded
-                      ? "border-border bg-transparent opacity-60 hover:bg-accent/40"
-                      : "border-primary/40 bg-primary/5"
+                      ? "border-border opacity-60 hover:bg-accent"
+                      : ITEM_ROW_SELECTED
                   )}
                 >
                   <span
@@ -547,11 +547,11 @@ export default function StepSelect({
                   ITEM_ROW,
                   "pr-11",
                   justCreated
-                    ? "border-primary bg-primary/10 ring-2 ring-primary"
+                    ? cn(ITEM_ROW_SELECTED, "border-primary ring-2 ring-primary")
                     : !isChartable
-                      ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60 hover:bg-muted/30"
+                      ? ITEM_ROW_DISABLED
                       : isAdded
-                        ? "border-primary/40 bg-primary/5"
+                        ? ITEM_ROW_SELECTED
                         : "border-border"
                 )}
               >
@@ -637,7 +637,7 @@ export default function StepSelect({
                 const rowKey = chart.slide_id ?? `${q.qid}-${index}`;
                 return (
                   <div key={rowKey} className="relative mt-1.5 ml-6">
-                    <div className={cn(ITEM_ROW, "pr-11 border-primary/40 bg-primary/5 hover:bg-primary/5")}>
+                    <div className={cn(ITEM_ROW, "pr-11", ITEM_ROW_SELECTED)}>
                       <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
                         <CheckIcon className="size-3.5" />
                       </span>
