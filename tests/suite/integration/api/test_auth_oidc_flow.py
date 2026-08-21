@@ -130,7 +130,12 @@ def test_the_full_round_trip_signs_the_user_in(client, monkeypatch, rsa_key):
     assert me.status_code == 200 and me.json()["email"] == "maija@egoiq.com"
 
 
-def test_a_state_mismatch_is_rejected(client):
+def test_a_corrupt_oauth_cookie_is_rejected(client):
+    """Not a genuine state mismatch -- "garbage" never survives
+    `_oauth_codec(...).loads` far enough to reach the state comparison at
+    all; it fails to decode first. See test_oidc_failure_modes.py's
+    test_a_genuine_state_mismatch_against_a_validly_signed_cookie_is_rejected
+    for the actual CSRF-mismatch branch, against a validly-signed cookie."""
     client.cookies.set("nsight_oauth", "garbage")
     r = client.get("/auth/callback/google?code=fake-code&state=whatever")
     assert r.status_code == 400

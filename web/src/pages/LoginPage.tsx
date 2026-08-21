@@ -72,6 +72,7 @@ function useProviderAvailability() {
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   not_allowed: "That email isn't set up for nSight Studio. Ask an admin to add it, then try again.",
   sign_in_failed: "That sign-in didn't go through. Try again, or use your password below.",
+  sign_in_cancelled: "Sign-in was cancelled. Try again when you're ready.",
 };
 
 /** The providers' own marks, inline.

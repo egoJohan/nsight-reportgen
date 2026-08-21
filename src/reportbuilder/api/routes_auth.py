@@ -9,6 +9,7 @@ import os
 
 import httpx
 import itsdangerous
+from authlib.integrations.base_client import OAuthError
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
 from reportbuilder.api.deps_auth import current_user
@@ -270,7 +271,7 @@ async def oidc_login(provider: str, request: Request, response: Response,
 
 @auth_router.get("/callback/{provider}", name="oidc_callback")
 async def oidc_callback(provider: str, request: Request,
-                        code: str = "", state: str = "",
+                        code: str = "", state: str = "", error: str = "",
                         auth: AuthContext = Depends(get_auth),
                         repo: Repository = Depends(get_repository)):
     """Verify the provider's id_token, resolve its email to a user, and mint
@@ -295,6 +296,25 @@ async def oidc_callback(provider: str, request: Request,
     if not state or saved.get("state") != state:
         raise HTTPException(400, "OAuth state mismatch")
 
+    if error:
+        # The provider answered with an error instead of a code -- most
+        # commonly `access_denied`, which is what Google/Microsoft send
+        # when the user clicks Cancel on the consent screen. Caught here,
+        # before ever attempting a token exchange: there is no `code` to
+        # exchange in this case anyway, and letting it fall through would
+        # otherwise surface as an obscure authlib.OAuthError from
+        # oidc.complete. Only the (non-secret) error code is logged.
+        log.info("oidc callback for %s reported a provider error: %s", provider, error)
+        reason = "sign_in_cancelled" if error == "access_denied" else "sign_in_failed"
+        redirect = Response(status_code=302, headers={"Location": f"/login?error={reason}"})
+        redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+        return redirect
+
+    if not code:
+        # No error, but no code either -- a malformed callback, refused the
+        # same way a missing/mismatched state is: a plain 400, not a 500.
+        raise HTTPException(400, "Missing authorization code")
+
     try:
         verified = await oidc.complete(repo, auth, provider, _callback_url(request, provider),
                                        code, saved["nonce"])
@@ -308,6 +328,15 @@ async def oidc_callback(provider: str, request: Request,
         return redirect
     except oidc.ProviderNotConfigured as exc:
         raise HTTPException(503, str(exc)) from exc
+    except OAuthError as exc:
+        # Backstop: the token exchange itself failed in some way oidc.py
+        # doesn't already turn into InvalidIdentityToken (e.g. the provider
+        # rejecting the code outright). No token/code/state in this log
+        # line either -- only authlib's own (non-secret) error reason.
+        log.warning("oidc token exchange failed for %s: %s", provider, exc)
+        redirect = Response(status_code=302, headers={"Location": "/login?error=sign_in_failed"})
+        redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+        return redirect
 
     resolved = identity.resolve_signed_in_user(
         repo, auth, verified.email, _bootstrap_admins(),
