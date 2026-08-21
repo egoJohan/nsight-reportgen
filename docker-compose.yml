@@ -12,6 +12,13 @@ services:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
       NSIGHT_DEMO_DIR: /data/demo-store
+      # Safe here specifically because the backend `expose`s 8200 to the
+      # compose network only and publishes no port of its own (see the
+      # file-level comment) -- the frontend/nginx container is structurally
+      # the only thing that can ever connect, so its X-Forwarded-Proto/-Host
+      # can be trusted for building the OAuth redirect_uri. See
+      # routes_auth.py's _trust_forwarded_headers.
+      NSIGHT_TRUST_FORWARDED_HEADERS: "1"
     volumes:
       - nsight-demo:/data/demo-store
     expose:

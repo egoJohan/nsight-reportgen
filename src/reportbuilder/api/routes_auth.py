@@ -40,8 +40,77 @@ def _oauth_codec(key: bytes) -> itsdangerous.URLSafeTimedSerializer:
     return itsdangerous.URLSafeTimedSerializer(key, salt=_OAUTH_SALT)
 
 
+def _trust_forwarded_headers(request: Request) -> bool:
+    """Whether X-Forwarded-Proto / X-Forwarded-Host may be trusted for this
+    request.
+
+    A forwarded-header bug is a redirect hijack in the worst case: whoever
+    can set these headers steers the OAuth `redirect_uri` -- and therefore
+    where the session cookie ends up -- wherever they like. So they are
+    honoured only when the request cannot have come from anyone but our own
+    reverse proxy, or from someone no worse positioned than it:
+
+    - loopback (127.0.0.1 / ::1), or Starlette's TestClient (host
+      "testclient") -- true in dev, where Vite's proxy and the backend both
+      run on 127.0.0.1 and nothing outside the machine can reach
+      127.0.0.1:8200; and true for the test suite's in-process client. This
+      does admit any OTHER process on the same machine, not only Vite --
+      accepted deliberately: reaching 127.0.0.1:8200 at all already requires
+      local code execution on this host, and a process with that is not
+      made meaningfully more dangerous by also being able to steer an OAuth
+      redirect (it can already read the session key, the datahive token, or
+      the browser's cookies directly). Standard practice elsewhere for the
+      same reason -- e.g. Rails' RemoteIp, Werkzeug's ProxyFix -- trusts
+      loopback as the proxy hop by default.
+    - NSIGHT_TRUST_FORWARDED_HEADERS=1, set only in the container
+      deployments (docker-compose*.yml). There the backend `expose`s 8200 to
+      the compose network and publishes no port of its own -- nginx is
+      structurally the only thing that can ever open a connection to it, so
+      any request that arrives has already come from the trusted proxy.
+
+    Neither condition holds for a backend an arbitrary client can reach
+    directly -- there the header is ignored and `request.url_for`'s own
+    origin is used instead: wrong-but-safe (nothing attacker-controlled is
+    trusted), never a hijack.
+    """
+    host = request.client.host if request.client else None
+    if host in {"127.0.0.1", "::1", "testclient"}:
+        return True
+    return os.environ.get("NSIGHT_TRUST_FORWARDED_HEADERS") == "1"
+
+
 def _callback_url(request: Request, provider: str) -> str:
-    return str(request.url_for("oidc_callback", provider=provider))
+    """The browser-facing URL Google/Microsoft must redirect back to.
+
+    This has to be the origin the BROWSER is using, not the one the backend
+    received the request on: Vite (dev) and nginx (prod) sit in front of the
+    backend and proxy /auth to it, so `request.url_for` alone builds a
+    backend-only URL (127.0.0.1:8200) that was never registered with the
+    provider and that the browser never talks to. Preference order:
+
+      1. NSIGHT_PUBLIC_URL, if set -- an explicit override for deployments
+         behind a proxy this heuristic doesn't recognise, and the only way
+         to pin this value deterministically in a test.
+      2. X-Forwarded-Proto / X-Forwarded-Host, if the request is trusted to
+         set them (see _trust_forwarded_headers) -- the normal dev/prod
+         path, honouring what Vite/nginx actually forwarded.
+      3. request.url_for's own origin -- the pre-proxy fallback: wrong (not
+         browser-facing) when a proxy is in play, but safe, and still
+         correct when the backend really is hit directly.
+    """
+    path = request.url_for("oidc_callback", provider=provider)
+
+    public = os.environ.get("NSIGHT_PUBLIC_URL")
+    if public:
+        return public.rstrip("/") + path.path
+
+    if _trust_forwarded_headers(request):
+        proto = request.headers.get("x-forwarded-proto")
+        host = request.headers.get("x-forwarded-host")
+        if proto and host:
+            return f"{proto}://{host}{path.path}"
+
+    return str(path)
 
 auth_router = APIRouter(tags=["auth"], prefix="/auth")
 

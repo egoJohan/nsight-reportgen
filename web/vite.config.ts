@@ -30,14 +30,24 @@ export default defineConfig({
     // allow credentialed cross-origin requests either. Proxying here — not
     // relaxing either of those — is the fix. Mirrors the prefix list in
     // web/nginx.conf; add a prefix in both places when the API gains one.
+    //
+    // xfwd: true makes Vite's bundled http-proxy set X-Forwarded-Proto/
+    // -Host/-For/-Port on the request it sends to the backend (it does NOT
+    // do this by default — checked against the installed vite@8 build,
+    // node_modules/vite/dist/node/chunks/node.js, which gates all four
+    // headers behind `options.xfwd`). Without it, routes_auth.py's
+    // _callback_url falls back to the backend's own origin
+    // (127.0.0.1:8200) for the OAuth redirect_uri, which Google/Microsoft
+    // reject (registered redirect_uris are matched byte-for-byte) — see
+    // task-12b.
     proxy: {
-      '/cases': { target: backend, bypass: bypassHtmlNav },
-      '/customers': { target: backend, bypass: bypassHtmlNav },
-      '/settings': { target: backend, bypass: bypassHtmlNav },
-      '/materials': backend,
-      '/chart-types': backend,
-      '/reports': backend,
-      '/auth': backend,
+      '/cases': { target: backend, bypass: bypassHtmlNav, xfwd: true },
+      '/customers': { target: backend, bypass: bypassHtmlNav, xfwd: true },
+      '/settings': { target: backend, bypass: bypassHtmlNav, xfwd: true },
+      '/materials': { target: backend, xfwd: true },
+      '/chart-types': { target: backend, xfwd: true },
+      '/reports': { target: backend, xfwd: true },
+      '/auth': { target: backend, xfwd: true },
     },
   },
 })

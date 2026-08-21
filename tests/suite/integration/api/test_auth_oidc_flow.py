@@ -156,6 +156,83 @@ def test_a_verified_email_that_matches_nothing_is_refused_not_signed_in(client, 
     assert not client.cookies.get("nsight_session")
 
 
+def _capture_redirect_uri(monkeypatch):
+    """Replaces oidc.begin with a stub that records the redirect_uri it was
+    given -- same technique as
+    test_login_redirects_to_the_provider_and_sets_the_oauth_cookie, but
+    keeping the argument instead of throwing it away."""
+    captured: dict = {}
+
+    def _begin(repo, auth, provider, redirect_uri):
+        captured["redirect_uri"] = redirect_uri
+        return _AsyncResult((f"{ISSUER}auth", "state-1", "nonce-1"))
+
+    monkeypatch.setattr(oidc, "begin", _begin)
+    return captured
+
+
+def test_the_callback_url_uses_forwarded_headers_when_the_request_is_trusted(client, monkeypatch):
+    # The TestClient's default client address ("testclient") is one of the
+    # trusted hosts (see routes_auth._trust_forwarded_headers) -- this is
+    # the Vite/nginx-in-front-of-the-backend path task-12b fixes.
+    captured = _capture_redirect_uri(monkeypatch)
+    r = client.get("/auth/login/google", follow_redirects=False,
+                   headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "localhost:5180"})
+    assert r.status_code == 302
+    assert captured["redirect_uri"] == "https://localhost:5180/auth/callback/google"
+
+
+def test_nsight_public_url_wins_over_forwarded_headers(client, monkeypatch):
+    captured = _capture_redirect_uri(monkeypatch)
+    monkeypatch.setenv("NSIGHT_PUBLIC_URL", "https://nsight.egohive.ai")
+    r = client.get("/auth/login/google", follow_redirects=False,
+                   headers={"X-Forwarded-Proto": "http", "X-Forwarded-Host": "evil.example"})
+    assert r.status_code == 302
+    assert captured["redirect_uri"] == "https://nsight.egohive.ai/auth/callback/google"
+
+
+def test_with_neither_forwarded_headers_nor_override_the_old_behaviour_holds(client, monkeypatch):
+    captured = _capture_redirect_uri(monkeypatch)
+    r = client.get("/auth/login/google", follow_redirects=False)
+    assert r.status_code == 302
+    assert captured["redirect_uri"] == "https://testserver/auth/callback/google"
+
+
+def test_forwarded_headers_are_ignored_from_an_untrusted_client(repo, auth, monkeypatch):
+    captured = _capture_redirect_uri(monkeypatch)
+    app = create_app()
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_auth] = lambda: auth
+    # A client address that is neither loopback nor the TestClient default
+    # ("testclient"), with NSIGHT_TRUST_FORWARDED_HEADERS unset: exactly the
+    # "backend reachable directly" case _trust_forwarded_headers documents
+    # as untrusted, so the forwarded headers below must be ignored even
+    # though they're present -- the fallback origin wins instead.
+    untrusted = TestClient(app, base_url="https://testserver", client=("203.0.113.5", 12345))
+    r = untrusted.get("/auth/login/google", follow_redirects=False,
+                      headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.example"})
+    assert r.status_code == 302
+    assert captured["redirect_uri"] == "https://testserver/auth/callback/google"
+
+
+def test_forwarded_headers_are_trusted_from_an_untrusted_client_when_the_override_is_set(
+        repo, auth, monkeypatch):
+    captured = _capture_redirect_uri(monkeypatch)
+    monkeypatch.setenv("NSIGHT_TRUST_FORWARDED_HEADERS", "1")
+    app = create_app()
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_auth] = lambda: auth
+    # Same non-loopback client address as the test above, but this time the
+    # operator has explicitly opted in (docker-compose*.yml's case: the
+    # backend has no published port of its own, so nginx is the only thing
+    # that can ever reach it even though it isn't loopback).
+    trusted_by_setting = TestClient(app, base_url="https://testserver", client=("203.0.113.5", 12345))
+    r = trusted_by_setting.get("/auth/login/google", follow_redirects=False,
+                              headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "nsight.egohive.ai"})
+    assert r.status_code == 302
+    assert captured["redirect_uri"] == "https://nsight.egohive.ai/auth/callback/google"
+
+
 class _AsyncResult:
     """Wraps a plain value so `await oidc.begin(...)` works in a test that
     replaces `begin` with a synchronous stub."""
