@@ -5,6 +5,7 @@ import {
   Loader2Icon,
   AlertTriangleIcon,
   CheckIcon,
+  XIcon,
   ServerOffIcon,
   MailIcon,
   CopyIcon,
@@ -23,9 +24,10 @@ import { EMPTY, PAGE, PAGE_TITLE, PANEL, PANEL_TITLE, ROW, SECTION_HEADER } from
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
   useUsers, useInvites, useUserActions,
+  useAccessRequests, useAccessRequestActions,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
-import type { InstalledFont, MissingFont, StudioUser, Invite } from "@/lib/api";
+import type { InstalledFont, MissingFont, StudioUser, Invite, AccessRequest } from "@/lib/api";
 
 function bytes(n: number): string {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
@@ -433,6 +435,62 @@ function InviteRow({ invite }: { invite: Invite }) {
   );
 }
 
+/** One access request -- who asked, for which customer, at what mode.
+ *  Approve/refuse only show while it is still pending; a decided one is
+ *  history, shown with its outcome and nothing to press. */
+function AccessRequestRow({ request }: { request: AccessRequest }) {
+  const actions = useAccessRequestActions();
+  const pending = request.state === "pending";
+  return (
+    <div className={`${ROW} gap-3`}>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">
+          {request.user_email}
+          <span className="font-normal text-muted-foreground">
+            {" "}
+            wants {request.mode} access to {request.customer_name ?? "a removed customer"}
+          </span>
+        </p>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          Requested {new Date(request.requested_at).toLocaleDateString()}
+          <Badge variant={pending ? "secondary" : request.state === "granted" ? "outline" : "destructive"}>
+            {request.state}
+          </Badge>
+        </p>
+      </div>
+      {pending && (
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            disabled={actions.refuse.isPending || actions.approve.isPending}
+            title="Refuse"
+            onClick={() =>
+              actions.refuse.mutate(request.id, { onError: (e) => toast.error(e.message) })
+            }
+          >
+            <XIcon className="size-4" />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            disabled={actions.refuse.isPending || actions.approve.isPending}
+            title="Approve"
+            onClick={() =>
+              actions.approve.mutate(request.id, {
+                onSuccess: () => toast.success(`Granted ${request.mode} access to ${request.user_email}`),
+                onError: (e) => toast.error(e.message),
+              })
+            }
+          >
+            <CheckIcon className="size-4" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Users, then pending/past invitations. The grant editor on each user row is
  *  the point of this whole screen: a colleague who signs in with no grants
  *  lands in an empty app, so this is where that gets fixed. */
@@ -440,10 +498,28 @@ function UsersTab() {
   const { data: me } = useSession();
   const { data: users, isLoading } = useUsers();
   const { data: invites } = useInvites();
+  const { data: accessRequests } = useAccessRequests();
   const [inviting, setInviting] = useState(false);
+
+  // Pending first, decided ones trail behind for context -- an admin's
+  // queue leads with what still needs a decision.
+  const orderedRequests = [...(accessRequests ?? [])].sort(
+    (a, b) => Number(b.state === "pending") - Number(a.state === "pending")
+  );
 
   return (
     <div className="space-y-6">
+      {/* Its own section, same shape as Invitations below: someone asked to
+          be let in, and this is where that request goes to be acted on. */}
+      {orderedRequests.length > 0 && (
+        <div>
+          <h3 className={PANEL_TITLE}>Access requests</h3>
+          <div className="mt-2 space-y-2">
+            {orderedRequests.map((r) => <AccessRequestRow key={r.id} request={r} />)}
+          </div>
+        </div>
+      )}
+
       <div className={SECTION_HEADER}>
         <h3 className={PANEL_TITLE}>Users</h3>
         <Button size="sm" variant="outline" onClick={() => setInviting(true)}>

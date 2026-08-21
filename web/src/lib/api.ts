@@ -277,6 +277,18 @@ export interface ReportDoc {
 
 // ---- Client ----
 
+/** Carries the HTTP status alongside the message, so a caller that needs to
+ *  tell "not found" apart from "network hiccup" (the no-access customer
+ *  page) does not have to parse it back out of the message text. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function json<T>(res: Response): Promise<T> {
   // A session dies mid-use constantly in normal operation (idle timeout,
   // absolute expiry, a revoke from another tab) — this is the one place
@@ -296,7 +308,7 @@ async function json<T>(res: Response): Promise<T> {
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${text}`);
   }
   return res.json() as Promise<T>;
 }
@@ -638,6 +650,17 @@ export const api = {
 
     get: (customerId: string): Promise<Customer> =>
       fetch(`${API_BASE}/customers/${customerId}`).then((r) => json<Customer>(r)),
+
+    /** Id and name ONLY, for any signed-in user regardless of grant — the
+     *  narrow, deliberate exception to the 404-for-absence rule `get`
+     *  above still follows. Exists for one reason: the no-access page
+     *  (NoAccessCustomer.tsx) has to say WHICH customer it is refusing you,
+     *  and `get` 404s before it can. Do not use this anywhere `get` would
+     *  work instead. */
+    getName: (customerId: string): Promise<{ id: string; name: string }> =>
+      fetch(`${API_BASE}/customers/${customerId}/name`).then((r) =>
+        json<{ id: string; name: string }>(r)
+      ),
 
     create: (name: string): Promise<Customer> =>
       fetch(`${API_BASE}/customers`, jsonPost({ name })).then((r) => json<Customer>(r)),
@@ -1260,6 +1283,34 @@ export const api = {
     revokeInvite: (inviteId: string): Promise<void> =>
       fetch(`${API_BASE}/invites/${inviteId}`, { method: "DELETE" }).then(detailedVoid),
   },
+
+  /** The "Request access" button behind the no-access customer page, and the
+   *  admin queue that acts on it (Settings > Users, beside Users and
+   *  Invitations — see routes_access_requests.py). */
+  accessRequests: {
+    create: (customerId: string, mode: AccessMode): Promise<AccessRequest> =>
+      fetch(`${API_BASE}/access-requests`,
+           jsonPost({ customer_id: customerId, mode })).then((r) => detailedJson<AccessRequest>(r)),
+
+    /** Only the signed-in caller's own requests — what the no-access page
+     *  checks to show "you already asked" instead of the button again. */
+    mine: (): Promise<AccessRequest[]> =>
+      fetch(`${API_BASE}/access-requests/mine`).then((r) => json<AccessRequest[]>(r)),
+
+    /** Every request, newest first — admin-only. */
+    list: (): Promise<AccessRequest[]> =>
+      fetch(`${API_BASE}/access-requests`).then((r) => json<AccessRequest[]>(r)),
+
+    approve: (requestId: string): Promise<AccessRequest> =>
+      fetch(`${API_BASE}/access-requests/${requestId}/approve`, { method: "POST" }).then((r) =>
+        detailedJson<AccessRequest>(r)
+      ),
+
+    refuse: (requestId: string): Promise<AccessRequest> =>
+      fetch(`${API_BASE}/access-requests/${requestId}/refuse`, { method: "POST" }).then((r) =>
+        detailedJson<AccessRequest>(r)
+      ),
+  },
 };
 
 export interface InstalledFont {
@@ -1339,4 +1390,22 @@ export interface Invite {
 export interface InvitationResult extends Invite {
   link: string;
   emailed: boolean;
+}
+
+export type AccessMode = "view" | "edit";
+
+/** A signed-in user's ask for access to a customer they cannot see — the
+ *  record behind the no-access page's "Request access" button (backend:
+ *  reportbuilder.store.repository.AccessRequest). */
+export interface AccessRequest {
+  id: string;
+  user_id: string;
+  user_email: string;
+  customer_id: string;
+  customer_name: string | null;
+  mode: AccessMode;
+  requested_at: string;
+  state: "pending" | "granted" | "refused";
+  decided_by: string | null;
+  decided_at: string | null;
 }

@@ -58,6 +58,45 @@ def list_customers(auth: AuthContext = Depends(get_auth),
             for c in repo.list_customers(auth, user=user)]
 
 
+@customers_router.get("/customers/names")
+def list_customer_names(auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(current_user)) -> list[dict]:
+    """Id and name for EVERY customer in the tenant, to any signed-in user —
+    the list form of `customer_name` below, and the same deliberate crack in
+    the 404/absence rule (see that route's docstring for the full
+    reasoning).
+
+    This one reveals more at once: every signed-in user learns the full
+    roster of customer NAMES, not just the one they happen to land on. That
+    is a known, deliberate widening, not an oversight — the sidebar has to
+    list every customer, including ones this caller holds no grant on, or
+    there is nothing to click into and request access to; without this, the
+    request-access flow (this whole task) has no target to name. Still id
+    and name ONLY, same as `customer_name` — no cases, no reports, no
+    counts, no template. Do not add a field here without going back to the
+    controller.
+
+    Kept OUT of `GET /customers` (`list_customers` above) deliberately: that
+    route stays grant-filtered exactly as it is — spec §5.3,
+    `test_the_other_customer_is_absent_from_listings` and the rest of
+    test_permission_matrix.py assert on it, and folding an unfiltered
+    listing into it would break that contract. Also distinct from the
+    admin-only `GET /users/customers` (routes_users.py's
+    `list_grantable_customers`): that one feeds an admin's grant picker and
+    stays behind `require_admin` on purpose; THIS one is reachable by any
+    signed-in user, on purpose, and weakening that other route's gate to
+    reach for this use would be the wrong fix.
+
+    Registered here, ahead of `get_customer`'s `/customers/{customer_id}`,
+    on purpose: a literal path and a param path of the same segment count
+    race by registration order in FastAPI/Starlette, and this one must win
+    or a request for "/customers/names" would be swallowed as
+    customer_id="names" instead. Do not move this below `get_customer`.
+    """
+    return [{"id": c.id, "name": c.name} for c in repo.list_customers(auth)]
+
+
 @customers_router.get("/customers/{customer_id}")
 def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
                  repo: Repository = Depends(get_repository),

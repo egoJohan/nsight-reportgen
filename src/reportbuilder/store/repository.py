@@ -130,6 +130,31 @@ class Invite:
     accepted_at: str | None = None
 
 
+@dataclass(frozen=True)
+class AccessRequest:
+    """A signed-in user's ask for access to a customer they cannot see.
+
+    What turns the no-access page's "Request access" button into something an
+    admin can act on, rather than a dead end -- the customer page itself
+    cannot grant anything (spec §5: administering access is not itself a
+    data grant), so this record is the whole mechanism.
+
+    `state` starts "pending" and moves to "granted" or "refused" exactly
+    once (`Repository.decide_access_request`); like `Invite`, the record is
+    kept past its decision rather than deleted, so an admin reviewing later
+    can see what was already refused instead of it just vanishing.
+    """
+    id: str
+    user_id: str
+    user_email: str
+    customer_id: str
+    mode: str  # "view" | "edit" -- Grant's own vocabulary (auth/permissions.py)
+    requested_at: str
+    state: str = "pending"  # "pending" | "granted" | "refused"
+    decided_by: str | None = None
+    decided_at: str | None = None
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -1050,6 +1075,101 @@ class Repository:
             self.store.delete(auth, P.invite_path(invite_id))
         except NotFound:
             pass
+
+    # --- access requests -----------------------------------------------------
+    #
+    # The record behind the no-access page's "Request access" button: who
+    # asked, for which customer, at what mode, and what an admin did about
+    # it. Same shape and tolerances as invitations above -- one malformed
+    # row costs only itself, never the whole listing.
+
+    def create_access_request(self, auth: AuthContext, user_id: str, user_email: str,
+                              customer_id: str, mode: str) -> AccessRequest:
+        """File (or refresh) a pending ask.
+
+        A second request for the same (user, customer) while the first is
+        still pending REPLACES it in place -- same id, updated mode and
+        timestamp -- rather than piling up a second row. The record is what
+        the person wants right now, not a log of every time they clicked the
+        button; an admin acting on it only ever needs the latest ask, and a
+        duplicate pending row for the same ask is something to reconcile, not
+        information. A request already DECIDED (granted/refused) is left
+        alone and a fresh one is opened instead -- that decision is history,
+        not a live ask to overwrite.
+        """
+        existing = self.find_pending_access_request(auth, user_id, customer_id)
+        rid = existing.id if existing is not None else _new_id("req")
+        now = _now()
+        self._write_json(auth, P.access_request_path(rid),
+                         {"id": rid, "user_id": user_id, "user_email": user_email,
+                          "customer_id": customer_id, "mode": mode, "requested_at": now,
+                          "state": "pending", "decided_by": None, "decided_at": None},
+                         [P.LABEL_ACCESS_REQUEST])
+        return AccessRequest(id=rid, user_id=user_id, user_email=user_email,
+                             customer_id=customer_id, mode=mode, requested_at=now)
+
+    def _access_request_from(self, d: dict) -> AccessRequest:
+        return AccessRequest(id=d["id"], user_id=d.get("user_id", ""),
+                             user_email=d.get("user_email", ""),
+                             customer_id=d.get("customer_id", ""),
+                             mode=d.get("mode", "view"),
+                             requested_at=d.get("requested_at", ""),
+                             state=d.get("state", "pending"),
+                             decided_by=d.get("decided_by"),
+                             decided_at=d.get("decided_at"))
+
+    def get_access_request(self, auth: AuthContext, request_id: str) -> "AccessRequest | None":
+        """The record for *request_id*, or None if it does not exist or is
+        unreadable -- tolerating a malformed row the same way `get_invite`
+        does, rather than 500ing the whole admin screen over one bad write.
+        """
+        try:
+            d = self._read_json(auth, P.access_request_path(request_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        return self._access_request_from(d)
+
+    def list_access_requests(self, auth: AuthContext) -> list[AccessRequest]:
+        """Every request, newest first -- an admin's queue leads with what
+        just came in, same ordering as `list_invites`."""
+        out = []
+        for info in self.store.list(auth, P.SETTINGS_ROOT + "/", labels=[P.LABEL_ACCESS_REQUEST]):
+            r = self.get_access_request(auth, info.path.rsplit("/", 1)[-1])
+            if r is not None:
+                out.append(r)
+        return sorted(out, key=lambda r: r.requested_at, reverse=True)
+
+    def list_access_requests_for_user(self, auth: AuthContext, user_id: str) -> list[AccessRequest]:
+        """Only *user_id*'s own requests -- what the no-access page uses to
+        show "you already asked" without exposing anyone else's asks."""
+        return [r for r in self.list_access_requests(auth) if r.user_id == user_id]
+
+    def find_pending_access_request(self, auth: AuthContext, user_id: str,
+                                    customer_id: str) -> "AccessRequest | None":
+        return next((r for r in self.list_access_requests(auth)
+                    if r.user_id == user_id and r.customer_id == customer_id
+                    and r.state == "pending"), None)
+
+    def decide_access_request(self, auth: AuthContext, request_id: str, state: str,
+                              decided_by: str) -> "AccessRequest | None":
+        """Move a pending request to *state* ("granted" or "refused"). Does
+        NOT itself touch grants -- approving is the caller's job (it calls
+        `set_grants` separately, reusing the exact path
+        `ManagePermissionsDialog` writes through, see
+        routes_access_requests.py) -- this only records the decision, once,
+        against the request that was actually reviewed.
+        """
+        r = self.get_access_request(auth, request_id)
+        if r is None:
+            return None
+        now = _now()
+        self._write_json(auth, P.access_request_path(request_id),
+                         {"id": r.id, "user_id": r.user_id, "user_email": r.user_email,
+                          "customer_id": r.customer_id, "mode": r.mode,
+                          "requested_at": r.requested_at, "state": state,
+                          "decided_by": decided_by, "decided_at": now},
+                         [P.LABEL_ACCESS_REQUEST])
+        return replace(r, state=state, decided_by=decided_by, decided_at=now)
 
     # --- fonts ------------------------------------------------------------
     #
