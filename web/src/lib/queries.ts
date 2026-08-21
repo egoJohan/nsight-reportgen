@@ -13,6 +13,7 @@ import type {
   ReportDoc,
   GroupingOverride,
   WordMerge,
+  UserGrantInput,
 } from "./api";
 
 // ---- Query keys ----
@@ -645,4 +646,39 @@ export function useRenderReport(caseId: string) {
       signal?: AbortSignal;
     }) => api.reports.render(caseId, reportId, materialId, view, signal),
   });
+}
+
+export function useUsers() {
+  return useQuery({ queryKey: ["users"], queryFn: api.users.list });
+}
+
+export function useInvites() {
+  return useQuery({ queryKey: ["invites"], queryFn: api.users.listInvites });
+}
+
+export function useUserActions() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["users"] });
+    qc.invalidateQueries({ queryKey: ["invites"] });
+  };
+  return {
+    setGrants: useMutation({
+      mutationFn: ({ userId, grants }: { userId: string; grants: UserGrantInput[] }) =>
+        api.users.setGrants(userId, grants),
+      onSuccess: invalidate,
+    }),
+    setAdmin: useMutation({
+      mutationFn: ({ userId, isAdmin }: { userId: string; isAdmin: boolean }) =>
+        api.users.setAdmin(userId, isAdmin),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({ mutationFn: api.users.remove, onSuccess: invalidate }),
+    invite: useMutation({
+      mutationFn: ({ email, grants }: { email: string; grants: UserGrantInput[] }) =>
+        api.users.invite(email, grants),
+      onSuccess: invalidate,
+    }),
+    revokeInvite: useMutation({ mutationFn: api.users.revokeInvite, onSuccess: invalidate }),
+  };
 }

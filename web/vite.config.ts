@@ -48,6 +48,8 @@ export default defineConfig({
       '/chart-types': { target: backend, xfwd: true },
       '/reports': { target: backend, xfwd: true },
       '/auth': { target: backend, xfwd: true },
+      '/users': { target: backend, xfwd: true },
+      '/invites': { target: backend, xfwd: true },
     },
   },
 })
