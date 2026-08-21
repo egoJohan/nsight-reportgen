@@ -61,7 +61,12 @@ def demo_app(tmp_path, monkeypatch):
         pytest.skip("demo-group test — set NSIGHT_DEMO=1 to run")
 
     from reportbuilder.api.app import create_app
+    from reportbuilder.api.deps_auth import current_user
+    from reportbuilder.api.deps_store import get_repository
     from reportbuilder.store.memory_client import InMemoryDataHiveClient
+    from reportbuilder.store.seam import AuthContext
+
+    from suite._helpers import sign_in_override
 
     store_dir = tmp_path / "store"
     store_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +74,13 @@ def demo_app(tmp_path, monkeypatch):
 
     client = InMemoryDataHiveClient(storage_dir=str(store_dir))
     app = create_app(client=client)
+    # This fixture, unlike the others in this suite, does not override
+    # get_repository/get_auth — it exercises the real (module-level) ones, the
+    # same way production does. current_user must resolve through that same
+    # repo/auth pair, or a route guard would resolve customer/case/material
+    # ids against a repository this override's grants know nothing about.
+    auth = AuthContext(token="demo")
+    app.dependency_overrides[current_user] = sign_in_override(get_repository(), auth)
     tc = TestClient(app)
 
     cust = tc.post("/customers", json={"name": "nsight-demo-real-savs"}).json()["id"]

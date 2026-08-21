@@ -13,13 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reportbuilder.api.app import create_app
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.ingest.multi_group import enrich_model
 from reportbuilder.ingest.sav_reader import read_sav
 from reportbuilder.store.datahive_client import DataHiveClient
 from reportbuilder.store.memory_client import InMemoryDataHiveClient
 from reportbuilder.testing.fixtures import synthetic_sav, synthetic_sav_bytes
 
-from suite._helpers import RecordingChat
+from suite._helpers import RecordingChat, sign_in_override
 
 
 # ---- SAV / model fixtures --------------------------------------------------
@@ -78,6 +79,7 @@ def client_mock(mock_hive) -> TestClient:
     app = create_app(client=mock_hive)
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(repo, auth)
     tc = TestClient(app)
     # A route guard resolves ids through the repository, so a test addressing a
     # guarded route needs THESE ids, not an arbitrary string — the mock's own
@@ -114,8 +116,10 @@ def client_memory() -> TestClient:
 
     app = create_app()
     repo = Repository(InMemoryObjectStore())
+    auth = AuthContext(token="test")
     app.dependency_overrides[get_repository] = lambda: repo
-    app.dependency_overrides[get_auth] = lambda: AuthContext(token="test")
+    app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(repo, auth)
     return TestClient(app)
 
 

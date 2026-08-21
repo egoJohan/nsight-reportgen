@@ -1,17 +1,17 @@
 """Turning a request into a user, and a user into an answer.
 
-Plan 2 adds sign-in. Until then `current_user` resolves a development user, and
-it is the ONLY function in this file that changes when the session cookie
-arrives — everything below it asks the permission model, not the request.
+`current_user` is the seam: everything below it asks the permission model,
+not the request, and does not change when the way a user gets identified
+does.
 """
 from __future__ import annotations
-
-import os
 
 from fastapi import Depends, HTTPException, Request
 
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth.permissions import Grant, User, may_read, may_write
+from reportbuilder.auth import session as _session
+from reportbuilder.auth.keys import get_or_create_signing_key
+from reportbuilder.auth.permissions import User, may_read, may_write
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
@@ -25,23 +25,25 @@ PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
 def current_user(request: Request,
                  auth: AuthContext = Depends(get_auth),
                  repo: Repository = Depends(get_repository)) -> User:
-    """The user this request acts as.
+    """The signed-in user, resolved from the session cookie (spec §4, §7).
 
-    DEVELOPMENT STAND-IN. `NSIGHT_DEV_USER` names an email that must already
-    exist in the store; without it the request is an admin granted every
-    customer, which is exactly today's pre-login behaviour, so nothing that
-    works now stops working. Plan 2 replaces this body with a session lookup
-    and deletes the environment variable.
+    No fallback. A request with no cookie, a malformed one, or a session that
+    has expired or been revoked all get 401. There is no dev bypass — tests
+    that need an authenticated request override THIS dependency via
+    `app.dependency_overrides`, the same way they already override
+    `get_auth`/`get_repository` (see tests/suite/_helpers.sign_in_override).
     """
-    email = os.environ.get("NSIGHT_DEV_USER", "").strip()
-    if email:
-        user = repo.find_user_by_email(auth, email)
-        if user is None:
-            raise HTTPException(401, f"NSIGHT_DEV_USER '{email}' is not a known user")
-        return user
-    return User(id="dev", email="dev@localhost", name="Development",
-                is_admin=True,
-                grants=tuple(Grant(c.id, "edit") for c in repo.list_customers(auth)))
+    raw = request.cookies.get(_session.COOKIE_NAME)
+    if not raw:
+        raise HTTPException(401, "Not signed in")
+    key = get_or_create_signing_key(repo, auth)
+    session_id = _session.session_id_from_cookie(key, raw)
+    if session_id is None:
+        raise HTTPException(401, "Invalid session")
+    user = _session.resolve(repo, auth, session_id)
+    if user is None:
+        raise HTTPException(401, "Session expired or signed out")
+    return user
 
 
 def require_admin(user: User = Depends(current_user)) -> User:

@@ -12,11 +12,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reportbuilder.api.app import create_app
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.render import fonts as F
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
+from suite._helpers import sign_in_override
 
 pytestmark = pytest.mark.integration
 
@@ -36,6 +38,7 @@ def client_store(store_repo, auth):
     app = create_app()
     app.dependency_overrides[get_repository] = lambda: store_repo
     app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(store_repo, auth)
     return TestClient(app)
 
 # Minimal but real-shaped: an sfnt magic number is what install_font_bytes

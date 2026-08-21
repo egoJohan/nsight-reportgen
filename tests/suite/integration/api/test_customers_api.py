@@ -13,6 +13,7 @@ from reportbuilder.auth.permissions import Grant, User
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
+from suite._helpers import sign_in_override
 
 pytestmark = pytest.mark.integration
 
@@ -26,8 +27,10 @@ def store():
 def client(store):
     app = create_app()
     repo = Repository(store)
+    auth = AuthContext(token="user-1")
     app.dependency_overrides[get_repository] = lambda: repo
-    app.dependency_overrides[get_auth] = lambda: AuthContext(token="user-1")
+    app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(repo, auth)
     return TestClient(app)
 
 
@@ -104,8 +107,10 @@ class TestListingIsPermissionFiltered:
     def test_a_scoped_caller_sees_only_their_customer(self, store):
         seed = create_app()
         repo = Repository(store)
+        seed_auth = AuthContext(token="admin")
         seed.dependency_overrides[get_repository] = lambda: repo
-        seed.dependency_overrides[get_auth] = lambda: AuthContext(token="admin")
+        seed.dependency_overrides[get_auth] = lambda: seed_auth
+        seed.dependency_overrides[current_user] = sign_in_override(repo, seed_auth)
         admin = TestClient(seed)
         a = _customer(admin, "Acme")
         b = _customer(admin, "Beta")

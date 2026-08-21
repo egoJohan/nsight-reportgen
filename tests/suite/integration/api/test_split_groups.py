@@ -12,10 +12,12 @@ import pathlib
 import pytest
 
 from reportbuilder.api.app import create_app
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
+from suite._helpers import sign_in_override
 
 # The .sav and the saved report are read from the OLD store's directory, which
 # still exists on disk after the legacy code was removed — the data was left
@@ -42,6 +44,7 @@ def client_and_material():
     app = create_app()
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(repo, auth)
     return TestClient(app), material.id
 
 

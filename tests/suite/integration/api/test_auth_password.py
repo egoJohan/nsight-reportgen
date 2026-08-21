@@ -3,10 +3,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reportbuilder.api.app import create_app
+from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
+from suite._helpers import sign_in_override
 
 pytestmark = pytest.mark.integration
 
@@ -19,6 +21,7 @@ def client(monkeypatch):
     auth = AuthContext(token="test")
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = sign_in_override(repo, auth)
     return TestClient(app)
 
 

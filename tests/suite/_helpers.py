@@ -69,6 +69,21 @@ def assert_single_picture(slide, slot):
     return pic
 
 
+def sign_in_override(repo, auth, *, admin: bool = True, email: str = "dev@localhost"):
+    """A `current_user` dependency override for tests: a user granted every
+    customer currently in *repo*, recomputed on EVERY call — the same shape
+    the pre-session dev stub had (Plan 1's deps_auth.py), so a test that
+    creates a customer mid-test still sees it on its next request without
+    re-registering the override. See deps_auth.current_user's docstring.
+    """
+    from reportbuilder.auth.permissions import Grant, User
+
+    def _override():
+        return User(id="dev", email=email, name="Development", is_admin=admin,
+                   grants=tuple(Grant(c.id, "edit") for c in repo.list_customers(auth)))
+    return _override
+
+
 class RecordingChat:
     """A deterministic stand-in for `egohive_chat` / an injected `chat=`.
 

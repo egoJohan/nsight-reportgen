@@ -40,15 +40,23 @@ def sign_in(client, monkeypatch, email, *grants, admin=False):
     `client_memory` builds its Repository inside the fixture and injects it with
     `app.dependency_overrides` — reaching for the module-level `get_repository()`
     would create a SECOND, empty store and the user would never be found.
+
+    Overrides `current_user` directly with the exact user just saved — NOT
+    `suite._helpers.sign_in_override`, which grants every customer in the
+    store; these tests exist to prove a caller with a NARROW grant sees only
+    what that grant covers, so the override must carry exactly the grants
+    passed in, no more. `monkeypatch` is kept in the signature for existing
+    call sites; it does nothing now that there is no env var to set.
     """
+    from reportbuilder.api.deps_auth import current_user
     from reportbuilder.api.deps_store import get_auth, get_repository
 
     overrides = client.app.dependency_overrides
     repo, auth = overrides[get_repository](), overrides[get_auth]()
-    repo.save_user(auth, User(id="", email=email, name=email.split("@")[0],
-                              is_admin=admin,
-                              grants=tuple(Grant(s, m) for s, m in grants)))
-    monkeypatch.setenv("NSIGHT_DEV_USER", email)
+    user = repo.save_user(auth, User(id="", email=email, name=email.split("@")[0],
+                                     is_admin=admin,
+                                     grants=tuple(Grant(s, m) for s, m in grants)))
+    overrides[current_user] = lambda: user
 
 
 @pytest.fixture
