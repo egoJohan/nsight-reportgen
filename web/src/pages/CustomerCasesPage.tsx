@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { PlusIcon, FolderIcon, ArrowRightIcon } from "lucide-react";
+import { PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,8 +15,10 @@ import {
   useTemplateActions,
   useTemplates,
 } from "@/lib/queries";
+import { useSession } from "@/lib/session";
 import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
+import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
@@ -29,8 +31,10 @@ export default function CustomerCasesPage() {
   const templates = useTemplateActions(customerId);
   // Read before the upload lands, so "was this the first?" is answerable.
   const { data: existingTemplates } = useTemplates(customerId);
+  const { data: me } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
+  const [managingAccess, setManagingAccess] = useState(false);
 
   // Reached from the sidebar's per-customer "Uusi case" link.
   const open = searchParams.get("new") === "case";
@@ -65,6 +69,13 @@ export default function CustomerCasesPage() {
           back, and two of them side by side is one too many. */}
       <div className={PAGE_HEADER}>
         <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
+        {/* Access to a customer is administered here, on the customer — not
+            per-user in Settings (see the Users screen's history). Admin-only:
+            a non-admin has no reason to know who else can see this customer. */}
+        {me?.is_admin && (
+          <Button variant="outline" onClick={() => setManagingAccess(true)}>
+            <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
+        )}
       </div>
 
       {/* Its own section, headed like "Studies" below: the pohjat belong to
@@ -157,6 +168,15 @@ export default function CustomerCasesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {me?.is_admin && customerId && (
+        <ManagePermissionsDialog
+          open={managingAccess}
+          onOpenChange={setManagingAccess}
+          customerId={customerId}
+          customerName={customer?.name ?? ""}
+        />
+      )}
     </div>
   );
 }
