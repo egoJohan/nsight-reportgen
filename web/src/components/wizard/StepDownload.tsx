@@ -10,7 +10,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { Question, ReportDoc } from "@/lib/api";
-import { useRegroupedQuestions, useRenderReport } from "@/lib/queries";
+import {
+  useCancelRender,
+  useRegroupedQuestions,
+  useRenderReport,
+  useRenderStatus,
+} from "@/lib/queries";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { SlideGrid } from "@/components/wizard/SlideGrid";
 import { PANEL_TITLE } from "@/lib/surfaces";
@@ -37,6 +42,12 @@ export default function StepDownload({
   save: () => Promise<boolean>;
 }) {
   const render = useRenderReport(caseId);
+  const cancelRender = useCancelRender(caseId);
+  // Server-side truth, not this tab's memory: whether a render is in progress
+  // for THIS report right now, whether or not this session is the one that
+  // started it. Polls only while it's running (see useRenderStatus).
+  const { data: statusData } = useRenderStatus(caseId, reportId);
+  const serverRendering = statusData?.rendering ?? false;
   const grouping = draft.grouping ?? { groups: [], singles: [] };
   const { data: questions } = useRegroupedQuestions(materialId, grouping);
   const questionMap = useMemo(() => {
@@ -54,7 +65,12 @@ export default function StepDownload({
   const [cancelled, setCancelled] = useState(false);
   const [downloading, setDownloading] = useState<"pdf" | "pptx" | null>(null);
   const pdfUrlRef = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  // Tracks the LAST server-reported rendering state the reconciliation effect
+  // below has accounted for. handleGenerate forces this to false once it has
+  // recorded its own outcome (rendered/error/cancelled), so a stale poll
+  // catching up afterwards does not re-run reconciliation over a render this
+  // tab already knows the ending of.
+  const wasServerRenderingRef = useRef(false);
 
   const fileBase = safeFileName(draft.name);
   // Slides unticked in Select are kept in the report but left OUT of the deck, so
@@ -78,8 +94,31 @@ export default function StepDownload({
     setPdfUrl(url);
   }
 
+  // Reconnecting to a render this tab didn't start (a reload mid-render, or a
+  // render someone else kicked off): when the server-side status flips from
+  // running to idle, go see what it left behind rather than staying on a
+  // spinner that will never resolve itself. A preview that's now fetchable
+  // means it finished; a 404 means it didn't (cancelled, failed, or a stale
+  // in-flight state) — either way there is nothing left to wait for.
+  useEffect(() => {
+    const justStopped = wasServerRenderingRef.current && !serverRendering;
+    wasServerRenderingRef.current = serverRendering;
+    if (!justStopped) return;
+    (async () => {
+      try {
+        const blob = await api.reports.previewPdf(caseId, reportId);
+        setPreview(URL.createObjectURL(blob));
+        setRendered(true);
+        setCancelled(false);
+      } catch {
+        setCancelled(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverRendering, caseId, reportId]);
+
   function handleCancel() {
-    abortRef.current?.abort();
+    cancelRender.mutate(reportId);
   }
 
   async function handleGenerate() {
@@ -88,36 +127,41 @@ export default function StepDownload({
     setCancelled(false);
     setPreview(null);
     setRendered(false);
-    const controller = new AbortController();
-    abortRef.current = controller;
     try {
       const ok = await save();
       if (!ok) {
         setError("Could not save the report before rendering. Try again.");
         return;
       }
-      const out = await render.mutateAsync({
-        reportId, materialId, signal: controller.signal,
-      });
+      const out = await render.mutateAsync({ reportId, materialId });
       setFontWarnings(out?.font_warnings ?? []);
       const blob = await api.reports.previewPdf(caseId, reportId);
       setPreview(URL.createObjectURL(blob));
       setRendered(true);
     } catch (e) {
-      // The user cancelled — the request was aborted; treat as a clean stop.
-      if (controller.signal.aborted || (e instanceof Error && e.name === "AbortError")) {
+      const msg = e instanceof Error ? e.message : "Rendering failed";
+      // The explicit Cancel took effect (see routes_render.cancel_render) —
+      // a clean stop, not a failure.
+      if (msg === "Render cancelled") {
         setCancelled(true);
         return;
       }
-      const msg = e instanceof Error ? e.message : "Rendering failed";
-      // 503 → LibreOffice missing
-      if (/503/.test(msg) || /libreoffice/i.test(msg)) {
+      // 409 → someone/something else is already rendering this report.
+      if (/409/.test(msg)) {
+        setError("This report is already being generated — wait for it to finish.");
+      } else if (/503/.test(msg) || /libreoffice/i.test(msg)) {
+        // 503 → LibreOffice missing
         setError("Rendering charts needs LibreOffice on the server.");
       } else {
         setError(msg);
       }
     } finally {
-      abortRef.current = null;
+      // Our own render's outcome is recorded above, and the server-side flag
+      // is already gone (this call would not have resolved otherwise) even
+      // though a stale poll may not have caught up yet. Mark it settled so
+      // the reconciliation effect does not re-run over an outcome this tab
+      // already knows, once that poll does catch up.
+      wasServerRenderingRef.current = false;
     }
   }
 
@@ -139,7 +183,12 @@ export default function StepDownload({
   // Deck generation is DELIBERATE (a "Generate deck" click), not automatic on entering
   // this step — a full render can be very resource-heavy (a large deck of slides), so it
   // must never run just because the user navigated here.
-  const pending = render.isPending;
+  //
+  // `pending` is true both while THIS tab is waiting on its own render call
+  // and while the server reports one already running that this tab merely
+  // reconnected to — a returning visitor sees "generating", not a stale
+  // "not rendered yet".
+  const pending = render.isPending || serverRendering;
 
   return (
     <div className="space-y-5">

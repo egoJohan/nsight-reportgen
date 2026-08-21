@@ -157,7 +157,14 @@ def test_orchestrate_render_wiring() -> None:
 
 def test_orchestrate_render_cancels_before_pdf(tmp_path) -> None:
     """When cancel_check fires, orchestrate_render raises RenderCancelled and SKIPS the
-    expensive LibreOffice PDF conversion — so a cancelled run stops promptly."""
+    expensive LibreOffice PDF conversion — so a cancelled run stops promptly.
+
+    cancel_check's CONTRACT is unchanged by the move to explicit cancellation
+    (see routes_render.cancel_render / render_report): orchestrate_render still
+    just polls a callable between slides. What changed is who sets it — a
+    client disconnect used to; now only POST .../render/cancel does — and that
+    trigger lives in render_report/cancel_render, not here. This test exercises
+    the still-true half: a cancelled run never reaches the PDF step."""
     import pytest
     from reportbuilder.api.routes_render import orchestrate_render
     from reportbuilder.render.deck import RenderCancelled
@@ -166,19 +173,19 @@ def test_orchestrate_render_cancels_before_pdf(tmp_path) -> None:
     mock_client.load_report.return_value = report_to_json(_make_small_report())
     mock_client.get_material.return_value = b"x"
 
-    def _fake_build(report, model, df, path, cancel_check=None):
+    def _fake_build(report, model, df, path, style=None, cancel_check=None):
         open(path, "w").write("pptx")
         return path
 
     with (
         patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build,
-        patch("reportbuilder.api.routes_render.pptx_to_pdf") as mock_pdf,
+        patch("reportbuilder.api.routes_render.pptx_to_pdf_parallel") as mock_pdf,
     ):
         mock_load.return_value = (pd.DataFrame({"q1_var": [1.0, 0.0]}), _make_small_model())
         mock_build.side_effect = _fake_build
         with pytest.raises(RenderCancelled):
-            orchestrate_render("c", "r", "m", mock_client, view="slides",
+            orchestrate_render("c", "r", "m", mock_client,
                                out_dir=str(tmp_path), cancel_check=lambda: True)
         mock_pdf.assert_not_called()   # cancelled before the slow PDF step
 

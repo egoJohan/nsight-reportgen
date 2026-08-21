@@ -51,6 +51,11 @@ export function useCaseReports(caseId: string | null) {
     queryKey: qk.caseReports(caseId ?? ""),
     queryFn: () => api.reports.listForCase(caseId!),
     enabled: !!caseId,
+    // Keeps a "Generating…" badge honest without the user reloading: once
+    // the list shows a report mid-render, poll until none are — server-side
+    // state, so this reflects a render this browser never started too.
+    refetchInterval: (query) =>
+      query.state.data?.reports.some((r) => r.rendering) ? 3000 : false,
   });
 }
 
@@ -675,13 +680,29 @@ export function useRenderReport(caseId: string) {
       reportId,
       materialId,
       view = "slides",
-      signal,
     }: {
       reportId: string;
       materialId: string;
       view?: "slides";
-      signal?: AbortSignal;
-    }) => api.reports.render(caseId, reportId, materialId, view, signal),
+    }) => api.reports.render(caseId, reportId, materialId, view),
+  });
+}
+
+export function useCancelRender(caseId: string) {
+  return useMutation({
+    mutationFn: (reportId: string) => api.reports.cancelRender(caseId, reportId),
+  });
+}
+
+/** Polls while a render is in progress, so a page that just loaded (or
+ *  reloaded) — including one that did not start the render itself — can tell
+ *  "generating" apart from "not rendered". Stops polling once idle. */
+export function useRenderStatus(caseId: string, reportId: string | null) {
+  return useQuery({
+    queryKey: ["render-status", caseId, reportId ?? ""],
+    queryFn: () => api.reports.renderStatus(caseId, reportId!),
+    enabled: !!reportId,
+    refetchInterval: (query) => (query.state.data?.rendering ? 1500 : false),
   });
 }
 
@@ -737,9 +758,18 @@ export function useMyAccessRequests() {
   return useQuery({ queryKey: ["access-requests", "mine"], queryFn: api.accessRequests.mine });
 }
 
-/** Every request, newest first — admin-only (Settings > Users). */
-export function useAccessRequests() {
-  return useQuery({ queryKey: ["access-requests"], queryFn: api.accessRequests.list });
+/** The queue: PENDING requests only, scoped server-side to what the caller
+ *  may decide — every one for an admin, just their own customers' for an
+ *  owner (see routes_access_requests.py's `list_access_requests`). Settings
+ *  > Permission requests is the one place this is read; `enabled` lets that
+ *  page skip the request entirely for someone who cannot see the tab at
+ *  all, rather than firing it and discarding an always-empty result. */
+export function useAccessRequests(enabled = true) {
+  return useQuery({
+    queryKey: ["access-requests"],
+    queryFn: api.accessRequests.list,
+    enabled,
+  });
 }
 
 export function useAccessRequestActions() {

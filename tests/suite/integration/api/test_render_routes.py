@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
+from unittest.mock import patch
 
 import pytest
 
@@ -135,6 +137,126 @@ def test_render_stacked_without_classifying_var_not_blocked(client_memory):
                 and "classifying variable" in r.json().get("detail", "").lower()), (
         f"total-only stacked render must no longer be blocked: {r.text[:200]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Explicit cancel (replaces the old client-disconnect trigger) + render status
+# + one render per report at a time
+# ---------------------------------------------------------------------------
+
+
+def _blocking_build(reached: threading.Event, released: threading.Event):
+    """A build_pptx stand-in that stalls until the test releases it, so the
+    test can observe/act on the render while it is genuinely in progress."""
+
+    def _build(report, model, df, path, style=None, cancel_check=None):
+        reached.set()
+        released.wait(timeout=5)
+        if cancel_check is not None and cancel_check():
+            from reportbuilder.render.deck import RenderCancelled
+            raise RenderCancelled()
+        with open(path, "w") as f:
+            f.write("pptx")
+        return path
+
+    return _build
+
+
+def test_render_status_is_false_before_and_after_a_render(client_memory):
+    cid, rid, mid = _seed_case_material_report(client_memory, "vertical_bar")
+    idle = client_memory.get(f"/cases/{cid}/reports/{rid}/render/status")
+    assert idle.status_code == 200
+    assert idle.json() == {"rendering": False}
+
+
+def test_render_cancel_stops_a_running_render_and_status_reflects_it(client_memory):
+    """POST .../render/cancel sets the between-slides flag a running render
+    watches — the same flag that used to get set by the client disconnecting.
+    Nothing about the render disconnecting/navigating away is involved here."""
+    cid, rid, mid = _seed_case_material_report(client_memory, "vertical_bar")
+    reached, released = threading.Event(), threading.Event()
+
+    outcome: dict = {}
+
+    def _do_render():
+        outcome["response"] = client_memory.post(
+            f"/cases/{cid}/reports/{rid}/render", json={"material_id": mid})
+
+    with patch("reportbuilder.api.routes_render.build_pptx",
+               side_effect=_blocking_build(reached, released)):
+        t = threading.Thread(target=_do_render)
+        t.start()
+        try:
+            assert reached.wait(timeout=5), "render never reached build_pptx"
+
+            # In progress, and the status route says so — this is the fact a
+            # returning browser reads, not anything held in React state.
+            status = client_memory.get(f"/cases/{cid}/reports/{rid}/render/status")
+            assert status.json() == {"rendering": True}
+
+            cancel = client_memory.post(f"/cases/{cid}/reports/{rid}/render/cancel")
+            assert cancel.status_code == 200
+            assert cancel.json() == {"cancelled": True}
+        finally:
+            released.set()
+            t.join(timeout=5)
+
+    assert outcome["response"].status_code == 499
+
+    status = client_memory.get(f"/cases/{cid}/reports/{rid}/render/status")
+    assert status.json() == {"rendering": False}
+
+    # Pressing Cancel again once nothing is running is not an error — it just
+    # did not have anything to stop.
+    again = client_memory.post(f"/cases/{cid}/reports/{rid}/render/cancel")
+    assert again.status_code == 200
+    assert again.json() == {"cancelled": False}
+
+
+def test_second_render_of_same_report_is_refused_while_one_is_running(client_memory):
+    """Two renders of the same report racing to publish the same deck.pptx is
+    the failure mode to avoid — a second POST while one is running is refused
+    (409), not silently started alongside the first."""
+    cid, rid, mid = _seed_case_material_report(client_memory, "vertical_bar")
+    reached, released = threading.Event(), threading.Event()
+
+    outcome: dict = {}
+
+    def _do_render():
+        outcome["response"] = client_memory.post(
+            f"/cases/{cid}/reports/{rid}/render", json={"material_id": mid})
+
+    def _fake_pdf_parallel(pptx_path, out_dir):
+        import os
+        pdf = os.path.join(out_dir, "work.pdf")
+        with open(pdf, "w") as f:
+            f.write("pdf")
+        return pdf
+
+    with (
+        patch("reportbuilder.api.routes_render.build_pptx",
+             side_effect=_blocking_build(reached, released)),
+        patch("reportbuilder.api.routes_render.pptx_to_pdf_parallel",
+             side_effect=_fake_pdf_parallel),
+        # The real conversion never ran (the fake above wrote a placeholder,
+        # not a real PDF), so the completion log line's page count would shell
+        # out to pdfinfo on that placeholder and fail — irrelevant to what
+        # this test checks.
+        patch("reportbuilder.api.routes_render.pdf_page_count", return_value=0),
+    ):
+        t = threading.Thread(target=_do_render)
+        t.start()
+        try:
+            assert reached.wait(timeout=5), "first render never reached build_pptx"
+
+            second = client_memory.post(
+                f"/cases/{cid}/reports/{rid}/render", json={"material_id": mid})
+            assert second.status_code == 409
+        finally:
+            released.set()
+            t.join(timeout=5)
+
+    assert outcome["response"].status_code == 200
 
 
 # ---------------------------------------------------------------------------

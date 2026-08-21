@@ -4,12 +4,21 @@ POST /cases/{case_id}/reports/{report_id}/render
   body: {"material_id": str}
   returns: {"pptx": <path>, "pdf": <path>, "pdf_url": <url>}
 
+POST /cases/{case_id}/reports/{report_id}/render/cancel
+  stops a render in progress for this report, between slides.
+
+GET /cases/{case_id}/reports/{report_id}/render/status
+  {"rendering": bool} -- whether a render is in progress for this report.
+  Backed by server-side state, not client state, so it answers correctly
+  for a browser that reloaded or never started the render itself.
+
 GET /cases/{case_id}/reports/{report_id}/preview.pdf
   streams the rendered PDF (REQ-C-19, REQ-C-21)
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import pathlib
 import tempfile
@@ -18,7 +27,7 @@ import threading
 import time
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -40,6 +49,47 @@ from reportbuilder.store.datahive_client import DataHiveClient
 log = logging.getLogger(__name__)
 
 render_router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Renders in progress (REQ: a render survives navigation/sign-out; an explicit
+# Cancel is the only thing that stops it)
+# ---------------------------------------------------------------------------
+#
+# One render per report at a time. Keyed in-process, not in datahive: this is
+# where the mutex has to live anyway (the between-slides cancel flag is a
+# threading.Event a worker thread polls), and it is naturally scoped to the
+# process actually doing the work. Two renders of the SAME report racing to
+# publish the SAME deck.pptx/deck.pdf is the failure mode worth avoiding, so a
+# second POST while one is running is refused (409) rather than silently
+# started alongside the first.
+#
+# This does not reach across processes: a multi-process deployment could still
+# run two renders of one report concurrently, one per process. That is the
+# same case orchestrate_render's unique-work-file + atomic os.replace publish
+# was already written to survive (see its docstring) -- torn output is
+# impossible either way, this registry just makes the common single-process
+# case (a second click, a second tab) a clean 409 instead of a silent race.
+
+
+@dataclasses.dataclass
+class _ActiveRender:
+    cancel: threading.Event
+
+
+_active_renders: dict[tuple[str, str], _ActiveRender] = {}
+_active_renders_lock = threading.Lock()
+
+
+def is_render_active(case_id: str, report_id: str) -> bool:
+    """Whether a render is in progress for this report right now.
+
+    Used by the render-status route and by the reports list so a browser that
+    reloaded mid-render -- or never started it -- can tell the difference
+    between "not rendered" and "rendering".
+    """
+    with _active_renders_lock:
+        return (case_id, report_id) in _active_renders
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +342,6 @@ async def render_report(
     case_id: str,
     report_id: str,
     body: RenderRequest,
-    request: Request,
     background: BackgroundTasks,
     client: DataHiveClient = Depends(get_client),
     auth: AuthContext = Depends(get_auth),
@@ -302,47 +351,50 @@ async def render_report(
     """Orchestrate the PPTX build and PDF conversion for a report.
     Writes artifacts to a deterministic per-report dir so the preview PDF is fetchable.
 
-    Cancellable: the heavy build runs in a worker thread while we watch for the client
-    aborting the request; on disconnect a cancel flag is set and the render stops
-    promptly (between slides), so a mistakenly-started 170-slide run doesn't grind on.
+    Runs to completion regardless of the request: navigating away, closing the
+    tab, or signing out does not stop it, and the deck still gets persisted to
+    datahive. The only way to stop one is the explicit POST .../render/cancel,
+    which sets the same between-slides cancel flag this used to get from a
+    watched client disconnect -- the trigger changed, not the mechanism.
     (REQ-C-19, REQ-C-21, REQ-C-22)"""
-    out_dir = render_output_dir(case_id, report_id)
-    cancel = threading.Event()
+    key = (case_id, report_id)
+    with _active_renders_lock:
+        if key in _active_renders:
+            raise HTTPException(
+                status_code=409,
+                detail="A render for this report is already in progress",
+            )
+        cancel = threading.Event()
+        _active_renders[key] = _ActiveRender(cancel=cancel)
 
-    async def _watch_disconnect():
-        try:
-            while not cancel.is_set():
-                if await request.is_disconnected():
-                    cancel.set()
-                    return
-                await asyncio.sleep(0.4)
-        except asyncio.CancelledError:
-            pass
-
-    # Resolved before the render so the deck is built INTO the client's
-    # template rather than styled afterwards.
-    template_path = _template_for(repo, auth, case_id, report_id, out_dir)
-    # Chart text uses the configured font, which is deliberately independent of
-    # the template's: brand faces are often too wide for category labels.
-    from reportbuilder.api.routes_settings import apply_chart_font
-    apply_chart_font(repo, auth)
-
-    watcher = asyncio.create_task(_watch_disconnect())
     try:
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: orchestrate_render(
-                case_id, report_id, body.material_id, client,
-                out_dir=str(out_dir), cancel_check=cancel.is_set,
-                template_path=template_path,
-            ),
-        )
-    except RenderCancelled:
-        # 499 = client closed request (the browser already aborted; body is moot).
-        raise HTTPException(status_code=499, detail="Render cancelled")
+        out_dir = render_output_dir(case_id, report_id)
+
+        # Resolved before the render so the deck is built INTO the client's
+        # template rather than styled afterwards.
+        template_path = _template_for(repo, auth, case_id, report_id, out_dir)
+        # Chart text uses the configured font, which is deliberately independent of
+        # the template's: brand faces are often too wide for category labels.
+        from reportbuilder.api.routes_settings import apply_chart_font
+        apply_chart_font(repo, auth)
+
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: orchestrate_render(
+                    case_id, report_id, body.material_id, client,
+                    out_dir=str(out_dir), cancel_check=cancel.is_set,
+                    template_path=template_path,
+                ),
+            )
+        except RenderCancelled:
+            # 499 = the render was told to stop (an explicit Cancel, not a
+            # dropped connection -- the client that asked is usually still
+            # right here waiting on this same response).
+            raise HTTPException(status_code=499, detail="Render cancelled")
     finally:
-        cancel.set()
-        watcher.cancel()
+        with _active_renders_lock:
+            _active_renders.pop(key, None)
 
     # The deck outlives /tmp from here on. Done after the render rather than
     # inside it so a storage problem cannot cancel work the user just waited for
@@ -359,6 +411,44 @@ async def render_report(
     # and not only on the template screen where it was uploaded.
     result["font_warnings"] = _font_warnings(repo, auth, case_id, report_id)
     return result
+
+
+@render_router.post("/cases/{case_id}/reports/{report_id}/render/cancel")
+def cancel_render(
+    case_id: str,
+    report_id: str,
+    user: User = Depends(require_case_write),
+) -> dict:
+    """Stop a render in progress for this report, between slides.
+
+    A write, not a read: cancelling someone else's render is an action, not a
+    lookup, so this takes the same write guard the render itself does.
+
+    Idempotent and never 404s: pressing Cancel a moment after the render
+    already finished (or was cancelled once already) is a race the UI cannot
+    fully avoid, and "nothing was running" is not an error -- the body says
+    whether this call actually signalled a render, so the caller can tell.
+    """
+    with _active_renders_lock:
+        active = _active_renders.get((case_id, report_id))
+        if active is not None:
+            active.cancel.set()
+    return {"cancelled": active is not None}
+
+
+@render_router.get("/cases/{case_id}/reports/{report_id}/render/status")
+def render_status(
+    case_id: str,
+    report_id: str,
+    user: User = Depends(require_case),
+) -> dict:
+    """Whether a render is in progress for this report right now.
+
+    Server-side state, not the caller's React state: a browser that reloaded
+    mid-render, or opened the report for the first time while someone else's
+    render is running, asks here rather than guessing from "not rendered yet".
+    """
+    return {"rendering": is_render_active(case_id, report_id)}
 
 
 # Both artifacts live at a fixed URL and are rewritten by every render, so the

@@ -534,6 +534,10 @@ export interface CaseReportInfo {
   /** When that render happened, ISO 8601. Empty on decks rendered before the
    *  backend recorded it — absence means "unknown", not "never". */
   rendered_at?: string;
+  /** A render is in progress for this report right now (server-side state —
+   *  see routes_render.is_render_active). A report can be `rendering` and
+   *  `rendered` at once: a fresh render of an already-finished report. */
+  rendering?: boolean;
 }
 
 export interface Template {
@@ -1100,12 +1104,16 @@ export const api = {
 
     // Run the full PPTX → PDF → raster render chain (slow). Surfaces the
     // backend's {detail} message (422 / 503) so the UI can show the reason.
+    //
+    // Runs to completion server-side regardless of this fetch: navigating
+    // away or closing the tab does not stop it (see routes_render.py). The
+    // only way to stop it is `cancelRender` below — there is no `signal`
+    // here on purpose, an aborted fetch no longer cancels anything.
     render: async (
       caseId: string,
       reportId: string,
       materialId: string,
-      view: "slides" = "slides",
-      signal?: AbortSignal
+      view: "slides" = "slides"
     ): Promise<{ pdf_url: string; font_warnings?: string[] }> => {
       const res = await fetch(
         `${API_BASE}/cases/${caseId}/reports/${reportId}/render`,
@@ -1113,7 +1121,6 @@ export const api = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ material_id: materialId, view }),
-          signal,
         }
       );
       if (!res.ok) {
@@ -1127,6 +1134,38 @@ export const api = {
         throw new Error(detail);
       }
       return res.json() as Promise<{ pdf_url: string; font_warnings?: string[] }>;
+    },
+
+    // The explicit stop: sets the same between-slides cancel flag a client
+    // disconnect used to set. Never throws on "nothing was running" — the
+    // body says whether this call actually stopped a render, so the caller
+    // can tell without treating a race as an error.
+    cancelRender: async (
+      caseId: string,
+      reportId: string
+    ): Promise<{ cancelled: boolean }> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/render/cancel`,
+        { method: "POST" }
+      );
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json() as Promise<{ cancelled: boolean }>;
+    },
+
+    // Whether a render is in progress for this report RIGHT NOW, per the
+    // server — not per this browser tab's own state. What a returning visitor
+    // (a reload, a different tab, a render nobody in this session started)
+    // reads to tell "generating" apart from "not rendered".
+    renderStatus: async (
+      caseId: string,
+      reportId: string
+    ): Promise<{ rendering: boolean }> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/render/status`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json() as Promise<{ rendering: boolean }>;
     },
 
     // `no-store`: the URL is fixed but the file changes with every render, and a
@@ -1296,9 +1335,9 @@ export const api = {
       fetch(`${API_BASE}/invites/${inviteId}`, { method: "DELETE" }).then(detailedVoid),
   },
 
-  /** The "Request access" button behind the no-access customer page, and the
-   *  admin queue that acts on it (Settings > Users, beside Users and
-   *  Invitations — see routes_access_requests.py). */
+  /** The "Request access"/"Request permissions" buttons on the customer
+   *  page, and the admin-or-owner queue that acts on them (Settings >
+   *  Permission requests, its own tab — see routes_access_requests.py). */
   accessRequests: {
     create: (customerId: string, mode: AccessMode): Promise<AccessRequest> =>
       fetch(`${API_BASE}/access-requests`,

@@ -75,11 +75,21 @@ def list_case_reports(
     An unknown case_id lists empty rather than 404ing: a case a caller has never
     heard of and a case with nothing in it look the same from here, and the UI
     reads this before it knows which one it has.
+
+    Each report also carries `rendering` — whether a render is in progress for
+    it right now (server-side state; see routes_render.is_render_active) — so
+    the list can show a report someone left mid-render as exactly that, not as
+    stuck on whatever it was before.
     """
+    from reportbuilder.api.routes_render import is_render_active
+
     try:
-        return {"reports": client.list_reports(case_id)}
+        reports = client.list_reports(case_id)
     except (KeyError, NotFound):
         return {"reports": []}
+    for r in reports:
+        r["rendering"] = is_render_active(case_id, r["report_id"])
+    return {"reports": reports}
 
 
 @reports_router.put("/cases/{case_id}/reports/{report_id}")

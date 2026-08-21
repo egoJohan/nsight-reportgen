@@ -111,29 +111,40 @@ function ReportRow({
   onDelete,
 }: {
   caseId: string;
-  report: { id: string; name: string; createdAt?: string; renderedAt?: string; rendered?: boolean };
+  report: {
+    id: string;
+    name: string;
+    createdAt?: string;
+    renderedAt?: string;
+    rendered?: boolean;
+    rendering?: boolean;
+  };
   canEdit: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const { data: doc, isLoading } = useReport(caseId, report.id);
   const n = doc?.charts?.length ?? null;
-  // Three states, and the last one was missing: a report stayed "Draft" for
-  // ever, because the badge only ever counted charts and never asked whether a
-  // deck had been generated. Empty -> no charts. Draft -> charts, no deck.
-  // Generated -> a deck exists, which is exactly when it becomes downloadable
-  // and when a viewer can see it at all.
-  // "Generated" is checked FIRST and does not depend on the chart count: a deck
-  // on disk is a fact about the deliverable, while `charts` is the report doc as
-  // it stands right now — someone can empty a report after rendering it, and
-  // that must not retitle a downloadable deck as "Empty".
-  const status = report.rendered
-    ? "Generated"
-    : n == null
-      ? null
-      : n === 0
-        ? "Empty"
-        : "Draft";
+  // Four states now. Empty -> no charts. Draft -> charts, no deck. Generated
+  // -> a deck exists, which is exactly when it becomes downloadable and when
+  // a viewer can see it at all. Generating -> a render is in progress right
+  // now (server-side state, not this browser's memory — a render outlives
+  // navigation and sign-out, so this list has to be able to say so to
+  // whoever comes back and looks, not just the tab that started it).
+  //
+  // "Generating" is checked FIRST, ahead of even "Generated": a re-render of
+  // an already-finished report is still in progress, and showing the OLD
+  // "Generated" badge while a NEW one is being built claims a fact ("this is
+  // what a viewer would get") that is not settled yet.
+  const status = report.rendering
+    ? "Generating…"
+    : report.rendered
+      ? "Generated"
+      : n == null
+        ? null
+        : n === 0
+          ? "Empty"
+          : "Draft";
   const created = formatReportDate(report.createdAt);
   const base =
     n == null
@@ -176,11 +187,16 @@ function ReportRow({
             <Badge
               variant="outline"
               className={
-                status === "Generated"
-                  ? "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
-                  : "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
+                status === "Generating…"
+                  ? "shrink-0 border-blue-300 bg-blue-50 font-normal text-blue-700"
+                  : status === "Generated"
+                    ? "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
+                    : "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
               }
             >
+              {status === "Generating…" && (
+                <Loader2Icon className="size-3 animate-spin" />
+              )}
               {status}
             </Badge>
           )}
@@ -251,6 +267,7 @@ export default function ReportsSection({
     createdAt: wsById.get(r.report_id)?.createdAt,
     rendered: r.rendered,
     renderedAt: r.rendered_at,
+    rendering: r.rendering,
   }));
   const orderedReports = canEdit ? allReports : allReports.filter((r) => r.rendered);
 
