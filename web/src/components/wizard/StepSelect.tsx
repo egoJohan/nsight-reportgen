@@ -12,20 +12,26 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { ITEM_ROW, ITEM_TITLE } from "@/lib/surfaces";
 import type { Question, GroupingOverride, BatterySuggestion, ChartSpec, Variable } from "@/lib/api";
 import { useRegroupedQuestions, useBatterySuggestions, useVariables } from "@/lib/queries";
 import { isSpecialSlide } from "@/lib/charts";
 import ManageGroupingDialog from "@/components/ManageGroupingDialog";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
+import {
+  QuestionKindBadge,
+  QuestionMeasurementBadge,
+  QuestionWordcloudBadge,
+} from "@/components/QuestionTags";
 import { AddSpecialDialog } from "@/components/wizard/AddSpecialDialog";
 import { slideTitle } from "@/components/wizard/slideTitle";
 
 
 // Human labels for the special-slide types (for the deck-row info dialog).
 const SPECIAL_KIND: Record<string, string> = {
-  special_overview: "Yhteenveto",
+  special_overview: "Overview",
   special_conclusion: "Conclusions",
-  special_demographics: "Taustatiedot",
+  special_demographics: "Demographics",
   special_blank: "Blank slide",
 };
 
@@ -77,28 +83,6 @@ function slideVariant(chart: ChartSpec, variables: Variable[] | undefined): stri
   if (!by) return "copy";
   const v = (variables ?? []).find((x) => x.name === by);
   return `by ${v?.label ?? by}`;
-}
-
-function KindBadge({ q }: { q: Question }) {
-  if (q.kind === "battery") {
-    return (
-      <Badge variant="secondary" className="whitespace-nowrap border-violet-200 bg-violet-50 font-normal text-violet-700">
-        Battery · {q.variables.length}
-      </Badge>
-    );
-  }
-  if (q.kind === "multi") {
-    return (
-      <Badge variant="secondary" className="whitespace-nowrap font-normal">
-        Multi · {q.variables.length}
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="outline" className="whitespace-nowrap font-normal">
-      Single
-    </Badge>
-  );
 }
 
 export default function StepSelect({
@@ -376,7 +360,7 @@ export default function StepSelect({
                   size="sm"
                   variant="ghost"
                   className="h-7 px-2"
-                  title="Sulje"
+                  title="Dismiss"
                   onClick={() =>
                     setDismissed((d) => new Set(d).add(sKey(s.variables)))
                   }
@@ -468,7 +452,8 @@ export default function StepSelect({
                   onClick={() => onToggleExcluded(i)}
                   title={c.excluded ? "Click to add to this report" : "Included — click to remove"}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border py-2.5 pr-11 pl-3 text-left transition-colors",
+                    ITEM_ROW,
+                    "pr-11",
                     c.excluded
                       ? "border-border bg-transparent opacity-60 hover:bg-accent/40"
                       : "border-primary/40 bg-primary/5"
@@ -485,7 +470,7 @@ export default function StepSelect({
                     {!c.excluded && <CheckIcon className="size-3.5" />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="line-clamp-2 text-sm leading-snug">
+                    <span className={ITEM_TITLE}>
                       {slideTitle(c, questionMap)}
                     </span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -559,14 +544,15 @@ export default function StepSelect({
                 onClick={() => isChartable && onToggle(q)}
                 title={!isChartable ? q.non_chartable_reason ?? undefined : undefined}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-lg border py-2.5 pr-11 pl-3 text-left transition-colors",
+                  ITEM_ROW,
+                  "pr-11",
                   justCreated
                     ? "border-primary bg-primary/10 ring-2 ring-primary"
                     : !isChartable
-                      ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60"
+                      ? "cursor-not-allowed border-transparent bg-muted/30 opacity-60 hover:bg-muted/30"
                       : isAdded
                         ? "border-primary/40 bg-primary/5"
-                        : "border-border hover:bg-muted/50"
+                        : "border-border"
                 )}
               >
                 <span
@@ -582,22 +568,16 @@ export default function StepSelect({
                   {isAdded && <CheckIcon className="size-3.5" />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-sm leading-snug">
+                  <span className={ITEM_TITLE}>
                     {q.text}
                   </span>
                   <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
                     {q.qid}
                   </span>
                 </span>
-                <KindBadge q={q} />
-                {isChartable && isWordcloudOnly(q) && (
-                  <Badge
-                    variant="outline"
-                    className="shrink-0 whitespace-nowrap border-teal-300 bg-teal-50 font-normal text-teal-700"
-                  >
-                    Word cloud
-                  </Badge>
-                )}
+                <QuestionKindBadge q={q} />
+                <QuestionMeasurementBadge q={q} />
+                {isChartable && isWordcloudOnly(q) && <QuestionWordcloudBadge />}
                 {!isChartable && (
                   <Badge
                     variant="outline"
@@ -657,12 +637,12 @@ export default function StepSelect({
                 const rowKey = chart.slide_id ?? `${q.qid}-${index}`;
                 return (
                   <div key={rowKey} className="relative mt-1.5 ml-6">
-                    <div className="flex w-full items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 py-2 pr-11 pl-3 text-left">
+                    <div className={cn(ITEM_ROW, "pr-11 border-primary/40 bg-primary/5 hover:bg-primary/5")}>
                       <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
                         <CheckIcon className="size-3.5" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="line-clamp-2 text-sm leading-snug">
+                        <span className={ITEM_TITLE}>
                           {q.text}
                         </span>
                         <span className="mt-0.5 block text-xs text-muted-foreground">

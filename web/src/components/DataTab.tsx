@@ -14,7 +14,6 @@ import {
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -26,14 +25,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useQuestions,
@@ -44,7 +35,8 @@ import {
 import { useWorkspace } from "@/lib/workspace";
 import type { Question } from "@/lib/api";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
-import { ERROR, PANEL, PANEL_TITLE } from "@/lib/surfaces";
+import { QuestionTags } from "@/components/QuestionTags";
+import { ERROR, ITEM_ROW, ITEM_TITLE, PANEL_TITLE } from "@/lib/surfaces";
 
 // ---- Sort options ----
 type SortKey = "default" | "text_asc" | "text_desc" | "kind";
@@ -58,63 +50,31 @@ function sortQuestions(questions: Question[], sort: SortKey): Question[] {
 }
 
 // Compact status: one icon — OK, warning (has "Not answered"/missing codes to
-// check), or error (can't be charted at all).
+// check), or error (can't be charted at all). Title carries the meaning that
+// used to sit in a column header, since the row no longer lives in a table.
 function StatusIcon({ q }: { q: Question }) {
   // Filled shape + white symbol so the status colour reads at a glance.
   if (q.chartable === false) {
     return (
-      <span className="inline-flex">
+      <span className="mt-0.5 inline-flex shrink-0" title="Not chartable">
         <CircleXIcon className="size-[18px] fill-red-500 text-white" />
       </span>
     );
   }
   if (q.missing_values && q.missing_values.length > 0) {
     return (
-      <span className="inline-flex">
+      <span
+        className="mt-0.5 inline-flex shrink-0"
+        title="Chartable — has non-response codes to check"
+      >
         <TriangleAlertIcon className="size-[18px] fill-amber-500 text-white" />
       </span>
     );
   }
   return (
-    <span className="inline-flex">
+    <span className="mt-0.5 inline-flex shrink-0" title="Chartable">
       <CircleCheckIcon className="size-[18px] fill-emerald-500 text-white" />
     </span>
-  );
-}
-
-// ---- Type tags (under the question title) — mirrors the details dialog: a kind
-// label plus the measurement, e.g. "Multi-response · 10" or "Single" + "text". ----
-function QuestionTags({ q }: { q: Question }) {
-  const kindLabel =
-    q.kind === "battery"
-      ? `rating battery · ${q.variables.length}`
-      : q.kind === "multi"
-        ? `multi-response · ${q.variables.length}`
-        : q.kind === "comparison"
-          ? `comparison · ${q.variables.length}`
-          : "single";
-  // The measurement adds info only for single/comparison questions — for multi and
-  // battery it just repeats the kind label.
-  const showMeasurement =
-    !!q.measurement && q.measurement !== "multi" && q.measurement !== "rating battery";
-  return (
-    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-      <Badge
-        variant="outline"
-        className="border-violet-200 bg-violet-50 font-normal lowercase text-violet-700"
-      >
-        {kindLabel}
-      </Badge>
-      {showMeasurement && (
-        <Badge
-          variant="outline"
-          className="border-teal-200 bg-teal-50 font-normal lowercase text-teal-700"
-        >
-          {q.measurement}
-        </Badge>
-      )}
-
-    </div>
   );
 }
 
@@ -191,7 +151,7 @@ function QuestionTable({
             <SelectItem value="default">Default order</SelectItem>
             <SelectItem value="text_asc">A → Z</SelectItem>
             <SelectItem value="text_desc">Z → A</SelectItem>
-            <SelectItem value="kind">Tyypin mukaan</SelectItem>
+            <SelectItem value="kind">By type</SelectItem>
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground tabular-nums ml-auto shrink-0">
@@ -204,39 +164,25 @@ function QuestionTable({
           No questions match your search.
         </div>
       ) : (
-        <div className={PANEL}>
-          {/* table-fixed + real column widths so the question text WRAPS within its
-              column (to 2 clamped lines) instead of collapsing to one clipped line. */}
-          <Table className="table-fixed">
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="py-3">Question</TableHead>
-                <TableHead className="w-24 whitespace-nowrap py-3 text-center">Tila</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sorted.map((q) => (
-                <TableRow
-                  key={q.qid}
-                  className="group cursor-pointer hover:bg-muted/40"
-                  onClick={() => setDetailQid(q.qid)}
-                >
-                  <TableCell className="py-3 align-top whitespace-normal">
-                    {/* whitespace-normal overrides TableCell's default nowrap so the
-                        question wraps; clamped to 2 lines. Full text is one click away
-                        in the details dialog (no hover-expand → no reflow, no spill). */}
-                    <p className="text-sm leading-snug line-clamp-2 break-words">
-                      {q.text}
-                    </p>
-                    <QuestionTags q={q} />
-                  </TableCell>
-                  <TableCell className="py-3 align-top text-center">
-                    <StatusIcon q={q} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        // The app's shared row vocabulary (ITEM_ROW) — a plain click target here,
+        // the same look the report's Select step uses for a checkbox + kebab row.
+        <div className="space-y-1.5">
+          {sorted.map((q) => (
+            <button
+              key={q.qid}
+              type="button"
+              onClick={() => setDetailQid(q.qid)}
+              className={ITEM_ROW}
+            >
+              <span className="min-w-0 flex-1">
+                {/* Full text is one click away in the details dialog — clamped to
+                    2 lines here, no hover-expand, no reflow, no spill. */}
+                <p className={ITEM_TITLE}>{q.text}</p>
+                <QuestionTags q={q} />
+              </span>
+              <StatusIcon q={q} />
+            </button>
+          ))}
         </div>
       )}
 

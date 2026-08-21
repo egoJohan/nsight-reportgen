@@ -58,6 +58,22 @@ export const ROW =
   "group flex w-full items-center justify-between rounded-lg border bg-surface p-4 " +
   "text-left transition-colors hover:bg-accent";
 
+/** A list-item row denser than ROW: a checkbox or status mark, a title that
+ *  may run to two lines, and a badge/menu at the trailing edge — the case's
+ *  question list and the report's Select step both list questions this way.
+ *  Same border/fill/hover as ROW, tighter padding and an explicit gap so the
+ *  leading mark and trailing badge don't need justify-between to place them.
+ *  Callers add their own state (selected/disabled/highlighted) and, where a
+ *  kebab menu overlays the row, "pr-11" to keep text out from under it. */
+export const ITEM_ROW =
+  "group flex w-full items-center gap-3 rounded-lg border bg-surface py-2.5 pr-3 pl-3 " +
+  "text-left transition-colors hover:bg-accent";
+
+/** A question/item title inside an ITEM_ROW — same size, line-height and
+ *  2-line clamp wherever a question is listed, so long text wraps the same
+ *  way in the case list and the Select step alike. */
+export const ITEM_TITLE = "text-sm leading-snug line-clamp-2 break-words";
+
 /** "Nothing here yet" — dashed, but still opaque. */
 export const EMPTY = "rounded-lg border border-dashed bg-surface p-10 text-center";
 
