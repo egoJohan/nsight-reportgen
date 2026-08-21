@@ -85,7 +85,11 @@ def test_route_returns_artifacts(rb_wire) -> None:
         )
 
     assert resp.status_code == 200
-    assert resp.json() == {**_ARTIFACTS, "pdf_url": f"/cases/{http.case_id}/reports/rep-1/preview.pdf"}
+    # font_warnings rides along now: a deck rendered with a substituted font
+    # is still a deck, but the caller is told.
+    assert resp.json() == {**_ARTIFACTS,
+                           "pdf_url": f"/cases/{http.case_id}/reports/rep-1/preview.pdf",
+                           "font_warnings": []}
 
     mock_orch.assert_called_once()
     call_args = mock_orch.call_args
@@ -93,8 +97,9 @@ def test_route_returns_artifacts(rb_wire) -> None:
     assert call_args[0][0] == http.case_id
     assert call_args[0][1] == "rep-1"
     assert call_args[0][2] == "mat-1"
-    # keyword: view defaults to "slides"
-    assert call_args[1]["view"] == "slides"
+    # `view` is gone: page-image rendering was removed, so a render has only
+    # one output shape and nothing selects between them.
+    assert "view" not in call_args[1]
 
 
 # ---------------------------------------------------------------------------
@@ -119,12 +124,15 @@ def test_orchestrate_render_wiring() -> None:
     # build_pptx / pptx_to_pdf now write UNIQUE work files that the orchestrator
     # atomically publishes (os.replace) to canonical deck.pptx/deck.pdf, so the
     # mocks must actually create the files they stand in for.
-    def _fake_build(report, model, df, path, cancel_check=None):
+    def _fake_build(report, model, df, path, cancel_check=None, style=None):
         with open(path, "w") as f:
             f.write("pptx")
         return path
 
-    def _fake_pdf(pptx_path, out_dir):
+    # orchestrate_render converts via pptx_to_pdf_parallel, not pptx_to_pdf —
+    # patching the old name let real LibreOffice run and the test failed
+    # looking for a PDF nobody had asked soffice to make.
+    def _fake_pdf(pptx_path, out_dir, **kw):
         pdf = os.path.join(out_dir, "work.pdf")
         with open(pdf, "w") as f:
             f.write("pdf")
@@ -133,21 +141,24 @@ def test_orchestrate_render_wiring() -> None:
     with (
         patch("reportbuilder.api.routes_render.df_model_for_material") as mock_load,
         patch("reportbuilder.api.routes_render.build_pptx") as mock_build_pptx,
-        patch("reportbuilder.api.routes_render.pptx_to_pdf") as mock_pptx_to_pdf,
+        patch("reportbuilder.api.routes_render.pdf_page_count", return_value=1),
+        patch("reportbuilder.api.routes_render.pptx_to_pdf_parallel") as mock_pptx_to_pdf,
     ):
         mock_load.return_value = (fake_df, small_model)
         mock_build_pptx.side_effect = _fake_build
         mock_pptx_to_pdf.side_effect = _fake_pdf
 
         result = orchestrate_render(
-            "case-3", "rep-3", "mat-3", mock_client, view="slides"
+            "case-3", "rep-3", "mat-3", mock_client
         )
 
     # Atomic publish: canonical names, real files on disk.
     assert os.path.basename(result["pptx"]) == "deck.pptx"
     assert os.path.basename(result["pdf"]) == "deck.pdf"
     assert os.path.exists(result["pptx"]) and os.path.exists(result["pdf"])
-    assert result["preview"] == ["/t/p1.png"]
+    # No "preview" key any more: page-image rendering was removed, and a render
+    # now produces a deck and its PDF, nothing else.
+    assert "preview" not in result
 
     mock_client.load_report.assert_called_once_with("case-3", "rep-3")
     mock_load.assert_called_once()

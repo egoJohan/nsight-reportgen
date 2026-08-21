@@ -45,6 +45,18 @@ def wire(client=None) -> TestClient:
     app = create_app(client=client)
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
+    # Sign the client in. Written before sign-in existed, this fixture relied on
+    # current_user's development fallback ("an admin granted every customer"),
+    # which was deleted when real sessions landed — so every guarded route here
+    # started answering 401. An explicit user with an edit grant on the seeded
+    # customer is what the guards actually want, and it says out loud who these
+    # requests are being made as.
+    from reportbuilder.api.deps_auth import current_user
+    from reportbuilder.auth.permissions import Grant, User
+
+    actor = User(id="rb-tester", email="rb@example.com", name="RB",
+                 is_admin=True, grants=(Grant(customer.id, "edit"),))
+    app.dependency_overrides[current_user] = lambda: actor
     tc = TestClient(app)
     # A route guard resolves ids through the repository, so a test addressing
     # a guarded route needs THESE ids, not an arbitrary placeholder string.
