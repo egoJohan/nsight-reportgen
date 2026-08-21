@@ -74,6 +74,12 @@ export const ITEM_ROW =
  *  way in the case list and the Select step alike. */
 /** A selected/included item row.
  *
+ *  Tinted with --accent, NOT --primary. This app's primary is near-black
+ *  (oklch 0.205) because the palette is neutral, so a primary tint does not
+ *  read as "chosen", it reads as "dirty" — and at 6% it landed DARKER than the
+ *  hover state, inverting the hierarchy. Lightness runs: row 0.965 > selected
+ *  ~0.948 > hover 0.928, so hovering a selected row still darkens it.
+ *
  *  An OPAQUE tint, not `bg-primary/5`. An alpha tint replaces ITEM_ROW's
  *  `bg-surface` rather than sitting on it, so the tiled page backdrop shows
  *  through and the row reads as semi-transparent — while the same row on the
@@ -81,7 +87,7 @@ export const ITEM_ROW =
  *  surface colour keeps one opaque surface everywhere.
  */
 export const ITEM_ROW_SELECTED =
-  "border-primary/40 bg-[color-mix(in_oklch,var(--surface),var(--primary)_6%)]";
+  "border-primary/40 bg-[color-mix(in_oklch,var(--surface),var(--accent)_45%)]";
 
 /** The same idea for an item that cannot be chosen. */
 export const ITEM_ROW_DISABLED =
