@@ -4,7 +4,6 @@ import {
   PlusIcon,
   Trash2Icon,
   Loader2Icon,
-  PresentationIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,6 +32,7 @@ import { api } from "@/lib/api";
 import { downloadBlob, safeFileName } from "@/lib/download";
 import { EMPTY, PANEL, SECTION_TITLE } from "@/lib/surfaces";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PdfIcon, PptxIcon } from "@/components/FileFormatIcons";
 
 // A viewer's row has no status and no delete — a half-built report is the
 // analyst's working state, not something to hand a viewer. PDF/PPTX download
@@ -71,29 +71,37 @@ function DownloadButtons({ caseId, reportId, name }: {
       // (A viewer's row is not clickable, so there it is merely harmless.)
       onClick={(e) => e.stopPropagation()}
     >
+      {/* Icon-only, so a row carries the format rather than a sentence. The
+          title is what a screen reader and a hovering cursor get instead of the
+          label — an unlabelled icon button with no accessible name is a button
+          nobody can name. */}
       <Button
         variant="outline"
+        size="icon-sm"
         disabled={downloading !== null}
+        title={`Download ${fileBase}.pdf`}
+        aria-label={`Download ${fileBase}.pdf`}
         onClick={() => handleDownload("pdf")}
       >
         {downloading === "pdf" ? (
           <Loader2Icon className="size-4 animate-spin" />
         ) : (
-          <FileTextIcon className="size-4" />
+          <PdfIcon className="size-4" />
         )}
-        PDF
       </Button>
       <Button
         variant="outline"
+        size="icon-sm"
         disabled={downloading !== null}
+        title={`Download ${fileBase}.pptx`}
+        aria-label={`Download ${fileBase}.pptx`}
         onClick={() => handleDownload("pptx")}
       >
         {downloading === "pptx" ? (
           <Loader2Icon className="size-4 animate-spin" />
         ) : (
-          <PresentationIcon className="size-4" />
+          <PptxIcon className="size-4" />
         )}
-        PPTX
       </Button>
     </div>
   );
