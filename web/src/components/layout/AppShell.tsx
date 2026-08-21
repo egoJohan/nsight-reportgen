@@ -50,6 +50,7 @@ import {
 import { Button } from "@/components/ui/button";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
 import { useSession, signOut, type Me } from "@/lib/session";
+import type { Customer } from "@/lib/api";
 
 /** One customer's cases, fetched only while the group is open so opening the
  *  sidebar does not fan out a request per customer. */
@@ -111,6 +112,19 @@ function CustomerCases({ customerId, canEdit }: { customerId: string; canEdit: b
 function CustomersNav() {
   const { data: customers } = useCustomers();
   const { data: allNames } = useCustomerNames();
+
+  // ONE alphabetical list, not "the ones you can open" followed by "the rest".
+  // Split into two blocks the order broke at the seam — Attendo, Synsam, then
+  // Holiday Club — and a reader looking for a name has to know which half it
+  // lives in before they can find it.
+  const merged = [
+    ...(customers ?? []).map((c) => ({ customer: c, accessible: true })),
+    ...(allNames ?? [])
+      .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
+      .map((n) => ({ customer: { ...n, template_id: "", can_edit: false } as Customer, accessible: false })),
+  ].sort((a, b) =>
+    a.customer.name.localeCompare(b.customer.name, undefined, { numeric: true, sensitivity: "base" })
+  );
   const { customerId: routeCustomerId } = useParams();
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 
@@ -138,8 +152,22 @@ function CustomersNav() {
         </SidebarMenuButton>
       </SidebarMenuItem>
 
-      {customers?.map((c) => {
-        const open = !!openIds[c.id];
+      {merged.map(({ customer: c, accessible }) => {
+        const open = accessible && !!openIds[c.id];
+        if (!accessible) return (
+          <SidebarMenuItem key={c.id}>
+            <SidebarMenuButton
+              render={<NavLink to={`/customers/${c.id}`} />}
+              isActive={routeCustomerId === c.id}
+              tooltip={`${c.name} — no access`}
+              className="text-muted-foreground"
+            >
+              <LockIcon className="size-3.5 shrink-0 opacity-70" />
+              <Building2Icon className="size-4" />
+              <span className="truncate">{c.name}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
         return (
           <SidebarMenuItem key={c.id}>
             {/* The label navigates; only the chevron folds. Clicking a
@@ -174,27 +202,6 @@ function CustomersNav() {
         );
       })}
 
-      {/* Customers this user cannot open. Listed deliberately: without them
-          there is no way to FIND a customer to ask about, and the request flow
-          is unreachable. They carry no chevron (there is nothing to expand)
-          and lead to the no-access page, which is where the asking happens.
-          Only id and name are known here — see api.customers.listNames. */}
-      {(allNames ?? [])
-        .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
-        .map((n) => (
-          <SidebarMenuItem key={n.id}>
-            <SidebarMenuButton
-              render={<NavLink to={`/customers/${n.id}`} />}
-              isActive={routeCustomerId === n.id}
-              tooltip={`${n.name} — no access`}
-              className="text-muted-foreground"
-            >
-              <LockIcon className="size-3.5 shrink-0 opacity-70" />
-              <Building2Icon className="size-4" />
-              <span className="truncate">{n.name}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ))}
     </SidebarMenu>
   );
 }

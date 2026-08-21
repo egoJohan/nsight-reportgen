@@ -10,6 +10,11 @@ export interface Me {
   email: string;
   name: string;
   is_admin: boolean;
+  /** Holds `edit` on at least one customer -- this model's only notion of
+   *  "owns a customer" (see auth/permissions.py). The one fact
+   *  SettingsPage.tsx needs to decide whether a non-admin should see the
+   *  "Permission requests" tab, without fetching every grant to find out. */
+  is_owner: boolean;
 }
 
 // Relative by default (spec §5.4), matching api.ts: same-origin is what makes

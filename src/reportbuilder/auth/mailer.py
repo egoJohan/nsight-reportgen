@@ -1,11 +1,16 @@
-"""Sending nSight's own mail -- today, just an invitation link (spec §6).
+"""Sending nSight's own mail: invitation links (spec §6), and an access
+request nudging whoever can decide it (auth/access_request_mail.py).
 
-No mail-provider dependency: smtplib is the standard library, and this is
-the ONE kind of email nSight sends. Configuration lives in datahive
-(`settings/email.json`, spec §9) rather than an environment variable, so
-moving hive moves the mail setup with it (spec §2). If a second kind of
-email is ever needed, an API-provider transport is a second function next
-to send_via_smtp, not a rewrite of this module's shape.
+No mail-provider dependency: smtplib is the standard library. Configuration
+lives in datahive (`settings/email.json`, spec §9) rather than an
+environment variable, so moving hive moves the mail setup with it (spec
+§2). Every kind of email nSight sends is a small module next to this one
+(auth/invites.py, auth/access_request_mail.py) composing `EmailConfig`,
+`config_from_settings` and `send_via_smtp` from here -- this module owns
+only the transport and the config shape, never a message's subject or
+body. If a second kind of TRANSPORT is ever needed (an API provider
+instead of raw SMTP), that is a second function next to send_via_smtp,
+not a rewrite of this module's shape.
 """
 from __future__ import annotations
 

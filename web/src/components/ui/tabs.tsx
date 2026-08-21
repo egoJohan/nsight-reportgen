@@ -22,12 +22,16 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  // gap-1.5 on the LIST, not margins on each trigger: a pill-shaped default
+  // trigger butts straight up against its neighbour with no gap of its own,
+  // and an icon+label trigger is wide enough that "touching" reads as
+  // crowded. One property here beats a margin fudge factor on every trigger.
+  "group/tabs-list inline-flex w-fit items-center justify-center gap-1.5 rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {
     variants: {
       variant: {
         default: "bg-muted",
-        line: "gap-1 bg-transparent",
+        line: "bg-transparent",
       },
     },
     defaultVariants: {

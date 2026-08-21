@@ -209,9 +209,26 @@ class TestListAccessRequests:
         assert len(mine) == 1
         assert mine[0]["customer_id"] == b
 
-    def test_a_non_admin_cannot_list_every_request(self, client, repo, auth):
-        sign_in(client, repo, auth, "viewer@egoiq.com")
-        assert client.get("/access-requests").status_code == 403
+    def test_a_viewer_sees_no_requests_at_all(self, client, repo, auth):
+        """Not a 403: having nothing to decide is not being refused a
+        permission, it's just an empty queue. A `view` grant on the very
+        customer a request names is still not ownership."""
+        cid = repo.create_customer(auth, "Attendo").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        client.post("/access-requests", json={"customer_id": cid, "mode": "edit"})
+
+        sign_in(client, repo, auth, "viewer@egoiq.com", (cid, "view"))
+        r = client.get("/access-requests")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_someone_with_no_grant_at_all_sees_no_requests(self, client, repo, auth):
+        cid = repo.create_customer(auth, "Attendo").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        client.post("/access-requests", json={"customer_id": cid, "mode": "view"})
+
+        sign_in(client, repo, auth, "nobody@egoiq.com")
+        assert client.get("/access-requests").json() == []
 
     def test_an_admin_sees_every_pending_request(self, client, repo, auth):
         a = repo.create_customer(auth, "Attendo").id
@@ -222,6 +239,40 @@ class TestListAccessRequests:
         rows = client.get("/access-requests").json()
         assert len(rows) == 1
         assert rows[0]["state"] == "pending"
+
+    def test_an_owner_sees_only_their_own_customers_requests(self, client, repo, auth):
+        """The core of the matrix: an owner (`edit` on Attendo) sees
+        Attendo's pending request and NOT Synsam's, even with both pending
+        at once -- this is a filter on the listing, not a separate
+        permission, so it has to actually discriminate between two
+        customers, not just between "some" and "none"."""
+        attendo = repo.create_customer(auth, "Attendo").id
+        synsam = repo.create_customer(auth, "Synsam").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        client.post("/access-requests", json={"customer_id": attendo, "mode": "edit"})
+        client.post("/access-requests", json={"customer_id": synsam, "mode": "edit"})
+
+        sign_in(client, repo, auth, "owner@egoiq.com", (attendo, "edit"))
+        rows = client.get("/access-requests").json()
+        assert [r["customer_id"] for r in rows] == [attendo]
+
+    def test_decided_requests_do_not_appear_in_the_queue(self, client, repo, auth):
+        """Granted and refused requests are history, not queue -- the record
+        itself is untouched (state/decided_by/decided_at all still readable
+        via /access-requests/mine, see TestApproveAndRefuse), but this
+        listing only ever shows what still needs deciding, for admin and
+        owner alike."""
+        a = repo.create_customer(auth, "Attendo").id
+        b = repo.create_customer(auth, "Synsam").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        granted_id = client.post("/access-requests", json={"customer_id": a, "mode": "view"}).json()["id"]
+        client.post("/access-requests", json={"customer_id": b, "mode": "view"})
+
+        sign_in(client, repo, auth, "admin@egoiq.com", admin=True)
+        client.post(f"/access-requests/{granted_id}/approve")
+
+        rows = client.get("/access-requests").json()
+        assert [r["customer_id"] for r in rows] == [b]
 
 
 # ---------------------------------------------------------------------------
@@ -279,9 +330,22 @@ class TestApproveAndRefuse:
         assert client.post("/access-requests/nope/approve").status_code == 404
         assert client.post("/access-requests/nope/refuse").status_code == 404
 
-    # -- escalation ----------------------------------------------------
+    # -- who may decide: admin, or the customer's owner (edit) -------------
+    #
+    # There used to be a test here (`test_an_admin_cannot_approve_their_own_
+    # request`) pinning a self-approval ban. The ban itself is gone --
+    # see routes_access_requests._require_decider's docstring for why -- and
+    # with it that test has no rule left to assert; keeping it would mean
+    # either deleting the assertion (leaving a test that tests nothing) or
+    # flipping it to assert the opposite with no more coverage than the
+    # owner self-decision tests below already give it, so it is removed
+    # rather than limping on as either. `test_edit_holder_cannot_approve_
+    # their_own_request_for_a_different_customer` and `test_an_owner_may_
+    # approve_their_own_request_for_a_customer_they_already_own` below are
+    # what now carries that weight -- self-decision is fine when the scope
+    # check passes, refused when it doesn't, same as anyone else.
 
-    def test_a_non_admin_cannot_approve_or_refuse_anything(self, client, repo, auth):
+    def test_a_non_admin_with_no_stake_in_the_customer_cannot_approve_or_refuse(self, client, repo, auth):
         cid = repo.create_customer(auth, "Attendo").id
         sign_in(client, repo, auth, "viewer@egoiq.com")
         rid = client.post("/access-requests", json={"customer_id": cid, "mode": "view"}).json()["id"]
@@ -290,14 +354,84 @@ class TestApproveAndRefuse:
         assert client.post(f"/access-requests/{rid}/approve").status_code == 403
         assert client.post(f"/access-requests/{rid}/refuse").status_code == 403
 
-    def test_an_admin_cannot_approve_their_own_request(self, client, repo, auth):
+    def test_a_viewer_cannot_approve_or_refuse_even_for_their_own_customer(self, client, repo, auth):
+        """`view` is not ownership -- only `edit` is (see permissions.py)."""
         cid = repo.create_customer(auth, "Attendo").id
-        admin = sign_in(client, repo, auth, "admin@egoiq.com", admin=True)
+        sign_in(client, repo, auth, "requester@egoiq.com")
         rid = client.post("/access-requests", json={"customer_id": cid, "mode": "edit"}).json()["id"]
+
+        sign_in(client, repo, auth, "viewer@egoiq.com", (cid, "view"))
+        assert client.post(f"/access-requests/{rid}/approve").status_code == 403
+        assert client.post(f"/access-requests/{rid}/refuse").status_code == 403
+
+    def test_an_owner_may_approve_a_request_for_their_own_customer(self, client, repo, auth):
+        cid = repo.create_customer(auth, "Attendo").id
+        requester = sign_in(client, repo, auth, "requester@egoiq.com")
+        rid = client.post("/access-requests", json={"customer_id": cid, "mode": "edit"}).json()["id"]
+
+        sign_in(client, repo, auth, "owner@egoiq.com", (cid, "edit"))
+        r = client.post(f"/access-requests/{rid}/approve")
+        assert r.status_code == 200
+        assert r.json()["state"] == "granted"
+        assert repo.get_user(auth, requester.id).grants == (Grant(cid, "edit"),)
+
+    def test_an_owner_may_refuse_a_request_for_their_own_customer(self, client, repo, auth):
+        cid = repo.create_customer(auth, "Attendo").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        rid = client.post("/access-requests", json={"customer_id": cid, "mode": "view"}).json()["id"]
+
+        sign_in(client, repo, auth, "owner@egoiq.com", (cid, "edit"))
+        r = client.post(f"/access-requests/{rid}/refuse")
+        assert r.status_code == 200
+        assert r.json()["state"] == "refused"
+
+    def test_an_owner_cannot_approve_a_request_for_a_different_customer(self, client, repo, auth):
+        """The customer-scope check on its own, with no self-decision angle
+        at all -- the requester and the owner are two different people, and
+        that alone is not enough: 'owner@egoiq.com' owns Attendo, the
+        request names Synsam, and holding edit on the wrong customer is the
+        same as holding none. This is the check that now does ALL the work
+        the removed self-approval ban used to share with it."""
+        attendo = repo.create_customer(auth, "Attendo").id
+        synsam = repo.create_customer(auth, "Synsam").id
+        sign_in(client, repo, auth, "requester@egoiq.com")
+        rid = client.post("/access-requests", json={"customer_id": synsam, "mode": "edit"}).json()["id"]
+
+        sign_in(client, repo, auth, "owner@egoiq.com", (attendo, "edit"))
+        assert client.post(f"/access-requests/{rid}/approve").status_code == 403
+        assert client.post(f"/access-requests/{rid}/refuse").status_code == 403
+
+    def test_edit_holder_cannot_approve_their_own_request_for_a_different_customer(self, client, repo, auth):
+        """Same check as above, but requester and decider ARE the same
+        identity -- the "obvious hole" a self-approval ban might seem to
+        guard against. It doesn't need one: 'owner@egoiq.com' holds edit on
+        Attendo, files their OWN request for Synsam, and still cannot
+        approve it, because they hold no edit on Synsam. Nothing about it
+        being their own request changes the answer."""
+        attendo = repo.create_customer(auth, "Attendo").id
+        synsam = repo.create_customer(auth, "Synsam").id
+        owner = sign_in(client, repo, auth, "owner@egoiq.com", (attendo, "edit"))
+        rid = client.post("/access-requests", json={"customer_id": synsam, "mode": "edit"}).json()["id"]
 
         r = client.post(f"/access-requests/{rid}/approve")
         assert r.status_code == 403
-        assert repo.get_user(auth, admin.id).grants == ()
+        assert repo.get_user(auth, owner.id).grants == (Grant(attendo, "edit"),)
+
+    def test_an_owner_may_approve_their_own_request_for_a_customer_they_already_own(self, client, repo, auth):
+        """Filing this through POST /access-requests is impossible -- you
+        cannot request access you already have, it 409s -- so the pending
+        request here is created directly through the repository, standing
+        in for one that predates a grant change. It proves the scope check
+        ALONE, with no self-check behind it, is what decides this even when
+        requester and decider are the very same identity."""
+        cid = repo.create_customer(auth, "Attendo").id
+        owner = sign_in(client, repo, auth, "owner@egoiq.com", (cid, "edit"))
+        req = repo.create_access_request(auth, user_id=owner.id, user_email=owner.email,
+                                         customer_id=cid, mode="edit")
+
+        r = client.post(f"/access-requests/{req.id}/approve")
+        assert r.status_code == 200
+        assert r.json()["state"] == "granted"
 
     def test_approving_grants_the_requester_never_the_approving_admin(self, client, repo, auth):
         cid = repo.create_customer(auth, "Attendo").id

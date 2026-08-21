@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   UploadIcon,
   Trash2Icon,
@@ -10,6 +11,9 @@ import {
   MailIcon,
   CopyIcon,
   PlusIcon,
+  UsersIcon,
+  ShieldCheckIcon,
+  TypeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -435,12 +439,13 @@ function InviteRow({ invite }: { invite: Invite }) {
   );
 }
 
-/** One access request -- who asked, for which customer, at what mode.
- *  Approve/refuse only show while it is still pending; a decided one is
- *  history, shown with its outcome and nothing to press. */
+/** One PENDING permission request -- who asked, for which customer, at what
+ *  mode, and when. The queue this feeds (`useAccessRequests`) is already
+ *  filtered server-side to "pending", so approve/refuse are always live
+ *  here -- there is no decided state left to render specially, and once one
+ *  is decided it drops out of the list rather than lingering with a badge. */
 function AccessRequestRow({ request }: { request: AccessRequest }) {
   const actions = useAccessRequestActions();
-  const pending = request.state === "pending";
   return (
     <div className={`${ROW} gap-3`}>
       <div className="min-w-0 flex-1">
@@ -451,42 +456,59 @@ function AccessRequestRow({ request }: { request: AccessRequest }) {
             wants {request.mode} access to {request.customer_name ?? "a removed customer"}
           </span>
         </p>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground">
           Requested {new Date(request.requested_at).toLocaleDateString()}
-          <Badge variant={pending ? "secondary" : request.state === "granted" ? "outline" : "destructive"}>
-            {request.state}
-          </Badge>
         </p>
       </div>
-      {pending && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            disabled={actions.refuse.isPending || actions.approve.isPending}
-            title="Refuse"
-            onClick={() =>
-              actions.refuse.mutate(request.id, { onError: (e) => toast.error(e.message) })
-            }
-          >
-            <XIcon className="size-4" />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            disabled={actions.refuse.isPending || actions.approve.isPending}
-            title="Approve"
-            onClick={() =>
-              actions.approve.mutate(request.id, {
-                onSuccess: () => toast.success(`Granted ${request.mode} access to ${request.user_email}`),
-                onError: (e) => toast.error(e.message),
-              })
-            }
-          >
-            <CheckIcon className="size-4" />
-          </Button>
-        </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          disabled={actions.refuse.isPending || actions.approve.isPending}
+          title="Refuse"
+          onClick={() =>
+            actions.refuse.mutate(request.id, { onError: (e) => toast.error(e.message) })
+          }
+        >
+          <XIcon className="size-4" />
+        </Button>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          disabled={actions.refuse.isPending || actions.approve.isPending}
+          title="Approve"
+          onClick={() =>
+            actions.approve.mutate(request.id, {
+              onSuccess: () => toast.success(`Granted ${request.mode} access to ${request.user_email}`),
+              onError: (e) => toast.error(e.message),
+            })
+          }
+        >
+          <CheckIcon className="size-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Its own tab (see SettingsPage below) rather than a section buried inside
+ *  Users -- an admin who lands on Fonts by default should still see the
+ *  queue is there, and a pending count on the tab itself is what makes that
+ *  true without clicking in. Reads as empty most of the time on purpose:
+ *  a decided request drops out of the list (`useAccessRequests` only ever
+ *  returns "pending"), so "No permission requests right now" is the normal
+ *  state of a well-run queue, not a placeholder waiting to be replaced. */
+function PermissionRequestsTab() {
+  const { data: requests, isLoading } = useAccessRequests();
+  return (
+    <div className="space-y-2">
+      {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+      {requests?.length === 0 && !isLoading && (
+        <p className={`${EMPTY} text-sm text-muted-foreground`}>
+          No permission requests right now.
+        </p>
       )}
+      {requests?.map((r) => <AccessRequestRow key={r.id} request={r} />)}
     </div>
   );
 }
@@ -498,28 +520,10 @@ function UsersTab() {
   const { data: me } = useSession();
   const { data: users, isLoading } = useUsers();
   const { data: invites } = useInvites();
-  const { data: accessRequests } = useAccessRequests();
   const [inviting, setInviting] = useState(false);
-
-  // Pending first, decided ones trail behind for context -- an admin's
-  // queue leads with what still needs a decision.
-  const orderedRequests = [...(accessRequests ?? [])].sort(
-    (a, b) => Number(b.state === "pending") - Number(a.state === "pending")
-  );
 
   return (
     <div className="space-y-6">
-      {/* Its own section, same shape as Invitations below: someone asked to
-          be let in, and this is where that request goes to be acted on. */}
-      {orderedRequests.length > 0 && (
-        <div>
-          <h3 className={PANEL_TITLE}>Access requests</h3>
-          <div className="mt-2 space-y-2">
-            {orderedRequests.map((r) => <AccessRequestRow key={r.id} request={r} />)}
-          </div>
-        </div>
-      )}
-
       <div className={SECTION_HEADER}>
         <h3 className={PANEL_TITLE}>Users</h3>
         <Button size="sm" variant="outline" onClick={() => setInviting(true)}>
@@ -550,25 +554,81 @@ function UsersTab() {
 
 export default function SettingsPage() {
   const { data: me } = useSession();
+  // Admin, or a customer's owner (edit on at least one -- see
+  // permissions.py): the same rule `list_access_requests` enforces
+  // server-side. `is_owner` comes off /auth/me rather than being worked out
+  // here from every grant, which the session response never carries (spec
+  // §5's "no grants over the wire beyond what's needed").
+  const canSeePermissionRequests = !!me && (me.is_admin || me.is_owner);
+  // Lifted above the tab so the pending count shows on the tab ITSELF, not
+  // only once someone has already clicked into it. Disabled entirely for
+  // someone who cannot see the tab at all, rather than firing a request
+  // whose result (always []) would just be discarded.
+  const { data: permissionRequests } = useAccessRequests(canSeePermissionRequests);
+  const pendingCount = permissionRequests?.length ?? 0;
+
+  // People first, fonts are set once and forgotten: Users, then Permission
+  // requests, then Fonts. Users and Permission requests are each gated;
+  // Fonts stays open to anyone signed in, so there is always at least one
+  // tab to land on -- the fallback just has to be the FIRST of the three
+  // this particular caller actually has, or an admin-only tab could be
+  // handed to someone who can't see it. That needs `me` resolved first
+  // (is_admin/is_owner are both on it), so the strip waits for it rather
+  // than guessing and re-defaulting once it arrives.
+  const [searchParams] = useSearchParams();
+  const fallbackTab = !me ? undefined : me.is_admin ? "users" : canSeePermissionRequests ? "permission-requests" : "fonts";
+  // ?tab=permission-requests is the landing spot the access-request email
+  // links to (routes_access_requests.py's create_access_request) -- honour
+  // it ONLY when this caller can actually see that tab, so a stale or
+  // tampered link falls back to the same default anyone else gets rather
+  // than silently no-oping on a tab that was never rendered.
+  const requestedTab = searchParams.get("tab");
+  const visible = new Set(
+    [me?.is_admin && "users", canSeePermissionRequests && "permission-requests", me && "fonts"].filter(Boolean)
+  );
+  const defaultTab = requestedTab && visible.has(requestedTab) ? requestedTab : fallbackTab;
 
   return (
     <div className={PAGE}>
       <h1 className={PAGE_TITLE}>Settings</h1>
 
-      <Tabs defaultValue="fonts" className="mt-6">
-        <TabsList>
-          <TabsTrigger value="fonts">Fonts</TabsTrigger>
-          {me?.is_admin && <TabsTrigger value="users">Users</TabsTrigger>}
-        </TabsList>
-        <TabsContent value="fonts" className="mt-4">
-          <FontsTab />
-        </TabsContent>
-        {me?.is_admin && (
-          <TabsContent value="users" className="mt-4">
-            <UsersTab />
+      {me && (
+        <Tabs defaultValue={defaultTab} className="mt-6">
+          <TabsList>
+            {me.is_admin && (
+              <TabsTrigger value="users">
+                <UsersIcon className="size-4" />Users
+              </TabsTrigger>
+            )}
+            {canSeePermissionRequests && (
+              <TabsTrigger value="permission-requests">
+                <ShieldCheckIcon className="size-4" />Permission requests
+                {pendingCount > 0 && (
+                  <Badge variant="secondary" className="font-normal">{pendingCount}</Badge>
+                )}
+              </TabsTrigger>
+            )}
+            {/* Unchanged: open to anyone signed in, not just an admin --
+                fonts are a server-wide resource, not customer access. */}
+            <TabsTrigger value="fonts">
+              <TypeIcon className="size-4" />Fonts
+            </TabsTrigger>
+          </TabsList>
+          {me.is_admin && (
+            <TabsContent value="users" className="mt-4">
+              <UsersTab />
+            </TabsContent>
+          )}
+          {canSeePermissionRequests && (
+            <TabsContent value="permission-requests" className="mt-4">
+              <PermissionRequestsTab />
+            </TabsContent>
+          )}
+          <TabsContent value="fonts" className="mt-4">
+            <FontsTab />
           </TabsContent>
-        )}
-      </Tabs>
+        </Tabs>
+      )}
     </div>
   );
 }

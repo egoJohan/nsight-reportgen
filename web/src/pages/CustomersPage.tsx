@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useCustomers, useCreateCustomer } from "@/lib/queries";
-import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_SUB, PAGE_TITLE, ROW } from "@/lib/surfaces";
+import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,
  *  so this sits above the case list rather than beside it. */
@@ -53,7 +53,6 @@ export default function CustomersPage() {
       <div className={PAGE_HEADER}>
         <div className="min-w-0">
           <h1 className={PAGE_TITLE}>Customers</h1>
-          <p className={PAGE_SUB}>Every study belongs to one customer.</p>
         </div>
         <Button variant="outline" onClick={() => setOpen(true)}>
           <PlusIcon className="mr-2 size-4" />New customer</Button>

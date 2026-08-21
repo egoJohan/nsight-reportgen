@@ -17,7 +17,7 @@ from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.api.routes_settings import OIDC_KEY
 from reportbuilder.auth import identity, oidc, password, session
 from reportbuilder.auth.keys import get_or_create_signing_key
-from reportbuilder.auth.permissions import User
+from reportbuilder.auth.permissions import EDIT, User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
@@ -147,7 +147,16 @@ def _issue_session(response: Response, repo: Repository, auth: AuthContext, user
 
 
 def _user_out(user: User) -> dict:
-    return {"id": user.id, "email": user.email, "name": user.name, "is_admin": user.is_admin}
+    """The public shape of a User. `is_owner` is synthesised from
+    `user.grants` -- holds `edit` on at least one customer -- never the
+    grants themselves: it is the one cheap fact SettingsPage.tsx needs to
+    decide whether to show the "Permission requests" tab to someone who is
+    not an admin, without fetching every grant to find out (see
+    routes_access_requests.py's `list_access_requests` for the matching
+    server-side rule)."""
+    return {"id": user.id, "email": user.email, "name": user.name,
+           "is_admin": user.is_admin,
+           "is_owner": any(g.mode == EDIT for g in user.grants)}
 
 
 @auth_router.post("/register", status_code=201)
