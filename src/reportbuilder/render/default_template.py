@@ -7,6 +7,8 @@ this one. A branch for "no template" would be a second rendering path that only
 the default exercises, and it would drift.
 
 Deliberately plain: a white ground, one very common typeface, no decoration.
+The typeface follows the customer templates in use (Calibri) rather than
+asserting one of its own.
 A deck with no template chosen is either a draft or headed for a customer whose
 own template has not been set up yet, and in both cases nSight's own branding on
 the slide is wrong — it is not the analyst's brand and not the client's. Plain
@@ -32,13 +34,18 @@ _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 # house colour; the alternating light variants keep adjacent bands legible.
 _ACCENTS = [hs.TEAL, hs.TEAL_LT, hs.BLUE, hs.BLUE_LT, hs.RED, hs.RED_LT]
 
-# Arial: the safest name to write into a .pptx. It is on every Windows and Mac
-# that will open the deck, and on this Linux host fontconfig answers it with
-# Liberation Sans — metric-compatible, so the slide keeps its layout either way.
-# Naming a font the OPENER lacks is the failure mode that matters here; naming
-# one the render host lacks is handled by that substitution.
-_HEADING_FONT = "Arial"
-_BODY_FONT = "Arial"
+# Calibri: the typeface Attendo's own deck declares, and the one a slide with
+# no template chosen should therefore match — a default that looks like the
+# customer templates it sits beside is one less thing to notice. It is on
+# every Windows and Mac that will open the deck.
+#
+# On the RENDER host it is a name like any other: without Calibri installed,
+# fontconfig answers with whatever it considers closest (Noto Sans here),
+# whose metrics differ — so line breaks and title fitting are computed against
+# a slightly different face than PowerPoint will draw. Installing Calibri, or
+# metric-compatible Carlito, through Settings > Fonts removes that difference.
+_HEADING_FONT = "Calibri"
+_BODY_FONT = "Calibri"
 
 # Plain white, not the house cream: see the module docstring.
 _BACKGROUND = "#FFFFFF"

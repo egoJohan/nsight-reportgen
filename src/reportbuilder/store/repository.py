@@ -1333,17 +1333,24 @@ class Repository:
                 pass
         return removed
 
-    def ensure_default_template(self, auth: AuthContext, pptx: bytes) -> None:
+    def ensure_default_template(self, auth: AuthContext, pptx: bytes,
+                                replace: bool = False) -> None:
         """Seed the house-style default if it is not there yet.
 
         Written once and left alone: overwriting on every boot would discard a
         deliberately customised default, and the bytes are deterministic anyway.
+
+        *replace* forces it — the escape hatch for when the BUILDER changes
+        (new fonts, new furniture) and the hive still holds a deck built by the
+        old one. Without it, changing the default in code would have no effect
+        on any hive that had already been started once.
         """
-        try:
-            self.store.get(auth, P.default_template_path())
-            return
-        except NotFound:
-            pass
+        if not replace:
+            try:
+                self.store.get(auth, P.default_template_path())
+                return
+            except NotFound:
+                pass
         self.store.put(auth, P.default_template_path(), pptx, _PPTX,
                        labels=[P.LABEL_TEMPLATE])
 

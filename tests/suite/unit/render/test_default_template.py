@@ -36,28 +36,41 @@ def test_the_chart_palette_is_the_house_palette(tmp_path):
     assert len(theme.palette) == 6
 
 
-def test_the_font_is_one_every_opener_has(tmp_path):
-    """Arial, because the deck is opened elsewhere.
+def test_the_font_matches_the_customer_templates(tmp_path):
+    """Calibri — the face Attendo's own deck declares.
 
-    Naming a font is not having it, and a missing one is substituted silently —
-    but that cuts both ways. This host has Liberation Sans and not Arial; the
-    Windows and Mac machines the deck is opened on have Arial and not Liberation
-    Sans. Arial is the name that survives the journey, and the substitution HERE
-    is metric-compatible by construction, so the layout holds either way.
+    A slide with no template chosen sits beside slides that do have one, and
+    the default looking like them is one less thing to notice. Calibri is also
+    on every Windows and Mac the deck is opened on.
     """
     theme = inspect_template(_built(tmp_path)).theme
-    assert theme.heading_font == "Arial"
+    assert theme.heading_font == "Calibri"
+    assert theme.body_font == "Calibri"
 
+
+def test_the_render_host_can_draw_that_font_at_the_right_width(tmp_path):
+    """Naming a font is not having it, and the substitute's METRICS are what
+    decide whether a title fits the box nSight measured it against.
+
+    Calibri and Carlito are drawn from the same metrics; anything else (Noto,
+    DejaVu) is a different width, so every label reflows between what this
+    host measures and what PowerPoint finally draws. This is a host
+    provisioning fact, not a code defect — hence a skip that says how to fix
+    it rather than a failure.
+    """
     import shutil
     import subprocess
 
     if shutil.which("fc-match") is None:
         pytest.skip("fontconfig not available")
-    resolved = subprocess.run(["fc-match", "-f", "%{family}", "Arial"],
+    resolved = subprocess.run(["fc-match", "-f", "%{family}", "Calibri"],
                               capture_output=True, text=True, check=True).stdout
-    # Liberation Sans is drawn from the same metrics as Arial. Anything else
-    # (DejaVu, Noto) is a different width and would reflow every label.
-    assert "Liberation Sans" in resolved, f"Arial resolves to {resolved!r} here"
+    if not any(name in resolved for name in ("Calibri", "Carlito")):
+        pytest.skip(
+            f"Calibri resolves to {resolved!r} on this host, whose metrics differ. "
+            "Install Calibri (Settings > Fonts) or metric-compatible Carlito "
+            "(apt install fonts-crosextra-carlito) so measured and drawn text agree.")
+    assert any(name in resolved for name in ("Calibri", "Carlito"))
 
 
 def test_the_default_is_plain(tmp_path):

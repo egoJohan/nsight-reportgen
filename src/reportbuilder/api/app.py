@@ -75,6 +75,48 @@ def create_app(client=None) -> FastAPI:
             logging.getLogger(__name__).warning(
                 "fonts: could not sync from datahive", exc_info=True)
 
+    def _seed_default_template() -> None:
+        """Install the house-style template if the hive has none.
+
+        Templates resolve report -> tutkimus -> asiakas -> this one, and until
+        it exists that chain ends in None: a report with no template chosen
+        rendered into a blank deck, not the plain white default that was
+        written for exactly that case. Building it is deterministic and
+        `ensure_default_template` writes only when it is absent, so this is a
+        no-op on every boot after the first — including when someone has
+        replaced the default deliberately.
+
+        Failure is logged, never fatal: same posture as the font sync. A
+        missing default costs a deck its styling, not the app its start.
+        """
+        import logging
+        import os as _os
+        import tempfile
+
+        from reportbuilder.api.deps_store import get_repository, service_auth
+        from reportbuilder.render.default_template import build_default_template
+
+        try:
+            auth = service_auth()
+            if auth is None:
+                return
+            fd, tmp = tempfile.mkstemp(prefix="nsight-default-", suffix=".pptx")
+            _os.close(fd)
+            try:
+                build_default_template(tmp)
+                with open(tmp, "rb") as fh:
+                    get_repository().ensure_default_template(
+                        auth, fh.read(),
+                        # Set this once after changing the builder: a hive that
+                        # has already been started holds a deck built by the
+                        # old code, and "seed if absent" would never replace it.
+                        replace=_os.environ.get("NSIGHT_RESEED_DEFAULT_TEMPLATE") == "1")
+            finally:
+                _os.unlink(tmp)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "default template: could not seed", exc_info=True)
+
     @contextlib.asynccontextmanager
     async def _lifespan(_app: FastAPI):
         task = None
@@ -82,6 +124,7 @@ def create_app(client=None) -> FastAPI:
             # Same opt-out as the janitor: tests should not shell out to
             # fc-cache or reach for datahive on import.
             await asyncio.to_thread(_sync_fonts)
+            await asyncio.to_thread(_seed_default_template)
         # Opt out for tests and one-shot scripts, where a background task that
         # deletes files is noise at best.
         if os.environ.get("NSIGHT_DISABLE_CLEANUP") != "1":
