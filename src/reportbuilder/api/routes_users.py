@@ -1,0 +1,166 @@
+# src/reportbuilder/api/routes_users.py
+"""The Users and Invitations HTTP surface: everything an admin does from
+the Settings > Users screen (spec §5, §6). Every route here is
+require_admin -- administering access is not itself a data grant (spec
+§5), so nobody without the admin flag reaches this file at all.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+
+from reportbuilder.api.deps_auth import require_admin
+from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.api.routes_auth import public_origin
+from reportbuilder.auth import invites, users
+from reportbuilder.auth.permissions import Grant, User
+from reportbuilder.store.repository import Invite, Repository
+from reportbuilder.store.seam import AuthContext, ConsentRequired
+
+users_router = APIRouter(tags=["users"])
+
+
+def _parse_grants(raw) -> tuple[Grant, ...]:
+    if not isinstance(raw, list):
+        raise HTTPException(422, "grants must be a list")
+    try:
+        return tuple(Grant(g["scope"], g.get("mode", "view")) for g in raw if g.get("scope"))
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _grant_out(repo: Repository, auth: AuthContext, g: Grant) -> dict:
+    """A grant plus the name it stands for, so the Users screen can show
+    "Attendo" rather than a bare id. Spec §5: a grant naming a customer or
+    case that no longer exists is IGNORED for access -- here it is still
+    SHOWN, with no name, so an admin can find and remove it."""
+    parts = [s for s in g.scope.split("/") if s]
+    customer = repo.find_customer(auth, parts[0]) if parts else None
+    out = {"scope": g.scope, "mode": g.mode,
+          "customer_name": customer.name if customer else None, "case_name": None}
+    if customer is not None and len(parts) > 1:
+        case = repo.find_case(auth, parts[1])
+        out["case_name"] = case.name if case is not None else None
+    return out
+
+
+def _user_row(repo: Repository, auth: AuthContext, u: User) -> dict:
+    return {"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin,
+           "grants": [_grant_out(repo, auth, g) for g in u.grants]}
+
+
+@users_router.get("/users")
+def list_users(auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),
+              admin: User = Depends(require_admin)) -> list[dict]:
+    return [_user_row(repo, auth, u) for u in repo.list_users(auth)]
+
+
+@users_router.put("/users/{user_id}/grants")
+def put_user_grants(user_id: str, body: dict = Body(...),
+                    auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),
+                    admin: User = Depends(require_admin)) -> dict:
+    if repo.get_user(auth, user_id) is None:
+        raise HTTPException(404, f"User '{user_id}' not found")
+    grants = _parse_grants(body.get("grants") or [])
+    repo.set_grants(auth, user_id, grants)
+    return _user_row(repo, auth, repo.get_user(auth, user_id))
+
+
+@users_router.patch("/users/{user_id}")
+def patch_user(user_id: str, body: dict = Body(...),
+              auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),
+              admin: User = Depends(require_admin)) -> dict:
+    """Today this only ever changes `is_admin` -- the promote/demote
+    control. Anything else in the body is refused rather than silently
+    ignored, so a frontend typo fails loudly instead of doing nothing."""
+    if "is_admin" not in body:
+        raise HTTPException(422, "is_admin is the only field this route changes")
+    if repo.get_user(auth, user_id) is None:
+        raise HTTPException(404, f"User '{user_id}' not found")
+    result = users.set_admin(repo, auth, user_id, bool(body["is_admin"]))
+    if isinstance(result, users.LastAdminRefused):
+        raise HTTPException(409, result.reason)
+    return _user_row(repo, auth, result)
+
+
+@users_router.delete("/users/{user_id}", status_code=204)
+def remove_user_route(user_id: str, auth: AuthContext = Depends(get_auth),
+                      repo: Repository = Depends(get_repository),
+                      admin: User = Depends(require_admin)) -> None:
+    if repo.get_user(auth, user_id) is None:
+        raise HTTPException(404, f"User '{user_id}' not found")
+    try:
+        result = users.remove_user(repo, auth, user_id)
+    except ConsentRequired as exc:
+        # datahive gates destructive operations -- surfaced with its
+        # approval envelope, same shape as delete_font (routes_settings.py).
+        raise HTTPException(409, {
+            "error": "consent_required",
+            "message": "Removing this user needs approval in datahive.",
+            "request_id": exc.request_id, "target": exc.target,
+            "approve": exc.envelope.get("approval_urls", {}),
+        }) from exc
+    if isinstance(result, users.LastAdminRefused):
+        raise HTTPException(409, result.reason)
+
+
+def _invite_out(i: Invite) -> dict:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if i.accepted_user_id:
+        status = "accepted"
+    elif i.expires <= now:
+        status = "expired"
+    else:
+        status = "pending"
+    return {"id": i.id, "email": i.email, "invited_by": i.invited_by,
+           "invited_at": i.invited_at, "expires": i.expires, "status": status,
+           "grants": [{"scope": g.scope, "mode": g.mode} for g in i.grants]}
+
+
+@users_router.post("/users/invite", status_code=201)
+def invite_user(request: Request, body: dict = Body(...),
+               auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),
+               admin: User = Depends(require_admin)) -> dict:
+    email = (body.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(422, "a valid email is required")
+    if repo.find_user_by_email(auth, email) is not None:
+        raise HTTPException(409, f"'{email}' is already a user")
+    if repo.find_pending_invite_by_email(auth, email) is not None:
+        raise HTTPException(409, f"an invitation is already pending for '{email}'")
+    grants = _parse_grants(body.get("grants") or [])
+    login_url = f"{public_origin(request)}/login"
+    invitation = invites.create_invitation(repo, auth, email=email, grants=grants,
+                                           invited_by=admin, login_url=login_url)
+    return {**_invite_out(invitation.invite), "link": invitation.link,
+           "emailed": invitation.emailed}
+
+
+@users_router.get("/invites")
+def list_invites(auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),
+                 admin: User = Depends(require_admin)) -> list[dict]:
+    return [_invite_out(i) for i in repo.list_invites(auth)]
+
+
+@users_router.delete("/invites/{invite_id}", status_code=204)
+def revoke_invite_route(invite_id: str, auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        admin: User = Depends(require_admin)) -> None:
+    try:
+        result = invites.revoke_invitation(repo, auth, invite_id)
+    except ConsentRequired as exc:
+        # Same gate, same envelope shape as remove_user_route: revoking an
+        # accepted invite removes the user behind it (auth/invites.py), and
+        # deleting the invite record itself is also consent-gated.
+        raise HTTPException(409, {
+            "error": "consent_required",
+            "message": "Revoking this invitation needs approval in datahive.",
+            "request_id": exc.request_id, "target": exc.target,
+            "approve": exc.envelope.get("approval_urls", {}),
+        }) from exc
+    if isinstance(result, users.LastAdminRefused):
+        raise HTTPException(409, result.reason)
+
+
+__all__ = ["users_router"]

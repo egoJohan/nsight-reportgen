@@ -18,6 +18,7 @@ from reportbuilder.api.routes_materials import materials_router
 from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
+from reportbuilder.api.routes_users import users_router
 from reportbuilder.export.cleanup import sweep_all
 from reportbuilder.store.datahive_client import DataHiveError
 
@@ -122,6 +123,7 @@ def create_app(client=None) -> FastAPI:
     app.include_router(reports_router)
     app.include_router(render_router)
     app.include_router(ai_router)
+    app.include_router(users_router)
 
     # Inject the client if provided
     if client is not None:

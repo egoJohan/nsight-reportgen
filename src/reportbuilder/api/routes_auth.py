@@ -82,8 +82,8 @@ def _trust_forwarded_headers(request: Request) -> bool:
     return os.environ.get("NSIGHT_TRUST_FORWARDED_HEADERS") == "1"
 
 
-def _callback_url(request: Request, provider: str) -> str:
-    """The browser-facing URL Google/Microsoft must redirect back to.
+def public_origin(request: Request) -> str:
+    """The browser-facing origin (scheme://host).
 
     This has to be the origin the BROWSER is using, not the one the backend
     received the request on: Vite (dev) and nginx (prod) sit in front of the
@@ -97,23 +97,34 @@ def _callback_url(request: Request, provider: str) -> str:
       2. X-Forwarded-Proto / X-Forwarded-Host, if the request is trusted to
          set them (see _trust_forwarded_headers) -- the normal dev/prod
          path, honouring what Vite/nginx actually forwarded.
-      3. request.url_for's own origin -- the pre-proxy fallback: wrong (not
+      3. request.url's own origin -- the pre-proxy fallback: wrong (not
          browser-facing) when a proxy is in play, but safe, and still
          correct when the backend really is hit directly.
-    """
-    path = request.url_for("oidc_callback", provider=provider)
 
+    Factored out of `_callback_url` for routes_users.py's invitation link,
+    which points at /login, a client-side React Router route with no
+    FastAPI url_for name to hang a path off.
+    """
     public = os.environ.get("NSIGHT_PUBLIC_URL")
     if public:
-        return public.rstrip("/") + path.path
+        return public.rstrip("/")
 
     if _trust_forwarded_headers(request):
         proto = request.headers.get("x-forwarded-proto")
         host = request.headers.get("x-forwarded-host")
         if proto and host:
-            return f"{proto}://{host}{path.path}"
+            return f"{proto}://{host}"
 
-    return str(path)
+    return f"{request.url.scheme}://{request.url.netloc}"
+
+
+def _callback_url(request: Request, provider: str) -> str:
+    """The browser-facing URL Google/Microsoft must redirect back to. See
+    `public_origin` for the preference order that makes this the browser's
+    origin rather than the backend's own.
+    """
+    path = request.url_for("oidc_callback", provider=provider)
+    return public_origin(request) + path.path
 
 auth_router = APIRouter(tags=["auth"], prefix="/auth")
 
