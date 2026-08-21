@@ -146,7 +146,10 @@ export default function LoginPage() {
           <img src="/nsight-logo.svg" alt="nSight" className="h-10 w-auto" />
         </div>
 
-        <div className="space-y-4 rounded-xl border bg-surface p-6 shadow-sm">
+        {/* shadow-xl, not the shadow-sm a panel gets on a working page: this card
+          sits over a deliberately strong tiled backdrop, and a faint shadow
+          reads as a flat patch rather than something lifted off it. */}
+      <div className="space-y-4 rounded-xl border bg-surface p-6 shadow-xl shadow-black/10 dark:shadow-black/40">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">
               {mode === "signin" ? "Sign in to nSight Studio" : "Create an account"}
