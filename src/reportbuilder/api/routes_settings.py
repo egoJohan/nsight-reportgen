@@ -272,4 +272,43 @@ def sync_fonts_to_host(repo: Repository, auth: AuthContext) -> list:
     return repo.sync_fonts(auth, F.install_font_bytes)
 
 
+OIDC_KEY = "oidc.json"
+_OIDC_PROVIDERS = ("google", "microsoft")
+
+
+def _oidc_status(stored: dict) -> dict:
+    """Presence only — a client secret must never come back out of the API."""
+    return {p: {"configured": bool(stored.get(p, {}).get("client_id")
+                                   and stored.get(p, {}).get("client_secret"))}
+            for p in _OIDC_PROVIDERS}
+
+
+@settings_router.get("/settings/oidc")
+def get_oidc(auth: AuthContext = Depends(get_auth),
+            repo: Repository = Depends(get_repository),
+            user: User = Depends(require_admin)) -> dict:
+    """Whether Google/Microsoft sign-in is configured. Never echoes a client
+    secret (spec §9) — only whether one has been set."""
+    stored = repo.get_setting(auth, OIDC_KEY) or {}
+    return _oidc_status(stored)
+
+
+@settings_router.put("/settings/oidc")
+def put_oidc(payload: dict = Body(...),
+            auth: AuthContext = Depends(get_auth),
+            repo: Repository = Depends(get_repository),
+            user: User = Depends(require_admin)) -> dict:
+    """Set a provider's client credentials. Admin only, and the response
+    never repeats the secret back — see get_oidc."""
+    if not isinstance(payload, dict) or not set(payload) <= set(_OIDC_PROVIDERS):
+        raise HTTPException(422, f"providers must be a subset of {_OIDC_PROVIDERS}")
+    stored = repo.get_setting(auth, OIDC_KEY) or {}
+    for provider, entry in payload.items():
+        if not isinstance(entry, dict) or not entry.get("client_id") or not entry.get("client_secret"):
+            raise HTTPException(422, f"{provider} needs client_id and client_secret")
+        stored[provider] = {"client_id": entry["client_id"], "client_secret": entry["client_secret"]}
+    repo.set_setting(auth, OIDC_KEY, stored)
+    return _oidc_status(stored)
+
+
 __all__ = ["settings_router", "sync_fonts_to_host", "apply_chart_font"]
