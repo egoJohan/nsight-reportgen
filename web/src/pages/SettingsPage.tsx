@@ -22,10 +22,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EMPTY, PAGE, PAGE_TITLE, PANEL, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
-  useUsers, useInvites, useUserActions, useGrantableCustomers,
+  useUsers, useInvites, useUserActions,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
-import type { InstalledFont, MissingFont, StudioUser, Invite, UserGrantInput } from "@/lib/api";
+import type { InstalledFont, MissingFont, StudioUser, Invite } from "@/lib/api";
 
 function bytes(n: number): string {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
@@ -257,80 +257,6 @@ function FontsTab() {
   );
 }
 
-/** Adds one customer grant to the set being built, at "view" or "edit". Used
- *  inside the invite dialog — a colleague should not land in an empty app,
- *  so an invite can hand them access up front instead of a second trip here
- *  once they've signed in. */
-function GrantPicker({
-  grants,
-  onChange,
-}: {
-  grants: UserGrantInput[];
-  onChange: (grants: UserGrantInput[]) => void;
-}) {
-  // The grant editor's own listing (task-11): unlike `useCustomers`, this
-  // is admin-only and NOT grant-filtered, so an admin with no grants yet
-  // still has customers to pick from -- see api.ts's listGrantableCustomers.
-  const { data: customers } = useGrantableCustomers();
-  const [customerId, setCustomerId] = useState("");
-  const [mode, setMode] = useState<"view" | "edit">("view");
-
-  function add() {
-    if (!customerId || grants.some((g) => g.scope === customerId)) return;
-    onChange([...grants, { scope: customerId, mode }]);
-    setCustomerId("");
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <select
-          className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-surface px-2.5 text-sm"
-          value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
-        >
-          <option value="">Choose a customer…</option>
-          {(customers ?? [])
-            .filter((c) => !grants.some((g) => g.scope === c.id))
-            .map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-        </select>
-        <select
-          className="h-8 w-24 rounded-lg border border-input bg-surface px-2.5 text-sm"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "view" | "edit")}
-        >
-          <option value="view">View</option>
-          <option value="edit">Edit</option>
-        </select>
-        <Button size="sm" variant="outline" disabled={!customerId} onClick={add}>
-          <PlusIcon className="size-4" />
-        </Button>
-      </div>
-      {grants.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {grants.map((g) => {
-            const name = (customers ?? []).find((c) => c.id === g.scope)?.name ?? g.scope;
-            return (
-              <Badge key={g.scope} variant="secondary" className="gap-1">
-                {name} · {g.mode}
-                <button
-                  type="button"
-                  className="ml-1 opacity-60 hover:opacity-100"
-                  onClick={() => onChange(grants.filter((x) => x.scope !== g.scope))}
-                >
-                  ×
-                </button>
-              </Badge>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Invite by email, optionally handing over customer access up front.
  *
  *  The token is returned exactly once, in this response — there is no way
@@ -342,12 +268,10 @@ function GrantPicker({
 function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const actions = useUserActions();
   const [email, setEmail] = useState("");
-  const [grants, setGrants] = useState<UserGrantInput[]>([]);
   const [result, setResult] = useState<{ link: string; emailed: boolean } | null>(null);
 
   function reset() {
     setEmail("");
-    setGrants([]);
     setResult(null);
   }
 
@@ -357,7 +281,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
         <DialogHeader>
           <DialogTitle>Invite someone to nSight Studio</DialogTitle>
           <DialogDescription>
-            They&rsquo;ll get an email with a link to sign in. Access is granted the moment they accept.
+            They&rsquo;ll get an email with a link to sign in.
           </DialogDescription>
         </DialogHeader>
         {result ? (
@@ -394,7 +318,6 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
               onChange={(e) => setEmail(e.target.value)}
               type="email"
             />
-            <GrantPicker grants={grants} onChange={setGrants} />
           </div>
         )}
         <DialogFooter>
@@ -405,7 +328,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
               disabled={!email || actions.invite.isPending}
               onClick={() =>
                 actions.invite.mutate(
-                  { email, grants },
+                  { email, grants: [] },
                   {
                     onSuccess: (r) => setResult({ link: r.link, emailed: r.emailed }),
                     onError: (e) => toast.error(e.message),
@@ -427,63 +350,16 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
  *  reuses the same picker, added at the bottom of the row. */
 function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
   const actions = useUserActions();
-  const [editingGrants, setEditingGrants] = useState(false);
 
-  function setMode(scope: string, mode: "view" | "edit") {
-    actions.setGrants.mutate({
-      userId: user.id,
-      grants: user.grants.map((g) => (g.scope === scope ? { scope, mode } : { scope: g.scope, mode: g.mode })),
-    }, { onError: (e) => toast.error(e.message) });
-  }
 
-  function removeGrant(scope: string) {
-    actions.setGrants.mutate({
-      userId: user.id,
-      grants: user.grants.filter((x) => x.scope !== scope).map((x) => ({ scope: x.scope, mode: x.mode })),
-    }, { onError: (e) => toast.error(e.message) });
-  }
 
-  function addGrants(added: UserGrantInput[]) {
-    const merged = [
-      ...user.grants.map((g) => ({ scope: g.scope, mode: g.mode })),
-      ...added.filter((a) => !user.grants.some((g) => g.scope === a.scope)),
-    ];
-    actions.setGrants.mutate({ userId: user.id, grants: merged }, { onError: (e) => toast.error(e.message) });
-  }
+
 
   return (
     <div className={`${ROW} flex-col items-stretch gap-3`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{user.email}</p>
-          {user.grants.length === 0 ? (
-            <p className="mt-1 text-xs text-muted-foreground">No customers granted yet</p>
-          ) : (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {user.grants.map((g) => (
-                <Badge key={g.scope} variant={g.customer_name ? "secondary" : "destructive"} className="gap-1">
-                  {g.customer_name ?? "deleted"}
-                  {g.case_name ? ` / ${g.case_name}` : ""} ·{" "}
-                  <button
-                    type="button"
-                    className="underline decoration-dotted underline-offset-2"
-                    title="Switch between view and edit"
-                    onClick={() => setMode(g.scope, g.mode === "view" ? "edit" : "view")}
-                  >
-                    {g.mode}
-                  </button>
-                  <button
-                    type="button"
-                    className="ml-1 opacity-60 hover:opacity-100"
-                    title="Remove this grant"
-                    onClick={() => removeGrant(g.scope)}
-                  >
-                    ×
-                  </button>
-                </Badge>
-              ))}
-            </div>
-          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -516,13 +392,6 @@ function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
           </Button>
         </div>
       </div>
-      {editingGrants ? (
-        <GrantPicker grants={[]} onChange={(added) => { addGrants(added); setEditingGrants(false); }} />
-      ) : (
-        <Button size="sm" variant="outline" className="w-fit" onClick={() => setEditingGrants(true)}>
-          <PlusIcon className="size-4" /> Grant a customer
-        </Button>
-      )}
     </div>
   );
 }
