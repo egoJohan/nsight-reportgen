@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { PlusIcon, Building2Icon, ArrowRightIcon } from "lucide-react";
+import { PlusIcon, Building2Icon, ArrowRightIcon, LockIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { useCustomers, useCreateCustomer } from "@/lib/queries";
+import { useCustomers, useCustomerNames, useCreateCustomer } from "@/lib/queries";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,
@@ -16,6 +16,18 @@ import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces
 export default function CustomersPage() {
   const navigate = useNavigate();
   const { data: customers, isLoading, isError } = useCustomers();
+  const { data: allNames } = useCustomerNames();
+
+  // The same one-list rule the sidebar follows: customers you cannot open are
+  // listed here too, in their alphabetical place, so this page and the menu
+  // agree about what exists. Without them the request flow is unreachable from
+  // this page — you can only ask about a customer you can already see.
+  const merged = [
+    ...(customers ?? []).map((c) => ({ id: c.id, name: c.name, accessible: true })),
+    ...(allNames ?? [])
+      .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
+      .map((n) => ({ id: n.id, name: n.name, accessible: false })),
+  ].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   const createCustomer = useCreateCustomer();
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
@@ -74,15 +86,24 @@ export default function CustomersPage() {
           </div>
         )}
 
-        {customers?.map((c) => (
+        {merged.map((c) => (
           <button
             key={c.id}
             onClick={() => navigate(`/customers/${c.id}`)}
             className={ROW}
           >
             <span className="flex items-center gap-3">
-              <Building2Icon className="size-5 text-muted-foreground" />
-              <span className="font-medium">{c.name}</span>
+              {c.accessible ? (
+                <Building2Icon className="size-5 text-muted-foreground" />
+              ) : (
+                <LockIcon className="size-4 text-muted-foreground opacity-70" />
+              )}
+              <span className={c.accessible ? "font-medium" : "font-medium text-muted-foreground"}>
+                {c.name}
+              </span>
+              {!c.accessible && (
+                <span className="text-xs text-muted-foreground">no access</span>
+              )}
             </span>
             <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
