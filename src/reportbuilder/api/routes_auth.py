@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 
+import httpx
 import itsdangerous
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
@@ -253,6 +254,11 @@ async def oidc_login(provider: str, request: Request, response: Response,
         # A clean 503, not a 500 -- an unconfigured (or, for Microsoft,
         # un-tenant-pinned) provider is an operator problem, not a bug.
         raise HTTPException(503, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        # The provider's discovery endpoint didn't answer (DNS, connection
+        # refused, timeout, ...) -- a clean 502, not an unhandled exception
+        # that would otherwise 500 (spec §10: "OIDC provider unreachable").
+        raise HTTPException(502, f"{provider} is unreachable right now") from exc
 
     key = get_or_create_signing_key(repo, auth)
     payload = _oauth_codec(key).dumps({"state": state, "nonce": nonce, "next": next})
