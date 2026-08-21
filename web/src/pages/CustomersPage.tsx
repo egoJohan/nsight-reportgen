@@ -101,9 +101,6 @@ export default function CustomersPage() {
               <span className={c.accessible ? "font-medium" : "font-medium text-muted-foreground"}>
                 {c.name}
               </span>
-              {!c.accessible && (
-                <span className="text-xs text-muted-foreground">no access</span>
-              )}
             </span>
             <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
