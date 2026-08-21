@@ -104,44 +104,6 @@ function CustomerCases({ customerId, canEdit }: { customerId: string; canEdit: b
   );
 }
 
-/** Cases created before the hierarchy existed. They belong to no customer, so
- *  they get their own group rather than a separate page — one navigation
- *  surface instead of two. Disappears once they are backfilled. */
-function LegacyCasesGroup() {
-  const { data: cases } = useCases();
-  const { id: activeCaseId } = useParams();
-  const [open, setOpen] = useState(false);
-
-  if (!cases?.length) return null;
-
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton onClick={() => setOpen((v) => !v)} tooltip="No customer">
-        <ChevronRightIcon
-          className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <FolderOpenIcon className="size-4" />
-        <span className="truncate text-muted-foreground">No customer</span>
-      </SidebarMenuButton>
-      {open && (
-        <SidebarMenuSub>
-          {cases.map((c) => (
-            <SidebarMenuSubItem key={c.id}>
-              <SidebarMenuSubButton
-                render={<NavLink to={`/cases/${c.id}`} />}
-                isActive={activeCaseId === c.id}
-              >
-                <FolderOpenIcon className="size-4" />
-                <span className="truncate">{c.name}</span>
-              </SidebarMenuSubButton>
-            </SidebarMenuSubItem>
-          ))}
-        </SidebarMenuSub>
-      )}
-    </SidebarMenuItem>
-  );
-}
-
 /** Asiakas -> Case tree. The menu mirrors the hierarchy: a case is only
  *  reachable through the customer that owns it. */
 function CustomersNav() {
@@ -177,14 +139,30 @@ function CustomersNav() {
         const open = !!openIds[c.id];
         return (
           <SidebarMenuItem key={c.id}>
+            {/* The label navigates; only the chevron folds. Clicking a
+                customer's NAME and getting a fold instead of that customer's
+                page is the kind of thing you re-learn every time you use it —
+                the disclosure triangle is the affordance for disclosure. */}
             <SidebarMenuButton
-              onClick={() => toggle(c.id)}
+              render={<NavLink to={`/customers/${c.id}`} />}
               isActive={routeCustomerId === c.id}
               tooltip={c.name}
             >
-              <ChevronRightIcon
-                className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
-              />
+              <button
+                type="button"
+                aria-label={open ? `Collapse ${c.name}` : `Expand ${c.name}`}
+                className="-m-1 shrink-0 rounded p-1 hover:bg-accent"
+                onClick={(e) => {
+                  // The row is a link; the chevron must not follow it.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  toggle(c.id);
+                }}
+              >
+                <ChevronRightIcon
+                  className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}
+                />
+              </button>
               <Building2Icon className="size-4" />
               <span className="truncate">{c.name}</span>
             </SidebarMenuButton>
@@ -193,7 +171,6 @@ function CustomersNav() {
         );
       })}
 
-      <LegacyCasesGroup />
     </SidebarMenu>
   );
 }
