@@ -34,4 +34,4 @@ def test_public_routes_are_few_and_named():
     assert PUBLIC_ROUTES == frozenset({
         "/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc",
         "/auth/register", "/auth/login/password", "/auth/logout",
-        "/auth/login/{provider}", "/auth/callback/{provider}"})
+        "/auth/login/{provider}", "/auth/callback/{provider}", "/auth/providers"})

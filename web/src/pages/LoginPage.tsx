@@ -1,6 +1,6 @@
 import { type ReactNode, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,16 +24,56 @@ const UNREACHABLE = "Could not reach the server. Try again.";
 
 type Mode = "signin" | "register";
 
-/** Google/Microsoft lead (spec §4, Part B — Tasks 10-14); password sits
- *  below, quieter, but is the only method that actually works until then.
- *
- *  Part B's seam: delete `disabled` and give this an `onClick` that does a
- *  real navigation — `location.assign(`${API_BASE}/auth/${provider}`)` —
- *  once GET /auth/google and /auth/microsoft exist server-side. A `<button>`
- *  on purpose, not an `<a href>`: OIDC needs a fresh navigation each click
- *  (no bfcache reuse of a stale redirect), which `location.assign` gives it
- *  same as a link would, without a dead href sitting in the DOM meanwhile.
+/** Where an SSO click actually goes. A plain `<a href>`, not `onClick` +
+ *  `location.assign`: this has to be a real top-level browser navigation so
+ *  the 302 from `/auth/login/{provider}` is followed by the browser itself
+ *  — a `fetch` cannot follow a cross-origin redirect into a consent screen,
+ *  it just fails opaque-CORS. `next` rides along as a query param; the
+ *  backend stashes it in the `nsight_oauth` state cookie (routes_auth.py)
+ *  so it survives the round trip to the provider and back, and is read back
+ *  out of that cookie — not the URL — when the callback redirects into the
+ *  app on success.
  */
+const providerLoginUrl = (provider: "google" | "microsoft", next: string): string =>
+  `${API_BASE}/auth/login/${provider}?next=${encodeURIComponent(next)}`;
+
+/** Which of the two providers are actually configured (`PUT /settings/oidc`)
+ *  — this page is signed-out, so it cannot call that route (admin-only); it
+ *  calls `GET /auth/providers` instead, a deliberately public sibling that
+ *  reports the same presence flags and nothing else (no client id, no
+ *  secret). Until it resolves, both buttons stay hidden rather than risking
+ *  a flash of a button that 503s on click.
+ */
+interface ProviderAvailability {
+  google: boolean;
+  microsoft: boolean;
+}
+
+function useProviderAvailability() {
+  return useQuery<ProviderAvailability>({
+    queryKey: ["auth", "providers"],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/auth/providers`);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+}
+
+/** The callback (routes_auth.py `oidc_callback`) never mints a session on
+ *  refusal — it redirects here with `?error=…` instead, so this is the only
+ *  place that refusal is ever shown. `not_allowed` is spec §4 step 3: a real
+ *  identity, an email nSight does not admit. `sign_in_failed` covers
+ *  everything upstream of that check (a rejected/expired code, a bad token)
+ *  — deliberately vaguer, since the server's own log line is where the real
+ *  reason lives (never sent to the browser).
+ */
+const SSO_ERROR_MESSAGES: Record<string, string> = {
+  not_allowed: "That email isn't set up for nSight Studio. Ask an admin to add it, then try again.",
+  sign_in_failed: "That sign-in didn't go through. Try again, or use your password below.",
+};
+
 /** The providers' own marks, inline.
  *
  *  Inline SVG rather than a file or a CDN: these sit on the one screen a
@@ -65,12 +105,14 @@ function MicrosoftMark() {
   );
 }
 
-function ProviderButton({ label, mark }: { label: string; mark: ReactNode }) {
+function ProviderButton({ label, mark, href }: { label: string; mark: ReactNode; href: string }) {
   return (
-    <Button type="button" variant="outline" className="w-full justify-center gap-2" disabled>
-      {mark}
-      {label}
-    </Button>
+    <a href={href}>
+      <Button type="button" variant="outline" className="w-full justify-center gap-2">
+        {mark}
+        {label}
+      </Button>
+    </a>
   );
 }
 
@@ -79,6 +121,13 @@ export default function LoginPage() {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const next = params.get("next") || "/";
+  const ssoErrorCode = params.get("error");
+  const ssoError = ssoErrorCode
+    ? (SSO_ERROR_MESSAGES[ssoErrorCode] ?? "Sign-in didn't complete. Try again.")
+    : null;
+  const { data: providers } = useProviderAvailability();
+  const showGoogle = providers?.google ?? false;
+  const showMicrosoft = providers?.microsoft ?? false;
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
@@ -161,23 +210,44 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* SSO leads. Both disabled until Part B — see ProviderButton. */}
-          <div className="space-y-2">
-            <ProviderButton label="Continue with Google" mark={<GoogleMark />} />
-            <ProviderButton label="Continue with Microsoft" mark={<MicrosoftMark />} />
-            <p className="text-center text-xs text-muted-foreground">
-              Google and Microsoft sign-in are not configured yet.
+          {ssoError && (
+            <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              {ssoError}
             </p>
-          </div>
+          )}
 
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center">
-              <span className="bg-surface px-2 text-xs text-muted-foreground">or</span>
-            </div>
-          </div>
+          {/* Only offer a provider GET /auth/providers reports configured —
+              see useProviderAvailability. Hidden entirely, divider included,
+              when neither is (or while that check is still loading). */}
+          {(showGoogle || showMicrosoft) && (
+            <>
+              <div className="space-y-2">
+                {showGoogle && (
+                  <ProviderButton
+                    label="Continue with Google"
+                    mark={<GoogleMark />}
+                    href={providerLoginUrl("google", next)}
+                  />
+                )}
+                {showMicrosoft && (
+                  <ProviderButton
+                    label="Continue with Microsoft"
+                    mark={<MicrosoftMark />}
+                    href={providerLoginUrl("microsoft", next)}
+                  />
+                )}
+              </div>
+
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-surface px-2 text-xs text-muted-foreground">or</span>
+                </div>
+              </div>
+            </>
+          )}
 
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">

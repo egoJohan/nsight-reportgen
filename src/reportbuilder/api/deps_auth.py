@@ -25,7 +25,13 @@ PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
                            # is served here but a redirect to the provider,
                            # or a session mint gated by
                            # identity.resolve_signed_in_user.
-                           "/auth/login/{provider}", "/auth/callback/{provider}"})
+                           "/auth/login/{provider}", "/auth/callback/{provider}",
+                           # Also necessarily public: the signed-out login page's
+                           # only way to know which SSO buttons to offer.
+                           # Presence only -- see routes_auth.auth_providers --
+                           # never a client id, secret, or anything else
+                           # /settings/oidc (admin-only) guards.
+                           "/auth/providers"})
 
 
 def current_user(request: Request,

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 
 from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
+from reportbuilder.api.routes_settings import OIDC_KEY
 from reportbuilder.auth import identity, oidc, password, session
 from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.auth.permissions import User
@@ -216,6 +217,23 @@ def logout(request: Request, response: Response,
 @auth_router.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return _user_out(user)
+
+
+@auth_router.get("/providers")
+def auth_providers(auth: AuthContext = Depends(get_auth),
+                   repo: Repository = Depends(get_repository)) -> dict:
+    """Which SSO providers are configured -- deliberately public: this is how
+    the signed-out login page decides which of the two buttons to draw.
+    `/settings/oidc` reports the same underlying fact but is admin-only (it
+    also matters for /settings/oidc's own audience -- an admin deciding
+    whether to configure a provider), so it cannot be the thing a signed-out
+    login page calls. This mirrors routes_settings._oidc_status's
+    presence-only shape -- never a client id or secret -- just flattened to
+    `{provider: bool}` since that is all a login page needs to decide.
+    """
+    stored = repo.get_setting(auth, OIDC_KEY) or {}
+    return {p: bool(stored.get(p, {}).get("client_id") and stored.get(p, {}).get("client_secret"))
+            for p in _OIDC_PROVIDERS}
 
 
 @auth_router.get("/login/{provider}")
