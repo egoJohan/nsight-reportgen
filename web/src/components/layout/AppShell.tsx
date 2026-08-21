@@ -3,6 +3,7 @@ import {
   Outlet,
   NavLink,
   useLocation,
+  useNavigate,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -42,9 +43,11 @@ import {
   SettingsIcon,
   XIcon,
   MessageSquareTextIcon,
+  LogOutIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
+import { useSession, signOut, type Me } from "@/lib/session";
 
 /** One customer's cases, fetched only while the group is open so opening the
  *  sidebar does not fan out a request per customer. */
@@ -318,7 +321,79 @@ function CloseReportButton() {
   );
 }
 
+/** Who is signed in, and the one way out. Shown, not hidden behind a menu —
+ *  a session that outlives the person who opened it is exactly the kind of
+ *  thing that should be visible at a glance. */
+function UserFooter({ me }: { me: Me }) {
+  const [busy, setBusy] = useState(false);
+
+  async function handleSignOut() {
+    setBusy(true);
+    try {
+      await signOut();
+    } finally {
+      // A hard navigation, not react-router's `navigate()`: this component
+      // is still mounted with the pre-sign-out `me` while the request is in
+      // flight, so a client-side navigate here races AppShell's own guard
+      // effect — which also fires once the session query settles to null
+      // while AppShell is still on the old route, and can re-add its own
+      // `?next=` back onto the very page being signed out of. `location
+      // .assign` sidesteps the race by dropping the whole SPA and starting
+      // over, the same reasoning api.ts's 401 handler already relies on.
+      location.assign("/login");
+    }
+  }
+
+  return (
+    <div className="mt-auto space-y-1 p-2">
+      <div className="flex items-center gap-2 px-2 py-1 group-data-[collapsible=icon]:justify-center">
+        <div
+          className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground"
+          title={me.email}
+        >
+          {(me.name || me.email).slice(0, 1).toUpperCase()}
+        </div>
+        <p className="min-w-0 truncate text-xs font-medium group-data-[collapsible=icon]:hidden">
+          {me.name || me.email}
+        </p>
+      </div>
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton render={<NavLink to="/settings" />} tooltip="Settings">
+            <SettingsIcon className="size-4" />
+            <span>Settings</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton onClick={handleSignOut} disabled={busy} tooltip="Sign out">
+            <LogOutIcon className="size-4" />
+            <span>Sign out</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </div>
+  );
+}
+
 export default function AppShell() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { data: me, isLoading: sessionLoading } = useSession();
+
+  useEffect(() => {
+    if (!sessionLoading && me === null) {
+      const next = encodeURIComponent(location.pathname + location.search);
+      navigate(`/login?next=${next}`, { replace: true });
+    }
+  }, [sessionLoading, me, location.pathname, location.search, navigate]);
+
+  if (sessionLoading || !me) {
+    // Avoids a flash of the shell (and of every page's own data fetches)
+    // before the redirect above fires. `!me` rather than `me === null`
+    // narrows out `undefined` too, so `me` below is a plain `Me`.
+    return null;
+  }
+
   return (
     <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon">
@@ -360,20 +435,9 @@ export default function AppShell() {
           </SidebarGroup>
         </SidebarContent>
 
-        {/* Settings footer */}
-        <div className="mt-auto p-2">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={<NavLink to="/settings" />}
-                tooltip="Settings"
-              >
-                <SettingsIcon className="size-4" />
-                <span>Settings</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </div>
+        {/* Settings + who is signed in, with the way out. `me` is never null
+            here — the guard above returns before this renders otherwise. */}
+        <UserFooter me={me} />
       </Sidebar>
 
       <SidebarInset>

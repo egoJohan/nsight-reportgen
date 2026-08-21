@@ -278,6 +278,22 @@ export interface ReportDoc {
 // ---- Client ----
 
 async function json<T>(res: Response): Promise<T> {
+  // A session dies mid-use constantly in normal operation (idle timeout,
+  // absolute expiry, a revoke from another tab) — this is the one place
+  // almost every call in this file passes through, so it is the one place
+  // that catches all of them and sends the browser back to sign-in instead
+  // of leaving the SPA showing a broken page or looping error toasts.
+  // `location.assign` (a real navigation), not `navigate()`: this module has
+  // no router context, and a hard navigation also clears any in-flight
+  // requests and component state that assumed a live session.
+  if (res.status === 401 && !location.pathname.startsWith("/login")) {
+    const next = encodeURIComponent(location.pathname + location.search);
+    location.assign(`/login?next=${next}`);
+    // The navigation above is async; throw so the caller's `.then` chain
+    // does not go on to treat a 401 body as a success payload in the
+    // meantime.
+    throw new Error("401 Unauthorized: redirecting to sign-in");
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status} ${res.statusText}: ${text}`);

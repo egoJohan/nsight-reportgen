@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import AppShell from "@/components/layout/AppShell";
+import LoginPage from "@/pages/LoginPage";
 import RecentReportsPage from "@/pages/RecentReportsPage";
 import CustomersPage from "@/pages/CustomersPage";
 import CustomerCasesPage from "@/pages/CustomerCasesPage";
@@ -9,6 +10,9 @@ import SettingsPage from "@/pages/SettingsPage";
 export default function App() {
   return (
     <Routes>
+      {/* Outside AppShell: signing in has no sidebar, no breadcrumb, nothing
+          that assumes a session already exists. */}
+      <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
         {/* The landing page answers "where was I?" — the customer tree is
             navigation and lives in the sidebar. */}
