@@ -76,7 +76,11 @@ class TestCaseUnderCustomer:
         assert r.status_code == 201
         k = r.json()
         assert k["customer_id"] == c["id"] and k["name"] == "Brändi 2026"
-        assert client.get(f"/customers/{c['id']}/cases").json() == [k]
+        # The list route adds completed_reports/draft_reports per study
+        # (a freshly created case has none of either), so compare on top of
+        # the create response's own fields rather than exact equality.
+        listed = client.get(f"/customers/{c['id']}/cases").json()
+        assert listed == [{**k, "completed_reports": 0, "draft_reports": 0}]
 
     def test_cases_do_not_leak_between_customers(self, client):
         a, b = _customer(client, "Acme"), _customer(client, "Beta")
@@ -92,6 +96,113 @@ class TestCaseUnderCustomer:
         k = client.post(f"/customers/{c['id']}/cases", json={"name": "Vanha"}).json()
         r = client.patch(f"/customers/{c['id']}/cases/{k['id']}", json={"name": "Uusi"})
         assert r.status_code == 200 and r.json()["name"] == "Uusi"
+
+
+class TestStudyReportStats:
+    """`completed_reports`/`draft_reports` under each study on
+    `GET /customers/{id}/cases` — Empty folds into draft (see
+    routes_customers._report_stats)."""
+
+    def test_a_study_with_no_reports_has_no_counts_worth_reading(self, client):
+        c = _customer(client)
+        client.post(f"/customers/{c['id']}/cases", json={"name": "K"})
+        listed = client.get(f"/customers/{c['id']}/cases").json()[0]
+        assert listed["completed_reports"] == 0
+        assert listed["draft_reports"] == 0
+
+    def test_empty_and_draft_both_count_as_draft_only_a_render_completes(
+        self, client, store
+    ):
+        from reportbuilder.testing.fixtures import report_json_n_charts
+
+        c = _customer(client)
+        k = client.post(f"/customers/{c['id']}/cases", json={"name": "K"}).json()
+
+        # Empty: no charts at all.
+        client.post(f"/cases/{k['id']}/reports", json=report_json_n_charts(0))
+        # Draft: has charts, but no deck has ever been rendered for it.
+        client.post(f"/cases/{k['id']}/reports", json=report_json_n_charts(1))
+        # Completed: a deck has been stamped onto this one's sidecar.
+        rid = client.post(
+            f"/cases/{k['id']}/reports", json=report_json_n_charts(2)
+        ).json()["report_id"]
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        repo.save_render(auth, k["customer_id"], k["id"], rid, b"fake-pptx", key="k1")
+
+        listed = client.get(f"/customers/{c['id']}/cases").json()[0]
+        assert listed["completed_reports"] == 1
+        # Empty (1) + Draft (1) folded into one bucket.
+        assert listed["draft_reports"] == 2
+        # The total must reconcile with what a user sees inside the study.
+        reports = client.get(f"/cases/{k['id']}/reports").json()["reports"]
+        assert listed["completed_reports"] + listed["draft_reports"] == len(reports)
+
+    def test_counts_do_not_leak_between_studies(self, client):
+        from reportbuilder.testing.fixtures import report_json_n_charts
+
+        c = _customer(client)
+        k1 = client.post(f"/customers/{c['id']}/cases", json={"name": "K1"}).json()
+        k2 = client.post(f"/customers/{c['id']}/cases", json={"name": "K2"}).json()
+        client.post(f"/cases/{k1['id']}/reports", json=report_json_n_charts(1))
+
+        listed = {x["id"]: x for x in client.get(f"/customers/{c['id']}/cases").json()}
+        assert listed[k1["id"]]["draft_reports"] == 1
+        assert listed[k2["id"]]["draft_reports"] == 0
+        assert listed[k2["id"]]["completed_reports"] == 0
+
+
+class TestCustomerListStats:
+    """The same statistics, aggregated, plus study count and owners, on
+    `GET /customers`."""
+
+    def test_case_count_and_report_stats_are_aggregated_across_studies(
+        self, client, store
+    ):
+        from reportbuilder.testing.fixtures import report_json_n_charts
+
+        c = _customer(client)
+        k1 = client.post(f"/customers/{c['id']}/cases", json={"name": "K1"}).json()
+        k2 = client.post(f"/customers/{c['id']}/cases", json={"name": "K2"}).json()
+        client.post(f"/cases/{k1['id']}/reports", json=report_json_n_charts(1))
+        client.post(f"/cases/{k2['id']}/reports", json=report_json_n_charts(0))
+        rid = client.post(
+            f"/cases/{k2['id']}/reports", json=report_json_n_charts(2)
+        ).json()["report_id"]
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        repo.save_render(auth, k2["customer_id"], k2["id"], rid, b"fake", key="k1")
+
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        assert row["case_count"] == 2
+        assert row["completed_reports"] == 1
+        assert row["draft_reports"] == 2  # the K1 draft + the K2 empty
+
+    def test_owners_are_edit_grant_holders_named_where_possible(self, client, store):
+        from reportbuilder.auth.permissions import Grant as PermGrant
+        from reportbuilder.auth.permissions import User as PermUser
+
+        c = _customer(client)
+        repo = Repository(store)
+        auth = AuthContext(token="user-1")
+        # Named -> shown by name, not email.
+        repo.save_user(auth, PermUser(id="", email="alice@example.com", name="Alice A",
+                                      grants=(PermGrant(c["id"], "edit"),)))
+        # No name on file -> falls back to email.
+        repo.save_user(auth, PermUser(id="", email="cara@example.com", name="",
+                                      grants=(PermGrant(c["id"], "edit"),)))
+        # View only -> not an owner, must not appear.
+        repo.save_user(auth, PermUser(id="", email="viewer@example.com", name="Viewer",
+                                      grants=(PermGrant(c["id"], "view"),)))
+
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        names = {o["name"] for o in row["owners"]}
+        assert names == {"Alice A", "cara@example.com"}
+
+    def test_a_customer_with_no_edit_holders_has_no_owners(self, client):
+        c = _customer(client)
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        assert row["owners"] == []
 
 
 class TestListingIsPermissionFiltered:

@@ -191,19 +191,37 @@ export default function CustomerCasesPage() {
           </div>
         )}
 
-        {cases?.map((k) => (
-          <button
-            key={k.id}
-            onClick={() => navigate(`/cases/${k.id}`)}
-            className={ROW}
-          >
-            <span className="flex items-center gap-3">
-              <FolderIcon className="size-5 text-muted-foreground" />
-              <span className="font-medium">{k.name}</span>
-            </span>
-            <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
-        ))}
+        {cases?.map((k) => {
+          // Say nothing rather than "0 drafts, 0 completed" — a study with
+          // no reports yet should read as empty, not as a row of zeroes.
+          // Draft folds in "Empty" (no charts, no deck) along with "Draft"
+          // (charts, no deck): neither is a deliverable, so this must agree
+          // with the report row's own three-state badge (ReportsSection.tsx)
+          // or the two pages would tell a different story about the same
+          // reports — see routes_customers.py's `_report_stats`.
+          const total = k.completed_reports + k.draft_reports;
+          return (
+            <button
+              key={k.id}
+              onClick={() => navigate(`/cases/${k.id}`)}
+              className={ROW}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FolderIcon className="size-5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 text-left">
+                  <span className="block truncate font-medium">{k.name}</span>
+                  {total > 0 && (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {k.completed_reports} completed, {k.draft_reports} draft
+                      {k.draft_reports === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          );
+        })}
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

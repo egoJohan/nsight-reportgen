@@ -9,7 +9,40 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useCustomers, useCustomerNames, useCreateCustomer } from "@/lib/queries";
+import type { Customer } from "@/lib/api";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
+
+/** "3 studies · 4 completed, 2 drafts · Owned by Alice, Bob +1" under a
+ *  customer's name — quiet, secondary information, the same idea as a
+ *  report row's own statistic line (ReportsSection.tsx) and the studies
+ *  list's per-study line (CustomerCasesPage.tsx), which this must agree
+ *  with: both read `completed_reports`/`draft_reports` off the same
+ *  server-side definition (routes_customers.py's `_report_stats`).
+ *
+ *  Each clause appears only once there is something to say: a customer
+ *  with no studies yet gets no clause at all rather than "0 studies", and
+ *  one with studies but no reports yet skips straight to owners — an
+ *  empty customer should read as empty, not as a row of zeroes. Owners
+ *  are capped at two names before folding the rest into "+N", so a
+ *  customer with five editors does not grow the row into a paragraph. */
+function customerSubtitle(c: Customer): string | null {
+  const parts: string[] = [];
+  if (c.case_count > 0) {
+    parts.push(`${c.case_count} ${c.case_count === 1 ? "study" : "studies"}`);
+    const total = c.completed_reports + c.draft_reports;
+    if (total > 0) {
+      parts.push(
+        `${c.completed_reports} completed, ${c.draft_reports} draft${c.draft_reports === 1 ? "" : "s"}`
+      );
+    }
+  }
+  if (c.owners.length > 0) {
+    const shown = c.owners.slice(0, 2).map((o) => o.name);
+    const extra = c.owners.length - shown.length;
+    parts.push(`Owned by ${shown.join(", ")}${extra > 0 ? ` +${extra}` : ""}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,
  *  so this sits above the case list rather than beside it. */
@@ -23,10 +56,12 @@ export default function CustomersPage() {
   // agree about what exists. Without them the request flow is unreachable from
   // this page — you can only ask about a customer you can already see.
   const merged = [
-    ...(customers ?? []).map((c) => ({ id: c.id, name: c.name, accessible: true })),
+    // The full row, stats and owners included, rides along for every
+    // customer this caller can actually open.
+    ...(customers ?? []).map((c) => ({ id: c.id, name: c.name, accessible: true, customer: c })),
     ...(allNames ?? [])
       .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
-      .map((n) => ({ id: n.id, name: n.name, accessible: false })),
+      .map((n) => ({ id: n.id, name: n.name, accessible: false, customer: null as Customer | null })),
   ].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   const createCustomer = useCreateCustomer();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -86,25 +121,43 @@ export default function CustomersPage() {
           </div>
         )}
 
-        {merged.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => navigate(`/customers/${c.id}`)}
-            className={ROW}
-          >
-            <span className="flex items-center gap-3">
-              {c.accessible ? (
-                <Building2Icon className="size-5 text-muted-foreground" />
-              ) : (
-                <LockIcon className="size-4 text-muted-foreground opacity-70" />
-              )}
-              <span className={c.accessible ? "font-medium" : "font-medium text-muted-foreground"}>
-                {c.name}
+        {merged.map((c) => {
+          // Only ever set for an accessible row (see `merged` above) — a
+          // customer this caller cannot open shows its name and nothing
+          // else, same as before.
+          const subtitle = c.customer ? customerSubtitle(c.customer) : null;
+          return (
+            <button
+              key={c.id}
+              onClick={() => navigate(`/customers/${c.id}`)}
+              className={ROW}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                {c.accessible ? (
+                  <Building2Icon className="size-5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <LockIcon className="size-4 shrink-0 text-muted-foreground opacity-70" />
+                )}
+                <span className="min-w-0 text-left">
+                  <span
+                    className={
+                      "block truncate " +
+                      (c.accessible ? "font-medium" : "font-medium text-muted-foreground")
+                    }
+                  >
+                    {c.name}
+                  </span>
+                  {subtitle && (
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {subtitle}
+                    </span>
+                  )}
+                </span>
               </span>
-            </span>
-            <ArrowRightIcon className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
-        ))}
+              <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          );
+        })}
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>

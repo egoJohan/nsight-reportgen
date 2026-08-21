@@ -527,6 +527,29 @@ class Repository:
         ]
         return sorted([r for r in refs if r], key=lambda r: r.modified_at, reverse=True)
 
+    def list_reports_for_customer(self, auth: AuthContext, customer_id: str,
+                                  user=None) -> list[ReportRef]:
+        """Every report across every case of one customer, in a SINGLE listing
+        call — the report-counts feature on the customer page and the studies
+        page (routes_customers.py) both need "how many reports per case", and
+        looping `list_reports` once per case would turn one page view into one
+        listing call per study. `case_prefix` nests under `customer_prefix`
+        (paths.py), so one list() under the customer's own prefix, filtered to
+        LABEL_REPORT_META, already covers every case's reports — no per-case
+        loop needed to collect them, only to bucket them afterwards.
+
+        Still one get() per report to read its sidecar (listings never carry
+        bytes, same as `list_reports`) — that part of the cost does not go
+        away, it is just no longer multiplied by the number of studies too.
+        """
+        refs = [
+            self._ref_from_meta(auth, info.path)
+            for info in self.store.list(auth, P.customer_prefix(customer_id),
+                                        labels=[P.LABEL_REPORT_META])
+            if _admits(user, info.path)
+        ]
+        return [r for r in refs if r]
+
     def recent_reports(self, auth: AuthContext, limit: int = 10,
                        user=None) -> list[ReportRef]:
         """The most recently modified reports this user may see, across every

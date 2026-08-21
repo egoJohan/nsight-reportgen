@@ -609,6 +609,17 @@ export interface ResolvedCase {
   can_edit: boolean;
 }
 
+/** One user holding `edit` on a customer — this app's only notion of
+ *  "owner" (see routes_customers.py's `list_customers`). `name` is already
+ *  resolved server-side to a display name, falling back to the user's email
+ *  only when they have never set one — never a raw email field here on
+ *  purpose, since this rides on a route any signed-in user with access to
+ *  the customer can call, not the admin-only user listing. */
+export interface CustomerOwner {
+  id: string;
+  name: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -619,6 +630,16 @@ export interface Customer {
    *  a template, and renaming/deleting the customer are all writes gated by
    *  this — never by is_admin, which is a different right (managing users). */
   can_edit: boolean;
+  /** How many studies this customer has. */
+  case_count: number;
+  /** Reports with a stamped render, across every one of this customer's
+   *  studies — see CustomerCase's own field for the exact definition. */
+  completed_reports: number;
+  /** Every other report, across every study — including one with no charts
+   *  at all, folded in because neither is a deliverable. */
+  draft_reports: number;
+  /** Every user holding `edit` on this customer. */
+  owners: CustomerOwner[];
 }
 
 /** A case now belongs to exactly one customer, so its id alone is no longer a
@@ -628,6 +649,14 @@ export interface CustomerCase {
   customer_id: string;
   name: string;
   template_id?: string;
+  /** Reports with a stamped render (ReportsSection.tsx's "Generated" badge,
+   *  `ReportRef.rendered` in repository.py) — the deliverable a viewer can
+   *  download. */
+  completed_reports: number;
+  /** Every other report in this study: "Draft" (has charts, no deck) and
+   *  "Empty" (no charts, no deck) folded together, since neither is a
+   *  deliverable — see routes_customers.py's `_report_stats`. */
+  draft_reports: number;
 }
 
 const jsonPost = (body: unknown) => ({

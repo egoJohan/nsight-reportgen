@@ -15,8 +15,8 @@ from reportbuilder.api.deps_auth import (
     require_customer_write, require_material,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth.permissions import User, may_write
-from reportbuilder.store.repository import Repository
+from reportbuilder.auth.permissions import EDIT, User, may_write
+from reportbuilder.store.repository import Repository, ReportRef
 from reportbuilder.store.seam import AuthContext, NotFound
 
 customers_router = APIRouter()
@@ -31,6 +31,29 @@ def _name(body: NameBody) -> str:
     if not name:
         raise HTTPException(422, "Name cannot be empty")
     return name
+
+
+def _report_stats(reports: list[ReportRef]) -> tuple[int, int]:
+    """(completed, draft) counts for the "N drafts, N completed" statistic
+    under a study on the customer page, and its aggregate on the customer
+    list.
+
+    Matches the report row badge (ReportsSection.tsx) so the two pages never
+    disagree: "Generated" there means `rendered` is true (a deck exists) --
+    that is "completed" here. "Draft" and "Empty" (no charts, no deck) both
+    fold into "draft": neither is a deliverable someone can walk away with.
+
+    Folding Empty into Draft is also what keeps this cheap. Telling Draft
+    and Empty apart needs a chart count, which lives in the report BODY, not
+    the sidecar `ReportRef` is read from (list_reports /
+    list_reports_for_customer read sidecars only, on purpose -- see their
+    docstrings). Splitting them here would mean fetching every report body
+    for every study, just for a number nobody asked to see chart counts in.
+    `rendered` is already on the sidecar, so this needs no extra reads
+    beyond the ones the caller already made to build `reports`.
+    """
+    completed = sum(1 for r in reports if r.rendered)
+    return completed, len(reports) - completed
 
 
 @customers_router.post("/customers", status_code=201)
@@ -52,10 +75,55 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     general rationale) because the sidebar shows a per-customer "New study"
     link right here in the listing — creating a study is a write against the
     CUSTOMER, so the answer has to be per-row, not a single flag for the page.
+
+    Study count, report stats and owners ride along too, for the same
+    reason: the customer page shows all three under each name, and a
+    second round trip per customer for each would just move the cost from
+    here to there.
+
+    `list_users` is fetched ONCE, outside the loop, and reused for every
+    row's owners — filtering the same in-memory list per customer instead
+    of a users listing per customer. `EDIT` on the customer's own scope is
+    this app's only notion of "owns a customer" (see
+    `access_request_mail.decision_makers`, the access-request approval
+    flow, which already keys "owner" the exact same way — this does not
+    invent a second definition). Only a display NAME rides along per owner,
+    falling back to email only when a user has never set one, and nothing
+    else about them (no email otherwise, no is_admin, no other grants) —
+    `GET /users` is admin-only precisely because a user listing is not
+    public, and this is a deliberately narrow crack in that: any signed-in
+    user who can already see a customer (this route is grant-filtered, see
+    above) can now also see who owns it, nothing more.
+
+    Cost note: for each customer this is one `list_cases` and one
+    `list_reports_for_customer` — both single listing calls regardless of
+    study count (see that method's docstring) — plus one get() per report
+    sidecar. So the shape is O(customers) listings + O(reports) gets across
+    the whole page, not O(customers × studies). `list_users` adds one
+    listing + 2 gets per tenant user, paid once for the page, not once per
+    customer. Fine at today's scale (a handful of customers, tens of
+    reports); if either count reaches the thousands the fix is a
+    denormalised counter kept on write, not a bigger fetch here — the same
+    trade `recent_reports` already documents for its own listing.
     """
-    return [{"id": c.id, "name": c.name, "template_id": c.template_id,
-             "can_edit": may_write(user, c.id)}
-            for c in repo.list_customers(auth, user=user)]
+    customers = repo.list_customers(auth, user=user)
+    users = repo.list_users(auth)
+    out = []
+    for c in customers:
+        cases = repo.list_cases(auth, c.id, user=user)
+        completed, draft = _report_stats(
+            repo.list_reports_for_customer(auth, c.id, user=user))
+        owners = [u for u in users
+                 if any(g.scope == c.id and g.mode == EDIT for g in u.grants)]
+        out.append({
+            "id": c.id, "name": c.name, "template_id": c.template_id,
+            "can_edit": may_write(user, c.id),
+            "case_count": len(cases),
+            "completed_reports": completed,
+            "draft_reports": draft,
+            "owners": [{"id": o.id, "name": o.name or o.email} for o in owners],
+        })
+    return out
 
 
 @customers_router.get("/customers/names")
@@ -170,9 +238,25 @@ def create_case(customer_id: str, body: NameBody,
 def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
                repo: Repository = Depends(get_repository),
                user: User = Depends(require_customer)) -> list[dict]:
-    return [{"id": k.id, "customer_id": k.customer_id, "name": k.name,
-             "template_id": k.template_id}
-            for k in repo.list_cases(auth, customer_id, user=user)]
+    """`completed_reports`/`draft_reports` ride along per study — see
+    `_report_stats` for the definition (matches the report row badge) and
+    why Empty folds into draft.
+
+    One `list_reports_for_customer` call covers every study's reports (see
+    its docstring) — this does NOT loop `list_reports` per case, which
+    would turn one page view into one listing call per study.
+    """
+    cases = repo.list_cases(auth, customer_id, user=user)
+    reports_by_case: dict[str, list[ReportRef]] = {}
+    for r in repo.list_reports_for_customer(auth, customer_id, user=user):
+        reports_by_case.setdefault(r.case_id, []).append(r)
+    out = []
+    for k in cases:
+        completed, draft = _report_stats(reports_by_case.get(k.id, []))
+        out.append({"id": k.id, "customer_id": k.customer_id, "name": k.name,
+                    "template_id": k.template_id,
+                    "completed_reports": completed, "draft_reports": draft})
+    return out
 
 
 @customers_router.get("/customers/{customer_id}/cases/{case_id}")
