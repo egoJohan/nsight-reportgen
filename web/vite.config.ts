@@ -50,6 +50,7 @@ export default defineConfig({
       '/auth': { target: backend, xfwd: true },
       '/users': { target: backend, xfwd: true },
       '/invites': { target: backend, xfwd: true },
+      '/access-requests': { target: backend, xfwd: true },
     },
   },
 })

@@ -22,6 +22,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/user/{user_id}.workspace                 nsight:workspace
     settings/session/{session_id}                    nsight:session
     settings/invite/{invite_id}                      nsight:invite
+    settings/access_request/{request_id}             nsight:access-request
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -57,6 +58,7 @@ LABEL_SESSION = "nsight:session"
 LABEL_PASSWORD = "nsight:password"
 LABEL_INVITE = "nsight:invite"
 LABEL_WORKSPACE = "nsight:workspace"
+LABEL_ACCESS_REQUEST = "nsight:access-request"
 
 SETTINGS_ROOT = "settings"
 
@@ -252,3 +254,15 @@ def invite_path(invite_id: str) -> str:
     `find_user_by_email` scans `list_users`.
     """
     return f"{SETTINGS_ROOT}/invite/{_seg(invite_id, 'invite_id')}"
+
+
+def access_request_path(request_id: str) -> str:
+    """A signed-in user's ask for access to a customer they cannot see.
+
+    Keyed by its own id, not by requester or customer -- an id is not a
+    credential here (unlike `invite_path`'s token): reaching it needs either
+    `require_admin` or being the requester (see routes_access_requests.py),
+    never mere possession of the id, so there is no reason to draw it from
+    `secrets` instead of `_new_id`'s uuid4.
+    """
+    return f"{SETTINGS_ROOT}/access_request/{_seg(request_id, 'request_id')}"

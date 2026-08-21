@@ -5,9 +5,10 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { api, setActivePreviewKey } from "./api";
+import { api, ApiError, setActivePreviewKey } from "./api";
 import type { Substitutions } from "./api";
 import type {
+  AccessMode,
   ChartSpec,
   ChartPreviewTitleMeta,
   ReportDoc,
@@ -15,6 +16,14 @@ import type {
   WordMerge,
   UserGrantInput,
 } from "./api";
+
+/** The HTTP status behind a failed query, or null for anything that isn't
+ *  one of `json()`'s `ApiError`s (a network failure, say). Lets a component
+ *  tell "you may not see this" (404, spec §5 — absence, not refusal) apart
+ *  from a fetch that just needs retrying. */
+export function statusOf(error: unknown): number | null {
+  return error instanceof ApiError ? error.status : null;
+}
 
 // ---- Query keys ----
 export const qk = {
@@ -259,6 +268,9 @@ export function useCustomer(customerId: string | undefined) {
     queryKey: ["customer", customerId],
     queryFn: () => api.customers.get(customerId!),
     enabled: !!customerId,
+    // An ungranted customer 404s (spec §5) — expected for the no-access
+    // page's caller, not worth retrying before it can show that page.
+    retry: false,
   });
 }
 
@@ -267,6 +279,20 @@ export function useCustomerCases(customerId: string | undefined) {
     queryKey: ["customer", customerId, "cases"],
     queryFn: () => api.customers.listCases(customerId!),
     enabled: !!customerId,
+    retry: false,
+  });
+}
+
+/** Id and name only — the one thing a customer page may show someone with no
+ *  grant on it (see api.customers.getName). Used by NoAccessCustomer.tsx,
+ *  fetched independently of `useCustomer` so it still resolves when THAT
+ *  query 404s. */
+export function useCustomerName(customerId: string | undefined) {
+  return useQuery({
+    queryKey: ["customer", customerId, "name"],
+    queryFn: () => api.customers.getName(customerId!),
+    enabled: !!customerId,
+    retry: false,
   });
 }
 
@@ -688,5 +714,37 @@ export function useUserActions() {
       onSuccess: invalidate,
     }),
     revokeInvite: useMutation({ mutationFn: api.users.revokeInvite, onSuccess: invalidate }),
+  };
+}
+
+// ---- Access requests (the no-access page's "Request access" button, and
+// the admin queue that acts on it — see api.accessRequests) ----
+
+/** The signed-in caller's own requests — what the no-access page checks so
+ *  a reload shows "you already asked, pending" instead of the button again. */
+export function useMyAccessRequests() {
+  return useQuery({ queryKey: ["access-requests", "mine"], queryFn: api.accessRequests.mine });
+}
+
+/** Every request, newest first — admin-only (Settings > Users). */
+export function useAccessRequests() {
+  return useQuery({ queryKey: ["access-requests"], queryFn: api.accessRequests.list });
+}
+
+export function useAccessRequestActions() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["access-requests"] });
+    // Approving writes a grant, same as the Users screen's own grant editor.
+    qc.invalidateQueries({ queryKey: ["users"] });
+  };
+  return {
+    create: useMutation({
+      mutationFn: ({ customerId, mode }: { customerId: string; mode: AccessMode }) =>
+        api.accessRequests.create(customerId, mode),
+      onSuccess: invalidate,
+    }),
+    approve: useMutation({ mutationFn: api.accessRequests.approve, onSuccess: invalidate }),
+    refuse: useMutation({ mutationFn: api.accessRequests.refuse, onSuccess: invalidate }),
   };
 }

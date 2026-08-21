@@ -14,18 +14,20 @@ import {
   useCreateCustomerCase,
   useTemplateActions,
   useTemplates,
+  statusOf,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
 import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
 import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
+import NoAccessCustomer from "@/components/NoAccessCustomer";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
 export default function CustomerCasesPage() {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
-  const { data: customer } = useCustomer(customerId);
+  const { data: customer, isError: customerIsError, error: customerError } = useCustomer(customerId);
   const { data: cases, isLoading, isError } = useCustomerCases(customerId);
   const createCase = useCreateCustomerCase(customerId);
   const templates = useTemplateActions(customerId);
@@ -36,11 +38,27 @@ export default function CustomerCasesPage() {
   const [name, setName] = useState("");
   const [managingAccess, setManagingAccess] = useState(false);
 
+  // A customer the caller holds no grant on 404s (spec §5, deps_auth._check)
+  // — absence, not refusal, everywhere else in the app. Here alone that 404
+  // gets a page instead of a dead end: NoAccessCustomer, fed by the one
+  // narrow route that may still name what was refused
+  // (GET /customers/{id}/name — see routes_customers.py's `customer_name`).
+  const noAccess = !!customerId && customerIsError && statusOf(customerError) === 404;
+
+  if (noAccess) {
+    return (
+      <div className={PAGE}>
+        <NoAccessCustomer customerId={customerId!} />
+      </div>
+    );
+  }
+
   // may_write on the customer (see routes_customers.py's get_customer),
   // never is_admin — see CaseDetailPage's `canEdit` for the full reasoning
   // and the courtesy/guard split. Defaults true while `customer` is still
   // loading so the common editor path renders with nothing to wait on.
-  const canEdit = customer?.can_edit ?? true;
+  // Fail closed while the answer is in flight — see CaseDetailPage.
+  const canEdit = customer?.can_edit ?? false;
 
   // Reached from the sidebar's per-customer "Uusi case" link. Gated on
   // canEdit too: hiding the button does not stop someone opening this URL

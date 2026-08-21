@@ -139,7 +139,11 @@ export default function CaseDetailPage() {
   // (require_case_write) re-checks the same grant independently, so a
   // viewer who reaches a write action before this flag resolves — or who
   // calls the API directly — still gets 403.
-  const canEdit = resolved?.can_edit ?? true;
+  // Assume NOT editable until the server says otherwise. Defaulting to true
+  // flashes delete buttons and the workbench at a viewer for one fetch, and
+  // every one of those controls would 403 if clicked. Erring closed costs an
+  // editor a moment of quiet; erring open shows people doors that are locked.
+  const canEdit = resolved?.can_edit ?? false;
   const { workspace, removeReport } = useWorkspace(id ?? "");
   const clearWorkspace = useClearWorkspace();
   // The case→material link is server-side; fall back to it when this browser has

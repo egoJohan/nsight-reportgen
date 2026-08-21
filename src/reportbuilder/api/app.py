@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from reportbuilder.api.deps import get_client
+from reportbuilder.api.routes_access_requests import access_requests_router
 from reportbuilder.api.routes_ai import ai_router
 from reportbuilder.api.routes_auth import auth_router
 from reportbuilder.api.routes_cases import cases_router
@@ -124,6 +125,7 @@ def create_app(client=None) -> FastAPI:
     app.include_router(render_router)
     app.include_router(ai_router)
     app.include_router(users_router)
+    app.include_router(access_requests_router)
 
     # Inject the client if provided
     if client is not None:
