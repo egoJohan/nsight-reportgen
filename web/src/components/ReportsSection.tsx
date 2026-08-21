@@ -117,7 +117,22 @@ function ReportRow({
 }) {
   const { data: doc, isLoading } = useReport(caseId, report.id);
   const n = doc?.charts?.length ?? null;
-  const status = n == null ? null : n === 0 ? "Empty" : "Draft";
+  // Three states, and the last one was missing: a report stayed "Draft" for
+  // ever, because the badge only ever counted charts and never asked whether a
+  // deck had been generated. Empty -> no charts. Draft -> charts, no deck.
+  // Generated -> a deck exists, which is exactly when it becomes downloadable
+  // and when a viewer can see it at all.
+  // "Generated" is checked FIRST and does not depend on the chart count: a deck
+  // on disk is a fact about the deliverable, while `charts` is the report doc as
+  // it stands right now — someone can empty a report after rendering it, and
+  // that must not retitle a downloadable deck as "Empty".
+  const status = report.rendered
+    ? "Generated"
+    : n == null
+      ? null
+      : n === 0
+        ? "Empty"
+        : "Draft";
   const created = formatReportDate(report.createdAt);
   const base =
     n == null
@@ -160,9 +175,9 @@ function ReportRow({
             <Badge
               variant="outline"
               className={
-                status === "Empty"
-                  ? "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
-                  : "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
+                status === "Generated"
+                  ? "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
+                  : "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
               }
             >
               {status}
@@ -204,8 +219,8 @@ function ReportRow({
  * FINISHED reports — a half-built report is the analyst's working state, not
  * a deliverable. "Finished" keys on the server's `rendered` flag (a render
  * has been stamped for the report's current content — see repository.py's
- * ReportRef.rendered), not on the Draft/Empty badge, which only reflects
- * whether the report DOC has charts.
+ * ReportRef.rendered) — the same flag the Generated badge keys on, so "what a
+ * viewer can see" and "what the badge says" cannot drift apart.
  */
 export default function ReportsSection({
   caseId,
