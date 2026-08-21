@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon } from "lucide-react";
+import { PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,8 @@ import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
 import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
 import NoAccessCustomer from "@/components/NoAccessCustomer";
+import { RequestAccessDialog } from "@/components/RequestAccessDialog";
+import type { AccessMode } from "@/lib/api";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
@@ -37,6 +39,7 @@ export default function CustomerCasesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
   const [managingAccess, setManagingAccess] = useState(false);
+  const [requestingPermissions, setRequestingPermissions] = useState(false);
 
   // A customer the caller holds no grant on 404s (spec §5, deps_auth._check)
   // — absence, not refusal, everywhere else in the app. Here alone that 404
@@ -59,6 +62,19 @@ export default function CustomerCasesPage() {
   // loading so the common editor path renders with nothing to wait on.
   // Fail closed while the answer is in flight — see CaseDetailPage.
   const canEdit = customer?.can_edit ?? false;
+
+  // What the "Request permissions" button offers, top right — always the
+  // same slot as "Manage permissions" (see PAGE_HEADER below), shown
+  // whenever ANY permission is missing and hidden only once the caller
+  // holds edit. Reaching this component at all means at least `view` (no
+  // grant is the `noAccess` branch above, which renders NoAccessCustomer
+  // instead — so its own "Request access" button and this one are never on
+  // screen together), so the only thing left to ask for is `edit`. Gated on
+  // `customer` being loaded, not just `!canEdit`: the fail-closed default
+  // while it's in flight would otherwise flash the button for someone who
+  // turns out to already hold edit. is_admin plays no part — an admin who
+  // is themselves only a viewer still has nothing to write with.
+  const missingModes: AccessMode[] = customer && !canEdit ? ["edit"] : [];
 
   // Reached from the sidebar's per-customer "Uusi case" link. Gated on
   // canEdit too: hiding the button does not stop someone opening this URL
@@ -96,13 +112,23 @@ export default function CustomerCasesPage() {
           back, and two of them side by side is one too many. */}
       <div className={PAGE_HEADER}>
         <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
-        {/* Access to a customer is administered here, on the customer — not
-            per-user in Settings (see the Users screen's history). Admin-only:
-            a non-admin has no reason to know who else can see this customer. */}
-        {me?.is_admin && (
-          <Button variant="outline" onClick={() => setManagingAccess(true)}>
-            <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Same top-right slot regardless of who's looking. Missing edit
+              (the only gap left once this page renders at all) gets this;
+              missing everything gets NoAccessCustomer's own button instead,
+              never both at once — see `missingModes` above. */}
+          {missingModes.length > 0 && (
+            <Button variant="outline" onClick={() => setRequestingPermissions(true)}>
+              <LockIcon className="mr-2 size-4" />Request permissions</Button>
+          )}
+          {/* Access to a customer is administered here, on the customer — not
+              per-user in Settings (see the Users screen's history). Admin-only:
+              a non-admin has no reason to know who else can see this customer. */}
+          {me?.is_admin && (
+            <Button variant="outline" onClick={() => setManagingAccess(true)}>
+              <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
+          )}
+        </div>
       </div>
 
       {/* Its own section, headed like "Studies" below: the pohjat belong to
@@ -208,6 +234,16 @@ export default function CustomerCasesPage() {
           onOpenChange={setManagingAccess}
           customerId={customerId}
           customerName={customer?.name ?? ""}
+        />
+      )}
+
+      {customerId && missingModes.length > 0 && (
+        <RequestAccessDialog
+          open={requestingPermissions}
+          onOpenChange={setRequestingPermissions}
+          customerId={customerId}
+          customerName={customer?.name ?? ""}
+          allowedModes={missingModes}
         />
       )}
     </div>

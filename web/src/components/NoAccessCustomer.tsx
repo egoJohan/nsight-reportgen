@@ -1,78 +1,10 @@
 import { useState } from "react";
-import { LockIcon, Loader2Icon } from "lucide-react";
-import { toast } from "sonner";
+import { LockIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
-import { useCustomerName, useMyAccessRequests, useAccessRequestActions } from "@/lib/queries";
-import type { AccessMode } from "@/lib/api";
+import { useCustomerName, useMyAccessRequests } from "@/lib/queries";
+import { RequestAccessDialog } from "@/components/RequestAccessDialog";
 import { PAGE_TITLE } from "@/lib/surfaces";
-
-/** View or edit, and a "Send request" primary action — the dialog's one
- *  filled button, everything else outline/ghost (see surfaces.ts). */
-function RequestAccessDialog({
-  open,
-  onOpenChange,
-  customerId,
-  customerName,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  customerId: string;
-  customerName: string;
-}) {
-  const actions = useAccessRequestActions();
-  const [mode, setMode] = useState<AccessMode>("view");
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Request access to {customerName}</DialogTitle>
-          <DialogDescription>
-            An admin will see this and can grant or refuse it.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex items-center gap-2">
-          <select
-            aria-label="Access level to request"
-            className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-surface px-2.5 text-sm"
-            value={mode}
-            onChange={(e) => setMode(e.target.value as AccessMode)}
-          >
-            <option value="view">View — see studies and reports</option>
-            <option value="edit">Edit — build and change reports</option>
-          </select>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            disabled={actions.create.isPending}
-            onClick={() =>
-              actions.create.mutate(
-                { customerId, mode },
-                {
-                  onSuccess: () => {
-                    toast.success("Request sent");
-                    onOpenChange(false);
-                  },
-                  onError: (e) => toast.error(e.message),
-                }
-              )
-            }
-          >
-            {actions.create.isPending && <Loader2Icon className="size-4 animate-spin" />}
-            Send request
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 /** What a signed-in user sees instead of a customer's cases when they hold
  *  no grant on it (spec §5 — the customer is a 404 to every other route).
@@ -138,6 +70,7 @@ export default function NoAccessCustomer({ customerId }: { customerId: string })
         onOpenChange={setRequesting}
         customerId={customerId}
         customerName={name}
+        allowedModes={["view", "edit"]}
       />
     </div>
   );
