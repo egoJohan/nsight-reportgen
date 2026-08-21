@@ -127,3 +127,75 @@ def test_an_admin_without_grants_sees_nothing(client_memory, two_customers, monk
     """Administering access is not having access (spec §5)."""
     sign_in(client_memory, monkeypatch, "admin@egoiq.com", admin=True)
     assert client_memory.get("/customers").json() == []
+
+
+# ---------------------------------------------------------------------------
+# can_edit on /cases/{id}/resolve — the read-only web view's only way to know
+# whether it is looking at an editor's or a viewer's case.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_case_can_edit_true_for_an_editor(client_memory, as_attendo_editor):
+    a = as_attendo_editor["Attendo"]
+    body = client_memory.get(f"/cases/{a['kid']}/resolve").json()
+    assert body["can_edit"] is True
+
+
+def test_resolve_case_can_edit_false_for_a_viewer(client_memory, two_customers, monkeypatch):
+    sign_in(client_memory, monkeypatch, "viewer@egoiq.com",
+            (two_customers["Attendo"]["cid"], "view"))
+    a = two_customers["Attendo"]
+    body = client_memory.get(f"/cases/{a['kid']}/resolve").json()
+    assert body["can_edit"] is False
+
+
+def test_resolve_case_can_edit_ignores_is_admin(client_memory, two_customers, monkeypatch):
+    """Same rule as above, one level down: an admin with only a view grant on
+    this case is still a viewer here."""
+    sign_in(client_memory, monkeypatch, "admin-viewer@egoiq.com",
+            (two_customers["Attendo"]["cid"], "view"), admin=True)
+    a = two_customers["Attendo"]
+    body = client_memory.get(f"/cases/{a['kid']}/resolve").json()
+    assert body["can_edit"] is False
+
+
+# ---------------------------------------------------------------------------
+# can_edit on /customers and /customers/{id} — same question, one level up:
+# creating a study is a write against the CUSTOMER, not any one case, so the
+# "New study" affordance (page + sidebar) needs the answer at this level too.
+# ---------------------------------------------------------------------------
+
+
+def test_get_customer_can_edit_true_for_an_editor(client_memory, as_attendo_editor):
+    a = as_attendo_editor["Attendo"]
+    body = client_memory.get(f"/customers/{a['cid']}").json()
+    assert body["can_edit"] is True
+
+
+def test_get_customer_can_edit_false_for_a_viewer(client_memory, two_customers, monkeypatch):
+    sign_in(client_memory, monkeypatch, "viewer@egoiq.com",
+            (two_customers["Attendo"]["cid"], "view"))
+    a = two_customers["Attendo"]
+    body = client_memory.get(f"/customers/{a['cid']}").json()
+    assert body["can_edit"] is False
+
+
+def test_list_customers_carries_can_edit_per_row(client_memory, two_customers, monkeypatch):
+    """A viewer on one customer and an editor on the other sees each row say
+    so — the sidebar's per-customer "New study" link needs a per-row answer,
+    not one flag for the whole page."""
+    sign_in(client_memory, monkeypatch, "mixed@egoiq.com",
+            (two_customers["Attendo"]["cid"], "view"),
+            (two_customers["Synsam"]["cid"], "edit"))
+    rows = {c["name"]: c["can_edit"] for c in client_memory.get("/customers").json()}
+    assert rows == {"Attendo": False, "Synsam": True}
+
+
+def test_customer_can_edit_ignores_is_admin(client_memory, two_customers, monkeypatch):
+    """An admin with only a view grant is a viewer — is_admin must not leak
+    into this decision (admin is the right to manage users, not data)."""
+    sign_in(client_memory, monkeypatch, "admin-viewer@egoiq.com",
+            (two_customers["Attendo"]["cid"], "view"), admin=True)
+    a = two_customers["Attendo"]
+    body = client_memory.get(f"/customers/{a['cid']}").json()
+    assert body["can_edit"] is False

@@ -33,10 +33,12 @@ function CaseHeading({
   caseId,
   name,
   customerId,
+  canEdit,
 }: {
   caseId: string;
   name: string;
   customerId?: string;
+  canEdit: boolean;
 }) {
   const rename = useRenameCase();
   const renameInCustomer = useRenameCustomerCase(customerId);
@@ -87,18 +89,23 @@ function CaseHeading({
   return (
     <div className="group flex items-center gap-2">
       <h1 className={PAGE_TITLE}>{name}</h1>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-        onClick={() => {
-          setDraft(name);
-          setEditing(true);
-        }}
-        title="Rename study"
-      >
-        <PencilIcon className="size-4" />
-      </Button>
+      {/* Renaming is a write. A viewer gets no affordance for it — the
+          route would 403 anyway, but there is no reason to offer a control
+          that only ever fails for them. */}
+      {canEdit && (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={() => {
+            setDraft(name);
+            setEditing(true);
+          }}
+          title="Rename study"
+        >
+          <PencilIcon className="size-4" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -119,6 +126,20 @@ export default function CaseDetailPage() {
   const { data: caseTemplate } = useCaseTemplate(resolved?.customer_id, id);
   const legacyCase = cases?.find((c) => c.id === id);
   const caseName = resolved?.name ?? legacyCase?.name ?? "";
+  // The one place this page asks "may I write here" — computed server-side
+  // from may_write on "{customer_id}/{case_id}" (see routes_customers.py's
+  // resolve_case), never from is_admin: admin is the right to manage users,
+  // not a right to edit data. Defaults true while `resolved` is still
+  // loading (and for a legacy pre-hierarchy case /resolve 404s on) so an
+  // editor's page — the common case — renders exactly as it always has,
+  // with nothing to wait on; a viewer sees the full editor UI hidden the
+  // instant the answer comes back false.
+  //
+  // This is a UI courtesy, not a security boundary: every write route
+  // (require_case_write) re-checks the same grant independently, so a
+  // viewer who reaches a write action before this flag resolves — or who
+  // calls the API directly — still gets 403.
+  const canEdit = resolved?.can_edit ?? true;
   const { workspace, removeReport } = useWorkspace(id ?? "");
   const clearWorkspace = useClearWorkspace();
   // The case→material link is server-side; fall back to it when this browser has
@@ -164,8 +185,11 @@ export default function CaseDetailPage() {
 
   if (!id) return null;
 
-  // A report is open → the wizard takes over the whole page.
-  if (openReportId && materialId) {
+  // A report is open → the wizard takes over the whole page. Editor-only:
+  // the wizard IS the workbench (select questions, build charts, render),
+  // so a viewer who lands on a stale `?report=` URL sees the normal
+  // read-only page instead, not the tool that only ever 403s for them.
+  if (canEdit && openReportId && materialId) {
     return (
       <div className={PAGE}>
         <ReportWizard
@@ -189,31 +213,45 @@ export default function CaseDetailPage() {
       {/* Heading + delete */}
       <div className={PAGE_HEADER}>
         <div className="min-w-0">
-          <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} />
+          <CaseHeading caseId={id} name={caseName} customerId={resolved?.customer_id} canEdit={canEdit} />
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {/* The pohja this tutkimus renders with. Managing the LIST is the
-              asiakas's page; here you choose from it. */}
-          <TemplateSelect
-            customerId={resolved?.customer_id}
-            value={resolved?.template_id ?? ""}
-            inheritedId={caseTemplate?.template_id}
-            onChange={(templateId) =>
-              templates.bindCase.mutate({ caseId: id, templateId })
-            }
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
-            onClick={() => setConfirmDelete(true)}
-          >
-            <Trash2Icon className="size-4" />Delete study</Button>
-        </div>
+        {/* Choosing a template and deleting the study are both writes — a
+            viewer gets neither control. */}
+        {canEdit && (
+          <div className="flex shrink-0 items-center gap-2">
+            {/* The pohja this tutkimus renders with. Managing the LIST is the
+                asiakas's page; here you choose from it. */}
+            <TemplateSelect
+              customerId={resolved?.customer_id}
+              value={resolved?.template_id ?? ""}
+              inheritedId={caseTemplate?.template_id}
+              onChange={(templateId) =>
+                templates.bindCase.mutate({ caseId: id, templateId })
+              }
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2Icon className="size-4" />Delete study</Button>
+          </div>
+        )}
       </div>
 
-      {!materialId ? (
+      {!canEdit ? (
+        // A viewer never sees the workbench (DataTab: upload, questions,
+        // curation) — only the finished-reports list, regardless of whether
+        // a material happens to be attached.
+        <ReportsSection
+          caseId={id}
+          materialId={materialId}
+          canEdit={false}
+          onOpen={setOpenReportId}
+        />
+      ) : !materialId ? (
         // No data yet (e.g. a legacy case): let the user import a SAV into it.
         <DataTab caseId={id} />
       ) : (
@@ -221,6 +259,7 @@ export default function CaseDetailPage() {
           <ReportsSection
             caseId={id}
             materialId={materialId}
+            canEdit
             onOpen={setOpenReportId}
           />
           {/* Questions section */}

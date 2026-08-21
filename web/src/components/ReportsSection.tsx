@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { FileTextIcon, PlusIcon, Trash2Icon, Loader2Icon } from "lucide-react";
+import {
+  FileTextIcon,
+  PlusIcon,
+  Trash2Icon,
+  Loader2Icon,
+  PresentationIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,17 +29,89 @@ import {
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
 import { formatReportDate } from "@/lib/utils";
-import { PANEL, SECTION_TITLE } from "@/lib/surfaces";
+import { api } from "@/lib/api";
+import { downloadBlob, safeFileName } from "@/lib/download";
+import { EMPTY, PANEL, SECTION_TITLE } from "@/lib/surfaces";
 
-// One report row — fetches the report doc to show its status + statistics.
+// A viewer's row has no status and no delete — a half-built report is the
+// analyst's working state, not something to hand a viewer. PDF/PPTX download
+// buttons take the trailing edge instead. This is a UI courtesy, not a
+// security control: preview.pdf/.pptx are already guarded by read access
+// (require_case, see routes_render.py), so a viewer fetching them directly
+// works whether or not this button is on screen.
+function DownloadButtons({ caseId, reportId, name }: {
+  caseId: string;
+  reportId: string;
+  name: string;
+}) {
+  const [downloading, setDownloading] = useState<"pdf" | "pptx" | null>(null);
+  const fileBase = safeFileName(name);
+
+  async function handleDownload(kind: "pdf" | "pptx") {
+    setDownloading(kind);
+    try {
+      const blob =
+        kind === "pdf"
+          ? await api.reports.previewPdf(caseId, reportId)
+          : await api.reports.previewPptx(caseId, reportId);
+      downloadBlob(blob, `${fileBase}.${kind}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-2"
+      // Rows in edit mode are clickable to open the wizard; a viewer's row is
+      // not (see ReportRow), so this is defensive rather than load-bearing —
+      // but a nested button inside a future clickable ancestor must never
+      // double-fire that ancestor's handler.
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Button
+        variant="outline"
+        disabled={downloading !== null}
+        onClick={() => handleDownload("pdf")}
+      >
+        {downloading === "pdf" ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <FileTextIcon className="size-4" />
+        )}
+        PDF
+      </Button>
+      <Button
+        variant="outline"
+        disabled={downloading !== null}
+        onClick={() => handleDownload("pptx")}
+      >
+        {downloading === "pptx" ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <PresentationIcon className="size-4" />
+        )}
+        PPTX
+      </Button>
+    </div>
+  );
+}
+
+// One report row — fetches the report doc to show its statistics. In edit
+// mode it also shows a Draft/Empty status and opens the wizard on click; a
+// viewer sees neither (see canEdit) and gets download buttons instead.
 function ReportRow({
   caseId,
   report,
+  canEdit,
   onOpen,
   onDelete,
 }: {
   caseId: string;
   report: { id: string; name: string; createdAt?: string };
+  canEdit: boolean;
   onOpen: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -51,8 +129,11 @@ function ReportRow({
 
   return (
     <div
-      className="group flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
-      onClick={() => onOpen(report.id)}
+      className={
+        "group flex items-center gap-3 px-4 py-3 transition-colors " +
+        (canEdit ? "cursor-pointer hover:bg-muted/50" : "")
+      }
+      onClick={canEdit ? () => onOpen(report.id) : undefined}
     >
       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
         <FileTextIcon className="size-4 text-primary" />
@@ -63,31 +144,37 @@ function ReportRow({
           {isLoading ? "Loading…" : stat}
         </p>
       </div>
-      {status && (
-        <Badge
-          variant="outline"
-          className={
-            status === "Empty"
-              ? "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
-              : "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
-          }
-        >
-          {status}
-        </Badge>
+      {canEdit ? (
+        <>
+          {status && (
+            <Badge
+              variant="outline"
+              className={
+                status === "Empty"
+                  ? "shrink-0 border-muted-foreground/30 bg-muted font-normal text-muted-foreground"
+                  : "shrink-0 border-teal-300 bg-teal-50 font-normal text-teal-700"
+              }
+            >
+              {status}
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            // Always visible: a control that appears on hover cannot be found by
+            // someone looking for it, and is invisible on a touch screen.
+            className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(report.id);
+            }}
+          >
+            <Trash2Icon className="size-4" />
+          </Button>
+        </>
+      ) : (
+        <DownloadButtons caseId={caseId} reportId={report.id} name={report.name} />
       )}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        // Always visible: a control that appears on hover cannot be found by
-        // someone looking for it, and is invisible on a touch screen.
-        className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(report.id);
-        }}
-      >
-        <Trash2Icon className="size-4" />
-      </Button>
     </div>
   );
 }
@@ -95,14 +182,23 @@ function ReportRow({
 /**
  * The Reports section: a list (like the Questions list) with "New report"
  * as the top row, then each report showing its status + statistics.
+ *
+ * A viewer (canEdit=false) sees none of that: no "New report" row, and only
+ * FINISHED reports — a half-built report is the analyst's working state, not
+ * a deliverable. "Finished" keys on the server's `rendered` flag (a render
+ * has been stamped for the report's current content — see repository.py's
+ * ReportRef.rendered), not on the Draft/Empty badge, which only reflects
+ * whether the report DOC has charts.
  */
 export default function ReportsSection({
   caseId,
   materialId,
+  canEdit,
   onOpen,
 }: {
   caseId: string;
-  materialId: string;
+  materialId: string | null;
+  canEdit: boolean;
   onOpen: (reportId: string) => void;
 }) {
   const qc = useQueryClient();
@@ -116,11 +212,13 @@ export default function ReportsSection({
   // Enrich with this browser's locally-remembered createdAt when we have it.
   const { data: serverReports } = useCaseReports(caseId);
   const wsById = new Map(workspace.reports.map((r) => [r.id, r]));
-  const orderedReports = (serverReports?.reports ?? []).map((r) => ({
+  const allReports = (serverReports?.reports ?? []).map((r) => ({
     id: r.report_id,
     name: r.name,
     createdAt: wsById.get(r.report_id)?.createdAt,
+    rendered: r.rendered,
   }));
+  const orderedReports = canEdit ? allReports : allReports.filter((r) => r.rendered);
 
   function handleCreate() {
     const name = `Report ${orderedReports.length + 1}`;
@@ -137,7 +235,10 @@ export default function ReportsSection({
           addReport({
             id: report_id,
             name,
-            materialId,
+            // Only reachable via the "New report" row, which is editor-only
+            // and requires materialId truthy — see the questions-driven
+            // `disabled` above.
+            materialId: materialId ?? undefined,
             createdAt: new Date().toISOString(),
           });
           qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
@@ -170,43 +271,58 @@ export default function ReportsSection({
       <div className="mb-3">
         <h2 className={SECTION_TITLE}>Reports</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Build chart reports from this case's survey data.
+          {canEdit
+            ? "Build chart reports from this case's survey data."
+            : "Finished reports for this study."}
         </p>
       </div>
 
-      <div className={`divide-y ${PANEL}`}>
-        {/* Topmost row: create a new report */}
-        <button
-          type="button"
-          onClick={handleCreate}
-          disabled={createReport.isPending || !questions}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 disabled:opacity-60"
-        >
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            {createReport.isPending ? (
-              <Loader2Icon className="size-4 animate-spin" />
-            ) : (
-              <PlusIcon className="size-4" />
-            )}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-medium">New report</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Pick questions and build charts
-            </p>
-          </div>
-        </button>
+      {!canEdit && orderedReports.length === 0 ? (
+        <div className={EMPTY}>
+          <FileTextIcon className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            No finished reports yet.
+          </p>
+        </div>
+      ) : (
+        <div className={`divide-y ${PANEL}`}>
+          {/* Topmost row: create a new report. Editor-only — starting a
+              report is the workbench, not something a viewer does. */}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={createReport.isPending || !questions}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 disabled:opacity-60"
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                {createReport.isPending ? (
+                  <Loader2Icon className="size-4 animate-spin" />
+                ) : (
+                  <PlusIcon className="size-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">New report</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Pick questions and build charts
+                </p>
+              </div>
+            </button>
+          )}
 
-        {orderedReports.map((r) => (
-          <ReportRow
-            key={r.id}
-            caseId={caseId}
-            report={r}
-            onOpen={onOpen}
-            onDelete={setConfirmDelete}
-          />
-        ))}
-      </div>
+          {orderedReports.map((r) => (
+            <ReportRow
+              key={r.id}
+              caseId={caseId}
+              report={r}
+              canEdit={canEdit}
+              onOpen={onOpen}
+              onDelete={setConfirmDelete}
+            />
+          ))}
+        </div>
+      )}
 
       <Dialog
         open={!!confirmDelete}

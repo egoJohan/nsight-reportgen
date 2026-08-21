@@ -515,6 +515,10 @@ export interface CaseMaterial {
 export interface CaseReportInfo {
   report_id: string;
   name: string;
+  /** True once a render has been stamped for this report's CURRENT content —
+   *  the deliverable a viewer may download. A report with no render behind it
+   *  is the analyst's working state, not a finished report. */
+  rendered: boolean;
 }
 
 export interface Template {
@@ -579,6 +583,11 @@ export interface ResolvedCase {
   customer_name: string;
   /** Template bound on the CASE itself; "" when inheriting. */
   template_id?: string;
+  /** Whether the signed-in user may WRITE to this case (may_write on
+   *  "{customer_id}/{id}"), computed server-side. A UI courtesy for hiding
+   *  editor-only controls — every write route re-checks the same grant on
+   *  its own, so this flag hiding a button is not what protects the data. */
+  can_edit: boolean;
 }
 
 export interface Customer {
@@ -586,6 +595,11 @@ export interface Customer {
   name: string;
   /** Template bound AT THIS LEVEL; "" when inheriting. */
   template_id?: string;
+  /** Whether the signed-in user may WRITE to this customer (may_write on the
+   *  customer id), computed server-side. Creating a study, uploading/binding
+   *  a template, and renaming/deleting the customer are all writes gated by
+   *  this — never by is_admin, which is a different right (managing users). */
+  can_edit: boolean;
 }
 
 /** A case now belongs to exactly one customer, so its id alone is no longer a

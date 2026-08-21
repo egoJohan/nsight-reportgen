@@ -109,7 +109,9 @@ class RepositoryClient:
 
     def list_reports(self, case_id: str) -> list[dict]:
         k = self._case(case_id)
-        return [{"report_id": r.id, "name": r.name}
+        # "rendered" rides along so the read-only view can filter to finished
+        # reports without a round trip per report (see ReportsSection.tsx).
+        return [{"report_id": r.id, "name": r.name, "rendered": r.rendered}
                 for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
                                                 user=self.user)]
 

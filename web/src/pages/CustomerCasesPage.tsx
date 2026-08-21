@@ -36,8 +36,17 @@ export default function CustomerCasesPage() {
   const [name, setName] = useState("");
   const [managingAccess, setManagingAccess] = useState(false);
 
-  // Reached from the sidebar's per-customer "Uusi case" link.
-  const open = searchParams.get("new") === "case";
+  // may_write on the customer (see routes_customers.py's get_customer),
+  // never is_admin — see CaseDetailPage's `canEdit` for the full reasoning
+  // and the courtesy/guard split. Defaults true while `customer` is still
+  // loading so the common editor path renders with nothing to wait on.
+  const canEdit = customer?.can_edit ?? true;
+
+  // Reached from the sidebar's per-customer "Uusi case" link. Gated on
+  // canEdit too: hiding the button does not stop someone opening this URL
+  // directly, and a create dialog that can only ever 403 has no reason to
+  // open.
+  const open = canEdit && searchParams.get("new") === "case";
   function setOpen(next: boolean) {
     setSearchParams(
       (prev) => {
@@ -79,8 +88,10 @@ export default function CustomerCasesPage() {
       </div>
 
       {/* Its own section, headed like "Studies" below: the pohjat belong to
-          the asiakas, and every tutkimus under it picks from this list. */}
-      {customerId && (
+          the asiakas, and every tutkimus under it picks from this list.
+          Editor-only: uploading, and picking a row (which BINDS it — a
+          write), are both writes against the customer. */}
+      {customerId && canEdit && (
         <>
           {/* Each section's "add one of these" sits beside its own heading, so
               a page with two lists has no single button whose target you have
@@ -114,8 +125,12 @@ export default function CustomerCasesPage() {
           divides the page, it is not a muted label inside a dialog. */}
       <div className={SECTION_HEADER}>
         <h2 className={SECTION_TITLE}>Studies</h2>
-        <Button variant="outline" onClick={() => setOpen(true)}>
-          <PlusIcon className="mr-2 size-4" />New study</Button>
+        {/* Creating a study is a write against the customer — a viewer gets
+            no button for it. */}
+        {canEdit && (
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            <PlusIcon className="mr-2 size-4" />New study</Button>
+        )}
       </div>
 
       <div className="mt-3 space-y-2">

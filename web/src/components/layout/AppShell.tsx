@@ -51,7 +51,7 @@ import { useSession, signOut, type Me } from "@/lib/session";
 
 /** One customer's cases, fetched only while the group is open so opening the
  *  sidebar does not fan out a request per customer. */
-function CustomerCases({ customerId }: { customerId: string }) {
+function CustomerCases({ customerId, canEdit }: { customerId: string; canEdit: boolean }) {
   const { data: cases, isLoading } = useCustomerCases(customerId);
   const { id: activeCaseId } = useParams();
 
@@ -68,16 +68,20 @@ function CustomerCases({ customerId }: { customerId: string }) {
   return (
     <SidebarMenuSub>
       {/* First, not last: the action that creates the thing this group lists
-          should not move down the page as the list grows. */}
-      <SidebarMenuSubItem>
-        <SidebarMenuSubButton
-          render={<NavLink to={`/customers/${customerId}?new=case`} />}
-          className="text-primary"
-        >
-          <PlusIcon className="size-4" />
-          <span>New study</span>
-        </SidebarMenuSubButton>
-      </SidebarMenuSubItem>
+          should not move down the page as the list grows. Creating a study
+          is a write against the customer (see CustomerCasesPage's canEdit) —
+          a viewer gets no link for it. */}
+      {canEdit && (
+        <SidebarMenuSubItem>
+          <SidebarMenuSubButton
+            render={<NavLink to={`/customers/${customerId}?new=case`} />}
+            className="text-primary"
+          >
+            <PlusIcon className="size-4" />
+            <span>New study</span>
+          </SidebarMenuSubButton>
+        </SidebarMenuSubItem>
+      )}
 
       {cases?.map((k) => (
         <SidebarMenuSubItem key={k.id}>
@@ -184,7 +188,7 @@ function CustomersNav() {
               <Building2Icon className="size-4" />
               <span className="truncate">{c.name}</span>
             </SidebarMenuButton>
-            {open && <CustomerCases customerId={c.id} />}
+            {open && <CustomerCases customerId={c.id} canEdit={c.can_edit} />}
           </SidebarMenuItem>
         );
       })}

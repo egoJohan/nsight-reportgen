@@ -93,6 +93,11 @@ class ReportRef:
     customer_id: str
     name: str
     modified_at: str = ""
+    #: True once a render has been stamped onto this report's meta sidecar
+    #: (see Repository.save_render) — the deliverable a viewer may download.
+    #: A report doc with no render behind it is the analyst's working state,
+    #: not something finished.
+    rendered: bool = False
 
 
 @dataclass(frozen=True)
@@ -528,7 +533,13 @@ class Repository:
         return ReportRef(id=d.get("id", ""), case_id=d.get("case_id", ""),
                          customer_id=d.get("customer_id", ""),
                          name=d.get("name") or d.get("id", ""),
-                         modified_at=d.get("modified_at", ""))
+                         modified_at=d.get("modified_at", ""),
+                         # A render stamps "render_key" onto this same sidecar
+                         # (save_render) — its presence means an artefact
+                         # exists for the report's CURRENT content, since
+                         # save_report rewrites this sidecar from scratch and
+                         # drops any stale key when the report changes.
+                         rendered=bool(d.get("render_key")))
 
     def duplicate_report(self, auth: AuthContext, customer_id: str, case_id: str,
                          report_id: str, new_name: str) -> ReportRef:

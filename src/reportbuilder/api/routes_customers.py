@@ -15,7 +15,7 @@ from reportbuilder.api.deps_auth import (
     require_customer_write, require_material,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth.permissions import User
+from reportbuilder.auth.permissions import User, may_write
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, NotFound
 
@@ -46,8 +46,15 @@ def list_customers(auth: AuthContext = Depends(get_auth),
                    repo: Repository = Depends(get_repository),
                    user: User = Depends(current_user)) -> list[dict]:
     """Only the customers this caller may see — datahive filters the listing,
-    so an over-permissive UI cannot widen it."""
-    return [{"id": c.id, "name": c.name, "template_id": c.template_id}
+    so an over-permissive UI cannot widen it.
+
+    `can_edit` rides along per row (see resolve_case's docstring for the
+    general rationale) because the sidebar shows a per-customer "New study"
+    link right here in the listing — creating a study is a write against the
+    CUSTOMER, so the answer has to be per-row, not a single flag for the page.
+    """
+    return [{"id": c.id, "name": c.name, "template_id": c.template_id,
+             "can_edit": may_write(user, c.id)}
             for c in repo.list_customers(auth, user=user)]
 
 
@@ -59,7 +66,40 @@ def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
         c = repo.get_customer(auth, customer_id)
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
-    return {"id": c.id, "name": c.name, "template_id": c.template_id}
+    return {"id": c.id, "name": c.name, "template_id": c.template_id,
+            "can_edit": may_write(user, c.id)}
+
+
+@customers_router.get("/customers/{customer_id}/name")
+def customer_name(customer_id: str, auth: AuthContext = Depends(get_auth),
+                  repo: Repository = Depends(get_repository),
+                  user: User = Depends(current_user)) -> dict:
+    """The one thing an ungranted signed-in user may learn about a customer
+    they cannot open: that it exists, and what it is called.
+
+    Deliberately breaks the 404-for-absence rule (spec §5, `deps_auth._check`)
+    that every other route in this file keeps: an ungranted customer is
+    normally ABSENT, not forbidden, so the API never confirms a path it will
+    not open. But the no-access page (the point of this whole task) has to
+    say "you don't have access to Attendo" — and that sentence necessarily
+    reveals Attendo exists. The controller weighed that one-line leak
+    against a no-access page that cannot even name what it is refusing, and
+    accepted it, NARROWLY: id and name, nothing else — no cases, no counts,
+    no template, no members. `require_customer` is what implements the 404
+    rule this route exists to carve one exception out of, so it is guarded
+    by `current_user` alone (any signed-in user) instead. A user who is not
+    signed in still gets 401 from `current_user` and learns nothing.
+
+    Do not widen this response, and do not copy this "any signed-in user"
+    pattern onto another route without going back to the controller — this
+    is the one deliberate crack in an otherwise-absolute rule, not a
+    precedent.
+    """
+    try:
+        c = repo.get_customer(auth, customer_id)
+    except NotFound:
+        raise HTTPException(404, f"Customer '{customer_id}' not found") from None
+    return {"id": c.id, "name": c.name}
 
 
 @customers_router.patch("/customers/{customer_id}")
@@ -147,6 +187,15 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
     The UI holds case ids in URLs that predate the hierarchy, so it needs a way
     to ask "which customer does this belong to, and what is it called?" without
     already knowing the answer.
+
+    Also answers the LOCAL capability question — "may THIS user edit THIS
+    case" — as `can_edit`, computed straight from `may_write`. This is a UI
+    courtesy, not a security control: every write route re-checks the same
+    grant independently (require_case_write), so a viewer who forges a request
+    around a hidden button still gets 403. `/auth/me` deliberately carries no
+    grants (see test_me_shape_carries_no_grants_or_password_fields) because
+    "what may they do here" is a per-object question, not a global one — this
+    is where it gets answered, for the one object this page is about.
     """
     k = repo.find_case(auth, case_id)
     if k is None:
@@ -157,7 +206,8 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
     except NotFound:
         pass
     return {"id": k.id, "name": k.name, "customer_id": k.customer_id,
-            "customer_name": customer_name, "template_id": k.template_id}
+            "customer_name": customer_name, "template_id": k.template_id,
+            "can_edit": may_write(user, f"{k.customer_id}/{k.id}")}
 
 
 def _case_name_from_filename(filename: str) -> str:

@@ -37,6 +37,33 @@ def test_get_case_reports_lists_created(client_memory):
     assert reps[0]["name"]
 
 
+def test_a_freshly_created_report_is_not_rendered(client_memory):
+    """No artefact yet -> the read-only view must not offer it as finished."""
+    cid = _new_case(client_memory)
+    client_memory.post(f"/cases/{cid}/reports", json=report_json_n_charts(1))
+
+    reps = client_memory.get(f"/cases/{cid}/reports").json()["reports"]
+    assert reps[0]["rendered"] is False
+
+
+def test_a_report_with_a_stamped_render_is_rendered(client_memory):
+    """Drives the same repository call routes_render.py's _persist_deck makes
+    after a real render, without needing LibreOffice: the listing's "rendered"
+    flag keys on the render_key stamp, not on invoking soffice."""
+    from reportbuilder.api.deps_store import get_auth, get_repository
+
+    cid = _new_case(client_memory)
+    rid = client_memory.post(f"/cases/{cid}/reports", json=report_json_n_charts(1)).json()["report_id"]
+
+    repo = client_memory.app.dependency_overrides[get_repository]()
+    auth = client_memory.app.dependency_overrides[get_auth]()
+    k = repo.find_case(auth, cid)
+    repo.save_render(auth, k.customer_id, k.id, rid, b"fake-pptx-bytes", key="k1")
+
+    reps = client_memory.get(f"/cases/{cid}/reports").json()["reports"]
+    assert reps[0]["rendered"] is True
+
+
 def test_case_materials_and_reports_are_scoped(client_memory, synthetic_bytes):
     a = _new_case(client_memory)
     b = _new_case(client_memory)
