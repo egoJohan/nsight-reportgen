@@ -129,6 +129,17 @@ class _Cache:
 _cache = _Cache()
 
 
+def forget_all() -> None:
+    """Drop every cached identity, tombstones included.
+
+    For a change that rewrites users and grants wholesale — a restore — where
+    naming the affected users is not possible: after it, every cached identity
+    describes a store that no longer exists. Tombstones go too: the sessions
+    they stood for were revoked against data the restore has just replaced.
+    """
+    _cache._entries.clear()
+
+
 def forget_user(user_id: str) -> None:
     """Invalidate this node's cached identity for *user_id*.
 

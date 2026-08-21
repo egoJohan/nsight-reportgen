@@ -630,14 +630,10 @@ export interface Customer {
    *  a template, and renaming/deleting the customer are all writes gated by
    *  this — never by is_admin, which is a different right (managing users). */
   can_edit: boolean;
-  /** How many studies this customer has. */
+  /** How many studies this customer has. Report counts live on the STUDY
+   *  (CustomerCase), not here — the customer list shows studies, and the
+   *  reports under one of them are one click away. */
   case_count: number;
-  /** Reports with a stamped render, across every one of this customer's
-   *  studies — see CustomerCase's own field for the exact definition. */
-  completed_reports: number;
-  /** Every other report, across every study — including one with no charts
-   *  at all, folded in because neither is a deliverable. */
-  draft_reports: number;
   /** Who created this customer. One person, fixed at creation — NOT everyone
    *  who can write to it. Null for customers created before ownership was
    *  recorded, and for those the UI says nothing rather than guessing. */
@@ -1393,7 +1389,47 @@ export const api = {
         detailedJson<AccessRequest>(r)
       ),
   },
+
+  /** Settings > Backup. Both admin-only: the archive carries every password
+   *  hash and the session signing key, and restoring one rewrites the store. */
+  backup: {
+    /** The whole store as a zip: settings, users, customers, studies, the
+     *  uploaded SAVs, report definitions, templates and fonts. Rendered decks
+     *  are left out — they are regenerated from what IS in there.
+     *
+     *  Downloaded through fetch rather than a plain link so a failure (a 403,
+     *  a server error) surfaces as an error instead of navigating the tab to
+     *  a JSON error page. */
+    download: async (): Promise<{ blob: Blob; filename: string }> => {
+      const res = await fetch(`${API_BASE}/admin/backup`);
+      // Reuse the shared failure path (server `detail` over a bare status
+      // line); it only returns on success, which cannot happen here.
+      if (!res.ok) await detailedVoid(res);
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const match = /filename="?([^";]+)"?/.exec(disposition);
+      return { blob: await res.blob(), filename: match?.[1] ?? "nsight-backup.zip" };
+    },
+
+    /** Write a backup's objects back. Overwrites what is at the same path and
+     *  leaves anything not in the backup alone. */
+    restore: (file: File): Promise<RestoreResult> => {
+      const form = new FormData();
+      form.append("file", file);
+      return fetch(`${API_BASE}/admin/restore`, { method: "POST", body: form }).then(
+        (r) => detailedJson<RestoreResult>(r)
+      );
+    },
+  },
 };
+
+export interface RestoreResult {
+  /** How many objects were written. */
+  restored: number;
+  total_bytes: number;
+  /** Objects that could not be restored, one line each. Empty on a clean
+   *  restore — a backup with problems still restores everything else. */
+  problems: string[];
+}
 
 export interface InstalledFont {
   id: string;

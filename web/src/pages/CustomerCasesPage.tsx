@@ -63,18 +63,25 @@ export default function CustomerCasesPage() {
   // Fail closed while the answer is in flight — see CaseDetailPage.
   const canEdit = customer?.can_edit ?? false;
 
-  // What the "Request permissions" button offers, top right — always the
-  // same slot as "Manage permissions" (see PAGE_HEADER below), shown
-  // whenever ANY permission is missing and hidden only once the caller
-  // holds edit. Reaching this component at all means at least `view` (no
-  // grant is the `noAccess` branch above, which renders NoAccessCustomer
-  // instead — so its own "Request access" button and this one are never on
-  // screen together), so the only thing left to ask for is `edit`. Gated on
-  // `customer` being loaded, not just `!canEdit`: the fail-closed default
-  // while it's in flight would otherwise flash the button for someone who
-  // turns out to already hold edit. is_admin plays no part — an admin who
-  // is themselves only a viewer still has nothing to write with.
-  const missingModes: AccessMode[] = customer && !canEdit ? ["edit"] : [];
+  // What the "Request permissions" button offers, top right — the same slot
+  // as "Manage permissions" (see PAGE_HEADER below), shown when the caller
+  // is missing `edit` and hidden once they hold it. Reaching this component
+  // at all means at least `view` (no grant is the `noAccess` branch above,
+  // which renders NoAccessCustomer instead — so its own "Request access"
+  // button and this one are never on screen together), so the only thing
+  // left to ask for is `edit`. Gated on `customer` being loaded, not just
+  // `!canEdit`: the fail-closed default while it's in flight would
+  // otherwise flash the button for someone who turns out to already hold
+  // edit.
+  //
+  // Never for an admin. An admin who is only a viewer really does lack
+  // write access — but the answer to that is the "Manage permissions"
+  // button right beside it, which they alone have and which can grant it
+  // outright. Offering both put "ask someone" next to "do it yourself",
+  // and the request would land in the very queue they are the one to
+  // approve.
+  const missingModes: AccessMode[] =
+    customer && !canEdit && !me?.is_admin ? ["edit"] : [];
 
   // Reached from the sidebar's per-customer "Uusi case" link. Gated on
   // canEdit too: hiding the button does not stop someone opening this URL

@@ -14,6 +14,7 @@ import {
   UsersIcon,
   ShieldCheckIcon,
   TypeIcon,
+  DatabaseIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import {
   useAccessRequests, useAccessRequestActions,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
+import BackupTab from "@/components/settings/BackupTab";
 import type { InstalledFont, MissingFont, StudioUser, Invite, AccessRequest } from "@/lib/api";
 
 function bytes(n: number): string {
@@ -584,7 +586,8 @@ export default function SettingsPage() {
   // than silently no-oping on a tab that was never rendered.
   const requestedTab = searchParams.get("tab");
   const visible = new Set(
-    [me?.is_admin && "users", canSeePermissionRequests && "permission-requests", me && "fonts"].filter(Boolean)
+    [me?.is_admin && "users", canSeePermissionRequests && "permission-requests",
+     me && "fonts", me?.is_admin && "backup"].filter(Boolean)
   );
   const defaultTab = requestedTab && visible.has(requestedTab) ? requestedTab : fallbackTab;
 
@@ -613,6 +616,14 @@ export default function SettingsPage() {
             <TabsTrigger value="fonts">
               <TypeIcon className="size-4" />Fonts
             </TabsTrigger>
+            {/* Last: taking a backup is a thing you do rarely and
+                deliberately, not a screen to land on. Admin-only — the
+                archive carries every password hash and the signing key. */}
+            {me.is_admin && (
+              <TabsTrigger value="backup">
+                <DatabaseIcon className="size-4" />Backup
+              </TabsTrigger>
+            )}
           </TabsList>
           {me.is_admin && (
             <TabsContent value="users" className="mt-4">
@@ -627,6 +638,11 @@ export default function SettingsPage() {
           <TabsContent value="fonts" className="mt-4">
             <FontsTab />
           </TabsContent>
+          {me.is_admin && (
+            <TabsContent value="backup" className="mt-4">
+              <BackupTab />
+            </TabsContent>
+          )}
         </Tabs>
       )}
     </div>

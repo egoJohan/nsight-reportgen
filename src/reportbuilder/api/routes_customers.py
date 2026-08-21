@@ -93,10 +93,13 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     link right here in the listing — creating a study is a write against the
     CUSTOMER, so the answer has to be per-row, not a single flag for the page.
 
-    Study count, report stats and the owner ride along too, for the same
-    reason: the customer page shows all three under each name, and a
-    second round trip per customer for each would just move the cost from
-    here to there.
+    Study count and the owner ride along too, for the same reason: the
+    customer page shows both under each name, and a second round trip per
+    customer for each would just move the cost from here to there. Report
+    counts do NOT — this page shows the number of studies, and the reports
+    under one of them are the studies list's business (that route computes
+    its own, per study). Dropping them from here also drops a get() per
+    report from every load of this page.
 
     ONE owner, the user who created the customer (`Customer.owner_id`), not
     everyone holding `edit`. Those are different questions: "who owns this"
@@ -119,31 +122,21 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     recorded has no owner, and says so by omission rather than by guessing
     at one.
 
-    Cost note: for each customer this is one `list_cases` and one
-    `list_reports_for_customer` — both single listing calls regardless of
-    study count (see that method's docstring) — plus one get() per report
-    sidecar. So the shape is O(customers) listings + O(reports) gets across
-    the whole page, not O(customers × studies). `list_users` adds one
-    listing + 2 gets per tenant user, paid once for the page, not once per
-    customer. Fine at today's scale (a handful of customers, tens of
-    reports); if either count reaches the thousands the fix is a
-    denormalised counter kept on write, not a bigger fetch here — the same
-    trade `recent_reports` already documents for its own listing.
+    Cost note: one `list_cases` per customer — a single listing call
+    regardless of study count — so the shape is O(customers) listings for
+    the whole page. `list_users` adds one listing + 2 gets per tenant user,
+    paid once for the page, not once per customer.
     """
     customers = repo.list_customers(auth, user=user)
     by_id = {u.id: u for u in repo.list_users(auth)}
     out = []
     for c in customers:
         cases = repo.list_cases(auth, c.id, user=user)
-        completed, draft = _report_stats(
-            repo.list_reports_for_customer(auth, c.id, user=user))
         owner = by_id.get(c.owner_id)
         out.append({
             "id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
             "case_count": len(cases),
-            "completed_reports": completed,
-            "draft_reports": draft,
             "owner": ({"id": owner.id, "name": owner.name or owner.email}
                       if owner else None),
         })

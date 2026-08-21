@@ -12,32 +12,22 @@ import { useCustomers, useCustomerNames, useCreateCustomer } from "@/lib/queries
 import type { Customer } from "@/lib/api";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
-/** "3 studies · 4 completed, 2 drafts · Owned by Alice" under a
- *  customer's name — quiet, secondary information, the same idea as a
- *  report row's own statistic line (ReportsSection.tsx) and the studies
- *  list's per-study line (CustomerCasesPage.tsx), which this must agree
- *  with: both read `completed_reports`/`draft_reports` off the same
- *  server-side definition (routes_customers.py's `_report_stats`).
+/** "3 studies · Owned by Alice" under a customer's name — quiet, secondary
+ *  information, the same idea as the studies list's per-study line
+ *  (CustomerCasesPage.tsx).
  *
- *  Each clause appears only once there is something to say: a customer
- *  with no studies yet gets no clause at all rather than "0 studies", and
- *  one with studies but no reports yet skips straight to the owner — an
- *  empty customer should read as empty, not as a row of zeroes. One owner,
- *  the creator; a customer from before ownership was recorded has none and
- *  simply omits the clause. */
-function customerSubtitle(c: Customer): string | null {
-  const parts: string[] = [];
-  if (c.case_count > 0) {
-    parts.push(`${c.case_count} ${c.case_count === 1 ? "study" : "studies"}`);
-    const total = c.completed_reports + c.draft_reports;
-    if (total > 0) {
-      parts.push(
-        `${c.completed_reports} completed, ${c.draft_reports} draft${c.draft_reports === 1 ? "" : "s"}`
-      );
-    }
-  }
+ *  The study count is ALWAYS shown, "0 studies" included: on this page the
+ *  number is the fact you are scanning for, and a customer with none should
+ *  say so rather than leave you wondering whether it failed to load. Report
+ *  counts belong to the studies list, where a report is one row away — here
+ *  they were a second number competing with the one that matters.
+ *
+ *  One owner, the creator; a customer from before ownership was recorded has
+ *  none and simply omits the clause. */
+function customerSubtitle(c: Customer): string {
+  const parts = [`${c.case_count} ${c.case_count === 1 ? "study" : "studies"}`];
   if (c.owner) parts.push(`Owned by ${c.owner.name}`);
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return parts.join(" · ");
 }
 
 /** Asiakas list — the navigation root. A case belongs to exactly one customer,

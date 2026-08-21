@@ -218,31 +218,24 @@ class TestCreatingGrantsTheCreator:
         assert grants == {(other.id, "view"), (c["id"], "edit")}
 
 
-class TestCustomerListStats:
-    """The same statistics, aggregated, plus study count and the owner, on
-    `GET /customers`."""
+class TestCustomerListRow:
+    """Study count and the owner on `GET /customers`."""
 
-    def test_case_count_and_report_stats_are_aggregated_across_studies(
-        self, client, store
-    ):
-        from reportbuilder.testing.fixtures import report_json_n_charts
-
+    def test_the_study_count_is_the_number_of_studies(self, client):
         c = _customer(client)
-        k1 = client.post(f"/customers/{c['id']}/cases", json={"name": "K1"}).json()
-        k2 = client.post(f"/customers/{c['id']}/cases", json={"name": "K2"}).json()
-        client.post(f"/cases/{k1['id']}/reports", json=report_json_n_charts(1))
-        client.post(f"/cases/{k2['id']}/reports", json=report_json_n_charts(0))
-        rid = client.post(
-            f"/cases/{k2['id']}/reports", json=report_json_n_charts(2)
-        ).json()["report_id"]
-        repo = Repository(store)
-        auth = AuthContext(token="user-1")
-        repo.save_render(auth, k2["customer_id"], k2["id"], rid, b"fake", key="k1")
+        client.post(f"/customers/{c['id']}/cases", json={"name": "K1"})
+        client.post(f"/customers/{c['id']}/cases", json={"name": "K2"})
 
         row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
         assert row["case_count"] == 2
-        assert row["completed_reports"] == 1
-        assert row["draft_reports"] == 2  # the K1 draft + the K2 empty
+
+    def test_report_counts_are_not_on_the_customer_row(self, client):
+        """They belong to the STUDY (see the studies list), and computing them
+        here cost a get() per report on every load of the customer page."""
+        c = _customer(client)
+        row = next(x for x in client.get("/customers").json() if x["id"] == c["id"])
+        assert "completed_reports" not in row
+        assert "draft_reports" not in row
 
     def _creator(self, store, name="Development"):
         """The `client` fixture signs in as id "dev" (suite/_helpers.py). Give
