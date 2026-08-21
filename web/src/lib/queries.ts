@@ -656,6 +656,14 @@ export function useInvites() {
   return useQuery({ queryKey: ["invites"], queryFn: api.users.listInvites });
 }
 
+/** The grant picker's customer list -- admin-only and NOT grant-filtered
+ *  (see api.users.listGrantableCustomers). Only the Users screen's
+ *  GrantPicker should use this; everywhere else that lists customers wants
+ *  `useCustomers`, which respects the caller's grants. */
+export function useGrantableCustomers() {
+  return useQuery({ queryKey: ["users", "customers"], queryFn: api.users.listGrantableCustomers });
+}
+
 export function useUserActions() {
   const qc = useQueryClient();
   const invalidate = () => {

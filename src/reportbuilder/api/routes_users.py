@@ -56,6 +56,37 @@ def list_users(auth: AuthContext = Depends(get_auth), repo: Repository = Depends
     return [_user_row(repo, auth, u) for u in repo.list_users(auth)]
 
 
+@users_router.get("/users/customers")
+def list_grantable_customers(auth: AuthContext = Depends(get_auth),
+                             repo: Repository = Depends(get_repository),
+                             admin: User = Depends(require_admin)) -> list[dict]:
+    """Every customer in the tenant, id and name only -- so the grant editor
+    on THIS screen has something to put in its picker.
+
+    Why this exists: `GET /customers` (routes_customers.py) is grant-filtered
+    (spec §5.3) -- an admin with no grants gets `[]` from it, by design (see
+    `test_an_admin_without_grants_sees_nothing`). But that is exactly the
+    state every BOOTSTRAP admin starts in, and a grant picker fed from that
+    route is then empty: nobody can be granted anything, including the admin
+    themselves, because there is no customer to name in the grant. That is a
+    chicken-and-egg, not a bug in the filter -- the filter is right.
+    "Administering access" and "having access" are deliberately different
+    things (spec §5); this route answers the administration question ("what
+    customers exist, so I can write a grant naming one") and nothing else.
+    It carries no template, case, material, report or preview data -- only
+    what a <select> needs -- and it is `require_admin`, not a general
+    listing: a non-admin still has no way to enumerate customers they were
+    not granted.
+
+    Do not delete this as redundant with `/customers` -- for an admin with
+    no grants they are NOT redundant, that is the whole reason this exists.
+    Do not widen it into `/customers?all=true` or similar either: a route
+    that sometimes ignores the grant filter is a much larger thing to audit
+    than a route that only ever returns ids and names.
+    """
+    return [{"id": c.id, "name": c.name} for c in repo.list_customers(auth)]
+
+
 @users_router.put("/users/{user_id}/grants")
 def put_user_grants(user_id: str, body: dict = Body(...),
                     auth: AuthContext = Depends(get_auth), repo: Repository = Depends(get_repository),

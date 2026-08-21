@@ -57,6 +57,36 @@ class TestListUsers:
         assert viewer_client.get("/users").status_code == 403
 
 
+class TestGrantableCustomers:
+    """GET /users/customers -- the grant picker's feed, deliberately
+    unfiltered by grants (task-11): an admin with none yet must still be
+    able to name a customer in a grant, or nobody can ever be granted
+    anything, including that admin."""
+
+    def test_an_admin_with_no_grants_still_sees_every_customer_here(self, repo, auth):
+        app = create_app()
+        app.dependency_overrides[get_repository] = lambda: repo
+        app.dependency_overrides[get_auth] = lambda: auth
+        cid = repo.create_customer(auth, "Attendo").id
+        admin = User(id="admin", email="admin@x.c", name="admin", is_admin=True, grants=())
+        app.dependency_overrides[current_user] = lambda: admin
+        client = TestClient(app)
+
+        # The rule this route exists around, restated: the grant-filtered
+        # listing sees nothing for this admin.
+        assert client.get("/customers").json() == []
+        # The admin-only listing exists precisely so that is not a dead end.
+        assert client.get("/users/customers").json() == [{"id": cid, "name": "Attendo"}]
+
+    def test_it_returns_only_id_and_name(self, admin_client, repo, auth):
+        cid = repo.create_customer(auth, "Attendo").id
+        row = admin_client.get("/users/customers").json()[0]
+        assert row == {"id": cid, "name": "Attendo"}
+
+    def test_a_non_admin_cannot_list_it_either(self, viewer_client):
+        assert viewer_client.get("/users/customers").status_code == 403
+
+
 class TestGrants:
     def test_admin_replaces_a_users_grants(self, admin_client, repo, auth):
         u = repo.save_user(auth, User(id="", email="a@x.c"))

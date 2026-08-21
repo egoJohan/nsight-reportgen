@@ -1219,6 +1219,15 @@ export const api = {
     list: (): Promise<StudioUser[]> =>
       fetch(`${API_BASE}/users`).then((r) => json<StudioUser[]>(r)),
 
+    /** Every customer in the tenant, id and name only -- admin-only, and
+     *  deliberately NOT grant-filtered (backend: routes_users.py's
+     *  list_grantable_customers). Feeds the grant picker on this screen so
+     *  an admin with no grants yet -- every bootstrap admin -- has
+     *  something to pick from. Never use this for anything that reads a
+     *  customer's data; that path stays on `api.customers.list`. */
+    listGrantableCustomers: (): Promise<Customer[]> =>
+      fetch(`${API_BASE}/users/customers`).then((r) => json<Customer[]>(r)),
+
     setGrants: (userId: string, grants: UserGrantInput[]): Promise<StudioUser> =>
       fetch(`${API_BASE}/users/${userId}/grants`, jsonPut({ grants })).then((r) => detailedJson<StudioUser>(r)),
 

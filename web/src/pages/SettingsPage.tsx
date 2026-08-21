@@ -22,7 +22,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EMPTY, PAGE, PAGE_TITLE, PANEL, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
-  useUsers, useInvites, useUserActions, useCustomers,
+  useUsers, useInvites, useUserActions, useGrantableCustomers,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
 import type { InstalledFont, MissingFont, StudioUser, Invite, UserGrantInput } from "@/lib/api";
@@ -268,7 +268,10 @@ function GrantPicker({
   grants: UserGrantInput[];
   onChange: (grants: UserGrantInput[]) => void;
 }) {
-  const { data: customers } = useCustomers();
+  // The grant editor's own listing (task-11): unlike `useCustomers`, this
+  // is admin-only and NOT grant-filtered, so an admin with no grants yet
+  // still has customers to pick from -- see api.ts's listGrantableCustomers.
+  const { data: customers } = useGrantableCustomers();
   const [customerId, setCustomerId] = useState("");
   const [mode, setMode] = useState<"view" | "edit">("view");
 
