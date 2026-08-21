@@ -107,7 +107,11 @@ function MicrosoftMark() {
 
 function ProviderButton({ label, mark, href }: { label: string; mark: ReactNode; href: string }) {
   return (
-    <a href={href}>
+    // `block`, not the anchor's default `inline`: space-y-* spaces siblings with
+    // margin-top, and margin-top does nothing on an inline element — so without
+    // this the two buttons sit flush against each other no matter what spacing
+    // the parent asks for.
+    <a href={href} className="block">
       <Button type="button" variant="outline" className="w-full justify-center gap-2">
         {mark}
         {label}
@@ -226,7 +230,7 @@ export default function LoginPage() {
               made the login screen visibly resize a moment after paint. */}
           {(showGoogle || showMicrosoft || providersPending) && (
             <div className={providersPending ? "invisible" : undefined} aria-hidden={providersPending}>
-              <div className="space-y-6">
+              <div className="space-y-3">
                 {(showGoogle || providersPending) && (
                   <ProviderButton
                     label="Continue with Google"
