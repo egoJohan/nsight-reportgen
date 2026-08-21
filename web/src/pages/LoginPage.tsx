@@ -125,7 +125,7 @@ export default function LoginPage() {
   const ssoError = ssoErrorCode
     ? (SSO_ERROR_MESSAGES[ssoErrorCode] ?? "Sign-in didn't complete. Try again.")
     : null;
-  const { data: providers } = useProviderAvailability();
+  const { data: providers, isPending: providersPending } = useProviderAvailability();
   const showGoogle = providers?.google ?? false;
   const showMicrosoft = providers?.microsoft ?? false;
 
@@ -218,18 +218,23 @@ export default function LoginPage() {
 
           {/* Only offer a provider GET /auth/providers reports configured —
               see useProviderAvailability. Hidden entirely, divider included,
-              when neither is (or while that check is still loading). */}
-          {(showGoogle || showMicrosoft) && (
-            <>
-              <div className="space-y-2">
-                {showGoogle && (
+              when neither is.
+
+              While the check is in flight we render the block INVISIBLE rather
+              than absent: it still occupies its full height, so the card does
+              not grow under the cursor when the answer arrives. Omitting it
+              made the login screen visibly resize a moment after paint. */}
+          {(showGoogle || showMicrosoft || providersPending) && (
+            <div className={providersPending ? "invisible" : undefined} aria-hidden={providersPending}>
+              <div className="space-y-3">
+                {(showGoogle || providersPending) && (
                   <ProviderButton
                     label="Continue with Google"
                     mark={<GoogleMark />}
                     href={providerLoginUrl("google", next)}
                   />
                 )}
-                {showMicrosoft && (
+                {(showMicrosoft || providersPending) && (
                   <ProviderButton
                     label="Continue with Microsoft"
                     mark={<MicrosoftMark />}
@@ -238,7 +243,7 @@ export default function LoginPage() {
                 )}
               </div>
 
-              <div className="relative">
+              <div className="relative mt-4">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
                 </div>
@@ -246,7 +251,7 @@ export default function LoginPage() {
                   <span className="bg-surface px-2 text-xs text-muted-foreground">or</span>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           <form onSubmit={submit} className="space-y-4">
