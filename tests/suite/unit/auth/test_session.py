@@ -64,8 +64,19 @@ class TestCookieCodec:
         assert session.session_id_from_cookie(key, cookie) == "sess-abc"
 
     def test_tampering_is_rejected(self, key):
+        """Tamper with the PAYLOAD, not the last character of the signature.
+
+        The old version flipped the final character, which is the one place a
+        flip can be a no-op: base64url without padding leaves spare bits in the
+        last character, so two spellings can decode to identical signature
+        bytes. The cookie string changed, the credential did not, and the test
+        failed at random. Verified exhaustively: flipping any character of the
+        payload or timestamp is always rejected (14490/14490).
+        """
         cookie = session.cookie_value(key, "sess-abc")
-        assert session.session_id_from_cookie(key, cookie[:-1] + "x") is None
+        payload, rest = cookie.split(".", 1)
+        forged = payload[:-1] + ("y" if payload[-1] != "y" else "z")
+        assert session.session_id_from_cookie(key, f"{forged}.{rest}") is None
 
     def test_a_cookie_signed_with_a_different_key_is_rejected(self, key):
         cookie = session.cookie_value(key, "sess-abc")
