@@ -11,18 +11,19 @@ setup, are what no longer holds — see task-4c-report.md.
 from unittest.mock import Mock
 
 
-def test_post_cases_creates_case_and_returns_case_id(rb_wire) -> None:
-    """POST /cases with {"name": "Acme tracker"} returns 200/201 and body with case_id. (REQ-C-03)"""
-    mock_client = Mock()
-    mock_client.create_case.return_value = "case-123"
+def test_post_cases_is_gone_and_names_its_replacement(rb_wire) -> None:
+    """POST /cases refuses with 410 and points at the route that works.
 
-    test_client = rb_wire(client=mock_client)
+    A study belongs to a customer, and this pre-hierarchy route carries none in
+    its path, so it cannot succeed — RepositoryClient has no create_case at all.
+    It used to 500 on an AttributeError; it now says plainly that it is gone and
+    where to go instead. The replacement is POST /customers/{id}/cases."""
+    test_client = rb_wire(client=Mock())
 
     response = test_client.post("/cases", json={"name": "Acme tracker"})
 
-    assert response.status_code in (200, 201)
-    assert response.json()["case_id"] == "case-123"
-    mock_client.create_case.assert_called_once_with("Acme tracker")
+    assert response.status_code == 410
+    assert "/customers/" in response.json()["detail"]
 
 
 def test_get_cases_lists_cases(rb_wire) -> None:
@@ -52,11 +53,11 @@ def test_get_cases_lists_cases(rb_wire) -> None:
     mock_client.list_cases.assert_called_once()
 
 
-def test_post_cases_with_missing_name_returns_422(rb_wire) -> None:
-    """POST /cases with missing/empty name returns 422 validation error. (REQ-C-03)"""
-    mock_client = Mock()
-    test_client = rb_wire(client=mock_client)
+def test_post_cases_is_gone_whatever_the_body(rb_wire) -> None:
+    """410 before validation: the route is gone, so the body is beside the point.
 
-    response = test_client.post("/cases", json={})
+    It used to answer 422 for a missing name, which implied that a well-formed
+    body would have worked. None will."""
+    test_client = rb_wire(client=Mock())
 
-    assert response.status_code == 422
+    assert test_client.post("/cases", json={}).status_code == 410

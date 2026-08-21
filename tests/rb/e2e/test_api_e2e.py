@@ -114,16 +114,42 @@ def test_api_full_chain(tmp_path):
 
     REQ-C-03, REQ-C-04, REQ-C-05, REQ-C-08, REQ-C-09, REQ-C-19, REQ-C-21, REQ-C-22.
     """
-    hive = FakeHive()
-    app = create_app(client=hive)
+    from reportbuilder.api.deps_auth import current_user
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.auth.permissions import Grant, User
+    from reportbuilder.store.memory_objects import InMemoryObjectStore
+    from reportbuilder.store.repository import Repository
+    from reportbuilder.store.seam import AuthContext
+
+    # No injected client: get_client builds the real RepositoryClient over the
+    # same repository the guards read, so a material created through a route is
+    # visible to the guard on the next one. Injecting a separate fake store put
+    # the data in one place and the guard's lookup in another.
+    app = create_app()
+
+    # Signed in, and wired to a repository. Both are new since this test was
+    # written: every route resolves a user now, and the guards resolve ids
+    # through the repository rather than through the injected client.
+    auth = AuthContext(token="test")
+    repo = Repository(InMemoryObjectStore())
+    customer = repo.create_customer(auth, "E2E Co")
+    actor = User(id="e2e", email="e2e@example.com", name="E2E", is_admin=True,
+                 grants=(Grant(customer.id, "edit"),))
+    app.dependency_overrides[get_repository] = lambda: repo
+    app.dependency_overrides[get_auth] = lambda: auth
+    app.dependency_overrides[current_user] = lambda: actor
     tc = TestClient(app)
 
     # ------------------------------------------------------------------
-    # Step 1: POST /cases  (REQ-C-03)
+    # Step 1: create a study UNDER a customer  (REQ-C-03)
+    #
+    # Was POST /cases, which is now 410 Gone: a study belongs to a customer and
+    # that route carries none. The rest of the chain still addresses the study
+    # by its bare id, which resolves the same way it always did.
     # ------------------------------------------------------------------
-    resp = tc.post("/cases", json={"name": "E2E"})
+    resp = tc.post(f"/customers/{customer.id}/cases", json={"name": "E2E"})
     assert resp.status_code in (200, 201), resp.text
-    case_id = resp.json()["case_id"]
+    case_id = resp.json()["id"]
     assert case_id  # non-empty
 
     # ------------------------------------------------------------------
@@ -202,8 +228,10 @@ def test_api_full_chain(tmp_path):
     dup_id = resp.json()["report_id"]
     assert dup_id != report_id, "Duplicate must have a different report_id"
 
-    # Verify the stored duplicate has name "E2E copy"
-    dup_json = hive.load_report(case_id, dup_id)
+    # Verify the stored duplicate has name "E2E copy". Read it back through the
+    # API rather than reaching into a store object: the duplicate lives wherever
+    # the app put it, and the route is the contract this test is about.
+    dup_json = tc.get(f"/cases/{case_id}/reports/{dup_id}").text
     assert report_from_json(dup_json).name == "E2E copy", (
         f"Duplicate report name should be 'E2E copy'; stored JSON: {dup_json}"
     )
