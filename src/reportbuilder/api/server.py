@@ -15,6 +15,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from reportbuilder.api.app import create_app
 
 
+def _require_datahive() -> None:
+    """Refuse to start a SERVER without a hive to store anything in.
+
+    `build_repository` falls back to an in-memory store when NSIGHT_DATAHIVE_URL
+    is unset — right for tests, catastrophic for a deployment: every customer,
+    case, material, report, user and grant lives until the next restart and no
+    further, and nothing says so. The staging compose file shipped in exactly
+    that state for months, still setting the NSIGHT_DEMO variables that stopped
+    meaning anything when demo mode was removed.
+
+    This is the runnable server's entrypoint, not `create_app`, so tests keep
+    their in-memory store; only a process someone deploys is held to it.
+    """
+    missing = [name for name in ("NSIGHT_DATAHIVE_URL", "NSIGHT_DATAHIVE_TOKEN")
+               if not os.environ.get(name)]
+    if missing:
+        raise RuntimeError(
+            "refusing to start without datahive: " + ", ".join(missing) +
+            " unset. Storage is datahive, always — see this module's docstring. "
+            "Without it the store is in-memory and every write is lost on restart."
+        )
+
+
 def build_server_app():
 
     # No client is injected: get_client resolves per request, carrying the
@@ -42,7 +65,23 @@ def build_server_app():
     return app
 
 
-app = build_server_app()
+def __getattr__(name: str):
+    """`app` is built on ACCESS, not on import, and only after the datahive check.
+
+    uvicorn resolves "reportbuilder.api.server:app" by importing this module and
+    then reading the attribute, so the guard still fires before a deployed
+    process serves a single request. Importing the module — which the tests do,
+    to reach `build_server_app` — touches nothing and stays free.
+
+    Building it at import time instead would make the module unimportable
+    without a hive configured, which is not the same statement at all: a factory
+    that tests drive with no datahive is legitimate, a SERVER without one is not.
+    """
+    if name == "app":
+        _require_datahive()
+        return build_server_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 
 def main():

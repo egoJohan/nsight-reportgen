@@ -1,26 +1,95 @@
-# Local containerized run of the nSight report tool (production-style).
-#   docker compose up --build
-# UI on http://localhost:8090 ; the backend is internal (reached via the nginx
-# proxy). Demo mode = self-contained store persisted in the named volume.
+# Local containerized run of nSight Studio (production-style).
+#
+#   docker compose up --build          # UI on http://localhost:8090
+#
+# Three services, and the shape matters: it is the SAME shape staging runs, so
+# what works here is what will work there (docker-compose.staging.yml differs
+# only in what it publishes and how it restarts).
+#
+# Storage is datahive, always — see reportbuilder/api/server.py. The former demo
+# mode (NSIGHT_DEMO=1 and a JSON store under work/demo-store) is gone; the
+# variables that configured it were still set here long after the code stopped
+# reading them, and without NSIGHT_DATAHIVE_URL the backend falls back to an
+# IN-MEMORY store (deps_store.py's build_repository). Every customer, case,
+# material, report, user and grant then lives until the next restart and no
+# further. That is what this file used to deploy.
+#
+# FIRST RUN IS TWO STEPS, because the token cannot exist before the hive does:
+#
+#   1. docker compose up -d datahive
+#   2. docker compose exec datahive datahive auth grant nsight-backend \
+#          --config /var/lib/datahive/datahive.yaml \
+#          --state-dir /var/lib/datahive --groups owner --expires 365d --json
+#      …take `.bearer` from the JSON into .env as NSIGHT_DATAHIVE_TOKEN.
+#
+#      Two traps, both hit while writing this file:
+#        * mint it with the DEFAULT purpose. `--purpose hive-admin` looks like
+#          the stronger choice and is the wrong one — it is a MANAGEMENT
+#          credential, so every content path is refused with
+#          `management_not_content`, and the backend starts, serves, and fails
+#          on the first object it touches.
+#        * `--groups owner` is required. Without it deletes come back needing
+#          human consent (`ConsentRequired`), which is how "poista raportti"
+#          looks broken to a user: the button works, the object stays.
+#   3. docker compose up -d --build
+#
+# Every later deploy is just step 3.
 services:
+  # The hive: app + PostgreSQL 16 + Qdrant in ONE container, supervised by s6
+  # (STORAGE_SCHEME=bundled). Postgres and Qdrant bind loopback INSIDE the
+  # container and are not reachable from the compose network at all — only the
+  # hive's own port is. Build the image from the datahive checkout:
+  #
+  #   docker build -f docker/datahive.Dockerfile -t datahive:local .
+  #
+  # It also runs `datahive migrate up` during init and only starts serving once
+  # that succeeds, so a pending migration can never leave the hive refusing to
+  # boot while everything in front of it returns 500s.
+  datahive:
+    image: datahive:local
+    environment:
+      NAME: nsight-local
+      PORT: "7891"
+      TIER: personal
+      STORAGE_SCHEME: bundled     # postgres + qdrant inside this container
+      KMS_BACKEND: file
+      KMS_PROFILE: dev
+      TLS_SCHEME: "off"           # plain HTTP; nothing outside the host reaches it
+    volumes:
+      # Postgres data, the object store and the KMS material all live here.
+      # Losing this volume is losing the instance.
+      - nsight-datahive:/var/lib/datahive
+    ports:
+      # Loopback only, and only so you can inspect the hive from the host
+      # (healthz, the CLI over HTTP). The backend does not use this — it goes
+      # over the compose network. Staging publishes nothing at all.
+      - "127.0.0.1:7891:7891"
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
     environment:
-      NSIGHT_DEMO: "1"
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
-      NSIGHT_DEMO_DIR: /data/demo-store
+      # The service credential is read-write across the tenant; nSight narrows
+      # per user itself (reportbuilder/auth/permissions.py, spec §5.3).
+      NSIGHT_DATAHIVE_URL: "http://datahive:7891"
+      NSIGHT_DATAHIVE_TOKEN: "${NSIGHT_DATAHIVE_TOKEN:-}"
+      # Whoever signs in first with one of these verified emails becomes admin,
+      # on an EMPTY hive only (spec §3.1). Without it a fresh instance has no
+      # way in at all, because every route is grant-gated.
+      NSIGHT_BOOTSTRAP_ADMINS: "${NSIGHT_BOOTSTRAP_ADMINS:-}"
       # Safe here specifically because the backend `expose`s 8200 to the
-      # compose network only and publishes no port of its own (see the
-      # file-level comment) -- the frontend/nginx container is structurally
-      # the only thing that can ever connect, so its X-Forwarded-Proto/-Host
-      # can be trusted for building the OAuth redirect_uri. See
-      # routes_auth.py's _trust_forwarded_headers.
+      # compose network only and publishes no port of its own -- the
+      # frontend/nginx container is structurally the only thing that can
+      # ever connect, so its X-Forwarded-Proto/-Host can be trusted for
+      # building the OAuth redirect_uri. See routes_auth.py's
+      # _trust_forwarded_headers.
       NSIGHT_TRUST_FORWARDED_HEADERS: "1"
-    volumes:
-      - nsight-demo:/data/demo-store
+    depends_on:
+      - datahive
     expose:
       - "8200"
     restart: unless-stopped
@@ -35,4 +104,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  nsight-demo:
+  nsight-datahive:

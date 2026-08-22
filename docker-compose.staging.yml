@@ -2,7 +2,9 @@
 #
 #   docker compose -f docker-compose.staging.yml up -d --build
 #
-# Differences from the local docker-compose.yml:
+# Same three services and the same wiring as docker-compose.yml, so what works
+# locally works here. Differences, all of them deliberate:
+#   - the hive publishes NOTHING; only the compose network reaches it.
 #   - frontend publishes on 127.0.0.1:8090 (LOOPBACK only) so the plain-HTTP app
 #     is NOT exposed publicly; the host's Caddy terminates TLS and proxies to it.
 #   - restart: always (survives reboots).
@@ -12,16 +14,77 @@
 #
 # This file is self-contained (NOT an override) to avoid compose port-merge
 # ambiguity — use it alone, not combined with docker-compose.yml.
+#
+# FIRST DEPLOY IS TWO STEPS, because the service token cannot exist before the
+# hive does:
+#
+#   1. docker compose -f docker-compose.staging.yml up -d datahive
+#   2. docker compose -f docker-compose.staging.yml exec datahive datahive auth grant nsight-backend \
+#          --config /var/lib/datahive/datahive.yaml \
+#          --state-dir /var/lib/datahive --groups owner --expires 365d --json
+#      …take `.bearer` from the JSON into .env as NSIGHT_DATAHIVE_TOKEN.
+#
+#      Two traps, both hit while writing this file:
+#        * mint it with the DEFAULT purpose. `--purpose hive-admin` looks like
+#          the stronger choice and is the wrong one — it is a MANAGEMENT
+#          credential, so every content path is refused with
+#          `management_not_content`, and the backend starts, serves, and fails
+#          on the first object it touches.
+#        * `--groups owner` is required. Without it deletes come back needing
+#          human consent (`ConsentRequired`), which is how "poista raportti"
+#          looks broken to a user: the button works, the object stays.
+#   3. docker compose -f docker-compose.staging.yml up -d --build
+#
+# Every later deploy is just step 3.
 services:
+  # The hive: app + PostgreSQL 16 + Qdrant in ONE container under s6
+  # (STORAGE_SCHEME=bundled), Postgres and Qdrant on loopback INSIDE it. The
+  # image is not published to a registry, so build it on the server from the
+  # datahive checkout before the first `up`:
+  #
+  #   docker build -f docker/datahive.Dockerfile -t datahive:local .
+  #
+  # `datahive migrate up` runs during init and the hive only serves once it
+  # succeeds, so a pending migration stops the container instead of leaving a
+  # half-migrated instance answering 500s behind a healthy-looking proxy.
+  datahive:
+    image: datahive:local
+    environment:
+      NAME: nsight-staging
+      PORT: "7891"
+      TIER: personal
+      STORAGE_SCHEME: bundled
+      KMS_BACKEND: file
+      # dev KMS profile: staging holds no production client data. Revisit
+      # before this stack ever carries real material.
+      KMS_PROFILE: dev
+      TLS_SCHEME: "off"     # Caddy on the host terminates TLS, not this image
+    volumes:
+      # THE instance. Postgres data, objects and KMS material. Back this up;
+      # losing it loses every customer, report, user and grant.
+      - nsight-datahive:/var/lib/datahive
+    # No `ports:` on purpose — the backend reaches it over the compose network
+    # and nothing else should.
+    restart: always
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
     environment:
-      NSIGHT_DEMO: "1"
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
-      NSIGHT_DEMO_DIR: /data/demo-store
+      NSIGHT_DATAHIVE_URL: "http://datahive:7891"
+      # From .env on the server. Empty is allowed HERE only so that step 1 of a
+      # first deploy can start the hive alone — compose interpolates the whole
+      # file even when you name one service. The backend itself refuses to boot
+      # without both variables (server.py's _require_datahive), which is the
+      # check that matters: a missing token used to mean "fall back to an
+      # in-memory store" and lose everything on restart, silently.
+      NSIGHT_DATAHIVE_TOKEN: "${NSIGHT_DATAHIVE_TOKEN:-}"
+      # Who becomes admin on first sign-in to an EMPTY hive (spec §3.1). A fresh
+      # staging instance is unusable without it: every route is grant-gated.
+      NSIGHT_BOOTSTRAP_ADMINS: "${NSIGHT_BOOTSTRAP_ADMINS:-}"
       # Safe here specifically because the backend `expose`s 8200 to the
       # compose network only and publishes no port of its own -- the
       # frontend/nginx container is structurally the only thing that can
@@ -32,11 +95,12 @@ services:
       # to what IT received from the browser before forwarding to us.
       NSIGHT_TRUST_FORWARDED_HEADERS: "1"
     volumes:
-      - nsight-demo:/data/demo-store
       # egoHive credentials (base_url + endpoint_id). Read-only. The container's
       # default creds path is /app/work/egohive_creds.json. Place the file at
       # ./work/egohive_creds.json on the server before `up`.
       - ./work/egohive_creds.json:/app/work/egohive_creds.json:ro
+    depends_on:
+      - datahive
     expose:
       - "8200"
     restart: always
@@ -51,4 +115,4 @@ services:
     restart: always
 
 volumes:
-  nsight-demo:
+  nsight-datahive:
