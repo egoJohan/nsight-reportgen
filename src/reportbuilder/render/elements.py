@@ -143,6 +143,44 @@ def add_n_annotation(ctx: RenderContext) -> None:
     run.font.size = Pt(font_size)
 
 
+# Only these chart types draw one panel per group and cap at three; every other
+# chart type draws all its groups, so an omission clause there would be a lie.
+_PANEL_CHART_TYPES = ("pie", "doughnut", "funnel")
+
+
+def _omission_clause(ctx) -> str:
+    """The footer's record of every classifier group the slide did NOT draw.
+
+    The editor's warning stays in the editor; this line travels with the deck, so
+    it is the authoritative account of what was omitted. The two reasons are kept
+    apart because they mean different things to a reader: a group omitted for a
+    thin base could not be reported at all, while a capped group fits the data but
+    not the page. (spec 2026-08-22)
+
+    Only pie/doughnut/funnel draw one panel per group and cap at three; every
+    other chart type draws all its groups, so an omission clause there would be a
+    false statement printed on a client slide. (ruling 2026-08-22)
+    """
+    if getattr(ctx.spec, "chart_type", "") not in _PANEL_CHART_TYPES:
+        return ""
+    # Imported lazily: render.image._mpl (imported by panels) pulls in
+    # render.image.pie, which itself imports panel_segments from this module's
+    # sibling — a module-level import here would be circular.
+    from reportbuilder.render.panels import panel_segments
+
+    sel = panel_segments(ctx.series)
+    if not sel.split:
+        return ""
+    if sel.degraded:
+        return " · Ryhmittelyä ei voitu piirtää"
+    parts = []
+    if sel.thin:
+        parts.append("Ei raportoitu: " + ", ".join(sel.thin))
+    if sel.capped:
+        parts.append("Ei mahtunut sivulle: " + ", ".join(sel.capped))
+    return (" · " + " · ".join(parts)) if parts else ""
+
+
 def add_filter_annotation(ctx: RenderContext) -> None:
     """Add a slide textbox naming the classifying variable.
 
@@ -158,11 +196,12 @@ def add_filter_annotation(ctx: RenderContext) -> None:
     # Position: below the N annotation (or at slot bottom if no N)
     left = slot.left + int(Inches(2.1))
     top = slot.top + slot.height - int(Inches(0.35))
-    width = int(Inches(3.0))
+    width = int(Inches(5.5))
     height = int(Inches(0.3))
 
     txBox = ctx.slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
+    tf.word_wrap = True
     # In the SEPARATE layout the slide is split by BOTH variables, side by side;
     # naming only the first would misdescribe the chart. (spec 2026-08-04)
     opts = getattr(ctx.spec, "options", None) or {}
@@ -170,7 +209,7 @@ def add_filter_annotation(ctx: RenderContext) -> None:
     if cv2 and opts.get("xtab_layout") == "separate":
         tf.text = f"{ctx.spec.classifying_var} · {cv2}"
     else:
-        tf.text = ctx.spec.classifying_var
+        tf.text = f"{ctx.spec.classifying_var}{_omission_clause(ctx)}"
 
     font_name, font_size = ctx.style.font_for("filter_var")
     run = tf.paragraphs[0].runs[0]

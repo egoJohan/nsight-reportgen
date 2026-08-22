@@ -313,6 +313,54 @@ def test_add_image_slide_chrome_n_annotation():
     assert n_texts, "N=5 annotation not found in any textbox after chrome"
 
 
+def test_add_image_slide_chrome_names_a_capped_group_in_the_footer():
+    """The image-mode footer is the ONLY one real users see: deck.py routes
+    render_mode == "image" to add_image_slide_chrome, never add_filter_annotation
+    (deck.py:259-267), and the web app only ever sends render_mode "image"
+    (web/src/lib/api.ts:272). A capped pie must name what it dropped HERE, not
+    just in the native-only textbox that no real deck reaches. (spec 2026-08-22)
+    """
+    import dataclasses
+    from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
+
+    cats = ("A", "B")
+    segments = ("18-29", "30-44", "45-59", "60+", "Total")
+    cells = {(c, s): Cell(pct=50.0, count=1.0, mean=None) for c in cats for s in segments}
+    series = SeriesResult(categories=cats, segments=segments, cells=cells,
+                          base_n={"18-29": 50, "30-44": 90, "45-59": 70, "60+": 30,
+                                  "Total": 240},
+                          statistic="pct")
+    prs, slide, slot, ctx = _make_ctx("pie", series=series)
+    ctx = dataclasses.replace(ctx, spec=dataclasses.replace(ctx.spec, classifying_var="age"))
+
+    add_image_slide_chrome(ctx)
+
+    text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+    assert "60+" in text
+    assert "Ei mahtunut sivulle" in text
+
+
+def test_add_image_slide_chrome_says_nothing_when_nothing_was_dropped():
+    """An unsplit or fully-fitting classifier must not print an omission clause —
+    a false disclosure on a client slide is as wrong as a missing one."""
+    import dataclasses
+    from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
+
+    cats = ("A", "B")
+    segments = ("Naiset", "Miehet", "Total")
+    cells = {(c, s): Cell(pct=50.0, count=1.0, mean=None) for c in cats for s in segments}
+    series = SeriesResult(categories=cats, segments=segments, cells=cells,
+                          base_n={"Naiset": 60, "Miehet": 40, "Total": 100},
+                          statistic="pct")
+    prs, slide, slot, ctx = _make_ctx("pie", series=series)
+    ctx = dataclasses.replace(ctx, spec=dataclasses.replace(ctx.spec, classifying_var="sex"))
+
+    add_image_slide_chrome(ctx)
+
+    text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+    assert "Ei mahtunut sivulle" not in text and "Ei raportoitu" not in text
+
+
 # ---------------------------------------------------------------------------
 # Title fitting (Task D2): a title too long for the template's own box shrinks
 # instead of growing the box without limit.

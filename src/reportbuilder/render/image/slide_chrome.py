@@ -22,6 +22,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
+from reportbuilder.render.elements import _omission_clause
 from reportbuilder.render.template_profile import clone_furniture
 from reportbuilder.render.house_style import (
     PX_CREAM, PX_INK, PX_TEAL, PX_MUTED, furniture_colors,
@@ -657,6 +658,16 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         footer_text = f"N = {base_n}"
     else:
         footer_text = stat_label
+    # A pie/doughnut/funnel split into panels can drop a group (too thin a base,
+    # or more groups than the page holds) — the editor's warning stays in the
+    # editor, so this is the ONLY record of it that travels with the deck. Image
+    # mode has no separate "classifying variable" box the way the native builder
+    # does, so the disclosure rides on the same footer line. (spec 2026-08-22)
+    cv = getattr(ctx.spec, "classifying_var", None)
+    if cv:
+        omission = _omission_clause(ctx)
+        if omission:
+            footer_text = f"{footer_text}   ·   {cv}{omission}"
     # Left margin follows the chart on a templated or harvested slide: those
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.
