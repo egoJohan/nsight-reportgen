@@ -84,3 +84,18 @@ def test_a_bar_chart_never_claims_it_omitted_groups():
     add_filter_annotation(ctx)
     text = " ".join(_texts(slide))
     assert "Ei mahtunut sivulle" not in text and "Ei raportoitu" not in text
+
+
+def test_degraded_split_says_grouping_could_not_be_drawn():
+    # Every group is under the base floor -- the renderer falls back to the whole
+    # sample, and that is the single most severe omission the feature can make:
+    # the slide looks like an ordinary un-split pie unless the footer says
+    # otherwise. The degraded clause REPLACES the per-group ones, not stacks with
+    # them. (coordinator review 2026-08-22)
+    s = _split_series(("Naiset", "Miehet", "Total"),
+                      {"Naiset": 4, "Miehet": 6, "Total": 10})
+    _prs, slide, _slot, ctx = make_ctx("pie", s, classifying_var="sex")
+    add_filter_annotation(ctx)
+    text = " ".join(_texts(slide))
+    assert "Ryhmittelyä ei voitu piirtää" in text
+    assert "Ei raportoitu:" not in text and "Ei mahtunut sivulle:" not in text

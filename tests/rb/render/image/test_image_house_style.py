@@ -364,6 +364,30 @@ def test_add_image_slide_chrome_says_nothing_when_nothing_was_dropped():
     assert "Ei mahtunut sivulle" not in text and "Ei raportoitu" not in text
 
 
+def test_add_image_slide_chrome_says_grouping_could_not_be_drawn_when_all_thin():
+    """Every group under the base floor is the most severe omission the feature
+    can produce: the renderer falls back to a single whole-sample pie that looks
+    exactly like an ordinary un-split slide. This is the path real users see
+    (add_image_slide_chrome, not the native-only add_filter_annotation), so it is
+    the one that matters most. (coordinator review 2026-08-22)"""
+    import dataclasses
+    from reportbuilder.render.image.slide_chrome import add_image_slide_chrome
+
+    cats = ("A", "B")
+    segments = ("Naiset", "Miehet", "Total")
+    cells = {(c, s): Cell(pct=50.0, count=1.0, mean=None) for c in cats for s in segments}
+    series = SeriesResult(categories=cats, segments=segments, cells=cells,
+                          base_n={"Naiset": 4, "Miehet": 6, "Total": 10},
+                          statistic="pct")
+    prs, slide, slot, ctx = _make_ctx("pie", series=series)
+    ctx = dataclasses.replace(ctx, spec=dataclasses.replace(ctx.spec, classifying_var="sex"))
+
+    add_image_slide_chrome(ctx)
+
+    text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
+    assert "Ryhmittelyä ei voitu piirtää" in text
+
+
 # ---------------------------------------------------------------------------
 # Title fitting (Task D2): a title too long for the template's own box shrinks
 # instead of growing the box without limit.
