@@ -179,13 +179,18 @@ def test_stacked_schema_fields():
     ]
 
 
-def test_single_series_schema_omits_classifying_var():
+def test_single_series_schema_has_classifying_var_but_no_crosstab_controls():
+    # Pie/doughnut/funnel split into one panel per group (spec 2026-08-22), so they
+    # DO take a classifier — but never a second one, a cross-tab layout, or a Total
+    # reference series, none of which a row of pies can express.
     keys = _keys(single_series_schema())
-    assert "classifying_var" not in keys
     assert keys == [
-        "statistic", "sort", "number_format", "show_not_answered",
-        "show_empty_categories", "not_answered_codes", "category_label_overrides",
+        "statistic", "classifying_var", "sort", "number_format",
+        "show_not_answered", "show_empty_categories", "not_answered_codes",
+        "category_label_overrides",
     ]
+    for absent in ("classifying_var_2", "xtab_layout", "show_total", "percent_base"):
+        assert absent not in keys
 
 
 def test_combo_schema_has_combo_secondary_and_classifying_var():

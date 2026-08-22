@@ -279,8 +279,14 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
 
 
 def single_series_schema() -> tuple[ConfigField, ...]:
-    """Single-series charts (pie/doughnut/funnel): NO classifying variable."""
-    return (statistic_field(), *_common_tail())
+    """Pie/doughnut/funnel: ONE classifying variable, drawn as up to three panels.
+
+    No second classifier, no `xtab_layout`, no `show_total` — a row of pies can
+    express none of them. The percentage direction needs no control either:
+    `resolve_percent_base` always answers "classifier", so each panel already sums
+    to 100% within its own group. (spec 2026-08-22-multi-pie-panels-design)
+    """
+    return (statistic_field(), classifying_var_field(), *_common_tail())
 
 
 def combo_schema() -> tuple[ConfigField, ...]:

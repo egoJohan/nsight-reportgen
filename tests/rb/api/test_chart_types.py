@@ -35,14 +35,21 @@ def test_multi_series_types_expose_classifying_var(rb_wire):
         )
 
 
-def test_single_series_types_hide_classifying_var(rb_wire):
-    """The user's ask: pie/doughnut/funnel are single-series, so the classifying
-    variable must NOT be part of their config."""
+def test_single_series_types_split_by_one_classifier(rb_wire):
+    """Pie/doughnut/funnel split into up to three panels by a classifying variable
+    (spec 2026-08-22). They DO take a classifier, but never a second one, a
+    cross-tab layout, or a Total reference series — none of which a row of pies
+    can express."""
     cat = _catalog(rb_wire)
     for cid in ("pie", "doughnut", "funnel"):
-        assert "classifying_var" not in _keys(cat[cid]), (
-            f"{cid} is single-series and must not offer a classifying variable"
+        keys = _keys(cat[cid])
+        assert "classifying_var" in keys, (
+            f"{cid} must offer a classifying variable to split into panels"
         )
+        for absent in ("classifying_var_2", "xtab_layout", "show_total", "percent_base"):
+            assert absent not in keys, (
+                f"{cid} must not offer {absent}"
+            )
 
 
 def test_stacked_classifying_var_optional(rb_wire):
