@@ -278,15 +278,30 @@ defer if the plan needs to be cut.
 
 ### Footer
 
-`add_filter_annotation` (`render/elements.py:146`) already names the classifying
-variable and already has a branch for naming two variables in the separate layout.
-It gains the omitted-group clause.
+**Corrected during implementation, 2026-08-22.** This section originally named
+`add_filter_annotation` (`render/elements.py`) as the place the clause belongs. That
+was wrong in the way that matters most: `deck.py:259-263` calls that function ONLY
+under `render_mode == "native"`, and the web app sends image mode exclusively
+(`web/src/lib/api.ts:272`). The disclosure would have rendered for nobody. Every unit
+test against it would have passed while no real slide ever carried the line — the
+feature's one safety net, shipped dead.
 
-Its textbox is a fixed `Inches(3.0)` wide with no wrap setting, sized for a single
-variable name. An omitted-group clause naming two labels will not fit, and the box
-must grow and wrap to hold it. Left alone, the one line whose job is to disclose an
-omission would itself run off the slide — the failure mode this whole section exists
-to prevent.
+The footer an author actually sees is built by `add_image_slide_chrome`
+(`render/image/slide_chrome.py`), which composes the `N = …` / statistic line. The
+omitted-group clause is appended there, after the classifying variable's name. It is
+ALSO added to `add_filter_annotation`, so the native path is not left lying about what
+it drew — but the image path is the one that had to be right.
+
+The lesson generalises past this feature: a disclosure has to be verified where the
+reader will meet it. This one was caught by rendering a real slide through PowerPoint
+and reading its footer, on a deck that had silently dropped four age groups. No
+assertion about a function name would have found it.
+
+`add_filter_annotation`'s own textbox is a fixed `Inches(3.0)` wide with no wrap
+setting, sized for a single variable name. An omitted-group clause naming two labels
+will not fit, so the box grows and wraps. Left alone, the one line whose job is to
+disclose an omission would itself run off the slide — the failure mode this whole
+section exists to prevent.
 
 ## Known limitations
 
@@ -319,8 +334,12 @@ within-group percentages, unchanged by the renderer's renormalisation.
 does not offer a pie once split by that variable; a failing group that is *not*
 drawn (thin base, or capped out) does not veto it.
 
-**Footer** — a capped slide names its omitted groups; a slide that dropped a thin
-group says so, and distinguishes the two reasons; an unaffected slide says neither.
+**Footer** — asserted against **`add_image_slide_chrome`**, the image-mode footer an
+author actually sees, not only against the native-only `add_filter_annotation`: a
+capped slide names its omitted groups; a slide that dropped a thin group says so, and
+distinguishes the two reasons; an unaffected slide says neither. A chart type that does
+NOT panel (any bar chart) never prints an omission clause — it draws every group, so
+the clause there would be a false statement on a client slide.
 
 **Native** — a native pie or doughnut with a classifier draws the overall
 distribution, not the first group.

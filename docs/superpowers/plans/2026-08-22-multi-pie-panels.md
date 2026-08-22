@@ -744,8 +744,16 @@ git commit -m "feat(render): two or three pies in a row, one per group"
 ### Task 5: The footer names what was left out
 
 **Files:**
-- Modify: `src/reportbuilder/render/elements.py:146-180`
+- Modify: `src/reportbuilder/render/image/slide_chrome.py` (`add_image_slide_chrome`) — **the footer that ships**
+- Modify: `src/reportbuilder/render/elements.py:146-180` (`add_filter_annotation`) — native path only
 - Modify: `tests/suite/unit/render/test_filter_annotation.py`
+
+> **Corrected mid-execution.** This task originally targeted `add_filter_annotation`
+> alone. That function is called ONLY under `render_mode == "native"`
+> (`deck.py:259-263`), and the web app sends image mode exclusively — so the clause
+> would have rendered for nobody while its unit tests passed. The image-mode footer is
+> built by `add_image_slide_chrome`. Both get the clause; the image one is the one that
+> had to be right, and it needs its own test.
 
 **Interfaces:**
 - Consumes: `panel_segments` from Task 1.
