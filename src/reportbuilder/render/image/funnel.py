@@ -7,7 +7,10 @@ House style:
 - Slide-background bg, Liberation Sans font
 - TEAL fill for all funnel stages
 - White bold data labels centred in each bar (contrast against the fixed TEAL
-  fill — unrelated to the slide background, so not slide-derived)
+  fill — unrelated to the slide background, so not slide-derived); a label too
+  wide for its own bar (a narrow stage in a narrow panel) is instead placed just
+  right of the bar in ink tone, never shrunk and never left illegible-white
+  outside the fill it was sized for
 - Ink-tone category labels beside each bar (this IS on the slide background,
   and derived from it via `chart_furniture`)
 - No x-axis (values are in labels); no spines
@@ -34,6 +37,7 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
     bar_h = 0.60
     all_vals = [v for v in vals if v is not None]
 
+    value_labels = []  # (Text, left, v, i) — fitted against the real bar width below
     for i, (cat, v) in enumerate(zip(cats, vals)):
         # Centre the bar on the x-axis (symmetric funnel silhouette)
         left = (max_val - v) / 2
@@ -43,12 +47,13 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
         # Data label centred in bar — white on the fixed TEAL fill, same
         # reasoning as contrast_ink(TEAL), independent of the slide background.
         lbl = format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
-        ax.text(
+        text = ax.text(
             left + v / 2, i, lbl,
             ha="center", va="center",
             fontsize=10.5, fontweight="bold", color="#FFFFFF",
             zorder=5,
         )
+        value_labels.append((text, left, v, i))
 
     # Category labels on the right of each bar — wrapped onto multiple lines
     # (and pathological long words force-broken) so they stay in a fixed gutter
@@ -65,6 +70,42 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
     # Reserve a wide right gutter for the wrapped category labels.
     ax.set_xlim(0, max_val * 2.05)
     ax.axis("off")
+
+    _fit_value_labels(ax, value_labels, max_val, ink)
+
+
+def _fit_value_labels(ax, value_labels, max_val: float, ink: str) -> None:
+    """Move a value label outside its bar, in ink instead of white, when it does
+    not fit inside the bar's own rendered width.
+
+    A panel row (spec 2026-08-22) can draw a funnel at a THIRD of the width a
+    funnel was ever drawn at before this feature — a narrow stage's white label,
+    centred and sized exactly as always, can now overflow the bar onto the light
+    background behind it, where white-on-white is unreadable (a reader can misread
+    "20 %" as "0 %"). A label that already fits inside its bar is untouched: same
+    position, same colour, same size, byte-identical to the funnel this module
+    always drew.
+
+    Measured with matplotlib's own text metrics (`Text.get_window_extent` after a
+    forced `draw()`) against the bar's true on-screen width via `ax.transData` —
+    the same "measure the real render, don't estimate" technique
+    `_legend_height_frac` (image/pie.py) uses on this same kind of already-built,
+    correctly-sized figure.
+    """
+    if not value_labels:
+        return
+    fig = ax.figure
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    gap = max_val * 0.02
+    for text, left, v, i in value_labels:
+        x0_px, _ = ax.transData.transform((left, i))
+        x1_px, _ = ax.transData.transform((left + v, i))
+        bar_px = abs(x1_px - x0_px)
+        if text.get_window_extent(renderer).width > bar_px:
+            text.set_position((left + v + gap, i))
+            text.set_ha("left")
+            text.set_color(ink)
 
 
 def build_image_funnel(ctx) -> None:

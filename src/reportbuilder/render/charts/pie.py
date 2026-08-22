@@ -118,5 +118,5 @@ register(ChartPlugin(
     native_build=build_pie,
     suitability=pie_suitability,
     suggest=pie_suggest,
-    config_schema=single_series_schema(),  # single series → no classifying variable
+    config_schema=single_series_schema(),  # one series statistic, one classifying var (up to 3 panels)
 ))

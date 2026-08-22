@@ -39,5 +39,5 @@ register(ChartPlugin(
     native_build=build_funnel,
     suitability=suitability,
     suggest=None,
-    config_schema=single_series_schema(),  # single series → no classifying variable
+    config_schema=single_series_schema(),  # one series statistic, one classifying var (up to 3 panels)
 ))

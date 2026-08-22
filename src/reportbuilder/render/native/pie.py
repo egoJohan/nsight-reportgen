@@ -19,8 +19,12 @@ from reportbuilder.render.native.column import total_chart_data
 def build_pie(ctx: RenderContext):
     """Native pie chart.
 
-    Pie has one series (the first/only segment). Each category slice is
-    colored individually via per-point fill formatting.
+    Native (PowerPoint-drawn) pie charts always draw the "Total" segment —
+    the whole-sample series, never the first classifier group (see
+    `total_chart_data`) — since PowerPoint has no per-panel layout to draw a
+    split funnel/pie/doughnut with (image mode does; see render/image, spec
+    2026-08-22). Each category slice is colored individually via per-point
+    fill formatting.
 
     Args:
         ctx: render context with slide, slot, series, and style.

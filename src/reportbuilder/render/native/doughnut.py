@@ -19,8 +19,12 @@ from reportbuilder.render.native.column import total_chart_data
 def build_doughnut(ctx: RenderContext):
     """Native doughnut chart.
 
-    Doughnut has one series (the first/only segment). Each category slice is
-    colored individually via per-point fill formatting, matching pie coloring.
+    Native (PowerPoint-drawn) doughnut charts always draw the "Total" segment —
+    the whole-sample series, never the first classifier group (see
+    `total_chart_data`) — since PowerPoint has no per-panel layout to draw a
+    split funnel/pie/doughnut with (image mode does; see render/image, spec
+    2026-08-22). Each category slice is colored individually via per-point
+    fill formatting, matching pie coloring.
 
     Args:
         ctx: render context with slide, slot, series, and style.
