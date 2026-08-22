@@ -74,8 +74,9 @@ def classifying_var_field(*, required: bool = False) -> ConfigField:
     return ConfigField(
         "classifying_var", "variable", "Classifying variable",
         help=(
-            "Break the chart down by another variable (e.g. by gender or age) to "
-            "get a series per group plus a Total." if not required else
+            "Break the chart down by another variable (e.g. by gender or age), "
+            "so the chart reads one group at a time instead of the whole "
+            "sample." if not required else
             "Required: the dimension this chart splits its series by."
         ),
         required=required,

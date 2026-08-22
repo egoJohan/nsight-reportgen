@@ -198,7 +198,12 @@ def _build_pie_figure(ctx, *, donut: bool):
     fmt = ctx.spec.number_format
     bg = chart_background(ctx)
     ink, _muted, grid = chart_furniture(ctx)
-    want_legend = bool(ctx.spec.elements.axis_names or ctx.spec.elements.legend)
+    # The PANEL row's legend is optional (a two-category yes/no split can read
+    # fine from three titled circles), but the UN-SPLIT pie has always drawn one
+    # unconditionally and must keep doing so: `_draw_one_pie` passes
+    # `labels=None` to `ax.pie`, so without the legend the slide is an unlabelled
+    # ring of colours. Only the panel path reads the toggle.
+    want_panel_legend = bool(ctx.spec.elements.legend)
 
     def _values(seg):
         return [float(series.cell(c, seg).value(statistic) or 0.0) for c in cats]
@@ -215,9 +220,8 @@ def _build_pie_figure(ctx, *, donut: bool):
             ax.set_title(_wrap_legend_label(seg), fontsize=12.5, fontweight="bold",
                          color=ink, pad=6)
             ax.set_xlabel(f"n = {series.base_n.get(seg, 0)}", fontsize=9.5, color=ink)
-        if want_legend:
-            _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
-                                  bg, ink, grid)
+        _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
+                              bg, ink, grid)
         return fig
 
     fig, axes = _make_panel_axes(ctx, bg, len(sel.labels))
@@ -227,7 +231,7 @@ def _build_pie_figure(ctx, *, donut: bool):
                      color=ink, pad=6)
         ax.set_xlabel(f"n = {series.base_n.get(seg, 0)}", fontsize=9.5, color=ink)
 
-    if want_legend:
+    if want_panel_legend:
         # ONE legend for the row: the categories are identical in every panel, so a
         # legend per panel would be the same list three times.
         handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(cats))]

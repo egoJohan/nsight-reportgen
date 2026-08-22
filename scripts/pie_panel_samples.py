@@ -221,6 +221,17 @@ def figure_samples():
             print("  FAIL:", name, repr(e)[:160])
 
     funnel_cats = ("Tuntee", "Harkitsee", "Ostanut")
+    # TWO groups — the likeliest split of all (by gender), and an EVEN panel
+    # count: `invert_yaxis()` once per panel on a SHARED y-axis used to cancel
+    # itself here and draw the funnel upside down, while the three-group case
+    # below came out right by parity. Both must point the same way.
+    case_funnel(
+        "a13b_funnel_two_groups",
+        _series(funnel_cats, ("Naiset", "Miehet", "Total"),
+                {"Naiset": 512, "Miehet": 486, "Total": 998},
+                {"Naiset": (85, 55, 20), "Miehet": (42, 27, 10),
+                 "Total": (64, 41, 15)}),
+        classifying_var="sex")
     case_funnel(
         "a13_funnel_three_groups",
         _series(funnel_cats, ("Naiset", "Miehet", "Muut", "Total"),

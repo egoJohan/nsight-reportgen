@@ -124,3 +124,47 @@ def split_with_nonpartition_group_series() -> SeriesResult:
                         segments=("Naiset", "Miehet", "Total"), cells=cells,
                         base_n={"Naiset": 100, "Miehet": 100, "Total": 200},
                         statistic="pct")
+
+
+def split_with_thin_nonpartition_group_series() -> SeriesResult:
+    """3 classifier groups; the one that does NOT partition its base is too THIN
+    to be drawn (base below the panel floor), so no pie is ever rendered of it.
+
+    The panel rule — not the raw segment list — is what the pie's feasibility
+    check must read: a group that will not be drawn cannot veto the chart type.
+    """
+    cells = {}
+    for c, cnt in (("Yes", 60.0), ("No", 40.0)):
+        for seg in ("Naiset", "Miehet"):
+            cells[(c, seg)] = Cell(pct=cnt, count=cnt, mean=None)
+        cells[(c, "Total")] = Cell(pct=cnt, count=cnt * 2, mean=None)
+        # base 6 (< MIN_SEGMENT_BASE) and its counts fall far short of that base:
+        # a pie of THIS group would not add up — but it is never drawn.
+        cells[(c, "Muut")] = Cell(pct=cnt / 4.0, count=cnt / 100.0, mean=None)
+    return SeriesResult(categories=("Yes", "No"),
+                        segments=("Naiset", "Miehet", "Muut", "Total"),
+                        cells=cells,
+                        base_n={"Naiset": 100, "Miehet": 100, "Muut": 6,
+                                "Total": 206},
+                        statistic="pct")
+
+
+def split_with_capped_nonpartition_group_series() -> SeriesResult:
+    """5 classifier groups — one more than the 3-panel cap allows — where the
+    group that does NOT partition its base is among the SMALLEST, i.e. one of the
+    two the cap drops. Same rule as the thin case: undrawn cannot veto."""
+    ages = ("18-29", "30-44", "45-59", "60-74", "Yli 74")
+    bases = dict(zip(ages, (150, 140, 130, 120, 20)))
+    cells = {}
+    for c, share in (("Yes", 0.6), ("No", 0.4)):
+        for seg in ages:
+            count = bases[seg] * share
+            if seg == "Yli 74":            # capped out, and does not partition
+                count = count / 5.0
+            cells[(c, seg)] = Cell(pct=share * 100.0, count=count, mean=None)
+        cells[(c, "Total")] = Cell(pct=share * 100.0,
+                                   count=sum(bases.values()) * share, mean=None)
+    return SeriesResult(categories=("Yes", "No"), segments=(*ages, "Total"),
+                        cells=cells,
+                        base_n={**bases, "Total": sum(bases.values())},
+                        statistic="pct")

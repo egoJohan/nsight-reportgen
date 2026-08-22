@@ -31,9 +31,33 @@ from reportbuilder.render.house_style import TEAL
 from reportbuilder.render.panels import panel_segments
 
 
-def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
-    """Draw one funnel silhouette onto `ax` — the body this module always had."""
-    max_val = max(vals) if vals else 1.0
+# X-range each panel reserves, as a multiple of the SHARED bar scale. A panel that
+# draws the stage labels needs the wide right gutter the funnel always had; one
+# that does not can hand most of it back to the funnel (a small margin still
+# absorbs a value label pushed just outside a narrow bar). The grid gives each
+# panel a width in the same proportion, so a data unit is the same number of
+# pixels in every panel — which is what makes the bar widths comparable.
+_GUTTER_WITH_LABELS = 2.05
+_GUTTER_BARE = 1.20
+
+
+def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
+                     scale_max: float | None = None,
+                     stage_labels: bool = True) -> None:
+    """Draw one funnel silhouette onto `ax` — the body this module always had.
+
+    `scale_max` is the bar scale SHARED by every panel in the row: a funnel reads
+    magnitude, so a group running 90/60/30 and one running 45/30/15 must not draw
+    identical silhouettes. Left at None (the un-split slide) it is this panel's
+    own maximum — exactly what this function always used.
+
+    `stage_labels` draws the category names in the right gutter. Only ONE panel
+    per row does (the rightmost), so long scale labels are not repeated three
+    times across a row that has a third of the width to spare.
+    """
+    max_val = float(scale_max) if scale_max is not None else (
+        max(vals) if vals else 1.0)
+    max_val = max_val or 1.0
     bar_h = 0.60
     all_vals = [v for v in vals if v is not None]
 
@@ -57,18 +81,31 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
 
     # Category labels on the right of each bar — wrapped onto multiple lines
     # (and pathological long words force-broken) so they stay in a fixed gutter
-    # instead of running off the slide.
-    for i, cat in enumerate(cats):
-        ax.text(
-            max_val * 1.04, i, wrap_label(cat, 28),
-            va="center", ha="left",
-            fontsize=11.0, color=ink, zorder=5,
-        )
+    # instead of running off the slide. In a panel row only the rightmost panel
+    # carries them, so they sit at the row's right edge the way they sit at the
+    # un-split funnel's right edge.
+    if stage_labels:
+        for i, cat in enumerate(cats):
+            ax.text(
+                max_val * 1.04, i, wrap_label(cat, 28),
+                va="center", ha="left",
+                fontsize=11.0, color=ink, zorder=5,
+            )
 
-    # Invert y-axis so widest bar (index 0) appears at the top
-    ax.invert_yaxis()
-    # Reserve a wide right gutter for the wrapped category labels.
-    ax.set_xlim(0, max_val * 2.05)
+    # Widest bar (index 0) at the TOP. `invert_yaxis()` TOGGLES the axis, and a
+    # panel grid SHARES one y-axis (`new_figure_grid(..., sharey=True)`), so
+    # calling it once per panel cancelled itself on an even panel count — a
+    # two-group funnel (the likeliest split of all: by gender) drew the narrowest
+    # stage on top. Re-stating the limits in descending order is idempotent: the
+    # same call on every panel leaves the same orientation whatever the panel
+    # count. Derived from the autoscaled range rather than hard-coded to
+    # (n - 0.5, -0.5) so the un-split funnel keeps its exact bar margins.
+    lo, hi = sorted(ax.get_ylim())
+    ax.set_ylim(hi, lo)
+    # Reserve a right gutter — wide when this panel carries the wrapped category
+    # labels, narrow when it does not (the funnel reclaims that width).
+    ax.set_xlim(0, max_val * (_GUTTER_WITH_LABELS if stage_labels
+                              else _GUTTER_BARE))
     ax.axis("off")
 
     _fit_value_labels(ax, value_labels, max_val, ink)
@@ -137,11 +174,31 @@ def build_image_funnel(ctx) -> None:
             ax.set_title(_label(seg), fontsize=12.5, fontweight="bold",
                          color=ink, pad=6)
     else:
-        # Every panel draws the same categories, so the shared y-axis is correct.
-        fig, axes = new_figure_grid(ctx, len(sel.labels))
-        for ax, seg in zip(axes, sel.labels):
-            _draw_one_funnel(ax, cats, _values(seg), ctx, bg, ink)
+        # ONE bar scale for the whole row. A funnel reads MAGNITUDE, so panels
+        # that each rescaled to their own maximum drew 90/60/30 and 45/30/15 as
+        # identical silhouettes — defeating the very comparison the split exists
+        # to make. The scale is the largest value across the drawn panels; with a
+        # single panel it is that panel's own maximum, i.e. unchanged.
+        panel_vals = [_values(seg) for seg in sel.labels]
+        scale_max = max((max(v) for v in panel_vals if v), default=1.0)
+
+        # Only the RIGHTMOST panel carries the stage labels (see
+        # `_draw_one_funnel`), so it is the only one that needs the wide label
+        # gutter. Widths in the same ratio as the x-ranges keep a data unit worth
+        # the same number of pixels in every panel — without that, the labelled
+        # panel would draw a visibly smaller funnel than its neighbours and the
+        # shared scale would buy nothing.
+        n = len(sel.labels)
+        ratios = [_GUTTER_BARE] * (n - 1) + [_GUTTER_WITH_LABELS]
+        fig, axes = new_figure_grid(ctx, n, width_ratios=ratios)
+        for i, (ax, seg) in enumerate(zip(axes, sel.labels)):
+            gutter = _GUTTER_WITH_LABELS if i == n - 1 else _GUTTER_BARE
+            _draw_one_funnel(ax, cats, panel_vals[i], ctx, bg, ink,
+                             scale_max=scale_max, stage_labels=(i == n - 1))
+            # The funnel is centred on `scale_max / 2`, not on the axes, so the
+            # group name goes over the FUNNEL rather than over the label gutter
+            # it shares the panel with.
             ax.set_title(_label(seg), fontsize=12.5, fontweight="bold",
-                         color=ink, pad=6)
+                         color=ink, pad=6, x=0.5 / gutter)
 
     place_picture(ctx, render_png(fig))

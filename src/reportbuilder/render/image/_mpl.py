@@ -132,7 +132,7 @@ def new_figure(ctx):
 
 
 def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
-                     sharey: bool = True):
+                     sharey: bool = True, width_ratios=None):
     """Figure with n subplots, house style applied — for cross-tab SMALL MULTIPLES
     (one panel per primary classifier value) and for the SEPARATE layout (one
     panel per classifying VARIABLE). `rows` > 1 stacks the panels one above the
@@ -149,13 +149,22 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     first's ticks. The stacked separate-panel renderer draws a DIFFERENT set of
     bars per panel (one variable's classifier segments, not the shared answer
     categories) and must pass `sharey=False` to keep each panel's ticks/limits
-    independent. (spec 2026-08-04-separate-classifier-panels)"""
+    independent. (spec 2026-08-04-separate-classifier-panels)
+
+    `width_ratios` (one number per COLUMN, default equal) hands the columns
+    unequal widths. The funnel panel row uses it: only its rightmost panel draws
+    the stage labels, so only that one needs the wide label gutter, and giving it
+    a proportionally wider column keeps a data unit worth the same number of
+    pixels in every panel — which is what makes the funnel widths comparable
+    across groups. (spec 2026-08-22)"""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
     cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
-    axes = fig.subplots(max(1, rows), cols, sharey=sharey, sharex=False)
+    gridspec_kw = {"width_ratios": list(width_ratios)} if width_ratios else None
+    axes = fig.subplots(max(1, rows), cols, sharey=sharey, sharex=False,
+                        gridspec_kw=gridspec_kw)
     # `fig.subplots` returns a bare Axes only for a 1x1 grid; with rows > 1 it
     # returns an ndarray even when n == 1 (the separate layout hits exactly that
     # when one classifying variable resolves to no groups and the labels want two

@@ -119,3 +119,36 @@ def test_split_pie_places_exactly_one_picture():
     _prs, slide, slot, ctx = make_ctx("pie", series, classifying_var="sex")
     build_image_pie(ctx)
     assert_single_picture(slide, slot)
+
+
+def test_unsplit_pie_always_draws_its_legend():
+    """`_draw_one_pie` passes `labels=None` to `ax.pie`, so the legend is the
+    ONLY thing naming the slices. The un-split pie has always drawn one
+    unconditionally; a toggle must not be able to leave an unlabelled ring of
+    colours."""
+    from reportbuilder.model.report import ElementToggles
+
+    series = _series(("Total",), {"Total": 1023})
+    _prs, _slide, _slot, ctx = make_ctx(
+        "pie", series,
+        elements=ElementToggles(title=True, legend=False, data_labels=True,
+                                axis_names=False))
+    fig = _build_pie_figure(ctx, donut=False)
+    assert fig.axes[0].get_legend() is not None
+
+
+def test_panel_row_legend_follows_the_legend_toggle_alone():
+    """The panel row's shared legend is the one that IS optional — and it reads
+    the `legend` toggle, not `axis_names`."""
+    from reportbuilder.model.report import ElementToggles
+
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+    for legend, axis_names, want in ((True, False, 1), (False, True, 0),
+                                     (False, False, 0)):
+        _prs, _slide, _slot, ctx = make_ctx(
+            "pie", series, classifying_var="sex",
+            elements=ElementToggles(title=True, legend=legend,
+                                    data_labels=True, axis_names=axis_names))
+        fig = _build_pie_figure(ctx, donut=False)
+        assert len(fig.legends) == want, (legend, axis_names)
