@@ -127,6 +127,31 @@ def test_get_variables_name_as_label_when_no_real_label(rb_wire) -> None:
     )
 
 
+def test_get_variables_exposes_n_values_for_configure_panel_group_count_warning(rb_wire) -> None:
+    """CONTRACT for the configure panel's "too many groups" warning (spec
+    2026-08-22, StepConfigure.tsx ClassifyingVarWidget). Nothing in the
+    TypeScript enforces this: the warning counts a chosen classifying
+    variable's declared groups from THIS field. If 'n_values' silently
+    disappears from a variable entry here, the warning silently never fires —
+    with no test in the web/ tree to catch it."""
+    model = _make_labeled_model()
+    mock_client = Mock()
+    tc = rb_wire(client=mock_client)
+
+    with patch("reportbuilder.api.routes_questions.load_model_for_material") as mock_load:
+        mock_load.return_value = model
+        response = tc.get(f"/materials/{tc.material_id}/variables")
+
+    body = response.json()
+    by_name = {v["name"]: v for v in body["variables"]}
+    assert "n_values" in by_name["q1"], (
+        "'n_values' missing from a categorical variable entry — the configure "
+        "panel's group-count warning has nothing to count"
+    )
+    # 'q1' carries exactly two ValueLabel entries (Yes/No) in _make_labeled_model.
+    assert by_name["q1"]["n_values"] == 2
+
+
 def test_get_variables_categorical_before_scale(rb_wire) -> None:
     """GET /materials/{material_id}/variables sorts categorical variables before scale. (RX-be.1)"""
     model = _make_labeled_model()

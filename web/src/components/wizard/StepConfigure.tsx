@@ -391,6 +391,18 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
   // picking a second one against a banner primary is legal. (spec 2026-08-04)
   const noPrimary = key === "classifying_var_2" && !chart.classifying_var;
   const current = (chart[key] as string | null | undefined) ?? null;
+  // Pie/doughnut/funnel draw one chart per group and a 4:3 slide holds three.
+  // Warn on the VARIABLE's own value count — the renderer's own count can be
+  // lower (thin groups drop out), so this is advisory and the slide footer is the
+  // authoritative record. (spec 2026-08-22)
+  const PANEL_CHART_TYPES = ["pie", "doughnut", "funnel"];
+  const MAX_PANELS = 3;
+  const chosen = key === "classifying_var" && current
+    ? (variables ?? []).find((v) => v.name === current)
+    : undefined;
+  const tooManyGroups =
+    PANEL_CHART_TYPES.includes(chart.chart_type) &&
+    (chosen?.n_values ?? 0) > MAX_PANELS;
   const other =
     key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
   const required = !!field.required;
@@ -457,6 +469,16 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
           ))}
         </SelectContent>
       </Select>
+      {tooManyGroups && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+          <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+          <span className="leading-snug">
+            {chosen?.label ?? current} has {chosen?.n_values} groups and only{" "}
+            {MAX_PANELS} fit on one slide. The three largest will be drawn; the
+            slide footer names the rest.
+          </span>
+        </div>
+      )}
       {key === "classifying_var_2" && current && chart.classifying_var && (
         <button
           type="button"

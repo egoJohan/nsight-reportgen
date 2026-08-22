@@ -52,6 +52,23 @@ def test_single_series_types_split_by_one_classifier(rb_wire):
             )
 
 
+def test_panel_chart_types_expose_classifying_var_for_configure_panel_warning(rb_wire):
+    """CONTRACT for the configure panel's "too many groups" warning (spec
+    2026-08-22, StepConfigure.tsx ClassifyingVarWidget). Nothing in the
+    TypeScript enforces this: the classifying-variable picker — and with it the
+    amber over-three-groups notice — only renders for pie/doughnut/funnel
+    because THIS field is present in the catalog. If it silently disappears,
+    the frontend warning silently stops firing (and the picker itself
+    disappears) with no test in the web/ tree to catch it."""
+    cat = _catalog(rb_wire)
+    for cid in ("pie", "doughnut", "funnel"):
+        assert "classifying_var" in _keys(cat[cid]), (
+            f"{cid} must expose classifying_var — the configure panel's "
+            f"classifying-variable picker (and its group-count warning) is "
+            f"built purely from this schema field"
+        )
+
+
 def test_stacked_classifying_var_optional(rb_wire):
     """Total-only stacked bars are valid, so classifying_var is optional (present
     but not required)."""
