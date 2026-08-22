@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   FileTextIcon,
   PlusIcon,
+  CopyIcon,
   Trash2Icon,
   Loader2Icon,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import {
   useQuestions,
   useReport,
   useCaseReports,
+  useDuplicateReport,
   qk,
 } from "@/lib/queries";
 import { makeChart, normalizeSlots } from "@/lib/charts";
@@ -108,6 +110,8 @@ function ReportRow({
   report,
   canEdit,
   onOpen,
+  onCopy,
+  copyPending,
   onDelete,
 }: {
   caseId: string;
@@ -121,6 +125,8 @@ function ReportRow({
   };
   canEdit: boolean;
   onOpen: (id: string) => void;
+  onCopy: (id: string) => void;
+  copyPending: boolean;
   onDelete: (id: string) => void;
 }) {
   const { data: doc, isLoading } = useReport(caseId, report.id);
@@ -210,6 +216,25 @@ function ReportRow({
           <Button
             variant="ghost"
             size="icon-sm"
+            title="Copy to a new report"
+            aria-label="Copy to a new report"
+            // Always visible, for the same reason as delete below.
+            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            disabled={copyPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopy(report.id);
+            }}
+          >
+            {copyPending ? (
+              <Loader2Icon className="size-4 animate-spin" />
+            ) : (
+              <CopyIcon className="size-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
             // Always visible: a control that appears on hover cannot be found by
             // someone looking for it, and is invisible on a touch screen.
             className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
@@ -260,6 +285,8 @@ export default function ReportsSection({
   // Reports come from the SERVER (visible to any user/device), newest first.
   // Enrich with this browser's locally-remembered createdAt when we have it.
   const { data: serverReports, isPending: reportsPending } = useCaseReports(caseId);
+  const duplicateReport = useDuplicateReport(caseId);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const wsById = new Map(workspace.reports.map((r) => [r.id, r]));
   const allReports = (serverReports?.reports ?? []).map((r) => ({
     id: r.report_id,
@@ -296,6 +323,41 @@ export default function ReportsSection({
           onOpen(report_id);
         },
         onError: (e) => toast.error(`Could not create report: ${e.message}`),
+      }
+    );
+  }
+
+  /** "<name> (copy)", and "(copy 2)" if that is taken — copying twice must not
+   *  leave two reports a person cannot tell apart. Names come from the list the
+   *  user is looking at, so the suffix reflects what they can actually see. */
+  function copyName(source: string): string {
+    const taken = new Set(orderedReports.map((r) => r.name));
+    const base = `${source} (copy)`;
+    if (!taken.has(base)) return base;
+    for (let i = 2; ; i += 1) {
+      const next = `${source} (copy ${i})`;
+      if (!taken.has(next)) return next;
+    }
+  }
+
+  function handleCopy(id: string) {
+    const source = orderedReports.find((r) => r.id === id);
+    if (!source) return;
+    setCopyingId(id);
+    duplicateReport.mutate(
+      { reportId: id, name: copyName(source.name) },
+      {
+        onSuccess: () => {
+          // The server owns the copy; re-read the list rather than guessing
+          // what it made, so the row shows the report that actually exists.
+          qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+          setCopyingId(null);
+          toast.success("Report copied");
+        },
+        onError: (e) => {
+          setCopyingId(null);
+          toast.error(`Copy failed: ${e.message}`);
+        },
       }
     );
   }
@@ -380,6 +442,8 @@ export default function ReportsSection({
               report={r}
               canEdit={canEdit}
               onOpen={onOpen}
+              onCopy={handleCopy}
+              copyPending={duplicateReport.isPending && copyingId === r.id}
               onDelete={setConfirmDelete}
             />
           ))}

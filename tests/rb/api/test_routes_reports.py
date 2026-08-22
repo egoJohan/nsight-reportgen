@@ -128,6 +128,17 @@ def test_duplicate_new_id_null_report_id_new_name_baked_in(rb_wire) -> None:
     assert "Copy" in saved_json
     assert report_from_json(saved_json).name == "Copy"
 
+    # The card's actual promise: "kaikki asetukset kopioituvat ja raportti
+    # näyttää täsmälleen samalta lähteen kanssa". A copy that keeps only the
+    # name would pass every assertion above and still be the wrong feature, so
+    # assert the CONTENT is carried over — every chart, and everything on it.
+    copy = report_from_json(saved_json)
+    assert copy.charts == src.charts, "every chart and setting must survive the copy"
+    assert copy.render_mode == src.render_mode
+    assert copy.template_ref == src.template_ref
+    # ...and the source is left alone.
+    assert mock.save_report.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # Test 3 — PUT versioned save passes the existing report_id

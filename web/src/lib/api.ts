@@ -1121,6 +1121,20 @@ export const api = {
         json<ReportDoc>(r)
       ),
 
+    // "Raportti voidaan kopioida uudeksi" — the copy lands under the SAME case
+    // and carries every setting; only the name and the id differ. The backend
+    // owns the copying (routes_reports.py), so nothing here re-derives a report.
+    duplicate: (
+      caseId: string,
+      reportId: string,
+      name: string
+    ): Promise<{ report_id: string }> =>
+      fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }).then((r) => json<{ report_id: string }>(r)),
+
     remove: (
       caseId: string,
       reportId: string

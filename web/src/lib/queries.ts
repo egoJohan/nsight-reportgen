@@ -668,6 +668,13 @@ export function useUpdateReport(caseId: string) {
   });
 }
 
+export function useDuplicateReport(caseId: string) {
+  return useMutation({
+    mutationFn: ({ reportId, name }: { reportId: string; name: string }) =>
+      api.reports.duplicate(caseId, reportId, name),
+  });
+}
+
 export function useDeleteReport(caseId: string) {
   return useMutation({
     mutationFn: (reportId: string) => api.reports.remove(caseId, reportId),
