@@ -13,7 +13,7 @@ from __future__ import annotations
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE
 from reportbuilder.render.base import RenderContext
-from reportbuilder.render.native.column import series_chart_data
+from reportbuilder.render.native.column import total_chart_data
 
 
 def build_doughnut(ctx: RenderContext):
@@ -28,7 +28,7 @@ def build_doughnut(ctx: RenderContext):
     Returns:
         The graphic frame containing the chart.
     """
-    cd = series_chart_data(ctx.series, ctx.series.statistic)
+    cd = total_chart_data(ctx.series, ctx.series.statistic)
     gf = ctx.slide.shapes.add_chart(
         XL_CHART_TYPE.DOUGHNUT,
         ctx.slot.left,

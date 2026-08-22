@@ -30,6 +30,21 @@ def series_chart_data(series: SeriesResult, statistic: str) -> CategoryChartData
     return cd
 
 
+def total_chart_data(series: SeriesResult, statistic: str) -> CategoryChartData:
+    """CategoryChartData holding ONLY the "Total" segment.
+
+    For the chart types PowerPoint draws from a single series — pie, doughnut.
+    Handing them every classifier segment silently renders the first group as
+    though it were the whole sample. `base_n["Total"]` is contractually always
+    present, and so is the matching cell. (spec 2026-08-22)
+    """
+    cd = CategoryChartData()
+    cd.categories = series.categories
+    cd.add_series("Total", tuple(_value_for(series, c, "Total", statistic)
+                                  for c in series.categories))
+    return cd
+
+
 def _manual_layout_xml(x: float, y: float, w: float, h: float) -> str:
     return (
         f'<c:layout xmlns:c="{_C}"><c:manualLayout>'
