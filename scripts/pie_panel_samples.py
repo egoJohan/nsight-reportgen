@@ -2,6 +2,10 @@
 
 Two levels, because they catch different things:
 
+  C. REPORT — one openable PPTX/PDF whose slides walk the SAME question through
+     1, 2, 3 and 4 background-variable groups, so the cap and the footer can be
+     compared side by side. This is the one to send to a human.
+
   A. FIGURE level — synthetic series straight into `_build_pie_figure`, so every
      edge case is reachable on demand: the degraded split, the single surviving
      group, the cap, a count statistic, six categories with long labels. Fast, no
@@ -15,6 +19,7 @@ Usage:
     uv run python scripts/pie_panel_samples.py            # both levels
     uv run python scripts/pie_panel_samples.py figure     # A only (no soffice)
     uv run python scripts/pie_panel_samples.py slide      # B only
+    uv run python scripts/pie_panel_samples.py report     # C only — the deck to review
 
 Output lands in `work/pie_panels/` — `work/` is git-ignored, and NOT /tmp, which
 is a ramfs on the dev machine.
@@ -271,6 +276,179 @@ def slide_samples():
             shutil.rmtree(d, ignore_errors=True)
 
 
+# --------------------------------------------------------------------------- #
+# Level C — the reviewable deck: one question, 1..4 groups.
+# --------------------------------------------------------------------------- #
+REPORT_OUT = os.path.join("work", "pie_panels_report")
+
+# Age codes present in the Attendo data (var7). Real respondents, so every base
+# below is a real base — only the GROUPING is synthesised, to hit exactly 1, 2, 3
+# and 4 groups on one question.
+_A = {"25_34": 10004.0, "35_44": 10005.0, "45_54": 10006.0,
+      "55_64": 10007.0, "65_74": 10008.0}
+
+# name -> (label, {new_code: (new_label, [source age codes])})
+_DERIVED = {
+    "demo1": ("Kaikki vastaajat", {
+        1.0: ("Kaikki vastaajat", list(_A.values())),
+    }),
+    "demo2": ("Ikä, 2 ryhmää", {
+        1.0: ("Alle 45 vuotta", [_A["25_34"], _A["35_44"]]),
+        2.0: ("45 vuotta tai yli", [_A["45_54"], _A["55_64"], _A["65_74"]]),
+    }),
+    "demo3": ("Ikä, 3 ryhmää", {
+        1.0: ("Alle 45 vuotta", [_A["25_34"], _A["35_44"]]),
+        2.0: ("45–54 vuotta", [_A["45_54"]]),
+        3.0: ("55 vuotta tai yli", [_A["55_64"], _A["65_74"]]),
+    }),
+    "demo4": ("Ikä, 4 ryhmää", {
+        1.0: ("25–34 vuotta", [_A["25_34"]]),
+        2.0: ("35–44 vuotta", [_A["35_44"]]),
+        3.0: ("45–54 vuotta", [_A["45_54"]]),
+        4.0: ("55 vuotta tai yli", [_A["55_64"], _A["65_74"]]),
+    }),
+}
+
+
+def _add_derived_classifiers(df, model):
+    """Add demo1..demo4 — the same respondents grouped 1, 2, 3 and 4 ways.
+
+    Derived rather than picked from the file because no single real variable
+    gives a clean 1/2/3/4 progression on one question, and the point of the deck
+    is to vary ONLY the group count.
+    """
+    import pandas as pd
+    from reportbuilder.model.question import ValueLabel, Variable
+
+    age = pd.to_numeric(df["var7"], errors="coerce")
+    for name, (label, groups) in _DERIVED.items():
+        col = pd.Series(float("nan"), index=df.index)
+        for code, (_lbl, sources) in groups.items():
+            col = col.where(~age.isin(sources), code)
+        df[name] = col
+        model.variables[name] = Variable(
+            name=name, label=label, measurement="categorical",
+            value_labels=tuple(ValueLabel(value=c, label=l)
+                                for c, (l, _s) in sorted(groups.items())),
+            missing_values=frozenset(),
+        )
+    return df, model
+
+
+def group_count_report():
+    """Level C — one sample per group count, for a human to look at.
+
+    NOTE ON WHY EACH CASE IS ITS OWN REPORT: `_build` caches computed series in
+    `series_by_ref` keyed by QUESTION REF alone (`export/pptx_build.py:54,87`) and
+    `deck.py:245` reads them back the same way. Put two charts of the SAME question
+    in one Report and the last one computed wins — every slide then renders that
+    series. So a single 7-slide deck of one question silently showed the same split
+    seven times. One Report per case sidesteps it; the underlying defect is
+    reported separately, not worked around in shipped code.
+    """
+    from PIL import Image
+    from reportbuilder.export.pdf_convert import pptx_to_pdf
+    from reportbuilder.export.preview import rasterize_pages
+    from reportbuilder.export.pptx_build import build_pptx
+    from reportbuilder.ingest.multi_group import enrich_model
+    from reportbuilder.ingest.sav_reader import read_sav
+
+    sav = "input/spss AttendoSuomi-Brandiseuranta_112025.sav"
+    if not os.path.exists(sav):
+        print("  skip: no SAV at", sav)
+        return
+    os.makedirs(REPORT_OUT, exist_ok=True)
+    df, model = read_sav(sav)
+    model = enrich_model(model)
+    df, model = _add_derived_classifiers(df, model)
+
+    # (file stem, caption, classifier, chart type) — the SAME question throughout,
+    # so the only thing that changes is the number of groups.
+    cases = [
+        ("0-groups-baseline", "0 ryhmää — ei taustamuuttujaa (nykyinen piirakka)", None, "pie"),
+        ("1-group", "1 ryhmä — yksi paneeli, otsikoituna", "demo1", "pie"),
+        ("2-groups", "2 ryhmää", "demo2", "pie"),
+        ("3-groups", "3 ryhmää — suurin sallittu", "demo3", "pie"),
+        ("4-groups-capped", "4 ryhmää — kolme suurinta piirretään, loput alaviitteessä",
+         "demo4", "pie"),
+        ("3-groups-doughnut", "3 ryhmää — donitsi", "demo3", "doughnut"),
+        ("3-groups-funnel", "3 ryhmää — suppilo", "demo3", "funnel"),
+    ]
+
+    pngs = []
+    for stem, cap, clf, ctype in cases:
+        sp = ChartSpec(question_ref="var20", chart_type=ctype, statistic="pct",
+                       classifying_var=clf, number_format=NumberFormat(),
+                       sort=SortSpec(basis="data_order"), template_slot="s1",
+                       elements=ElementToggles(), options={})
+        d = tempfile.mkdtemp()
+        try:
+            pptx = os.path.join(REPORT_OUT, f"{stem}.pptx")
+            build_pptx(Report(name=cap, render_mode="image", template_ref="",
+                              charts=(sp,)), model, df, pptx)
+            pdf = pptx_to_pdf(pptx, d)
+            page = rasterize_pages(pdf, os.path.join(d, "pg"), dpi=110)[0]
+            dest = os.path.join(REPORT_OUT, f"{stem}.png")
+            shutil.copyfile(page, dest)
+            pngs.append(dest)
+            print(f"  ok: {dest}  — {cap}")
+        except Exception as e:
+            print("  FAIL:", stem, repr(e)[:200])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    # One flip-through PDF of every case, assembled from the PNGs (no PDF library
+    # in this environment; PIL writes multi-page PDFs natively).
+    if pngs:
+        combined = os.path.join(REPORT_OUT, "ALL-CASES.pdf")
+        first, *rest = [Image.open(p).convert("RGB") for p in pngs]
+        first.save(combined, save_all=True, append_images=rest)
+        print("  ok:", combined)
+
+    with open(os.path.join(REPORT_OUT, "README.md"), "w") as fh:
+        fh.write(_REPORT_README)
+    print("  ok:", os.path.join(REPORT_OUT, "README.md"))
+
+
+_REPORT_README = """# Useampi piirakkakuvio samalla sivulla — samples
+
+Flip through `ALL-CASES.pdf`, or open any single case's `.pptx` / `.png`. Every case
+charts the SAME question —
+*"Mikä on yleinen käsityksesi ... yksityisistä yrityksistä?"*, a five-point scale —
+so the only thing that changes down the deck is how many background-variable groups
+it is split by.
+
+The classifiers `demo1`..`demo4` are real respondents regrouped, so every base is a
+real base; only the grouping is synthesised, because no single variable in the file
+gives a clean 1-2-3-4 progression on one question.
+
+| File | Groups | What to look at |
+|---|---|---|
+| `0-groups-baseline` | none | The current pie, unchanged. Your baseline — it must look exactly as it does today. |
+| `1-group` | 1 | One circle, but TITLED with its group and its own base, so a reader knows which group it is. |
+| `2-groups` | 2 | Two pies, shared legend beneath, each its own 100%. |
+| `3-groups` | 3 | Three pies — the most that fit. |
+| `4-groups-capped` | 4 | Only the three largest are drawn. The footer names the one left out: *Ei mahtunut sivulle: …* |
+| `3-groups-doughnut` | 3 | The same split as a doughnut. |
+| `3-groups-funnel` | 3 | The same split as a funnel. |
+
+Worth checking on `4-groups-capped`: the omitted group is named in the footer and
+nowhere else. That footer line is the only record of the omission that travels with
+the deck — the editor's warning stays in the editor.
+
+**Why seven separate files rather than one seven-slide deck.** A Report caches each
+computed series by question ref alone, so two charts of the SAME question in one deck
+both render the last one's data. The first attempt at this deck showed the identical
+3-group split on all five pie slides. That is a pre-existing defect in the deck
+builder, unrelated to this feature but made much easier to hit by it — see the branch
+notes.
+
+Regenerate with:
+
+    uv run python scripts/pie_panel_samples.py report
+"""
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     which = sys.argv[1] if len(sys.argv) > 1 else "both"
@@ -280,6 +458,9 @@ def main():
     if which in ("both", "slide"):
         print("Level B — whole-slide samples (real data)")
         slide_samples()
+    if which in ("both", "report"):
+        print("Level C — reviewable deck (1..4 groups)")
+        group_count_report()
 
 
 if __name__ == "__main__":
