@@ -56,8 +56,25 @@ def test_pie_none_for_mean_statistic():
     assert plugin("pie").suitability(B.q(), B.mean_series()) is None
 
 
-def test_pie_none_for_multi_series():
-    assert plugin("pie").suitability(B.q(), B.multi_group_series()) is None
+def test_pie_offered_for_a_split_where_every_panel_partitions():
+    # A pie split by a background variable is one pie per group (spec 2026-08-22).
+    # The old rule rejected any multi-series outright, which would have made the
+    # chart type vanish from the picker the moment a classifier was chosen.
+    assert plugin("pie").suitability(B.q(), B.split_partition_series()) is not None
+
+
+def test_pie_dropped_when_a_drawn_panel_does_not_partition():
+    # A question can partition overall and still fail inside one group; that
+    # group's pie would be the one that quietly does not add up.
+    s = B.split_with_nonpartition_group_series()
+    assert plugin("pie").suitability(B.q(), s) is None
+    assert plugin("doughnut").suitability(B.q(), s) is None
+
+
+def test_split_pie_is_offered_but_never_auto_suggested():
+    s = B.split_partition_series()
+    assert plugin("pie").suitability(B.q(), s) is not None
+    assert plugin("pie").suggest(B.q(), s) is None
 
 
 def test_pie_value_for_small_partition():

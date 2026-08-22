@@ -59,8 +59,13 @@ def test_multi_response_overlap_hides_pie():
     assert DOUGHNUT.suitability(_Q("multi"), s) is None
 
 
-def test_multiple_series_hides_pie():
-    """A classifying variable yields several series; one pie can't show them."""
+def test_split_series_with_partitioning_panels_offers_pie():
+    """A classifying variable yields several series, drawn as one pie PER GROUP
+    (spec 2026-08-22-multi-pie-panels). Each drawn panel (Men, Women) here
+    partitions its own base, so the chart type is offered rather than
+    vanishing from the picker the moment a classifier is chosen. It is still
+    never the auto-suggested default for a split series (ruling, 2026-08-22;
+    see test_split_series_never_auto_suggested below)."""
     s = SeriesResult(
         categories=("A", "B"), segments=("Total", "Men", "Women"),
         cells={
@@ -73,7 +78,25 @@ def test_multiple_series_hides_pie():
         },
         base_n={"Total": 100, "Men": 40, "Women": 60}, statistic="pct",
     )
-    assert PIE.suitability(_Q("single"), s) is None
+    assert PIE.suitability(_Q("single"), s) is not None
+
+
+def test_split_series_never_auto_suggested():
+    """A row of pies is an explicit author choice, not a default the tool
+    makes for them — even when every panel partitions (ruling, 2026-08-22)."""
+    s = SeriesResult(
+        categories=("A", "B"), segments=("Total", "Men", "Women"),
+        cells={
+            ("A", "Total"): Cell(pct=60.0, count=60.0),
+            ("B", "Total"): Cell(pct=40.0, count=40.0),
+            ("A", "Men"): Cell(pct=50.0, count=20.0),
+            ("B", "Men"): Cell(pct=50.0, count=20.0),
+            ("A", "Women"): Cell(pct=66.0, count=40.0),
+            ("B", "Women"): Cell(pct=34.0, count=20.0),
+        },
+        base_n={"Total": 100, "Men": 40, "Women": 60}, statistic="pct",
+    )
+    assert PIE.suggest(_Q("single"), s) is None
 
 
 def test_mean_statistic_hides_pie():

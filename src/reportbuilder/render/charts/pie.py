@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from reportbuilder.render.plugins import ChartPlugin, register
 from reportbuilder.render.config_schema import single_series_schema
+from reportbuilder.render.panels import panel_segments
 from reportbuilder.render.shape import ADDITIVE_STATISTICS, SeriesShape
 from reportbuilder.render.image.pie import build_image_pie
 from reportbuilder.render.native.pie import build_pie
@@ -48,12 +49,23 @@ _UNDERSHOOT_TOL_PCT = PARTITION_UNDERSHOOT_TOL_PCT
 
 
 def _is_parts_of_whole(question, series) -> bool:
-    """The structural precondition shared by pie and doughnut."""
+    """The structural precondition shared by pie and doughnut.
+
+    With a classifier the chart is one pie PER GROUP, so the question is asked of
+    every panel that will actually be drawn: a question can partition the whole
+    sample and still fail inside a thin group, and that group's pie is the one that
+    would not add up. Groups that will NOT be drawn — dropped for a thin base or
+    beyond the three-panel cap — cannot veto the chart type, because nothing will
+    render them. (spec 2026-08-22)
+    """
     s = SeriesShape.of(question, series)
-    if s.n_series != 1 or s.statistic not in ADDITIVE_STATISTICS:
+    if s.statistic not in ADDITIVE_STATISTICS:
         return False
-    seg = series.segments[0] if series.segments else None
-    return series.is_partition(seg, undershoot_tol=_UNDERSHOOT_TOL_PCT)
+    panels = panel_segments(series).labels
+    if not panels:
+        return False
+    return all(series.is_partition(seg, undershoot_tol=_UNDERSHOOT_TOL_PCT)
+               for seg in panels)
 
 
 def pie_suitability(question, series) -> float | None:
@@ -81,7 +93,14 @@ def _looks_ordinal(series) -> bool:
 def pie_suggest(question, series) -> float | None:
     """Default for NOMINAL parts-of-whole (unordered groups, few slices) — a pie
     reads a composition better than a bar there. Ordered scales (Likert, age
-    bands) keep bars. A very small partition (<=4) defaults to pie regardless."""
+    bands) keep bars. A very small partition (<=4) defaults to pie regardless.
+
+    A SPLIT series is never auto-suggested: a row of pies is an explicit choice by
+    the author, not a default the tool makes for them. Offering it (`pie_suitability`)
+    and defaulting to it are different questions. (ruling, 2026-08-22)
+    """
+    if panel_segments(series).split:
+        return None
     if not _is_parts_of_whole(question, series):
         return None
     s = SeriesShape.of(question, series)

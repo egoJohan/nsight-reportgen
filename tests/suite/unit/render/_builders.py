@@ -101,3 +101,26 @@ def multi_group_series() -> SeriesResult:
 def empty_series() -> SeriesResult:
     return SeriesResult(categories=(), segments=("Total",), cells={},
                         base_n={"Total": 0}, statistic="pct")
+
+
+def split_partition_series() -> SeriesResult:
+    """2 classifier groups + Total; EVERY group partitions its own base."""
+    s = build_series(("Yes", "No"), segs=("Naiset", "Miehet", "Total"),
+                     statistic="pct", base=100,
+                     pct={"Yes": 60.0, "No": 40.0},
+                     count={"Yes": 60.0, "No": 40.0})
+    return s
+
+
+def split_with_nonpartition_group_series() -> SeriesResult:
+    """2 classifier groups; the SECOND does not partition its base (counts fall
+    far short), so a pie of it would not add up."""
+    cells = {}
+    for c, pct, cnt in (("Yes", 60.0, 60.0), ("No", 40.0, 40.0)):
+        cells[(c, "Naiset")] = Cell(pct=pct, count=cnt, mean=None)
+        cells[(c, "Total")] = Cell(pct=pct, count=cnt, mean=None)
+        cells[(c, "Miehet")] = Cell(pct=pct, count=cnt / 4.0, mean=None)
+    return SeriesResult(categories=("Yes", "No"),
+                        segments=("Naiset", "Miehet", "Total"), cells=cells,
+                        base_n={"Naiset": 100, "Miehet": 100, "Total": 200},
+                        statistic="pct")
