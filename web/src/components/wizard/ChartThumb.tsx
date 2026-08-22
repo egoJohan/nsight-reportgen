@@ -3,7 +3,6 @@ import { AlertCircleIcon, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
-import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 
 /**
  * A cached chart preview thumbnail. Backed by the shared useChartPreview cache,
@@ -92,7 +91,6 @@ export default function ChartThumb({
             alt="Chart preview"
             className="size-full rounded-md object-contain shadow-sm"
           />
-          <SlideTitleOverlay title={chart.slide_title} meta={titleMeta} />
         </div>
       ) : (
         !message && (

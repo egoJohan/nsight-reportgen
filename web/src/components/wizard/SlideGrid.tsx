@@ -1,7 +1,6 @@
 import { cn } from "@/lib/utils";
 import { chartTypeLabel, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
-import SlideTitleOverlay from "@/components/wizard/SlideTitleOverlay";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";
 import { slideTitle } from "@/components/wizard/slideTitle";
 
@@ -75,25 +74,14 @@ function SlideThumb({
   questionMap: Map<string, Question>;
   onClick: () => void;
 }) {
-  // renderTitle:true — the SAME variant the Design step renders and prefetches
-  // for every slide (StepConfigure's DeckPrefetch). `renderTitle` is part of the
-  // preview cache key, so asking for the other variant here meant the grid could
-  // not reuse a single one of those renders: every slide was a cache miss and the
-  // whole deck rendered a second time on the way into Preview. It also meant no
-  // title, because the fast composited path deliberately leaves the title band to
-  // the frontend and only emits `titleMeta` for it when a template resolves.
-  // Baking the title in is WYSIWYG against the deck anyway, and costs nothing
-  // extra now that both steps share one variant. (DeckPrefetch's own comment has
-  // always said this variant serves "BOTH the Design preview and the Overview
-  // grid" — the grid just never asked for it.)
+  // renderTitle: false — the COMPOSITED path (~0.2s, no LibreOffice). It now bakes the title too, so it is the same picture the deck has, and both the Design pane and the Preview grid use it. Nothing draws titles in HTML any more.
   const { data } = useChartPreview(materialId, chart, {
-    renderTitle: true,
+    renderTitle: false,
     grouping,
     reportId,
     templateRef,
   });
   const url = data?.dataUrl;
-  const titleMeta = data?.titleMeta;
 
   return (
     <div
@@ -114,7 +102,6 @@ function SlideThumb({
             the two would no longer agree on where "the box" is. */}
         <div
           className={`relative w-full overflow-hidden bg-muted/30 ${SLIDE_ASPECT}`}
-          style={titleMeta ? { aspectRatio: titleMeta.aspect } : undefined}
         >
           {url ? (
             <img src={url} alt="" className="absolute inset-0 size-full object-contain" />
@@ -123,7 +110,6 @@ function SlideThumb({
               {chartTypeLabel(chart.chart_type)}
             </span>
           )}
-          <SlideTitleOverlay title={chart.slide_title} meta={titleMeta} />
           <span className="absolute bottom-1.5 right-1.5 z-10 flex size-5 items-center justify-center rounded bg-background/85 text-xs tabular-nums shadow-sm">
             {index + 1}
           </span>

@@ -104,7 +104,7 @@ function ChartPreview({
   const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: true, priority: true, grouping, reportId, templateRef }
+    { renderTitle: false, priority: true, grouping, reportId, templateRef }
   );
   const url = data?.dataUrl;
   const error =
@@ -1336,7 +1336,7 @@ function SpecialPreview({
   const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     chart,
-    { renderTitle: true, priority: true, grouping, reportId, templateRef }
+    { renderTitle: false, priority: true, grouping, reportId, templateRef }
   );
   const url = data?.dataUrl;
   const error =
@@ -1486,10 +1486,14 @@ function PrefetchOne({
 }) {
   const grouping = useContext(GroupingCtx);
   const { reportId, templateRef } = useContext(PreviewTemplateCtx);
-  // Warm the full-slide preview (renderTitle:true) — used by BOTH the Design
-  // preview and the Overview grid — so nothing waits on focus.
+  // Warm the composited full-slide preview — the ONE variant both the Design
+  // so switching slides there does not wait on a ~4.4s LibreOffice render.
+  //
+  // NOT the grid's variant as well: warming both doubles the requests for no
+  // gain the user can see, and the expensive half of this is already the reason
+  // opening a deck spends a long time rendering.
   useChartPreview(materialId, chart, {
-    renderTitle: true,
+    renderTitle: false,
     enabled: true,
     grouping,
     reportId,

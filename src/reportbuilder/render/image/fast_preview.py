@@ -355,6 +355,23 @@ def _caps(shape, run, style) -> bool:
     return False
 
 
+# What LibreOffice draws for a title placeholder that states no size — and
+# LibreOffice renders the DECK (pptx -> pdf), so it is what a preview has to
+# agree with.
+#
+# MEASURED, not read off the template: nsight_default.pptx declares 14pt in its
+# master's titleStyle and LibreOffice ignores it, because the placeholder
+# python-pptx writes carries no explicit size to inherit from. Rendering the
+# same slide both ways and comparing cap heights (40px at 82.5 px/in for the
+# deck) puts LibreOffice's effective size at 28pt. Reading the master instead
+# drew the preview at half the deck's size; guessing LibreOffice's 44pt default
+# drew it half again too big.
+#
+# If this ever drifts, re-measure rather than reason: render one slide through
+# both paths and compare the title's cap height in pixels.
+_LO_DEFAULT_TITLE_PT = 28.0
+
+
 def _run_style(shape, para, run, style):
     """(family, size_pt, colour, bold, italic) for one RUN.
 
@@ -377,7 +394,9 @@ def _run_style(shape, para, run, style):
         title = getattr(getattr(style, "profile", None), "title", None)
         if title is not None:
             family = family or title.font
-            size_pt = size_pt or title.size_pt
+            # NOT title.size_pt: that is what the TEMPLATE says, and the deck is
+            # rendered by LibreOffice, which ignores it here. See the constant.
+            size_pt = size_pt or _LO_DEFAULT_TITLE_PT
             colour = colour or title.colour
             if run.font.bold is None:
                 bold = bool(title.bold)

@@ -7,6 +7,7 @@ import {
   Loader2Icon,
 } from "lucide-react";
 import { toast } from "sonner";
+import { reportCopyName } from "@/lib/reportCopyName";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -327,25 +328,12 @@ export default function ReportsSection({
     );
   }
 
-  /** "<name> (copy)", and "(copy 2)" if that is taken — copying twice must not
-   *  leave two reports a person cannot tell apart. Names come from the list the
-   *  user is looking at, so the suffix reflects what they can actually see. */
-  function copyName(source: string): string {
-    const taken = new Set(orderedReports.map((r) => r.name));
-    const base = `${source} (copy)`;
-    if (!taken.has(base)) return base;
-    for (let i = 2; ; i += 1) {
-      const next = `${source} (copy ${i})`;
-      if (!taken.has(next)) return next;
-    }
-  }
-
   function handleCopy(id: string) {
     const source = orderedReports.find((r) => r.id === id);
     if (!source) return;
     setCopyingId(id);
     duplicateReport.mutate(
-      { reportId: id, name: copyName(source.name) },
+      { reportId: id, name: reportCopyName(source.name, orderedReports.map((r) => r.name)) },
       {
         onSuccess: () => {
           // The server owns the copy; re-read the list rather than guessing

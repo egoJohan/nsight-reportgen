@@ -412,7 +412,12 @@ function postAi<T>(materialId: string, kind: string, body: unknown): Promise<T> 
 // setActivePreviewKey(); the gate then PROMOTES whichever queued task matches
 // that key, running it immediately in a reserved slot. So selecting a not-yet-
 // rendered slide from the end of the deck renders it right away.
-const PREVIEW_CONCURRENCY = 4;
+// 3, not 4: background renders now run 2 at a time. Each one is a LibreOffice
+// process (~300 MB, CPU-bound) on the SAME box as the API the UI is talking to,
+// so a wider pool warms the deck slightly sooner and makes everything else —
+// including switching slides — feel stuck while it does. Two background renders
+// plus the reserved slot keeps the machine answering.
+const PREVIEW_CONCURRENCY = 3;
 const PRIORITY_RESERVE = 1; // slot kept free so the active slide can always start
 let previewActive = 0;
 let activePreviewKey: string | null = null;

@@ -58,8 +58,31 @@ start_datahive() {
   echo "datahive starting (pid $(cat "$DH_STATE/server.pid"))"
 }
 
+# --reload, watching src/: the frontend hot-reloads on every edit and the backend
+# did not, so a change to a route could sit unloaded for hours while vite served
+# a UI that already expected it. That is how the slide titles vanished — the UI
+# had moved to the composited preview path while a backend from five hours
+# earlier was still stripping the title from it. The same shape as the pending
+# migration that morning: a live process serving happily, disagreeing with the
+# source someone was reading.
 start_backend() {
-  up "http://127.0.0.1:$API_PORT/health" && { echo "backend already up"; return; }
+  # A HEALTHY backend is not necessarily the CURRENT one. If the running process
+  # is older than the newest file under src/, it predates an edit and must go —
+  # `up` used to print "backend already up" and return, which is exactly how a
+  # stale process survives a restart you thought you performed.
+  if up "http://127.0.0.1:$API_PORT/health"; then
+    local pid started newest
+    pid=$(ss -ltnp 2>/dev/null | awk -F'pid=' '/127.0.0.1:'"$API_PORT"' /{split($2,a,","); print a[1]; exit}')
+    if [ -n "${pid:-}" ] && [ -d "/proc/$pid" ]; then
+      started=$(stat -c %Y "/proc/$pid" 2>/dev/null || echo 0)
+      newest=$(find "$ROOT/src" -name '*.py' -newermt "@$started" -print -quit 2>/dev/null)
+      if [ -z "$newest" ]; then echo "backend already up (current)"; return; fi
+      echo "backend is older than src/ — restarting it"
+      kill "$pid" 2>/dev/null; sleep 3
+    else
+      echo "backend already up"; return
+    fi
+  fi
   local token
   # bearer_admin, not bearer: nSight owns this hive, and datahive gates
   # destructive operations behind an admin approval. Without owner authority
@@ -78,7 +101,8 @@ start_backend() {
       NSIGHT_DATAHIVE_URL="http://127.0.0.1:$DH_PORT" \
       NSIGHT_DATAHIVE_TOKEN="$token" \
       NSIGHT_HOST=127.0.0.1 NSIGHT_PORT=$API_PORT PYTHONPATH=src \
-      nohup .venv/bin/python -m reportbuilder.api.server \
+      nohup .venv/bin/python -m uvicorn reportbuilder.api.server:app \
+      --host 127.0.0.1 --port $API_PORT --reload --reload-dir src \
       > work/backend-dev.log 2>&1 & echo $! > work/backend-dev.pid )
   echo "backend starting (pid $(cat "$ROOT/work/backend-dev.pid"))"
 }
@@ -105,5 +129,11 @@ case "${1:-status}" in
       rm -f "$p"
     done
     echo "egohive left running (shared with other projects)" ;;
-  *) echo "usage: $0 {status|up|down}"; exit 1 ;;
+  restart)
+    # Stop whatever holds the port, not whatever the pid file remembers: a stale
+    # pid file meant `kill` hit nothing and the old process kept serving.
+    pid=$(ss -ltnp 2>/dev/null | awk -F'pid=' '/127.0.0.1:'"$API_PORT"' /{split($2,a,","); print a[1]; exit}')
+    [ -n "${pid:-}" ] && kill "$pid" 2>/dev/null && echo "stopped backend pid $pid"
+    sleep 3; start_backend; sleep 5; status ;;
+  *) echo "usage: $0 {status|up|down|restart}"; exit 1 ;;
 esac

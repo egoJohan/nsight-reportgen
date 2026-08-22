@@ -1222,8 +1222,17 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         template_slot="preview",
         elements=ElementToggles(
-            # render_title=False omits the baked title block for the live preview.
-            title=body.elements.title and body.render_title,
+            # The title is baked on BOTH paths. It used to be stripped when
+            # render_title=False so the browser could draw it in HTML instead,
+            # and the browser does not have the template's display font — that
+            # title came out in a fallback sans at a fraction of the size while
+            # the deck showed the real headline.
+            #
+            # The compositor draws it correctly now (fast_preview resolves the
+            # size LibreOffice actually uses, measured rather than read off the
+            # template), so render_title selects only HOW a slide is rasterised
+            # — compositor or LibreOffice — never what is on it.
+            title=body.elements.title,
             legend=body.elements.legend,
             n=body.elements.n,
             axis_names=body.elements.axis_names,

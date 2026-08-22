@@ -32,6 +32,8 @@ import {
   useCustomerCases,
   useResolvedCase,
   useCaseReports,
+  useDuplicateReport,
+  qk,
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import ChatPanel from "@/components/ChatPanel";
@@ -44,9 +46,14 @@ import {
   LockIcon,
   SettingsIcon,
   XIcon,
+  CopyIcon,
+  Loader2Icon,
   MessageSquareTextIcon,
   LogOutIcon,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { reportCopyName } from "@/lib/reportCopyName";
 import { Button } from "@/components/ui/button";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
 import { useSession, signOut, type Me } from "@/lib/session";
@@ -308,6 +315,71 @@ function ChatLauncher() {
   );
 }
 
+/** Copy the OPEN report to a new one under the same case.
+ *
+ *  Here rather than only in the reports list because this is where someone who
+ *  has the report open goes looking for it — the list button copies a report you
+ *  are not in, which is a different act. Both exist; both name the copy the same
+ *  way (reportCopyName).
+ *
+ *  It opens the copy afterwards: you copied the report you were working on, so
+ *  the copy is what you want to be in. That is also the clearest possible
+ *  feedback that it worked.
+ */
+function CopyReportButton() {
+  const { id: caseId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reportId = searchParams.get("report");
+  const { data: caseReports } = useCaseReports(caseId ?? null);
+  const duplicate = useDuplicateReport(caseId ?? "");
+  const qc = useQueryClient();
+
+  if (!caseId || !reportId) return null;
+  const reports = caseReports?.reports ?? [];
+  const source = reports.find((r) => r.report_id === reportId);
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-muted-foreground"
+      title="Copy this report to a new one"
+      disabled={!source || duplicate.isPending}
+      onClick={() => {
+        if (!source) return;
+        duplicate.mutate(
+          {
+            reportId,
+            name: reportCopyName(source.name, reports.map((r) => r.name)),
+          },
+          {
+            onSuccess: ({ report_id }) => {
+              qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+              setSearchParams(
+                (prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.set("report", report_id);
+                  return next;
+                },
+                { replace: true }
+              );
+              toast.success("Report copied");
+            },
+            onError: (e) => toast.error(`Copy failed: ${e.message}`),
+          }
+        );
+      }}
+    >
+      {duplicate.isPending ? (
+        <Loader2Icon className="size-4 animate-spin" />
+      ) : (
+        <CopyIcon className="size-4" />
+      )}
+      Copy as new
+    </Button>
+  );
+}
+
 function CloseReportButton() {
   const [searchParams, setSearchParams] = useSearchParams();
   if (!searchParams.get("report")) return null;
@@ -458,8 +530,9 @@ export default function AppShell() {
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="h-4" />
           <Breadcrumb />
-          {/* Right side: Close report (left) then Chat (always rightmost). */}
+          {/* Right side: Copy / Close report, then Chat (always rightmost). */}
           <div className="ml-auto flex items-center gap-2">
+            <CopyReportButton />
             <CloseReportButton />
             <ChatLauncher />
           </div>
