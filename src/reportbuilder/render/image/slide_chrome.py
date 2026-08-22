@@ -662,12 +662,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # or more groups than the page holds) — the editor's warning stays in the
     # editor, so this is the ONLY record of it that travels with the deck. Image
     # mode has no separate "classifying variable" box the way the native builder
-    # does, so the disclosure rides on the same footer line. (spec 2026-08-22)
-    cv = getattr(ctx.spec, "classifying_var", None)
-    if cv:
-        omission = _omission_clause(ctx)
+    # does, so the disclosure rides on the same footer line. It names only the
+    # omitted GROUPS, never the classifier's raw code (e.g. "var7") — RenderContext
+    # carries no model to resolve that to a human label, and the panel titles
+    # already show which variable the split used. (spec 2026-08-22, ruling 2026-08-22)
+    if getattr(ctx.spec, "classifying_var", None):
+        omission = _omission_clause(ctx).removeprefix(" · ")
         if omission:
-            footer_text = f"{footer_text}   ·   {cv}{omission}"
+            footer_text = f"{footer_text}   ·   {omission}"
     # Left margin follows the chart on a templated or harvested slide: those
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.

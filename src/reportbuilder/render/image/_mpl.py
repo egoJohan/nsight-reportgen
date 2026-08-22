@@ -227,10 +227,10 @@ def place_picture(ctx, png_path: str) -> None:
     place_picture_square(ctx, png_path, valign="top")
 
 
-# A classifier segment (or cross-tab combo) whose base is below this is too small
-# to chart — its percentages would be noise (a "won't say" group of 1 → 100%). The
-# engine still computes it exactly; we just don't PLOT it. Tunable.
-MIN_SEGMENT_BASE = 10
+# Defined in render.panels (not here) so that module has no dependency on the
+# image package; re-exported here because every caller in this file already
+# imports from _mpl and MIN_SEGMENT_BASE has always lived at this name.
+from reportbuilder.render.panels import MIN_SEGMENT_BASE  # noqa: F401
 
 
 def series_values(series):

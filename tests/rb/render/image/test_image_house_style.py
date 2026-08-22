@@ -338,6 +338,9 @@ def test_add_image_slide_chrome_names_a_capped_group_in_the_footer():
     text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
     assert "60+" in text
     assert "Ei mahtunut sivulle" in text
+    # The raw classifier code never belongs on a client slide: RenderContext
+    # carries no model to resolve it to a human label. (ruling 2026-08-22)
+    assert "age" not in text
 
 
 def test_add_image_slide_chrome_says_nothing_when_nothing_was_dropped():

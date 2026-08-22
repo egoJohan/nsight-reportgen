@@ -13,9 +13,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# The base floor is the renderer's own, defined once next to the segment filter it
-# already guards (a tiny classifier group must never render a misleading 100%).
-from reportbuilder.render.image._mpl import MIN_SEGMENT_BASE
+# A classifier segment (or cross-tab combo) whose base is below this is too small
+# to chart — its percentages would be noise (a "won't say" group of 1 -> 100%). The
+# engine still computes it exactly; we just don't PLOT it. Defined here (not in
+# image._mpl) so this module has no dependency on the image package — `panels` is
+# imported by callers (the pie/doughnut suitability check, native builders) that
+# must not have to pull in matplotlib-backed rendering just to ask this question.
+# image._mpl imports it back from here. Tunable.
+MIN_SEGMENT_BASE = 10
 
 # Three circles is what a 4:3 slot holds while each stays readable. A fourth is the
 # case the feature exists to prevent, not a layout to support.

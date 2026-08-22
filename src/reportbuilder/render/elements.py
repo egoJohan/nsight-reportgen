@@ -11,6 +11,7 @@ from pptx.dml.color import RGBColor
 from reportbuilder.model.report import NumberFormat
 from reportbuilder.render.base import RenderContext
 from reportbuilder.render.house_style import furniture_colors
+from reportbuilder.render.panels import panel_segments
 import reportbuilder.stats.statistics  # noqa: F401 — ensure built-in registrations are loaded
 import reportbuilder.stats.registry as _registry
 
@@ -163,11 +164,6 @@ def _omission_clause(ctx) -> str:
     """
     if getattr(ctx.spec, "chart_type", "") not in _PANEL_CHART_TYPES:
         return ""
-    # Imported lazily: render.image._mpl (imported by panels) pulls in
-    # render.image.pie, which itself imports panel_segments from this module's
-    # sibling — a module-level import here would be circular.
-    from reportbuilder.render.panels import panel_segments
-
     sel = panel_segments(ctx.series)
     if not sel.split:
         return ""

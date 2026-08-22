@@ -75,3 +75,12 @@ def test_one_surviving_group_still_counts_as_split():
     assert sel.labels == ("Naiset",)
     assert sel.split is True
     assert sel.thin == ("Miehet",)
+
+
+def test_panels_imports_standalone():
+    """`panels` must not depend on the image package: importing it first used to
+    raise ImportError through image/__init__ -> pie -> panels. (2026-08-22)"""
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "-c", "import reportbuilder.render.panels"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
