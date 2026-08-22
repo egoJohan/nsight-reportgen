@@ -13,29 +13,23 @@ House style:
 - No x-axis (values are in labels); no spines
 - No matplotlib title (handled by slide chrome, REQ-D-04)
 
+With a classifying variable, one funnel per group side by side — the same panel
+rule the pie uses (spec 2026-08-22).
+
 Returns None.
 """
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values, format_value, wrap_label,
+    new_figure, new_figure_grid, render_png, place_picture, format_value, wrap_label,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import TEAL
+from reportbuilder.render.panels import panel_segments
 
 
-def build_image_funnel(ctx) -> None:
-    """Centered horizontal bar funnel (widest category on top) with house style.
-
-    REQ-C-24b/f, REQ-C-27a.
-    """
-    cats, segs, data = series_values(ctx.series)
-    vals = data[segs[0]]
-
-    fig, ax = new_figure(ctx)
-    bg = chart_background(ctx)
-    ink, _muted, _grid = chart_furniture(ctx)
-
+def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str) -> None:
+    """Draw one funnel silhouette onto `ax` — the body this module always had."""
     max_val = max(vals) if vals else 1.0
     bar_h = 0.60
     all_vals = [v for v in vals if v is not None]
@@ -72,5 +66,41 @@ def build_image_funnel(ctx) -> None:
     ax.set_xlim(0, max_val * 2.05)
     ax.axis("off")
 
-    png = render_png(fig)
-    place_picture(ctx, png)
+
+def build_image_funnel(ctx) -> None:
+    """Centered horizontal bar funnel (widest category on top) with house style.
+
+    With a classifying variable, one funnel per group side by side — the same
+    panel rule the pie uses. (REQ-C-24b/f, REQ-C-27a; spec 2026-08-22)
+    """
+    sel = panel_segments(ctx.series)
+    cats = list(ctx.series.categories)
+    bg = chart_background(ctx)
+    ink, _muted, _grid = chart_furniture(ctx)
+
+    def _values(seg):
+        return [float(ctx.series.cell(c, seg).value(ctx.series.statistic) or 0.0)
+                for c in cats]
+
+    def _label(seg) -> str:
+        # `ax.axis("off")` hides the x-axis label, so the base rides in the title's
+        # second line rather than under the funnel as it does on a pie.
+        return f"{wrap_label(seg, 20)}\nn = {ctx.series.base_n.get(seg, 0)}"
+
+    if not sel.split or len(sel.labels) == 1:
+        fig, ax = new_figure(ctx)
+        seg = sel.labels[0]
+        _draw_one_funnel(ax, cats, _values(seg), ctx, bg, ink)
+        if sel.split and not sel.degraded:
+            # One group survived: the reader must be told WHICH group this is.
+            ax.set_title(_label(seg), fontsize=12.5, fontweight="bold",
+                         color=ink, pad=6)
+    else:
+        # Every panel draws the same categories, so the shared y-axis is correct.
+        fig, axes = new_figure_grid(ctx, len(sel.labels))
+        for ax, seg in zip(axes, sel.labels):
+            _draw_one_funnel(ax, cats, _values(seg), ctx, bg, ink)
+            ax.set_title(_label(seg), fontsize=12.5, fontweight="bold",
+                         color=ink, pad=6)
+
+    place_picture(ctx, render_png(fig))

@@ -194,6 +194,36 @@ def figure_samples():
                   "Total": (58, 41, 1)}),
          classifying_var="sex")
 
+    # Funnel gets the same split (spec 2026-08-22): three groups, each
+    # descending, side by side. `build_image_funnel` places its own picture onto
+    # the slide rather than returning a Figure, so pull the PNG back out of the
+    # slide's picture shape instead of going through `_save`.
+    def case_funnel(name, series, **spec_kw):
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+        from reportbuilder.render.image.funnel import build_image_funnel
+
+        try:
+            ctx = _ctx(series, "funnel", **spec_kw)
+            build_image_funnel(ctx)
+            pics = [s for s in ctx.slide.shapes
+                    if s.shape_type == MSO_SHAPE_TYPE.PICTURE]
+            dest = os.path.join(OUT, name + ".png")
+            with open(dest, "wb") as f:
+                f.write(pics[0].image.blob)
+            print("  ok:", dest)
+        except Exception as e:                       # a broken case must be VISIBLE
+            print("  FAIL:", name, repr(e)[:160])
+
+    funnel_cats = ("Tuntee", "Harkitsee", "Ostanut")
+    case_funnel(
+        "a13_funnel_three_groups",
+        _series(funnel_cats, ("Naiset", "Miehet", "Muut", "Total"),
+                {"Naiset": 512, "Miehet": 486, "Muut": 120, "Total": 1118},
+                {"Naiset": (85, 55, 20), "Miehet": (78, 48, 15),
+                 "Muut": (90, 60, 25), "Total": (83, 53, 20)}),
+        classifying_var="sex")
+
 
 def slide_samples():
     """Level B — real survey data, rendered as whole slides through PowerPoint."""

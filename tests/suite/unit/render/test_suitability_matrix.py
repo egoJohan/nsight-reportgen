@@ -156,8 +156,11 @@ def test_funnel_low_for_too_few_categories():
     assert plugin("funnel").suitability(B.q(), B.few_short_series()) == 0.30
 
 
-def test_funnel_low_for_multi_series():
-    assert plugin("funnel").suitability(B.q(), B.multi_group_series()) == 0.30
+def test_funnel_high_for_multi_series_when_every_panel_descends():
+    # A classifier no longer buries the funnel (spec 2026-08-22): each group gets
+    # its own panel, judged on its own descending-ness. multi_group_series() is
+    # flat per group (non-increasing), so every panel still qualifies.
+    assert plugin("funnel").suitability(B.q(), B.multi_group_series()) == 0.85
 
 
 # ---- line ------------------------------------------------------------------
