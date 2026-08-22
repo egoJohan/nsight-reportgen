@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircleIcon,
+  AlertTriangleIcon,
   BarChart3Icon,
   GripVerticalIcon,
   ImageIcon,
@@ -22,6 +23,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
@@ -391,18 +398,6 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
   // picking a second one against a banner primary is legal. (spec 2026-08-04)
   const noPrimary = key === "classifying_var_2" && !chart.classifying_var;
   const current = (chart[key] as string | null | undefined) ?? null;
-  // Pie/doughnut/funnel draw one chart per group and a 4:3 slide holds three.
-  // Warn on the VARIABLE's own value count — the renderer's own count can be
-  // lower (thin groups drop out), so this is advisory and the slide footer is the
-  // authoritative record. (spec 2026-08-22)
-  const PANEL_CHART_TYPES = ["pie", "doughnut", "funnel"];
-  const MAX_PANELS = 3;
-  const chosen = key === "classifying_var" && current
-    ? (variables ?? []).find((v) => v.name === current)
-    : undefined;
-  const tooManyGroups =
-    PANEL_CHART_TYPES.includes(chart.chart_type) &&
-    (chosen?.n_values ?? 0) > MAX_PANELS;
   const other =
     key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
   const required = !!field.required;
@@ -469,16 +464,6 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
           ))}
         </SelectContent>
       </Select>
-      {tooManyGroups && (
-        <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-          <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
-          <span className="leading-snug">
-            {chosen?.label ?? current} has {chosen?.n_values} groups and only{" "}
-            {MAX_PANELS} fit on one slide. The three largest will be drawn; the
-            slide footer names the rest.
-          </span>
-        </div>
-      )}
       {key === "classifying_var_2" && current && chart.classifying_var && (
         <button
           type="button"
@@ -1544,6 +1529,53 @@ function DeckPrefetch({
   );
 }
 
+/** Chart types that draw ONE panel per classifier group, and the most a 4:3
+ *  slide holds. Kept next to the rule that reads them; the renderer's own copy
+ *  is `render/panels.py` (MAX_PANELS), and the two are deliberately independent
+ *  — this one only decides whether to WARN. */
+const PANEL_CHART_TYPES = ["pie", "doughnut", "funnel"];
+const MAX_PANELS = 3;
+
+type SlideProblem = { id: string; title: string; detail: string };
+
+/** What is wrong with this slide, in the author's terms.
+ *
+ *  English, like the rest of the editor. The Finnish strings this warning talks
+ *  ABOUT — "Ei mahtunut sivulle" and friends — are the DECK's, printed on the
+ *  slide for the client who reads it. Two audiences, two languages; do not
+ *  follow the footer's lead here.
+ *
+ *  A list because the preview's warning button is the obvious home for the next
+ *  such check — but no machinery beyond that: one function, one array.
+ *
+ *  The group count here is the VARIABLE's own declared value count. The renderer
+ *  counts what survives (groups under ten respondents drop out first), so the two
+ *  can legitimately differ and this stays advisory. The slide's own footer is the
+ *  authoritative record of what was omitted. (spec 2026-08-22)
+ */
+function slideProblems(
+  chart: ChartSpec | undefined,
+  variables: Variable[] | undefined
+): SlideProblem[] {
+  if (!chart || !PANEL_CHART_TYPES.includes(chart.chart_type)) return [];
+  const clf = chart.classifying_var;
+  if (!clf) return [];
+  const v = (variables ?? []).find((x) => x.name === clf);
+  const n = v?.n_values ?? 0;
+  if (n <= MAX_PANELS) return [];
+  return [
+    {
+      id: "too-many-groups",
+      title: `Only ${MAX_PANELS} groups fit on a slide`,
+      detail:
+        `"${v?.label ?? clf}" has ${n} groups, and a slide holds ${MAX_PANELS}. ` +
+        `The three largest will be drawn and the rest left out. The slide's own ` +
+        `footer names the ones it omitted — that footnote is the only record of ` +
+        `the omission that travels with the deck.`,
+    },
+  ];
+}
+
 function StepConfigureInner({
   materialId,
   charts,
@@ -1581,7 +1613,9 @@ function StepConfigureInner({
   templateRef?: string;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
+  const { data: panelVariables } = useVariables(materialId);
   const [editQid, setEditQid] = useState<string | null>(null);
+  const [problemsOpen, setProblemsOpen] = useState(false);
   const activeRowRef = useRef<HTMLDivElement>(null);
   // Drag-reorder the slide list.
   const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(onReorder);
@@ -1675,6 +1709,9 @@ function StepConfigureInner({
   // variable — and matching on the question made every edit land on the first.
   const activeIndex = charts.findIndex((c) => c.slide_id === active);
   const activeChart = activeIndex >= 0 ? charts[activeIndex] : charts[0];
+  // What this slide will NOT show. A pure read of the active chart and the
+  // material's variables; declared here because both are only in scope now.
+  const activeProblems = slideProblems(activeChart, panelVariables);
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
   // A "themes" chart is an open-ended question rendered as bullets — unlike a true
@@ -1795,6 +1832,20 @@ function StepConfigureInner({
                 <InfoIcon className="size-4" />
               </button>
             )}
+            {/* What this slide will NOT show. Sits beside the (i) rather than in
+                the config panel: it is about the RENDERED slide, so it belongs on
+                the picture. Only appears when there is something to say. */}
+            {!activeSpecial && activeProblems.length > 0 && (
+              <button
+                type="button"
+                title={activeProblems[0].title}
+                aria-label={activeProblems[0].title}
+                onClick={() => setProblemsOpen(true)}
+                className="absolute right-12 top-2 z-20 flex size-8 items-center justify-center rounded-md bg-destructive/10 text-destructive shadow-sm ring-1 ring-destructive/30 backdrop-blur-sm transition-colors hover:bg-destructive/20"
+              >
+                <AlertTriangleIcon className="size-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1847,6 +1898,25 @@ function StepConfigureInner({
           )}
         </div>
       )}
+
+      <Dialog open={problemsOpen} onOpenChange={setProblemsOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangleIcon className="size-5 shrink-0" />
+              This slide won't show everything
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {activeProblems.map((p) => (
+              <div key={p.id} className="space-y-1">
+                <p className="text-sm font-medium">{p.title}</p>
+                <p className="text-sm leading-relaxed text-muted-foreground">{p.detail}</p>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <QuestionDetailsDialog
         materialId={materialId}

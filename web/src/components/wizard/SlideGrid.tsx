@@ -75,11 +75,19 @@ function SlideThumb({
   questionMap: Map<string, Question>;
   onClick: () => void;
 }) {
-  // renderTitle:false takes the fast composited path (no LibreOffice per
-  // thumbnail — see routes_questions.py) and the title is drawn in DOM below,
-  // over the image, from the box the template's own profile states.
+  // renderTitle:true — the SAME variant the Design step renders and prefetches
+  // for every slide (StepConfigure's DeckPrefetch). `renderTitle` is part of the
+  // preview cache key, so asking for the other variant here meant the grid could
+  // not reuse a single one of those renders: every slide was a cache miss and the
+  // whole deck rendered a second time on the way into Preview. It also meant no
+  // title, because the fast composited path deliberately leaves the title band to
+  // the frontend and only emits `titleMeta` for it when a template resolves.
+  // Baking the title in is WYSIWYG against the deck anyway, and costs nothing
+  // extra now that both steps share one variant. (DeckPrefetch's own comment has
+  // always said this variant serves "BOTH the Design preview and the Overview
+  // grid" — the grid just never asked for it.)
   const { data } = useChartPreview(materialId, chart, {
-    renderTitle: false,
+    renderTitle: true,
     grouping,
     reportId,
     templateRef,
