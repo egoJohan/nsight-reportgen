@@ -36,7 +36,7 @@ from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (chart_accent,
-    render_png, place_picture_square, series_values, format_value,
+    render_png, place_picture_square, format_value,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import (
@@ -84,7 +84,13 @@ def _make_square_fig_ax(ctx, bg: str):
 
 
 # Vertical share of the figure reserved for the shared legend under a panel row.
+# This is only a STARTING reservation: a legend with many categories or long
+# wrapped labels can render taller than this, so `_build_pie_figure` measures the
+# legend's actual height and grows the reservation to match before it is final.
 _PANEL_LEGEND_FRAC: float = 0.18
+# Breathing room between the legend's top edge and the panels' `n = …` labels
+# above it, as a fraction of the figure height.
+_PANEL_LEGEND_GAP_FRAC: float = 0.025
 # Gap between neighbouring panels, as a fraction of one panel's width. Pies have no
 # axis furniture to keep apart, so this only has to stop two circles touching.
 _PANEL_GAP_FRAC: float = 0.06
@@ -118,7 +124,21 @@ def _make_panel_axes(ctx, bg: str, n_panels: int):
     return fig, axes
 
 
-def _add_category_legend(fig, ax, wedges, cats, fracs, statistic, fmt,
+def _legend_height_frac(fig, leg) -> float:
+    """How tall `leg` actually rendered, as a fraction of the figure height.
+
+    `_PANEL_LEGEND_FRAC` is only a starting guess — a legend with many categories
+    (`ncol` wraps to more rows) or long wrapped labels can need more room than
+    that. Forcing a draw lets matplotlib lay out the legend's real text extent so
+    the reservation can be grown to fit it, rather than letting it overlap the
+    panels above.
+    """
+    fig.canvas.draw()
+    bbox = leg.get_window_extent(fig.canvas.get_renderer())
+    return bbox.height / fig.bbox.height
+
+
+def _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
                           bg: str, ink: str, grid: str) -> None:
     """Add a house-style category legend to the right of the pie (no overlap, full text).
     Category names ONLY — the percentages live on the slices, so repeating them in the
@@ -192,10 +212,11 @@ def _build_pie_figure(ctx, *, donut: bool):
         wedges = _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg, donut)
         if sel.split and not sel.degraded:
             # One group survived: the reader must be told WHICH group this is.
-            ax.set_title(seg, fontsize=12.5, fontweight="bold", color=ink, pad=6)
+            ax.set_title(_wrap_legend_label(seg), fontsize=12.5, fontweight="bold",
+                         color=ink, pad=6)
             ax.set_xlabel(f"n = {series.base_n.get(seg, 0)}", fontsize=9.5, color=ink)
         if want_legend:
-            _add_category_legend(fig, ax, wedges, cats, [], statistic, fmt,
+            _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
                                   bg, ink, grid)
         return fig
 
@@ -218,6 +239,19 @@ def _build_pie_figure(ctx, *, donut: bool):
         leg.get_frame().set_linewidth(0.8)
         for t in leg.get_texts():
             t.set_color(ink)
+
+        # A legend with many categories or long wrapped labels can render taller
+        # than the fixed `_PANEL_LEGEND_FRAC` reservation `_make_panel_axes` used.
+        # Measure it for real and, if it needs more room, shrink the panels
+        # (keeping their top — and the titles above them — fixed) rather than let
+        # the legend collide with the `n = …` labels or the circles.
+        needed = _legend_height_frac(fig, leg) + _PANEL_LEGEND_GAP_FRAC
+        if needed > _PANEL_LEGEND_FRAC:
+            new_bottom = needed
+            for ax in axes:
+                left, _bottom, width, _height = ax.get_position().bounds
+                top = 1.0 - 0.10  # same top the panels were given originally
+                ax.set_position([left, new_bottom, width, top - new_bottom])
     return fig
 
 

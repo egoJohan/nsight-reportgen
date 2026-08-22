@@ -70,6 +70,19 @@ def test_all_groups_thin_degrades_to_one_whole_sample_pie():
     assert axes[0].get_title() == ""
 
 
+def test_one_surviving_group_draws_a_titled_single_panel():
+    # Distinct from the degraded case: one group survived, so the reader must be
+    # told WHICH group the single circle describes. (spec 2026-08-22)
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 4, "Total": 516})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex")
+    fig = _build_pie_figure(ctx, donut=False)
+    axes = list(fig.axes)
+    assert len(axes) == 1
+    assert axes[0].get_title() == "Naiset"
+    assert axes[0].get_xlabel() == "n = 512"
+
+
 def test_panel_percentages_are_the_engine_s_own_numbers():
     """The invariant that keeps the slice labels honest.
 
