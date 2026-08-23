@@ -28,7 +28,10 @@ function since(iso: string): string {
  *  is the only decoration and has nothing to fight with. */
 export default function RecentReportsPage() {
   const navigate = useNavigate();
-  const { data: reports, isLoading, isError } = useRecentReports(10);
+  // Five, not ten: this is a "where was I?" list, not a report browser. Ten
+  // filled the landing page and pushed the customer tree below the fold, which
+  // made the shortest list the slowest way in.
+  const { data: reports, isLoading, isError } = useRecentReports(5);
   const { data: customers } = useCustomers();
 
   const customerName = (id: string) =>
