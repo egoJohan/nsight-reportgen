@@ -355,21 +355,106 @@ def _caps(shape, run, style) -> bool:
     return False
 
 
-# What LibreOffice draws for a title placeholder that states no size — and
-# LibreOffice renders the DECK (pptx -> pdf), so it is what a preview has to
-# agree with.
-#
-# MEASURED, not read off the template: nsight_default.pptx declares 14pt in its
-# master's titleStyle and LibreOffice ignores it, because the placeholder
-# python-pptx writes carries no explicit size to inherit from. Rendering the
-# same slide both ways and comparing cap heights (40px at 82.5 px/in for the
-# deck) puts LibreOffice's effective size at 28pt. Reading the master instead
-# drew the preview at half the deck's size; guessing LibreOffice's 44pt default
-# drew it half again too big.
-#
-# If this ever drifts, re-measure rather than reason: render one slide through
-# both paths and compare the title's cap height in pixels.
-_LO_DEFAULT_TITLE_PT = 28.0
+def chart_ground(style) -> str:
+    """The slide background this template states, as #RRGGBB."""
+    bg = (getattr(style, "background", "") or "").strip()
+    if not bg:
+        return "#" + CREAM.lstrip("#")
+    return bg if bg.startswith("#") else f"#{bg}"
+
+
+def _legible_on(colour_hex: str, ground_hex: str) -> bool:
+    """Is *colour* readable on *ground*?
+
+    The renderer's OWN definition of dark (`_DARK_LUMINANCE_THRESHOLD`), not a
+    difference threshold: dark text belongs on a light ground and light text on
+    a dark one. A difference of 0.25 let black through on 37474F — it scores
+    0.267 away and is still unreadable — which is exactly the headline that
+    disappeared into the customer's own background.
+    """
+    from reportbuilder.render.house_style import (
+        _DARK_LUMINANCE_THRESHOLD, _relative_luminance,
+    )
+    try:
+        c = colour_hex if colour_hex.startswith("#") else f"#{colour_hex}"
+        text_is_dark = _relative_luminance(c) < _DARK_LUMINANCE_THRESHOLD
+        ground_is_dark = _relative_luminance(ground_hex) < _DARK_LUMINANCE_THRESHOLD
+        return text_is_dark != ground_is_dark
+    except Exception:  # noqa: BLE001 — a colour must never fail a preview
+        return True
+
+
+def _inherited_placeholder_style(shape):
+    """(font, size_pt, colour, bold, caps) a placeholder INHERITS, as PowerPoint
+    and LibreOffice resolve it: the layout's matching placeholder first, then the
+    master's, then the master's txStyles.
+
+    A placeholder python-pptx writes states nothing, so everything about how it
+    looks lives up that chain. Reading only the shape — or the harvested profile
+    — is what drew Arial 14pt black on a deck whose master ("slate") asks for
+    Bebas Neue 30pt: the preview showed a small sentence-case line where the deck
+    showed a big condensed headline, on the same slide.
+
+    Returns empty/zero fields where the chain says nothing, so the caller keeps
+    its own fallbacks.
+    """
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    try:
+        ph_type = shape.placeholder_format.type
+    except (AttributeError, ValueError):
+        return "", 0.0, "", None, False
+
+    def _read(el):
+        """(font, sz, colour, bold, caps) from the first defRPr/rPr under `el`."""
+        if el is None:
+            return "", 0.0, "", None, False
+        for tag in (f"{A}defRPr", f"{A}rPr"):
+            for rpr in el.iter(tag):
+                latin = rpr.find(f"{A}latin")
+                fill = rpr.find(f"{A}solidFill")
+                srgb = fill.find(f"{A}srgbClr") if fill is not None else None
+                sz = rpr.get("sz")
+                return (latin.get("typeface") if latin is not None else "",
+                        int(sz) / 100.0 if sz else 0.0,
+                        srgb.get("val") if srgb is not None else "",
+                        {"1": True, "0": False}.get(rpr.get("b")),
+                        rpr.get("cap") == "all")
+        return "", 0.0, "", None, False
+
+    def _matching(container):
+        for cand in getattr(container, "placeholders", []):
+            try:
+                if cand.placeholder_format.type == ph_type:
+                    return cand.element
+            except (AttributeError, ValueError):
+                continue
+        return None
+
+    sources = []
+    try:
+        layout = shape.part.slide.slide_layout
+        sources.append(_matching(layout))
+        master = layout.slide_master
+        sources.append(_matching(master))
+        # Last: the master's text styles, which state a size for every title.
+        sources.append(master.element.find(f"{P}txStyles/{P}titleStyle")
+                       if ph_type == 1 else
+                       master.element.find(f"{P}txStyles/{P}bodyStyle"))
+    except (AttributeError, KeyError):
+        pass
+
+    font, size_pt, colour, bold, caps = "", 0.0, "", None, False
+    for src in sources:
+        f, z, c, b, cp = _read(src)
+        font = font or f
+        size_pt = size_pt or z
+        colour = colour or c
+        bold = bold if bold is not None else b
+        caps = caps or cp
+        if font and size_pt and colour:
+            break
+    return font, size_pt, colour, bold, caps
 
 
 def _run_style(shape, para, run, style):
@@ -391,16 +476,37 @@ def _run_style(shape, para, run, style):
     except (AttributeError, ValueError):
         pass
     if not (family and size_pt and colour) and shape.is_placeholder:
+        # The template's own chain first — it is what the DECK renders from.
+        inh_font, inh_pt, inh_col, inh_bold, _caps = _inherited_placeholder_style(shape)
+        family = family or inh_font
+        size_pt = size_pt or inh_pt
+        # The chain's colour only when it is legible on the ground this same
+        # template states. Egoiq_x_Rahoo resolves black for its title over a
+        # 37474F ground, so the headline came out invisible; its own dk1 says
+        # white. Both are the template's — this takes the one it did not
+        # contradict, and invents nothing.
+        if inh_col and _legible_on(inh_col, chart_ground(style)):
+            colour = colour or inh_col
+        if run.font.bold is None and inh_bold is not None:
+            bold = inh_bold
         title = getattr(getattr(style, "profile", None), "title", None)
         if title is not None:
             family = family or title.font
-            # NOT title.size_pt: that is what the TEMPLATE says, and the deck is
-            # rendered by LibreOffice, which ignores it here. See the constant.
-            size_pt = size_pt or _LO_DEFAULT_TITLE_PT
-            colour = colour or title.colour
+            size_pt = size_pt or title.size_pt
+            # Same legibility rule as the chain above: a harvested colour is read
+            # off ONE slide of the customer's deck, and a deck has light and dark
+            # slides both.
+            if title.colour and _legible_on(title.colour, chart_ground(style)):
+                colour = colour or title.colour
             if run.font.bold is None:
                 bold = bool(title.bold)
-    return family, size_pt or 11.0, colour or "2B2B2B", bold, italic
+    if not colour:
+        # Nothing legible stated anywhere: the slide's own furniture ink, which
+        # is what the chart on the same slide uses, so text agrees with charts
+        # about what this background needs.
+        from reportbuilder.render.house_style import furniture_colors
+        colour = furniture_colors(chart_ground(style)).__getitem__(0).lstrip("#")
+    return family, size_pt or 11.0, colour, bold, italic
 
 
 def _indents(para, to_px) -> tuple[int, int]:

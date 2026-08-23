@@ -25,6 +25,7 @@ from reportbuilder.render.base import RenderContext
 from reportbuilder.render.elements import _omission_clause
 from reportbuilder.render.template_profile import clone_furniture
 from reportbuilder.render.house_style import (
+    _relative_luminance,
     PX_CREAM, PX_INK, PX_TEAL, PX_MUTED, furniture_colors,
 )
 
@@ -423,7 +424,7 @@ def draw_template_heading(slide, style, text: str) -> int:
     """
     if getattr(style, "chart_layout_index", None) is not None:
         # Also removes an empty placeholder, so PowerPoint shows no prompt.
-        if not _fill_title_placeholder(slide, text) or not text:
+        if not _fill_title_placeholder(slide, text, style) or not text:
             return 0
         profile = getattr(style, "profile", None)
         if profile is not None and profile.title.positioned:
@@ -439,7 +440,7 @@ def draw_template_heading(slide, style, text: str) -> int:
     left, top, width, height = harvested_title_box(profile, text)
     size = fit_title_size(st, text)
     _textbox(slide, left, top, width, height,
-             [(text, size, _rgb(st.colour) or _furniture_px(style)[0],
+             [(text, size, title_colour_for(st, style),
                True if st.bold is None else st.bold)],
              font=st.font or getattr(style, "heading_font", "") or "")
     return top + height
@@ -467,15 +468,40 @@ def header_furniture_floor(profile, chart_top: int, sw: int, sh: int) -> int:
     return floor
 
 
-def _fill_title_placeholder(slide, title: str) -> bool:
+def title_colour_for(st, style):
+    """The colour to draw the title in, taken from the TEMPLATE — but from the
+    field of it that agrees with the background the same template states.
+
+    A harvested title colour is read off one slide of the customer's deck, and a
+    deck usually has both light and dark slides. Egoiq_x_Rahoo's harvest yields
+    black on a ground the same template states as 37474F, so the headline came
+    out dark-on-dark and all but invisible, while that template's own dk1 says
+    white.
+
+    So: the harvested colour when it is legible against the ground, otherwise
+    the template's own ink for that ground. Both are the template's; this picks
+    the one it did not contradict. Nothing here invents a colour.
+    """
+    harvested = _rgb(getattr(st, "colour", "") or "")
+    bg = (getattr(style, "background", "") or "").strip()
+    if harvested is None or not bg:
+        return harvested or _furniture_px(style)[0]
+    ground = bg if bg.startswith("#") else f"#{bg}"
+    if abs(_relative_luminance(f"#{st.colour}") - _relative_luminance(ground)) < 0.25:
+        return _furniture_px(style)[0]
+    return harvested
+
+
+def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     """Put *title* in the layout's title placeholder. False if there isn't one.
 
     Only the TEXT is set: size, font, colour and position stay inherited, which
-    is the whole point of using the customer's layout. Their box was drawn for
-    the headline they wrote and ours is often a question, so a long title spills
-    out of the bottom of the box — the chart and subtitle are moved down to meet
-    it (see `_resolve_slot`) rather than the type being shrunk, because the size
-    is one of the things Johan asked us to take from the template.
+    is the whole point of using the customer's layout. LibreOffice resolves that
+    chain correctly — the "slate" master states Bebas Neue 30pt for its title and
+    that is what the deck shows. The preview compositor has to resolve the SAME
+    chain (see fast_preview._inherited_placeholder_style); writing harvested
+    values over the placeholder instead put Arial 14pt on a slide whose template
+    asked for Bebas Neue 30pt.
     An unused placeholder is removed so PowerPoint does not show its "Click to
     add title" prompt.
     """
@@ -491,6 +517,7 @@ def _fill_title_placeholder(slide, title: str) -> bool:
     tf = ph.text_frame
     tf.word_wrap = True
     tf.text = title
+
     return True
 
 
