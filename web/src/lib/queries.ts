@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { api, ApiError, setActivePreviewKey } from "./api";
+import { imageFingerprint } from "./previewFingerprint";
 import type { Substitutions } from "./api";
 import type {
   AccessMode,
@@ -358,57 +359,6 @@ export function useDeleteCase() {
   });
 }
 
-// ---- Chart preview cache ----
-// Only the fields that change the rendered PNG; identical content → identical
-// cache entry → the preview is formed ONCE and reused across mounts/steps.
-function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
-  // Kept in the fingerprint because it selects WHICH renderer draws the
-  // slide (compositor vs LibreOffice), and their output is not identical.
-  const key: Record<string, unknown> = {
-    render_title: renderTitle,
-    question_ref: chart.question_ref,
-    chart_type: chart.chart_type,
-    statistic: chart.statistic,
-    classifying_var: chart.classifying_var,
-    classifying_var_2: chart.classifying_var_2 ?? null,
-    // The cross-tab percentage DIRECTION changes the numbers in the PNG, so a change
-    // must re-render the preview (else switching direction silently shows the old one).
-    percent_base: chart.percent_base ?? "auto",
-    // Showing/hiding the "Total" reference series changes the PNG too.
-    show_total: chart.show_total ?? "auto",
-    number_format: chart.number_format,
-    sort: chart.sort,
-    elements: chart.elements,
-    scatter_xy: chart.scatter_xy,
-    show_not_answered: chart.show_not_answered,
-    show_empty_categories: chart.show_empty_categories,
-    not_answered_codes: chart.not_answered_codes,
-    category_label_overrides: chart.category_label_overrides,
-    options: chart.options ?? null,
-    // The methodology footer is baked into the PNG regardless of render_title (it lives
-    // outside the title block), so a footer edit must always re-render the preview.
-    footer_note: chart.footer_note,
-    // The row-summary column (function/codes/header) is baked into the chart PNG, so
-    // any change must re-render the preview.
-    row_summary_fn: chart.row_summary_fn ?? "none",
-    row_summary_codes: chart.row_summary_codes ?? null,
-    row_summary_pos_codes: chart.row_summary_pos_codes ?? null,
-    row_summary_neg_codes: chart.row_summary_neg_codes ?? null,
-    row_summary_label: chart.row_summary_label ?? "",
-  };
-  // The title is baked into the PNG on BOTH paths now — the composited one draws
-  // it server-side in the template's own face, because the browser does not have
-  // that font. So it belongs in the key unconditionally.
-  //
-  // It used to be added only when render_title was on, back when the frontend
-  // drew the title itself and editing it had to NOT re-render. Leaving that
-  // condition after the change meant an AI-generated headline arrived, the spec
-  // changed, the key did not, and the preview went on serving the image rendered
-  // before the title existed — titles simply never appeared.
-  key.slide_title = chart.slide_title;
-  key.slide_description = chart.slide_description;
-  return key;
-}
 
 // Cache data URLs (plain strings), not object URLs: they are freed with the
 // cache entry, so no manual revoke is needed and a cached preview survives
@@ -466,14 +416,19 @@ export function useChartPreview(
 ) {
   const renderTitle = opts?.renderTitle ?? false;
   const groupingKey = JSON.stringify(opts?.grouping ?? {});
+  // One fingerprint, computed by exclusion — see previewFingerprint.ts. The
+  // 25-field allow-list this replaced had to be remembered every time ChartSpec
+  // gained a field, and forgetting meant the preview silently kept showing the
+  // previous image.
   const queryKey = [
     "chart-preview",
     materialId,
-    opts?.reportId ?? "",
-    opts?.templateRef ?? "",
-    renderTitle,
-    previewContentKey(chart, renderTitle),
-    groupingKey,
+    imageFingerprint(chart, {
+      templateRef: opts?.templateRef ?? "",
+      reportId: opts?.reportId ?? "",
+      groupingKey,
+      renderTitle,
+    }),
   ];
   // Stable string key shared with the render gate so it can match this slide's
   // queued render and promote it when this slide is the active one.

@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
@@ -19,6 +19,12 @@ function bypassHtmlNav(req: IncomingMessage) {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [tailwindcss(), react()],
+  // Unit tests for the PURE modules only — no component rendering, no jsdom.
+  // The fingerprint functions decide whether a slide needs a new title or a new
+  // render, which is where the "changing chart type regenerated the headline"
+  // class of bug lives; they are pure, so they get real tests that run in
+  // milliseconds instead of a two-minute pass over the live UI.
+  test: { environment: 'node', include: ['src/**/*.test.ts'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
