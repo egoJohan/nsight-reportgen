@@ -26,7 +26,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { EMPTY, PAGE, PAGE_TITLE, PANEL, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
+import { EMPTY, PAGE, PAGE_TITLE, PANEL_PADDED, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
   useUsers, useInvites, useUserActions,
@@ -132,7 +132,7 @@ function ChartFontSetting() {
   const fellBack = data.family !== "" && data.effective !== data.family;
 
   return (
-    <div className={`${PANEL} p-4`}>
+    <div className={PANEL_PADDED}>
       <h3 className={PANEL_TITLE}>Chart font</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         Chart text is drawn in this font. It is deliberately separate from the
@@ -193,7 +193,7 @@ function FontsTab() {
 
       <ChartFontSetting />
 
-      <div className={`${PANEL} p-4`}>
+      <div className={PANEL_PADDED}>
         <h3 className={PANEL_TITLE}>Installed fonts</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           nSight installs open-licence fonts from Google Fonts by itself. It

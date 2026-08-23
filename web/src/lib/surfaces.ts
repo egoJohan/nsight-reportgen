@@ -50,8 +50,22 @@ export const OVERLINE =
  *  Matches the tutkimus page, which is the layout the others are aligned to. */
 export const PAGE_HEADER = "mb-8 flex items-start justify-between gap-4";
 
-/** A bordered container holding a divided list (reports, questions). */
+/** A bordered container holding a divided list (reports, questions).
+ *
+ *  Deliberately UNPADDED: the rows inside supply their own padding, and a pad
+ *  here would inset every divider from the border. For a panel whose content is
+ *  a block of its own — a heading, some text, a control — use PANEL_PADDED.
+ */
 export const PANEL = "overflow-hidden rounded-xl border bg-surface";
+
+/** A panel whose content is its own block rather than a divided list — the
+ *  Settings panels, and anything else that is a heading plus some controls.
+ *
+ *  Named because four of them were spelling `${PANEL} p-4` by hand, which is
+ *  the point at which the next one gets p-5 and the tab stops looking like one
+ *  page. The inset lives here now.
+ */
+export const PANEL_PADDED = `${PANEL} p-4`;
 
 /** A standalone clickable row (a customer, a tutkimus, a recent report). */
 export const ROW =

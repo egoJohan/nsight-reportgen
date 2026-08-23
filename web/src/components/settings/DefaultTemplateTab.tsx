@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { PANEL, PANEL_TITLE } from "@/lib/surfaces";
+import { PANEL_PADDED, PANEL_TITLE } from "@/lib/surfaces";
 
 /** The template every report falls back to.
  *
@@ -58,8 +58,9 @@ export default function DefaultTemplateTab() {
   });
 
   return (
-    <div className={PANEL}>
-      <h2 className={PANEL_TITLE}>Default template</h2>
+    <div className={PANEL_PADDED}>
+      {/* h3, matching the other Settings panels — the tab itself is the h2. */}
+      <h3 className={PANEL_TITLE}>Default template</h3>
       <p className="text-sm text-muted-foreground">
         What a report comes out on when neither it, its study, nor its customer
         has a template of its own. Uploading one here changes how every such
