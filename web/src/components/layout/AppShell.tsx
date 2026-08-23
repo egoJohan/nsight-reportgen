@@ -31,6 +31,7 @@ import {
   useCustomerNames,
   useCustomerCases,
   useResolvedCase,
+  useCaseMaterials,
   useCaseReports,
   useDuplicateReport,
   qk,
@@ -297,9 +298,20 @@ function ChatLauncher() {
   const match = pathname.match(/^\/cases\/([^/]+)/);
   const caseId = match ? match[1] : null;
   const { workspace } = useWorkspace(caseId ?? "");
-  const materialId = caseId ? workspace.materialId : null;
+  // The workspace remembers the material the WIZARD is working on, and it is
+  // empty until someone picks one there — so a case opened straight from the
+  // list had no chat at all, which is exactly when you want to ask about it.
+  // Fall back to the case's own material.
+  const { data: caseMaterials } = useCaseMaterials(caseId);
+  const materialId =
+    (caseId ? workspace.materialId : null)
+    || caseMaterials?.materials?.[0]?.material_id
+    || null;
   const [open, setOpen] = useState(false);
-  if (!caseId || !materialId) return null;
+  // Present whenever a case is open — the rightmost control in the bar. It is
+  // disabled, not hidden, while the case has no data to talk about: a control
+  // that vanishes reads as a bug, and there is nothing to discover it by.
+  if (!caseId) return null;
   return (
     <>
       <Button
@@ -307,10 +319,14 @@ function ChatLauncher() {
         size="sm"
         className="text-muted-foreground"
         onClick={() => setOpen(true)}
-        title="Chat with the data"
+        disabled={!materialId}
+        title={materialId ? "Chat with the data"
+                          : "Add data to this case to chat about it"}
       >
         <MessageSquareTextIcon className="size-4" />Chat</Button>
-      <ChatPanel materialId={materialId} open={open} onClose={() => setOpen(false)} />
+      {materialId && (
+        <ChatPanel materialId={materialId} open={open} onClose={() => setOpen(false)} />
+      )}
     </>
   );
 }
