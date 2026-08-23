@@ -197,6 +197,17 @@ export default function ReportWizard({
     >
   >({});
 
+  // Is any AI pass still producing? Titles, short labels and bullets all report
+  // through `aiPending`, so this is the one place that knows the generation
+  // phase is still running — used to keep autosave out of the middle of it.
+  const aiBusy = useMemo(
+    () =>
+      Object.values(aiPending).some(
+        (p) => p.titlePending || p.labelsPending || p.bulletsPending
+      ),
+    [aiPending]
+  );
+
   // Initialise the working draft once the report loads.
   useEffect(() => {
     if (loaded && !draft) {
@@ -515,6 +526,11 @@ export default function ReportWizard({
   saveRef.current = save;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  // When the current run of unsaved changes began — the clock the cap above
+  // reads. Cleared whenever the draft is clean again.
+  const dirtySince = useRef<number | null>(null);
+  if (!dirty) dirtySince.current = null;
+  else if (dirtySince.current === null) dirtySince.current = Date.now();
   useEffect(() => {
     return () => {
       if (dirtyRef.current) void saveRef.current();
@@ -528,13 +544,31 @@ export default function ReportWizard({
   // immediately); `dirty` still drives the Save button's state, so it goes
   // back to "Saved" on its own once the autosave lands.
   const AUTOSAVE_DELAY_MS = 1500;
+  const MAX_AI_SAVE_HOLD_MS = 90_000;
   useEffect(() => {
-    if (!dirty) return;
+    // Hold off entirely while the AI passes are still producing. They land 60
+    // titles over about a minute, in bursts with pauses between them, and each
+    // pause longer than the delay above used to be its own save: 17 writes of a
+    // 60-chart document during the exact minute the author is trying to click
+    // something. Waiting for `aiBusy` to clear turns the whole generation phase
+    // into ONE save — the effect re-runs when it clears, with the draft still
+    // dirty, and saves then. Nothing is at risk in the meantime: closing the
+    // report saves through the unmount cleanup above, and `finally` blocks clear
+    // the pending flags even when a generation call fails.
+    //
+    // The wait is CAPPED. Suppressing a save is only ever a courtesy to the
+    // generation phase; if a pending flag were somehow stranded, an uncapped
+    // gate would mean the author's typing is never written at all — a far worse
+    // bug than the one it fixes. After MAX_AI_SAVE_HOLD_MS of being dirty we
+    // save regardless of what the AI passes think they are still doing.
+    const held = dirtySince.current !== null
+      && Date.now() - dirtySince.current > MAX_AI_SAVE_HOLD_MS;
+    if (!dirty || (aiBusy && !held)) return;
     const h = setTimeout(() => {
       if (dirtyRef.current) void saveRef.current();
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(h);
-  }, [dirty, draft]);
+  }, [dirty, draft, aiBusy]);
 
   // ── Auto AI slide titles (batched, like the chart thumbnails) ─────────────
   // When the Design step is open, titles are generated automatically for every
@@ -552,102 +586,113 @@ export default function ReportWizard({
   const titleActive = useRef(0);
   // Bumped when a batch drains; a separate effect then persists the result so
   // every generated patch has flushed into the draft before we read it.
-  const [aiSaveTick, setAiSaveTick] = useState(0);
+
+  // Clearing a slide's pending flags is the ONE thing runTitle must always do.
+  //
+  // It is what tells the rest of the wizard the AI phase has finished for this
+  // slide — the title placeholder comes off, and autosave is allowed to run
+  // again. Leaving one set is not a cosmetic bug: a single stranded flag makes
+  // `aiBusy` true forever, and then NOTHING the author types is ever saved.
+  // Every exit from the work below funnels through here.
+  const clearAiPending = useCallback((slideId: string) => {
+    setAiPending((prev) => ({
+      ...prev,
+      [slideId]: {
+        ...prev[slideId],
+        titlePending: false,
+        labelsPending: prev[slideId]?.labelsPending ?? false,
+        bulletsPending: false,
+      },
+    }));
+  }, []);
 
   const runTitle = useCallback(
     async (slideId: string) => {
-      const chart = draftRef.current?.charts.find((c) => c.slide_id === slideId);
-      if (!chart) return;
-      const ref = chart.question_ref;
-      // Recomputed here (not just trusted from the caller) because runTitle is
-      // also reached for a themes chart's bullets alone — the title half of the
-      // work below still needs its own up-to-date needs-it check.
-      const resolved = questionByRef.get(ref);
-      const currentKey = titleDataKey(chart, resolved);
-      const keyStale =
-        !!chart.slide_title_key && chart.slide_title_key !== currentKey;
-      const needsTitleNow = !chart.slide_title || keyStale;
-      // A "themes" chart (open-ended) generates theme bullets AND an AI heading
-      // (a key message from the answers) — otherwise it falls back to showing its
-      // raw, often messy, question text as the title.
-      if (isThemes(chart)) {
-        const hasBullets = !!(chart.options?.bullets as string[] | undefined)
-          ?.length;
-        const bulletsP = hasBullets
-          ? Promise.resolve()
-          : api.materials
-              .aiThemes(materialId, { question_ref: ref })
-              .then(({ bullets }) =>
-                updateChartById(slideId, {
-                  options: { ...(chart.options ?? {}), bullets },
-                })
-              )
-              .catch(() => {
-                /* graceful: leave empty */
-              })
-              .finally(() =>
-                setAiPending((prev) => ({
-                  ...prev,
-                  [slideId]: { ...prev[slideId], bulletsPending: false },
-                }))
-              );
-        const titleP = !needsTitleNow
-          ? Promise.resolve()
-          : api.materials
-              .aiSlideTitle(materialId, {
-                question_ref: ref,
-                statistic: chart.statistic,
-                grouping: draftRef.current?.grouping,
-              })
-              .then(({ title }) => {
-                if (title)
-                  updateChartById(slideId, {
-                    slide_title: title,
-                    slide_title_key: currentKey,
-                  });
-              })
-              .catch(() => {
-                /* graceful: fall back to the question text */
-              })
-              .finally(() =>
-                setAiPending((prev) => ({
-                  ...prev,
-                  [slideId]: { ...prev[slideId], titlePending: false },
-                }))
-              );
-        await Promise.all([bulletsP, titleP]);
-        return;
-      }
       try {
-        // Only the headline (slide_title) is AI-generated. The subtitle is left to
-        // default to the MATERIAL question text (deterministic), not an AI line.
-        const { title } = await api.materials.aiSlideTitle(materialId, {
-          question_ref: ref,
-          statistic: chart.statistic,
-          classifying_var: chart.classifying_var,
-          show_not_answered: chart.show_not_answered,
-          not_answered_codes: chart.not_answered_codes,
-          grouping: draftRef.current?.grouping,
-        });
-        const patch: Partial<ChartSpec> = {};
-        // Tag the title with the data it was generated for, so it survives a
-        // template swap, a re-sort, a re-colour — anything that isn't the data —
-        // and only regenerates once that same fingerprint changes again.
-        if (title) {
-          patch.slide_title = title;
-          patch.slide_title_key = currentKey;
+        const chart = draftRef.current?.charts.find(
+          (c) => c.slide_id === slideId
+        );
+        // The slide was deleted while its title was queued. Nothing to generate
+        // — but the flags still have to come off, which is why this returns
+        // inside the try rather than before it.
+        if (!chart) return;
+        const ref = chart.question_ref;
+        // Recomputed here (not just trusted from the caller) because runTitle is
+        // also reached for a themes chart's bullets alone — the title half of the
+        // work below still needs its own up-to-date needs-it check.
+        const resolved = questionByRef.get(ref);
+        const currentKey = titleDataKey(chart, resolved);
+        const keyStale =
+          !!chart.slide_title_key && chart.slide_title_key !== currentKey;
+        const needsTitleNow = !chart.slide_title || keyStale;
+        // A "themes" chart (open-ended) generates theme bullets AND an AI heading
+        // (a key message from the answers) — otherwise it falls back to showing its
+        // raw, often messy, question text as the title.
+        if (isThemes(chart)) {
+          const hasBullets = !!(chart.options?.bullets as string[] | undefined)
+            ?.length;
+          const bulletsP = hasBullets
+            ? Promise.resolve()
+            : api.materials
+                .aiThemes(materialId, { question_ref: ref })
+                .then(({ bullets }) =>
+                  updateChartById(slideId, {
+                    options: { ...(chart.options ?? {}), bullets },
+                  })
+                )
+                .catch(() => {
+                  /* graceful: leave empty */
+                });
+          const titleP = !needsTitleNow
+            ? Promise.resolve()
+            : api.materials
+                .aiSlideTitle(materialId, {
+                  question_ref: ref,
+                  statistic: chart.statistic,
+                  grouping: draftRef.current?.grouping,
+                })
+                .then(({ title }) => {
+                  if (title)
+                    updateChartById(slideId, {
+                      slide_title: title,
+                      slide_title_key: currentKey,
+                    });
+                })
+                .catch(() => {
+                  /* graceful: fall back to the question text */
+                });
+          await Promise.all([bulletsP, titleP]);
+          return;
         }
-        if (Object.keys(patch).length) updateChartById(slideId, patch);
-      } catch {
-        /* graceful: fall back to the question text */
+        if (!needsTitleNow) return;
+        try {
+          // Only the headline (slide_title) is AI-generated. The subtitle is left to
+          // default to the MATERIAL question text (deterministic), not an AI line.
+          const { title } = await api.materials.aiSlideTitle(materialId, {
+            question_ref: ref,
+            statistic: chart.statistic,
+            classifying_var: chart.classifying_var,
+            show_not_answered: chart.show_not_answered,
+            not_answered_codes: chart.not_answered_codes,
+            grouping: draftRef.current?.grouping,
+          });
+          const patch: Partial<ChartSpec> = {};
+          // Tag the title with the data it was generated for, so it survives a
+          // template swap, a re-sort, a re-colour — anything that isn't the data —
+          // and only regenerates once that same fingerprint changes again.
+          if (title) {
+            patch.slide_title = title;
+            patch.slide_title_key = currentKey;
+          }
+          if (Object.keys(patch).length) updateChartById(slideId, patch);
+        } catch {
+          /* graceful: fall back to the question text */
+        }
       } finally {
-        setAiPending((prev) => ({
-          ...prev,
-          [slideId]: { ...prev[slideId], titlePending: false },
-        }));
+        clearAiPending(slideId);
       }
     },
-    [materialId, updateChartById, questionByRef]
+    [materialId, updateChartById, questionByRef, clearAiPending]
   );
 
   const pumpTitles = useCallback(() => {
@@ -661,7 +706,6 @@ export default function ReportWizard({
         titleActive.current -= 1;
         if (titleActive.current === 0 && titleQueue.current.length === 0) {
           // Batch settled — persist all generated titles in one save.
-          setAiSaveTick((t) => t + 1);
         }
         pumpTitles();
       });
@@ -724,13 +768,20 @@ export default function ReportWizard({
     [pumpTitles, questionByRef]
   );
 
-  // Persist generated overrides/titles once an auto-format pass settles. Runs
-  // post-commit so draftRef already reflects every generated patch.
-  useEffect(() => {
-    if (aiSaveTick === 0) return;
-    void save();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiSaveTick]);
+  // NOTE: the AI passes do NOT save on their own.
+  //
+  // They used to: each pass bumped a tick and the tick wrote the document
+  // immediately. Because `ensureTitles` enqueues charts as they resolve rather
+  // than all at once, the queue drained and re-drained, and opening Design on a
+  // 28-slide report produced 28 PUTs — each one followed by a refetch of the
+  // whole document — while the author was trying to click something. That is
+  // the "constant saving" that made the phase buttons feel dead.
+  //
+  // Every one of those passes already goes through `mutate`, which marks the
+  // draft dirty, and autosave above re-arms its timer on each change. So the
+  // whole generation phase now settles into exactly ONE save, 1.5s after the
+  // last title lands — and closing the report mid-generation still saves via
+  // the unmount cleanup. A separate tick was never adding anything but writes.
 
   // ── Special (non-chart) slides: Overview / Conclusion / Demographics ──────
   const SPECIAL_HEADINGS: Record<string, string> = {
@@ -889,7 +940,6 @@ export default function ReportWizard({
           toast.error(`Could not generate slide: ${errMsg(e)}`);
         } finally {
           setBulletsPending(group, false);
-          setAiSaveTick((t) => t + 1);
         }
       })();
       return group;
@@ -915,7 +965,6 @@ export default function ReportWizard({
           toast.error(`Could not regenerate themes: ${errMsg(e)}`);
         } finally {
           setBulletsPending(slideId, false);
-          setAiSaveTick((t) => t + 1);
         }
         return;
       }
@@ -942,7 +991,6 @@ export default function ReportWizard({
         toast.error(`Could not regenerate slide: ${errMsg(e)}`);
       } finally {
         setBulletsPending(group, false);
-        setAiSaveTick((t) => t + 1);
       }
     },
     [
@@ -985,7 +1033,6 @@ export default function ReportWizard({
     if (!next || next === draft?.name) return;
     mutate((d) => ({ ...d, name: next }));
     renameReport(reportId, next);
-    setAiSaveTick((t) => t + 1); // persist via the post-commit save effect
   }
 
   // Self-heal a stale/deleted report id out of the workspace, once.

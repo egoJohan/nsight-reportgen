@@ -19,6 +19,7 @@ export default function ChartThumb({
   chart,
   className,
   renderTitle,
+  titlePending = false,
   grouping,
   reportId,
   templateRef,
@@ -30,6 +31,7 @@ export default function ChartThumb({
   // below over the image instead of baked into the PNG. A caller that needs
   // the exact baked slide (WYSIWYG against the deck) passes renderTitle: true.
   renderTitle?: boolean;
+  titlePending?: boolean;
   grouping?: GroupingOverride;
   // Which report (and its own template choice) this is a preview for — see
   // SlideGrid.tsx's SlideThumb for why both matter.
@@ -57,7 +59,10 @@ export default function ChartThumb({
 
   const { data, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
-    enabled: seen,
+    // `seen` alone was not enough: a thumbnail scrolled into view while its
+    // headline is still being generated renders titleless and then again a
+    // second later. The title is part of the picture now.
+    enabled: seen && !titlePending,
     grouping,
     reportId,
     templateRef,

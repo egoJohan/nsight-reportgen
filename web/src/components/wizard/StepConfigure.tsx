@@ -101,10 +101,16 @@ function ChartPreview({
   void questionText;
   const grouping = useContext(GroupingCtx);
   const { reportId, templateRef } = useContext(PreviewTemplateCtx);
+  // Do NOT render while the headline is still being generated. The title is
+  // baked into the slide, so rendering first and titling second means every
+  // slide is drawn twice — once wrong — and the second pass lands while the
+  // author is already clicking. `titlePending` is the flag the wizard already
+  // sets for exactly this moment; it used to only dim the image.
   const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: false, priority: true, grouping, reportId, templateRef }
+    { renderTitle: false, priority: true, grouping, reportId, templateRef,
+      enabled: !titlePending }
   );
   const url = data?.dataUrl;
   const error =
@@ -1509,10 +1515,17 @@ function PrefetchOne({
 function DeckPrefetch({
   materialId,
   charts,
+  aiPending,
 }: {
   materialId: string;
   charts: ChartSpec[];
+  aiPending?: AiPendingMap;
 }) {
+  // Warming a slide whose title is still coming renders it twice: once titleless,
+  // then again when the headline lands. Wait for it — the prefetch exists to be
+  // ahead of the author, not to spend a LibreOffice render on a slide we know is
+  // about to change.
+  charts = charts.filter((c) => !aiPending?.[c.slide_id ?? ""]?.titlePending);
   const key = JSON.stringify(charts);
   const [debounced, setDebounced] = useState(charts);
   useEffect(() => {
@@ -1742,7 +1755,7 @@ function StepConfigureInner({
     <div className="space-y-4">
       {/* Background: warm every slide's preview so the deck (and the Preview grid)
           are ready without clicking each slide (renders nothing). */}
-      <DeckPrefetch materialId={materialId} charts={charts} />
+      <DeckPrefetch materialId={materialId} charts={charts} aiPending={aiPending} />
 
       {/* Top: slide list (left) + preview (right), EQUAL HEIGHT. The list is an
           absolutely-positioned scroll area so it never grows the row — the PREVIEW

@@ -671,8 +671,19 @@ export function useUpdateReport(caseId: string) {
       reportId: string;
       report: ReportDoc;
     }) => api.reports.update(caseId, reportId, report),
+    // Mark the cached document stale, but do NOT pull it back right now.
+    //
+    // The saver already holds the authoritative version — it is what we just
+    // sent — so refetching teaches us nothing, and a plain invalidate made every
+    // save of a 60-chart report cost a PUT *and* a full GET. `refetchType:
+    // "none"` keeps the freshness guarantee (anything mounting later, or this
+    // query on its next observer, fetches the server's copy) without the round
+    // trip behind each save.
     onSuccess: (_data, vars) =>
-      qc.invalidateQueries({ queryKey: qk.report(caseId, vars.reportId) }),
+      qc.invalidateQueries({
+        queryKey: qk.report(caseId, vars.reportId),
+        refetchType: "none",
+      }),
   });
 }
 
