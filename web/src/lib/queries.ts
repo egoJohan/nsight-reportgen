@@ -362,7 +362,10 @@ export function useDeleteCase() {
 // Only the fields that change the rendered PNG; identical content → identical
 // cache entry → the preview is formed ONCE and reused across mounts/steps.
 function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
+  // Kept in the fingerprint because it selects WHICH renderer draws the
+  // slide (compositor vs LibreOffice), and their output is not identical.
   const key: Record<string, unknown> = {
+    render_title: renderTitle,
     question_ref: chart.question_ref,
     chart_type: chart.chart_type,
     statistic: chart.statistic,
@@ -393,12 +396,17 @@ function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
     row_summary_neg_codes: chart.row_summary_neg_codes ?? null,
     row_summary_label: chart.row_summary_label ?? "",
   };
-  // The title/description only affect the PNG when baked (render_title on); when
-  // the frontend owns the title region, editing it must NOT re-render the chart.
-  if (renderTitle) {
-    key.slide_title = chart.slide_title;
-    key.slide_description = chart.slide_description;
-  }
+  // The title is baked into the PNG on BOTH paths now — the composited one draws
+  // it server-side in the template's own face, because the browser does not have
+  // that font. So it belongs in the key unconditionally.
+  //
+  // It used to be added only when render_title was on, back when the frontend
+  // drew the title itself and editing it had to NOT re-render. Leaving that
+  // condition after the change meant an AI-generated headline arrived, the spec
+  // changed, the key did not, and the preview went on serving the image rendered
+  // before the title existed — titles simply never appeared.
+  key.slide_title = chart.slide_title;
+  key.slide_description = chart.slide_description;
   return key;
 }
 
