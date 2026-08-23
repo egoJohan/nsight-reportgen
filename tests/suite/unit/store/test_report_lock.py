@@ -166,3 +166,28 @@ def _age_the_lock(repo, auth, cust, case, rid, *, seconds: float) -> None:
         datetime.now(timezone.utc) - timedelta(seconds=seconds)
     ).isoformat(timespec="seconds")
     repo._write_json(auth, path, d, [P.LABEL_REPORT_LOCK])
+
+
+def test_signing_out_hands_back_every_lock_that_person_holds(repo, auth, report):
+    """Signing out is a deliberate "I am finished".
+
+    Waiting out the expiry would bar the report for two minutes for no reason,
+    and the person signing out at the end of the day is exactly the one whose
+    colleague wants the report next.
+    """
+    cust, case, rid = report
+    other = repo.save_report(auth, cust, case, '{"name":"R2","charts":[]}')
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan")
+    repo.lock_report(auth, cust, case, other.id, "u1", "Johan")
+    # Somebody else's lock must survive it.
+    third = repo.save_report(auth, cust, case, '{"name":"R3","charts":[]}')
+    repo.lock_report(auth, cust, case, third.id, "u2", "Maija")
+
+    assert repo.release_user_locks(auth, "u1") == 2
+    locks = repo.report_locks(auth, cust, case)
+    assert set(locks) == {third.id}
+    assert locks[third.id]["user_name"] == "Maija"
+
+
+def test_signing_out_with_nothing_open_is_harmless(repo, auth):
+    assert repo.release_user_locks(auth, "nobody") == 0

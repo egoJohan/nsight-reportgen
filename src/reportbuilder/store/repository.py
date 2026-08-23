@@ -638,6 +638,32 @@ class Repository:
             [P.LABEL_REPORT_LOCK])
         return True
 
+    def release_user_locks(self, auth: AuthContext, user_id: str) -> int:
+        """Hand back every lock this person holds, anywhere. Returns how many.
+
+        Signing out is a deliberate "I am finished", so waiting out the expiry
+        would leave reports barred for two minutes for no reason — and the
+        person who signs out at the end of the day is exactly the one whose
+        colleague wants the report next.
+
+        One listing across the whole store, filtered to lock objects. Locks are
+        rare (one per report being edited right now), so this is a short list
+        even on a busy instance.
+        """
+        released = 0
+        for info in self.store.list(auth, "", labels=[P.LABEL_REPORT_LOCK]):
+            try:
+                d = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            if d.get("user_id") != user_id or d.get("released"):
+                continue
+            self._write_json(auth, info.path,
+                             {**d, "released": True, "released_at": _now()},
+                             [P.LABEL_REPORT_LOCK])
+            released += 1
+        return released
+
     def report_locks(self, auth: AuthContext, customer_id: str,
                      case_id: str) -> dict[str, dict]:
         """Every live lock in this case, by report id.

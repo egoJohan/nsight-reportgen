@@ -231,6 +231,18 @@ def logout(request: Request, response: Response,
         key = get_or_create_signing_key(repo, auth)
         session_id = session.session_id_from_cookie(key, raw)
         if session_id:
+            # Hand back any report this person had open, BEFORE the session
+            # goes: signing out is a deliberate "I am finished", and waiting
+            # out the two-minute expiry would bar those reports to everyone
+            # else for no reason. Resolving the user needs the session, so the
+            # order matters.
+            try:
+                who = session.resolve(repo, auth, session_id)
+                if who is not None:
+                    repo.release_user_locks(auth, who.id)
+            except Exception:  # noqa: BLE001 — signing out must always succeed
+                logging.getLogger(__name__).warning(
+                    "could not release editing locks on sign-out", exc_info=True)
             session.revoke(repo, auth, session_id)
     response.delete_cookie(session.COOKIE_NAME, path="/")
     return {"ok": True}
