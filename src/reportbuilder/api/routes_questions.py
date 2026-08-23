@@ -1303,6 +1303,19 @@ def _preview_headline(body) -> str:
     return (getattr(body, "slide_title", None) or "").strip()
 
 
+def _preview_template_filename(template_id: str, blob: bytes) -> str:
+    """The temp-file name for this exact template CONTENT.
+
+    Named by content hash, not by length. The previous rule rewrote the file
+    only when its size differed, so re-uploading a template that happened to be
+    the same number of bytes kept rendering from the old one — and now that
+    template resolution is cached on the file (template_cache.resolve), it would
+    keep that template's fonts, palette and type sizes too.
+    """
+    digest = hashlib.sha256(blob).hexdigest()[:16]
+    return f"{template_id or 'default'}.{digest}.pptx"
+
+
 def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
@@ -1330,8 +1343,8 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tupl
         import tempfile as _tf
         path = pathlib.Path(_tf.gettempdir()) / "nsight-preview-templates"
         path.mkdir(parents=True, exist_ok=True)
-        f = path / f"{template_id or 'default'}.pptx"
-        if not f.exists() or f.stat().st_size != len(blob):
+        f = path / _preview_template_filename(template_id, blob)
+        if not f.exists():
             f.write_bytes(blob)
         return str(f), template_id or "default"
     except Exception:  # noqa: BLE001 — styling must never break a preview
