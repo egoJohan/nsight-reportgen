@@ -22,6 +22,9 @@ to read rather than more neutral.
 from __future__ import annotations
 
 from lxml import etree
+import os
+import pathlib
+
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
@@ -208,3 +211,37 @@ def build_default_template(path: str) -> str:
 
     prs.save(path)
     return path
+
+
+# The template nSight itself ships, and what a fresh hive starts on.
+#
+# A real .pptx, designed rather than constructed: `build_default_template`
+# below assembles a serviceable deck from python-pptx's blank presentation, and
+# that is the fallback, but the house design is a file a designer made. Shipping
+# it as an asset is what makes "restore nSight's template" mean the same thing
+# on every install.
+#
+# A tenant can replace it — Settings > Default template — and that upload is
+# stored in the hive, not here; this is only ever what they get back.
+_SHIPPED = pathlib.Path(__file__).with_name("assets") / "nsight_default.pptx"
+
+
+def default_template_bytes() -> bytes:
+    """The bytes a fresh hive is seeded with, and what "restore" restores."""
+    if _SHIPPED.exists():
+        return _SHIPPED.read_bytes()
+    # No asset in this checkout (a source tree without it, or a trimmed
+    # package): build one, so a hive always has SOMETHING to render on.
+    import tempfile as _tf
+    fd, tmp = _tf.mkstemp(prefix="nsight-default-", suffix=".pptx")
+    os.close(fd)
+    try:
+        build_default_template(tmp)
+        return pathlib.Path(tmp).read_bytes()
+    finally:
+        os.unlink(tmp)
+
+
+def shipped_default_name() -> str:
+    """What to call the built-in, so the UI can name what is in effect."""
+    return _SHIPPED.name if _SHIPPED.exists() else "nSight's own template"

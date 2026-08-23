@@ -15,6 +15,7 @@ import {
   ShieldCheckIcon,
   TypeIcon,
   DatabaseIcon,
+  PresentationIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
 import BackupTab from "@/components/settings/BackupTab";
+import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
 import type { InstalledFont, MissingFont, StudioUser, Invite, AccessRequest } from "@/lib/api";
 
 function bytes(n: number): string {
@@ -616,6 +618,13 @@ export default function SettingsPage() {
             <TabsTrigger value="fonts">
               <TypeIcon className="size-4" />Fonts
             </TabsTrigger>
+            {/* Admin-only: one upload restyles every report that has no
+                template of its own, which is the whole point of it. */}
+            {me.is_admin && (
+              <TabsTrigger value="default-template">
+                <PresentationIcon className="size-4" />Default template
+              </TabsTrigger>
+            )}
             {/* Last: taking a backup is a thing you do rarely and
                 deliberately, not a screen to land on. Admin-only — the
                 archive carries every password hash and the signing key. */}
@@ -638,6 +647,11 @@ export default function SettingsPage() {
           <TabsContent value="fonts" className="mt-4">
             <FontsTab />
           </TabsContent>
+          {me.is_admin && (
+            <TabsContent value="default-template" className="mt-4">
+              <DefaultTemplateTab />
+            </TabsContent>
+          )}
           {me.is_admin && (
             <TabsContent value="backup" className="mt-4">
               <BackupTab />

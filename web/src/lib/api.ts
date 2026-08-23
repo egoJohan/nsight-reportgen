@@ -1234,6 +1234,39 @@ export const api = {
       return res.json() as Promise<ChartFontSettings>;
     },
 
+    /** The template every report renders on when nothing above it binds one. */
+    defaultTemplate: (): Promise<DefaultTemplateState> =>
+      fetch(`${API_BASE}/settings/default-template`).then((r) =>
+        json<DefaultTemplateState>(r)
+      ),
+
+    uploadDefaultTemplate: async (file: File): Promise<DefaultTemplateState> => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_BASE}/settings/default-template`, {
+        method: "PUT",
+        body: form,
+      });
+      if (!res.ok) {
+        // The body carries WHY the template was refused — "no layout with a
+        // large content placeholder" is the whole value of the check.
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<DefaultTemplateState>;
+    },
+
+    restoreDefaultTemplate: (): Promise<DefaultTemplateState> =>
+      fetch(`${API_BASE}/settings/default-template`, { method: "DELETE" }).then((r) =>
+        json<DefaultTemplateState>(r)
+      ),
+
     fonts: (): Promise<FontsSettings> =>
       fetch(`${API_BASE}/settings/fonts`).then((r) => json<FontsSettings>(r)),
 
@@ -1421,6 +1454,15 @@ export interface ChartFontSettings {
   effective: string;
   default: string;
   available: string[];
+}
+
+export interface DefaultTemplateState {
+  /** True while the tenant is still on the deck nSight builds for itself. */
+  is_builtin: boolean;
+  name: string;
+  uploaded_at: string;
+  size: number;
+  warnings?: string[];
 }
 
 export interface FontsSettings {

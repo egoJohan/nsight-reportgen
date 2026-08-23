@@ -91,28 +91,22 @@ def create_app(client=None) -> FastAPI:
         """
         import logging
         import os as _os
-        import tempfile
 
         from reportbuilder.api.deps_store import get_repository, service_auth
-        from reportbuilder.render.default_template import build_default_template
+        from reportbuilder.render.default_template import default_template_bytes
 
         try:
             auth = service_auth()
             if auth is None:
                 return
-            fd, tmp = tempfile.mkstemp(prefix="nsight-default-", suffix=".pptx")
-            _os.close(fd)
-            try:
-                build_default_template(tmp)
-                with open(tmp, "rb") as fh:
-                    get_repository().ensure_default_template(
-                        auth, fh.read(),
-                        # Set this once after changing the builder: a hive that
-                        # has already been started holds a deck built by the
-                        # old code, and "seed if absent" would never replace it.
-                        replace=_os.environ.get("NSIGHT_RESEED_DEFAULT_TEMPLATE") == "1")
-            finally:
-                _os.unlink(tmp)
+            get_repository().ensure_default_template(
+                auth, default_template_bytes(),
+                # Set this once after changing the SHIPPED template: a hive that
+                # has already been started holds the previous one, and "seed if
+                # absent" would never replace it. Note this also overwrites a
+                # default the tenant uploaded themselves, which is why it is an
+                # explicit environment variable and not the normal path.
+                replace=_os.environ.get("NSIGHT_RESEED_DEFAULT_TEMPLATE") == "1")
         except Exception:  # noqa: BLE001
             logging.getLogger(__name__).warning(
                 "default template: could not seed", exc_info=True)

@@ -22,6 +22,7 @@ from reportbuilder.auth import mailer
 from reportbuilder.auth.permissions import User
 from reportbuilder.render import fonts as F
 from reportbuilder.render import house_style as H
+from reportbuilder.store import paths as _P
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 
@@ -382,3 +383,104 @@ def put_email_settings(payload: dict = Body(...),
 
 
 __all__ = ["settings_router", "sync_fonts_to_host", "apply_chart_font"]
+
+
+# ── The default template ─────────────────────────────────────────────────────
+# What a report renders on when neither it, its tutkimus, nor its asiakas binds
+# a template of its own. nSight seeds its own house deck at boot and refuses to
+# overwrite what is already stored (Repository.ensure_default_template), which
+# is what makes an uploaded one survive a restart — the store anticipated this
+# feature long before anything offered it.
+#
+# Tenant-wide and admin-only, because one upload restyles every unbound report
+# at once. That is the point of it, and the reason it is not something any
+# signed-in user can do.
+DEFAULT_TEMPLATE_KEY = "default-template"
+
+
+def _default_template_state(repo: Repository, auth: AuthContext) -> dict:
+    from reportbuilder.render.default_template import (
+        shipped_default_name as _shipped_default_name,
+    )
+
+    meta = repo.get_setting(auth, DEFAULT_TEMPLATE_KEY) or {}
+    try:
+        size = len(repo.store.get(auth, _P.default_template_path()))
+    except NotFound:
+        size = 0
+    return {
+        # No stored metadata means nobody has uploaded one, so what is in the
+        # hive is the deck nSight built at boot.
+        "is_builtin": not meta.get("name"),
+        "name": meta.get("name") or _shipped_default_name(),
+        "uploaded_at": meta.get("uploaded_at", ""),
+        "size": size,
+    }
+
+
+@settings_router.get("/settings/default-template")
+def get_default_template(auth: AuthContext = Depends(get_auth),
+                         repo: Repository = Depends(get_repository),
+                         user: User = Depends(require_admin)) -> dict:
+    """Which template every unbound report currently renders on."""
+    return _default_template_state(repo, auth)
+
+
+@settings_router.put("/settings/default-template")
+async def put_default_template(file: UploadFile = File(...),
+                               auth: AuthContext = Depends(get_auth),
+                               repo: Repository = Depends(get_repository),
+                               user: User = Depends(require_admin)) -> dict:
+    """Replace the default template.
+
+    Validated the same way a customer's template is, and validated BEFORE
+    anything is stored: a bad upload here would leave every unbound report in
+    the tenant rendering on a broken deck.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(422, "Empty file")
+
+    import os as _os
+    import tempfile as _tf
+
+    from reportbuilder.render.template_check import inspect_template
+
+    with _tf.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+    try:
+        report = inspect_template(tmp_path)
+    except Exception:  # noqa: BLE001 — a file that is not a .pptx at all
+        raise HTTPException(422, "That file is not a PowerPoint template.") from None
+    finally:
+        _os.unlink(tmp_path)
+
+    if not report.ok:
+        raise HTTPException(422, "; ".join(report.problems))
+
+    repo.ensure_default_template(auth, data, replace=True)
+    repo.set_setting(auth, DEFAULT_TEMPLATE_KEY, {
+        "name": file.filename or "template.pptx",
+        "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+    state = _default_template_state(repo, auth)
+    # Problems that did not block it are still worth showing: the deck will
+    # render, it just will not carry everything the template states.
+    return {**state, "warnings": report.problems}
+
+
+@settings_router.delete("/settings/default-template")
+def delete_default_template(auth: AuthContext = Depends(get_auth),
+                            repo: Repository = Depends(get_repository),
+                            user: User = Depends(require_admin)) -> dict:
+    """Put nSight's own template back.
+
+    Rebuilt from the builder rather than merely forgotten: something has to be
+    stored at that path, or every unbound report falls back to a blank deck.
+    """
+    from reportbuilder.render.default_template import default_template_bytes
+
+    repo.ensure_default_template(auth, default_template_bytes(), replace=True)
+    repo.set_setting(auth, DEFAULT_TEMPLATE_KEY, {})
+    return _default_template_state(repo, auth)

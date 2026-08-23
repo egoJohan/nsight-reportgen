@@ -1407,10 +1407,16 @@ def preview_chart(
     template_path, template_id = _preview_template(
         repo, auth, material_id, body.report_id or "")
 
-    # The template is part of the cache identity: without it, changing the
-    # template would keep serving the previously cached image and look like the
-    # change had not taken effect.
-    out_dir = _preview_out_dir(material_id, body.model_dump_json() + f"|{template_id}")
+    # The template is part of the cache identity by its CONTENT, not its id.
+    # `_preview_template` names its temp copy `<id>.<content-hash>.pptx`, so
+    # using that filename covers both "a different template" and "the same
+    # template, different bytes". Keying on the id alone was wrong for exactly
+    # one id and it is the most important one: the default template's id is the
+    # literal string "default" however many different files pass through it, so
+    # replacing the tenant's default kept serving pictures of the old one.
+    _template_identity = os.path.basename(template_path) if template_path else "none"
+    out_dir = _preview_out_dir(
+        material_id, body.model_dump_json() + f"|{_template_identity}")
     cached_png = out_dir / "preview.png"
 
     # Where the template puts its title, for a caller that draws the title
