@@ -224,7 +224,7 @@ function Breadcrumb() {
   const { id, customerId } = useParams();
   const [searchParams] = useSearchParams();
   const { data: customers } = useCustomers();
-  const { data: resolved } = useResolvedCase(id);
+  const { data: resolved, isPending: resolving } = useResolvedCase(id);
   const { data: legacyCases } = useCases();
   const { data: caseReports } = useCaseReports(id ?? null);
 
@@ -245,8 +245,19 @@ function Breadcrumb() {
       // report: with a report open this crumb is the way back to the case, and
       // it used to be dead text with no other route out.
       crumbs.push({ label: resolved.name, to: `/cases/${id}` });
+    } else if (resolving) {
+      // Still asking. Say nothing rather than something wrong: this branch used
+      // to fall through to "No customer", so every case opened from a customer
+      // page flashed the one label that contradicted where you had just come
+      // from. A crumb that is briefly absent reads as loading; a crumb that is
+      // briefly WRONG reads as a bug.
+      crumbs.push({
+        label: legacyCases?.find((c) => c.id === id)?.name ?? "…",
+        to: `/cases/${id}`,
+      });
     } else {
-      // A legacy case has no customer; say so rather than inventing one.
+      // Resolved, and there genuinely is no customer: a legacy case. Say so
+      // rather than inventing one.
       crumbs.push({ label: "No customer" });
       crumbs.push({
         label: legacyCases?.find((c) => c.id === id)?.name ?? id,

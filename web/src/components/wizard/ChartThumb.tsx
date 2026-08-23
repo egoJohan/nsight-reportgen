@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
 import * as previewQueue from "@/lib/previewQueue";
+import { usePreviewStatus } from "@/lib/usePreviewStatus";
 
 /**
  * A cached chart preview thumbnail. Backed by the shared useChartPreview cache,
@@ -65,6 +66,14 @@ export default function ChartThumb({
     if (seen && slideId) previewQueue.promote(slideId);
   }, [seen, slideId]);
 
+  // Thumbnails say "updating" while their slide is queued or being produced,
+  // not only while an HTTP request is open — most of a slide's wait is spent
+  // waiting for a turn.
+  const status = usePreviewStatus(slideId);
+  const pending =
+    status.chart === "pending" || status.chart === "running" ||
+    status.title === "pending" || status.title === "running";
+
   const { data, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
     grouping,
@@ -105,12 +114,18 @@ export default function ChartThumb({
         !message && (
           <div className="flex flex-col items-center gap-2 text-muted-foreground">
             <ImageIcon className="size-6 opacity-40" />
-            {seen && <span className="text-xs">Rendering…</span>}
+            {seen && (
+              <span className="text-xs">{pending ? "Updating…" : "Rendering…"}</span>
+            )}
           </div>
         )
       )}
 
-      {isFetching && url && (
+      {/* Spinning while the slide is QUEUED too, not only while a request is
+          open: most of a slide's wait is spent waiting its turn, and a thumbnail
+          that looks finished until its turn came is why changing the template
+          seemed to do nothing. */}
+      {(isFetching || pending) && url && (
         <div className="absolute top-2 right-2 size-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       )}
 

@@ -119,8 +119,12 @@ function ChartPreview({
   // the work, rather than of a flag threaded down from the wizard that could
   // disagree with it (and, when one was stranded, did).
   const queued = usePreviewStatus(debounced.slide_id ?? "");
+  // "Pending" counts as busy. A slide waiting behind fifty others is not
+  // finished, and saying nothing until its turn came is what made changing the
+  // template look like it had done nothing at all.
+  const busyState = (s?: string) => s === "running" || s === "pending";
   const producing =
-    queued.title === "running" || queued.bullets === "running" || queued.chart === "running";
+    busyState(queued.title) || busyState(queued.bullets) || busyState(queued.chart);
   const busy = loading || producing || titlePending || labelsPending;
 
   return (

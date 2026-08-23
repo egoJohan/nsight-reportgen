@@ -541,8 +541,14 @@ export default function ReportWizard({
   // type or a headline leaves the ids identical, and because components only
   // read the cache now, nothing would ever draw the new version. The author's
   // edit saved and the picture never moved.
+  // What a slide's picture depends on: the slide itself AND the context it is
+  // drawn in. The template belongs here — changing it restyles every slide, but
+  // it does not touch a single chart, so watching the charts alone meant picking
+  // a new template updated nothing on screen until something else was edited.
+  const renderSalt = `${draft?.template_ref ?? ""}|${JSON.stringify(draft?.grouping ?? {})}`;
+  const signatureOf = (c: ChartSpec) => `${JSON.stringify(c)}|${renderSalt}`;
   const chartsSignature = (draft?.charts ?? [])
-    .map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
+    .map((c) => `${c.slide_id ?? ""}=${signatureOf(c)}`)
     .join("\u0000");
   const resolvedCount = questionByRef.size;
   const lastSeen = useRef<Map<string, string>>(new Map());
@@ -557,7 +563,7 @@ export default function ReportWizard({
     const h = setTimeout(() => {
       const next = new Map<string, string>();
       for (const c of draftRef.current?.charts ?? []) {
-        if (c.slide_id) next.set(c.slide_id, JSON.stringify(c));
+        if (c.slide_id) next.set(c.slide_id, signatureOf(c));
       }
       for (const [id, sig] of next) {
         if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
@@ -565,6 +571,7 @@ export default function ReportWizard({
       lastSeen.current = next;
     }, 350);
     return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsSignature, resolvedCount]);
 
   // "Is the queue doing anything?" — the one signal the save rule needs.

@@ -66,8 +66,17 @@ export function setSlideSource(fn: SlideSource) {
 export function setPatchSink(fn: PatchSink) {
   patchSink = fn;
 }
+/** Bumped whenever the context every slide is drawn in changes — a new
+ *  template, a new grouping. Work started under an older one is abandoned
+ *  rather than finished: a picture of the previous template is not worth the
+ *  wait, and finishing it would put a stale image in the cache for a
+ *  fingerprint nobody is asking for any more. */
+let contextGeneration = 0;
+
 export function setRenderContext(ctx: RenderContext) {
+  const changed = JSON.stringify(ctx) !== JSON.stringify(renderContext);
   renderContext = ctx;
+  if (changed) contextGeneration += 1;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -218,16 +227,39 @@ function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">): ProducerCt
 async function producePreview(slideId: string): Promise<void> {
   /** What each producer was asked to satisfy on this pass. */
   const handled = new Map<ProducerId, string>();
+  const startedUnder = contextGeneration;
+  /** The author changed the template (or the grouping) while this was running.
+   *  Whatever comes back describes the old one. */
+  const abandoned = () => contextGeneration !== startedUnder;
 
   for (const p of PRODUCERS) {
     const chart = readSlide(slideId);
-    if (!chart) return; // deleted while queued
+    if (!chart) {
+      statuses.delete(slideId); // deleted while queued
+      notify();
+      return;
+    }
     const c = needed(p, { slideId, chart, ctx: renderContext });
-    if (!c) continue;
+    if (!c) {
+      // Not needed after all: clear the pending mark set at enqueue, or the
+      // slide would sit showing "updating" for work nobody is going to do.
+      if (statuses.get(slideId)?.get(p.id)?.status === "pending") {
+        setStatus(slideId, p.id, "done", p.fingerprint({ slideId, chart, ctx: renderContext }));
+      }
+      continue;
+    }
     handled.set(p.id, c.fingerprint);
     setStatus(slideId, p.id, "running", c.fingerprint);
     try {
       const patch = await p.run(c);
+      if (abandoned()) {
+        // Drop the result and start this slide again under the new context.
+        // Recording it would cache a picture of the template the author just
+        // moved away from, under a fingerprint nothing will ask for.
+        setStatus(slideId, p.id, "pending", null);
+        enqueue(slideId);
+        return;
+      }
       if (patch) applyPatch(slideId, patch);
       // The fingerprint captured BEFORE the run, never one re-read after it:
       // re-reading would record work that was never done.
@@ -261,6 +293,18 @@ export function enqueue(slideId: string) {
   if (!slideId || queued.has(slideId) || running.has(slideId)) return;
   queued.add(slideId);
   queue.push(slideId);
+  // Mark it pending NOW. A slide waiting its turn behind fifty others is not
+  // finished, and showing it as finished is why changing the template looked
+  // like nothing had happened: the work was queued, the screen just never said
+  // so. Which producers it will need is not known until it runs, so this is
+  // deliberately about the SLIDE, not about any one producer.
+  const forSlide = statuses.get(slideId) ?? new Map<ProducerId, Entry>();
+  for (const p of PRODUCERS) {
+    const e = forSlide.get(p.id);
+    if (!e || e.status === "done") forSlide.set(p.id, { status: "pending", fingerprint: e?.fingerprint ?? null });
+  }
+  statuses.set(slideId, forSlide);
+  notify();
   pump();
 }
 

@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { chartTypeLabel, SLIDE_ASPECT } from "@/lib/charts";
 import { useChartPreview } from "@/lib/queries";
+import { usePreviewStatus } from "@/lib/usePreviewStatus";
 import type { ChartSpec, GroupingOverride, Question } from "@/lib/api";
 import { slideTitle } from "@/components/wizard/slideTitle";
 
@@ -82,6 +83,15 @@ function SlideThumb({
     templateRef,
   });
   const url = data?.dataUrl;
+  // Whether this slide still has work outstanding — queued as well as running.
+  // The grid keeps showing the OLD picture while a new one is made, which is
+  // right, but without this it looks finished: changing the template restyled
+  // sixty slides and the grid sat there apparently doing nothing for the half
+  // minute it took.
+  const status = usePreviewStatus(chart.slide_id ?? "");
+  const updating =
+    status.chart === "pending" || status.chart === "running" ||
+    status.title === "pending" || status.title === "running";
 
   return (
     <div
@@ -103,8 +113,21 @@ function SlideThumb({
         <div
           className={`relative w-full overflow-hidden bg-muted/30 ${SLIDE_ASPECT}`}
         >
+          {updating && (
+            <span
+              title="Updating this slide"
+              className="absolute top-1.5 right-1.5 z-10 size-3 animate-spin rounded-full border-2 border-primary border-t-transparent"
+            />
+          )}
           {url ? (
-            <img src={url} alt="" className="absolute inset-0 size-full object-contain" />
+            <img
+              src={url}
+              alt=""
+              className={cn(
+                "absolute inset-0 size-full object-contain transition-opacity",
+                updating && "opacity-50"
+              )}
+            />
           ) : (
             <span className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
               {chartTypeLabel(chart.chart_type)}
