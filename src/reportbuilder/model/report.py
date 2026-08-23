@@ -7,7 +7,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SortSpec:
-    basis: str                                  # "data_order"|"pct"|"topbox_sum"|"mean"|"count" (REQ-S-01)
+    basis: str                                  # "data_order"|"pct"|"topbox_sum"|"top3_sum"|"bottom2_sum"|"bottom3_sum"|"mean"|"count" (REQ-S-01)
     topbox_codes: tuple[float, ...] = ()        # for "topbox_sum" (REQ-S-02)
     descending: bool = True
 
@@ -72,7 +72,7 @@ class ChartSpec:
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
     # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
     # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
-    row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|sum|mean|net
+    row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|bottom2_sum|bottom3_sum|sum|mean|net
     row_summary_codes: tuple[float, ...] = ()        # for "sum"
     row_summary_pos_codes: tuple[float, ...] = ()    # for "net"
     row_summary_neg_codes: tuple[float, ...] = ()    # for "net"
@@ -155,6 +155,8 @@ class Report:
 _ROW_SUMMARY_DEFAULT_LABEL = {
     "top2_sum": "Top 2",
     "top3_sum": "Top 3",
+    "bottom2_sum": "Bottom 2",
+    "bottom3_sum": "Bottom 3",
     "sum": "Sum",
     "mean": "Keskiarvo",
     "net": "Net",

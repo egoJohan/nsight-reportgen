@@ -131,7 +131,9 @@ export interface NumberFormat {
 }
 
 export interface SortSpec {
-  basis: "data_order" | "pct" | "topbox_sum" | "top3_sum" | "mean" | "count";
+  basis:
+    | "data_order" | "pct" | "topbox_sum" | "top3_sum"
+    | "bottom2_sum" | "bottom3_sum" | "mean" | "count";
   topbox_codes: number[];
   descending: boolean;
 }
@@ -216,7 +218,9 @@ export interface ChartSpec {
   show_total?: "auto" | "on" | "off";
   // Right-hand per-row summary column (stacked_horizontal_bar only). Off when
   // row_summary_fn is "none"/absent.
-  row_summary_fn?: "none" | "top2_sum" | "top3_sum" | "sum" | "mean" | "net";
+  row_summary_fn?:
+    | "none" | "top2_sum" | "top3_sum" | "bottom2_sum" | "bottom3_sum"
+    | "sum" | "mean" | "net";
   row_summary_codes?: number[];
   row_summary_pos_codes?: number[];
   row_summary_neg_codes?: number[];

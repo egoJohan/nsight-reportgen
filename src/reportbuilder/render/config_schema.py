@@ -108,7 +108,8 @@ def sort_field(*, stacked: bool = False) -> ConfigField:
     # their summed two/three highest scale levels, while the scale stack stays 1..N.
     opts = SORT_BASIS_OPTIONS
     if stacked:
-        opts = opts + (("topbox_sum", "Top 2 sum"), ("top3_sum", "Top 3 sum"))
+        opts = opts + (("topbox_sum", "Top 2 sum"), ("top3_sum", "Top 3 sum"),
+                       ("bottom2_sum", "Bottom 2 sum"), ("bottom3_sum", "Bottom 3 sum"))
     return ConfigField("sort", "sort", "Sort", options=opts, default="pct")
 
 
@@ -244,7 +245,8 @@ def row_summary_fields() -> tuple[ConfigField, ...]:
         ConfigField(
             "row_summary_fn", "select", "Row summary",
             options=(("none", "None"), ("top2_sum", "Top 2 sum"),
-                     ("top3_sum", "Top 3 sum"), ("sum", "Sum of selected"),
+                     ("top3_sum", "Top 3 sum"), ("bottom2_sum", "Bottom 2 sum"),
+                     ("bottom3_sum", "Bottom 3 sum"), ("sum", "Sum of selected"),
                      ("mean", "Mean"), ("net", "Net (positive − negative)")),
             default="none",
             help="Add a summary column on the right — e.g. the 4+5 'agree' share per row.",

@@ -28,7 +28,7 @@ def _battery(dist_by_stmt: dict[str, list[float]]):
             missing_values=frozenset())
         rows[name] = codes
     model = QuestionModel(variables=vars_, questions=[])
-    q = Question(qid="bat", kind="single", variables=tuple(vars_), text="Battery")
+    q = Question(qid="bat", kind="battery", variables=tuple(vars_), text="Battery")
     return model, q, pd.DataFrame(rows)
 
 
@@ -95,7 +95,7 @@ def test_row_summary_reports_the_bottom_two_share():
     model, q, df = _battery(_DIST)
     spec = _spec("data_order", row_summary_fn="bottom2_sum")
     res = engine.compute(q, spec, df, model)
-    by_bar = dict(zip(res.row_summary_keys, res.row_summary or ()))
+    by_bar = dict(zip(res.row_summary_keys, res.row_summaries or ()))
     # A is 60% ones + 20% twos of 100 respondents.
     assert by_bar["A"] == 80.0
     assert by_bar["B"] == 10.0
