@@ -874,26 +874,23 @@ export default function ReportWizard({
     ]
   );
 
-  // Persist any unsaved edits before navigating; abort if the save fails
-  // (save() already toasts on failure). Used by every exit/transition so
-  // in-memory changes are never silently dropped.
-  const commitThen = useCallback(
-    async (action: () => void) => {
-      if (dirty) {
-        const ok = await save();
-        if (!ok) return;
-      }
-      action();
-    },
-    [dirty, save]
-  );
-
+  // Moving between steps does NOT save.
+  //
+  // It used to: every transition awaited a full-document PUT first, so clicking
+  // "Preview" on a 60-chart report sat there doing nothing an author could see
+  // until the write came back — the phase buttons felt broken, which is exactly
+  // what they were told. Nothing is at risk in dropping it: the wizard stays
+  // mounted across steps, so the draft is still there; autosave persists edits
+  // 1.5s after they settle; closing the report saves on unmount; and the one
+  // place that genuinely needs the SERVER's copy to be current — generating the
+  // deck, which the backend builds from the stored report — saves for itself
+  // before rendering (see StepDownload's handleGenerate).
   function goNext() {
-    commitThen(() => setStep((s) => Math.min(s + 1, STEPS.length - 1)));
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
   }
 
   function goPrev() {
-    commitThen(() => setStep((s) => Math.max(0, s - 1)));
+    setStep((s) => Math.max(0, s - 1));
   }
 
   // Inline report rename: update the draft (persisted on save), the workspace
@@ -1066,7 +1063,7 @@ export default function ReportWizard({
           <div className="flex flex-1 justify-center">
             <Stepper
               current={step}
-              onJump={(i) => commitThen(() => setStep(i))}
+              onJump={(i) => setStep(i)}
               chartCount={draft.charts.length}
             />
           </div>

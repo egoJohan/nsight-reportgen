@@ -44,23 +44,39 @@ export default function TemplateSelect({
 
   // Base UI renders the raw VALUE in the trigger unless it is given a map from
   // value to label — without this the box showed "tpl-62707de80f27".
-  const labels: Record<string, string> = {
-    [INHERIT]: inherited
-      ? `Use parent setting (${inherited.name})`
-      : "Use parent setting",
-    ...Object.fromEntries((templates ?? []).map((t) => [t.id, t.name])),
-  };
+  // With no templates at all there is nothing to choose, so the control is
+  // disabled — but "Use parent setting", greyed out, reads as though something
+  // is being withheld. Say what is actually true instead: there are none, and
+  // the deck comes out on nSight's own default until someone uploads one. (The
+  // placeholder below says something similar and is never reached: `shown` is
+  // always set, so Base UI never falls back to it.)
+  const noTemplates = !templates?.length;
+  const labels: Record<string, string> = noTemplates
+    ? { [INHERIT]: "No templates yet — using nSight's default" }
+    : {
+        [INHERIT]: inherited
+          ? `Use parent setting (${inherited.name})`
+          : "Use parent setting",
+        ...Object.fromEntries((templates ?? []).map((t) => [t.id, t.name])),
+      };
 
   return (
     <Select
       items={labels}
       value={shown}
       onValueChange={(v) => onChange(v === INHERIT ? null : v)}
-      disabled={disabled || !templates?.length}
+      disabled={disabled || noTemplates}
     >
       {/* Wide enough for a real template file name — "attendo_agent_deck.pptx"
           truncated at 16rem told you nothing about which one you had. */}
-      <SelectTrigger className="w-[24rem] max-w-[60vw]">
+      <SelectTrigger
+        className="w-[24rem] max-w-[60vw]"
+        title={
+          noTemplates
+            ? "This asiakas has no templates. Upload one on the asiakas's page; until then reports render on nSight's own default."
+            : undefined
+        }
+      >
         <SelectValue
           placeholder={
             templates?.length

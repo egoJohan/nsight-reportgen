@@ -118,8 +118,13 @@ def title_colour(stated: str, style) -> str:
 #
 # Start here and tune by looking: these are the numbers the eye judges, so they
 # are meant to be adjusted against rendered slides rather than argued about.
-TARGET_TITLE_CAP_IN = 0.20
-TARGET_SUBTITLE_CAP_IN = 0.15
+# Lowered from 0.20 / 0.15 on 2026-08-23: the headline crowded the slide, and a
+# two-line one came down close to the chart. These are the numbers the eye
+# judges, so they are meant to be moved against rendered slides rather than
+# argued about — and moving them here moves BOTH renderers, because both size
+# their type from this one pair.
+TARGET_TITLE_CAP_IN = 0.175
+TARGET_SUBTITLE_CAP_IN = 0.132
 
 _MEASURE_PX = 200.0        # measure once, big enough that rounding does not matter
 
