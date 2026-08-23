@@ -417,6 +417,45 @@ def template_ground(slide, style) -> bool:
     return getattr(style, "chart_layout_index", None) is not None
 
 
+# The subtitle always sits this far above the chart. One constant, so the gap is
+# the same on every slide whatever the question's length — the thing that made
+# the old placement look arbitrary was that the gap moved with the text.
+_SUBTITLE_GAP = Inches(0.18)
+# How close to the top edge a headline may start. Small on purpose: the band
+# above a title is dead space, and a two-line headline needs the room.
+_MIN_TITLE_TOP = int(Inches(0.30))
+# Room for the question to grow UPWARD into. Four lines at the largest step;
+# the box is bottom-anchored, so unused height is invisible.
+_SUBTITLE_MAX_H = Inches(1.10)
+
+
+def title_left_width(slide, style, title: str) -> tuple[int, int]:
+    """(left, width) of the TITLE on this slide, so the subtitle can line up
+    with it rather than with the chart.
+
+    A subtitle indented differently from the headline above it reads as a
+    mistake — and the two were indeed placed from different boxes: the title
+    from the template's placeholder, the subtitle from the chart's slot.
+    """
+    try:
+        ph = slide.shapes.title
+        if ph is not None and ph.width:
+            # The placeholder keeps its own insets while `_textbox` zeroes
+            # every margin, so matching the BOX edges left the subtitle about
+            # 0.1" to the left of the headline — visibly out of line. Match
+            # where the TEXT starts instead.
+            inset_l = int(ph.text_frame.margin_left or 0)
+            inset_r = int(ph.text_frame.margin_right or 0)
+            return int(ph.left or 0) + inset_l, max(1, int(ph.width) - inset_l - inset_r)
+    except (AttributeError, KeyError):
+        pass
+    profile = harvested_profile(style)
+    if profile is not None and profile.title.positioned:
+        left, _top, width, _h = harvested_title_box(profile, title)
+        return int(left), int(width)
+    return 0, 0
+
+
 def _rendered_title_height(ph, text: str) -> int:
     """How tall the fitted headline actually is in *ph*, in EMU.
 
@@ -438,7 +477,13 @@ def _rendered_title_height(ph, text: str) -> int:
         st = SimpleNamespace(size_pt=size_pt, width=width, height=int(ph.height or 0),
                              font=font, caps=caps, line_spacing=0.0)
         lines = measured_line_count(text, width, size_pt, st)
-        return int(lines * _title_line_height(size_pt, st))
+        # 1.18: LibreOffice lays Bebas Neue's lines out taller than PIL measures
+        # them, and it is LibreOffice that renders the deck. Measured on
+        # Egoiq_x_Rahoo — a two-line headline the box said ended at 1.34" was
+        # still drawing at 1.55" and came down across the subtitle. Reserving the
+        # difference is what keeps the deck and the preview agreeing about where
+        # the header ends.
+        return int(lines * _title_line_height(size_pt, st) * 1.18)
     except Exception:  # noqa: BLE001 — a title must never fail a render
         logging.getLogger(__name__).warning("could not measure the title",
                                             exc_info=True)
@@ -555,7 +600,31 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
         return True
     tf = ph.text_frame
     tf.word_wrap = True
+    # TOP-anchored: a headline should start at the top of the space the template
+    # gave it and grow down, not float in the middle of it. A middle-anchored box
+    # drawn for one line leaves a band of empty slide above a two-line title and
+    # pushes the second line toward the chart.
+    tf.vertical_anchor = MSO_ANCHOR.TOP
     tf.text = title
+
+    # Pull the headline up into the top margin, and give the space it gains to
+    # the box. Templates commonly park the title a third of the way down the
+    # slide, which wastes the band above it AND leaves a long headline nowhere
+    # to wrap but over the subtitle. Raising the box does both jobs at once and
+    # costs nothing: the space above the title is empty by definition.
+    try:
+        left, top = int(ph.left or 0), int(ph.top or 0)
+        width, height = int(ph.width or 0), int(ph.height or 0)
+        if top > _MIN_TITLE_TOP and width and height:
+            # All FOUR, explicitly. A placeholder inherits its position and size
+            # from the layout, and writing one of them makes python-pptx emit an
+            # <a:xfrm> carrying only that value — the others stop resolving and
+            # the headline wrapped one word per line down the slide.
+            ph.left, ph.width = left, width
+            ph.height = height + (top - _MIN_TITLE_TOP)
+            ph.top = _MIN_TITLE_TOP
+    except (AttributeError, TypeError):
+        pass
 
     # Fit the headline to the placeholder's OWN box, and state the result.
     #
@@ -576,12 +645,30 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
         )
         _font, inherited_pt, _col, _bold, caps = _inherited_placeholder_style(ph)
         if inherited_pt and ph.width and ph.height:
-            st = SimpleNamespace(size_pt=inherited_pt, width=int(ph.width),
+            # The width the text really wraps inside: the box minus its own
+            # insets. Measuring the full box made the fitter believe a headline
+            # fitted on one line that the renderer then wrapped onto two — the
+            # scaling looked broken because it was answering a different
+            # question than the one being drawn.
+            inset = int(tf.margin_left or 0) + int(tf.margin_right or 0)
+            st = SimpleNamespace(size_pt=inherited_pt,
+                                 width=max(1, int(ph.width) - inset),
                                  height=int(ph.height), font=_font, caps=caps,
                                  line_spacing=0.0)
             fitted = fit_title_size(st, title)
             if fitted and abs(fitted - inherited_pt) > 0.01:
                 tf.paragraphs[0].runs[0].font.size = Pt(fitted)
+            # Let the BOX admit the text it now holds. A template's title box is
+            # drawn for the headline the customer wrote; ours wraps to two lines
+            # and LibreOffice simply overflows the box downward — straight across
+            # the subtitle — while every measurement of "where the title ends"
+            # kept reading the box and believing it. Growing the box is what makes
+            # the layout below it true.
+            needed = _rendered_title_height(ph, title)
+            if needed > int(ph.height or 0):
+                ph.left, ph.width = int(ph.left or 0), int(ph.width or 0)
+                ph.top = int(ph.top or 0)
+                ph.height = needed
     except Exception:  # noqa: BLE001 — a title must never fail a render
         logging.getLogger(__name__).warning(
             "could not fit the title to its placeholder", exc_info=True)
@@ -713,20 +800,51 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # real client decks puts it. Left hanging off the chart instead it
             # floated in the middle of the slide with a band of empty cream
             # above it.
+            # Bound to the CHART, never to the title: the box bottom sits a
+            # fixed gap above the chart and BOTTOM anchor grows the text upward,
+            # so the space between question and chart is identical on every
+            # slide however long the question is. Placing it under the TITLE
+            # instead made that gap depend on the headline's height, and a
+            # two-line headline pushed the subtitle straight through it.
             anchor = MSO_ANCHOR.BOTTOM
-            title_profile = getattr(ctx.style, "profile", None)
-            if title_profile is not None and title_profile.title.positioned:
-                _l, t_top, _w, t_height = harvested_title_box(title_profile, title)
-                sub_top = max(t_top + t_height,
-                              header_furniture_floor(title_profile, int(ctx.slot.top),
-                                                     sw, sh)) + int(Inches(0.10))
-                sub_h = max(int(Inches(0.30)), int(ctx.slot.top) - sub_top)
-                sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
-                anchor = MSO_ANCHOR.TOP
-            elif templated or profile is not None:
-                sub_h = int(Inches(0.62))
-                sub_top = max(0, int(ctx.slot.top) - sub_h)
-                sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
+            if templated or profile is not None:
+                sub_bottom = int(ctx.slot.top) - int(_SUBTITLE_GAP)
+                sub_h = min(int(_SUBTITLE_MAX_H), max(int(Inches(0.30)), sub_bottom))
+                sub_top = max(0, sub_bottom - sub_h)
+                # The BOTTOM is the fixed thing — a constant gap above the chart,
+                # so that space never changes with the question's length. Growing
+                # upward stops at whatever the header already occupies: the title
+                # itself, and any rule the template draws under it (Synsam's).
+                # Without the clamp a long question climbed through both.
+                ceiling = 0
+                title_profile = getattr(ctx.style, "profile", None)
+                if title_profile is not None and title_profile.title.positioned:
+                    _l, t_top, _w, t_h = harvested_title_box(title_profile, title)
+                    ceiling = max(ceiling, int(t_top + t_h))
+                    ceiling = max(ceiling, header_furniture_floor(
+                        title_profile, int(ctx.slot.top), sw, sh))
+                # The REAL headline, not the harvested box it was sized from:
+                # the placeholder was raised and given the top margin's space, so
+                # a two-line title ends well below where the harvest says. Using
+                # the harvested bottom left the subtitle under the first line and
+                # the second line came down across it.
+                try:
+                    tph = slide.shapes.title
+                except (AttributeError, KeyError):
+                    tph = None
+                if tph is not None and title:
+                    ceiling = max(ceiling, int(tph.top or 0)
+                                  + _rendered_title_height(tph, title))
+                if ceiling:
+                    ceiling += int(Inches(0.06))     # a hair of clearance
+                # Push the box DOWN to clear the header — `min` capped it instead,
+                # which left it exactly where it had been overlapping.
+                sub_top = max(sub_top, ceiling)
+                sub_h = max(int(Inches(0.20)), sub_bottom - sub_top)
+                # Left edge and width from the TITLE, so the two line up.
+                t_left, t_width = title_left_width(slide, ctx.style, title)
+                sub_left = t_left or int(ctx.slot.left)
+                sub_w = t_width or int(ctx.slot.width)
             else:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
