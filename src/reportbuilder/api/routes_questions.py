@@ -1180,6 +1180,10 @@ class ChartSpecBody(BaseModel):
     slide_title: str | None = None
     slide_description: str | None = None
     footer_note: str | None = None  # override methodology footer; "{n}" expands to the base
+    # Axis titles (P-C-27). Part of the preview's cache key via model_dump_json,
+    # so editing one re-renders the image.
+    axis_x_title: str = ""
+    axis_y_title: str = ""
     # Preview-only: when False the rendered PNG omits the title block (accent bar +
     # title + description) so the frontend can own that region with a progressive
     # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
@@ -1263,6 +1267,8 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         slide_title=body.slide_title,
         slide_description=body.slide_description,
         footer_note=body.footer_note,
+        axis_x_title=body.axis_x_title,
+        axis_y_title=body.axis_y_title,
         options=dict(body.options or {}),
     )
 

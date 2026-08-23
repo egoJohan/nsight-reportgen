@@ -192,6 +192,11 @@ export interface ChartSpec {
   // AI response; cleared the instant the user edits the title field by hand.
   slide_title_key?: string | null;
   slide_description: string | null;
+  // Axis titles (P-C-27). Empty = no axis title. Presentation only: they land in
+  // the image fingerprint, so editing one re-renders the slide, and deliberately
+  // NOT in titleDataKey, so it never regenerates the headline.
+  axis_x_title?: string;
+  axis_y_title?: string;
   // Per-chart identity. question_ref says WHICH QUESTION a chart shows and is no
   // longer unique: a comparison section adds a second slide for a question that
   // already has a total-level one. Empty on reports saved before this existed —

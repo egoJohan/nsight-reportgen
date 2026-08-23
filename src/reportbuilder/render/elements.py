@@ -106,6 +106,20 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
             chart.category_axis.tick_labels.font.name = cfont_name
             chart.category_axis.tick_labels.font.size = Pt(cfont_size)
             chart.category_axis.tick_labels.font.color.rgb = _native_ink(ctx)
+
+            # The author's own axis titles (P-C-27). Empty means none, which is
+            # how every chart looked before the field existed. The image path
+            # draws the same text from the same fields — see
+            # image/_mpl.apply_axis_titles — because a preview that omits what
+            # the deck shows is the bug the preview pipeline exists to prevent.
+            x_title = getattr(ctx.spec, "axis_x_title", "") or ""
+            y_title = getattr(ctx.spec, "axis_y_title", "") or ""
+            if x_title:
+                chart.category_axis.has_title = True
+                chart.category_axis.axis_title.text_frame.text = x_title
+            if y_title:
+                chart.value_axis.has_title = True
+                chart.value_axis.axis_title.text_frame.text = y_title
         except (AttributeError, ValueError):
             # pie / doughnut / radar / scatter have no value_axis or category_axis;
             # python-pptx raises ValueError("chart has no value axis") for those types.

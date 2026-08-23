@@ -899,6 +899,7 @@ function ChartControls({
         scaleGloss={question?.scale_gloss ?? ""}
         onChange={onChange}
       />
+      <AxisTitleFields chart={chart} onChange={onChange} />
       <FooterNoteField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
@@ -941,6 +942,39 @@ function SlideTitleField({
         Enter to break it onto up to three lines. The preview updates live.
       </p>
     </Field>
+  );
+}
+
+// ── Editable axis titles (P-C-27's fourth text property) ─────────────────────
+// The requirement asks that a chart's title, subtitle, value names and AXIS names
+// all be editable here. The first three were; axis names had only an on/off
+// toggle and no text field anywhere.
+//
+// These are PRESENTATION: they are in the image fingerprint, so editing one
+// re-renders the slide, and deliberately not in titleDataKey, so it never spends
+// an LLM call rewriting the headline. Chart families with no axes ignore them.
+function AxisTitleFields({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="X axis title">
+        <Input
+          value={chart.axis_x_title ?? ""}
+          onChange={(e) => onChange({ axis_x_title: e.target.value })}
+        />
+      </Field>
+      <Field label="Y axis title">
+        <Input
+          value={chart.axis_y_title ?? ""}
+          onChange={(e) => onChange({ axis_y_title: e.target.value })}
+        />
+      </Field>
+    </div>
   );
 }
 

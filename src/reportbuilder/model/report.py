@@ -55,6 +55,13 @@ class ChartSpec:
     slide_title_key: str | None = None
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
     footer_note: str | None = None              # override methodology footer; None = auto ("<stat> · n = N"). "{n}" expands to the base.
+    # Axis titles (P-C-27, the fourth editable text property beside the title,
+    # subtitle and value names). Empty = no axis title, which is how every chart
+    # looked before this existed, so old reports are unchanged.
+    # `elements.axis_names` still governs axis text as a whole: with it off,
+    # these are not drawn even when set.
+    axis_x_title: str = ""
+    axis_y_title: str = ""
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
     # Cross-tab percentage DIRECTION for a classified chart:
@@ -246,6 +253,8 @@ def report_from_json(data: dict | str) -> Report:
             slide_title_key=c.get("slide_title_key"),
             slide_description=c.get("slide_description"),
             footer_note=c.get("footer_note"),
+            axis_x_title=c.get("axis_x_title", "") or "",
+            axis_y_title=c.get("axis_y_title", "") or "",
             show_empty_categories=c.get("show_empty_categories", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),

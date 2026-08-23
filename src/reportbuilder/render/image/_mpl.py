@@ -503,3 +503,26 @@ def style_legend(ax, ctx, loc: str = "best") -> None:
     leg.get_frame().set_linewidth(0.8)
     for t in leg.get_texts():
         t.set_color(ink)
+
+
+def apply_axis_titles(ax, spec, ink: str) -> None:
+    """Draw the author's axis titles on *ax*, if this chart has any.
+
+    P-C-27's fourth text property. Empty means no axis title — the way every
+    chart looked before the field existed — and `elements.axis_names` still
+    governs axis text as a whole, so one control continues to mean "no axis
+    text on this slide".
+
+    Both renderers must agree about this: a preview that omits what the deck
+    draws is exactly the class of bug the preview pipeline exists to prevent,
+    so render/elements.py does the same thing for the native path.
+    """
+    elements = getattr(spec, "elements", None)
+    if elements is not None and not getattr(elements, "axis_names", True):
+        return
+    x = getattr(spec, "axis_x_title", "") or ""
+    y = getattr(spec, "axis_y_title", "") or ""
+    if x:
+        ax.set_xlabel(x, fontsize=10.5, color=ink)
+    if y:
+        ax.set_ylabel(y, fontsize=10.5, color=ink)
