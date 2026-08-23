@@ -28,7 +28,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.deps_auth import current_user, require_material, require_material_write
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth.permissions import User
-from reportbuilder.render.style_spec import load_style_spec as _load_style_spec
+from reportbuilder.render.template_cache import resolve as _resolve_template
 from reportbuilder.store import paths as _paths
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -1404,7 +1404,7 @@ def preview_chart(
     style = None
     if not body.render_title and template_path:
         try:
-            style = _load_style_spec(template_path)
+            style = _resolve_template(template_path).style
             # The headline this slide will carry, so the reported size is the
             # one the deck would use for THIS text rather than the template's
             # nominal size — see title_box_headers.
@@ -1460,7 +1460,7 @@ def preview_chart(
         # case, render_title=False) rather than parsing the template twice.
         if style is None and template_path:
             try:
-                style = _load_style_spec(template_path)
+                style = _resolve_template(template_path).style
             except Exception:  # noqa: BLE001
                 style = None
 

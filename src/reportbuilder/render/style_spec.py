@@ -50,6 +50,12 @@ class TemplateStyleSpec(StyleSpec):
     # What to borrow from the template when its design is NOT in the layouts:
     # the title's style and box, and the furniture that repeats on every slide.
     profile: object | None = None
+    # The template's type and colour, resolved ONCE — see template_cache.resolve,
+    # which sets this. None on a style built without a template (or built
+    # directly rather than through resolve), in which case the renderers measure
+    # as they did before. Carried here because the renderers are handed a style,
+    # not a ResolvedTemplate, at far too many call sites to thread a new one.
+    resolved_spec: object | None = None
     # Hex, no leading '#'. Empty means "no template opinion", and the house
     # cream/ink apply.
     background: str = ""
