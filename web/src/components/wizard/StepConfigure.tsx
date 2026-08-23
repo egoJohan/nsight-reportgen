@@ -34,6 +34,7 @@ import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
 import { usePreviewStatus } from "@/lib/usePreviewStatus";
+import * as previewQueue from "@/lib/previewQueue";
 import { useDragReorder } from "@/lib/useDragReorder";
 import { slideTitle } from "@/components/wizard/slideTitle";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -1549,6 +1550,45 @@ type SlideProblem = { id: string; title: string; detail: string };
  *  can legitimately differ and this stays advisory. The slide's own footer is the
  *  authoritative record of what was omitted. (spec 2026-08-22)
  */
+/** What the preview queue could not produce for this slide, in the author's
+ *  terms. A failed generation is not a crash and does not stop the slide being
+ *  drawn — the headline falls back to the question text — but the author should
+ *  be able to find out why their slide says something blander than usual. */
+function producerProblems(chart: ChartSpec | undefined): SlideProblem[] {
+  const failures = previewQueue.failuresOf(chart?.slide_id ?? "");
+  const say: Record<string, { title: string; detail: string }> = {
+    title: {
+      title: "The AI headline could not be written",
+      detail:
+        "This slide shows its question text instead, which is what every slide " +
+        "showed before AI headlines existed. Nothing else about the slide is " +
+        "affected. Editing the slide, or reopening the report, tries again.",
+    },
+    bullets: {
+      title: "The theme bullets could not be generated",
+      detail:
+        "The open-ended answers could not be summarised into themes. The slide " +
+        "is otherwise complete; you can type bullets yourself, or try again by " +
+        "reopening the report.",
+    },
+    chart: {
+      title: "The slide could not be rendered",
+      detail:
+        "The picture for this slide failed to draw. The deck cannot include it " +
+        "until it does — changing anything on the slide will try again.",
+    },
+  };
+  return failures.map((f) => {
+    const copy = say[f.id];
+    const why = f.error instanceof Error ? f.error.message : "";
+    return {
+      id: `producer-${f.id}`,
+      title: copy.title,
+      detail: why ? `${copy.detail}\n\nThe service said: ${why}` : copy.detail,
+    };
+  });
+}
+
 function slideProblems(
   chart: ChartSpec | undefined,
   variables: Variable[] | undefined
@@ -1695,7 +1735,18 @@ function StepConfigureInner({
   const activeChart = activeIndex >= 0 ? charts[activeIndex] : charts[0];
   // What this slide will NOT show. A pure read of the active chart and the
   // material's variables; declared here because both are only in scope now.
-  const activeProblems = slideProblems(activeChart, panelVariables);
+  // Both kinds: what the slide will not SHOW (too many groups for one slide),
+  // and what could not be MADE for it (a generation that failed). They belong in
+  // the same button because they are the same question to an author looking at a
+  // slide that is not what they expected.
+  // Subscribed, so a failure appearing while the author is looking at the slide
+  // lights the button then — not on the next unrelated re-render.
+  const activeStatus = usePreviewStatus(activeChart?.slide_id ?? "");
+  void activeStatus;
+  const activeProblems = [
+    ...slideProblems(activeChart, panelVariables),
+    ...producerProblems(activeChart),
+  ];
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
   // A "themes" chart is an open-ended question rendered as bullets — unlike a true
@@ -1887,7 +1938,14 @@ function StepConfigureInner({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangleIcon className="size-5 shrink-0" />
-              This slide won't show everything
+              {/* Two different things land in this dialog: content the slide
+                  leaves OUT because it does not fit, and content that could not
+                  be MADE. "Won't show everything" is right for the first and
+                  simply wrong for the second — a slide whose headline failed
+                  shows everything it has. */}
+              {activeProblems.some((p) => p.id.startsWith("producer-"))
+                ? "Something on this slide could not be generated"
+                : "This slide won't show everything"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">

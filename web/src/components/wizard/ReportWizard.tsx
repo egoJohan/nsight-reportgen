@@ -536,8 +536,16 @@ export default function ReportWizard({
   // Warm the whole deck, and pick up slides added later. `enqueue` dedupes and
   // each producer decides for itself whether it is needed, so re-enqueueing a
   // settled deck costs nothing.
-  const chartIds = (draft?.charts ?? []).map((c) => c.slide_id ?? "").join(",");
+  // Every slide whose CONTENT changed goes back on the queue — not just slides
+  // that were added. Watching the id list alone was not enough: editing a chart
+  // type or a headline leaves the ids identical, and because components only
+  // read the cache now, nothing would ever draw the new version. The author's
+  // edit saved and the picture never moved.
+  const chartsSignature = (draft?.charts ?? [])
+    .map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
+    .join("\u0000");
   const resolvedCount = questionByRef.size;
+  const lastSeen = useRef<Map<string, string>>(new Map());
   useEffect(() => {
     // Not before the questions have resolved. A headline is written ABOUT the
     // question as the current grouping resolves it, so starting earlier means
@@ -545,10 +553,19 @@ export default function ReportWizard({
     // nothing to write about and are recorded as needing nothing. That is how
     // the first four slides of a sixty-slide report came out untitled.
     if (!resolvedCount) return;
-    for (const c of draftRef.current?.charts ?? []) {
-      if (c.slide_id) previewQueue.enqueue(c.slide_id);
-    }
-  }, [chartIds, resolvedCount]);
+    // Debounced, so holding a key down does not queue a render per keystroke.
+    const h = setTimeout(() => {
+      const next = new Map<string, string>();
+      for (const c of draftRef.current?.charts ?? []) {
+        if (c.slide_id) next.set(c.slide_id, JSON.stringify(c));
+      }
+      for (const [id, sig] of next) {
+        if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
+      }
+      lastSeen.current = next;
+    }, 350);
+    return () => clearTimeout(h);
+  }, [chartsSignature, resolvedCount]);
 
   // "Is the queue doing anything?" — the one signal the save rule needs.
   const queueBusy = useSyncExternalStore(previewQueue.subscribe, previewQueue.isBusy);
