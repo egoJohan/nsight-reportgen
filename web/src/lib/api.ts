@@ -487,6 +487,17 @@ export interface CaseReportInfo {
    *  see routes_render.is_render_active). A report can be `rendering` and
    *  `rendered` at once: a fresh render of an already-finished report. */
   rendering?: boolean;
+  /** When it was last saved, and by whom. From the report's sidecar, so the
+   *  whole list is one request — this replaced fetching every report in full
+   *  just to count its charts, which is what made the page slow. */
+  modified_at?: string;
+  modified_by?: string;
+  /** Who has it open in the editor right now, if anyone. `locked_by_me` is
+   *  what stops your own second tab looking like somebody else's lock. */
+  locked_by?: string;
+  locked_by_name?: string;
+  locked_since?: string;
+  locked_by_me?: boolean;
 }
 
 export interface Template {
@@ -811,9 +822,9 @@ export const api = {
     usage: (
       caseId: string,
       materialId: string
-    ): Promise<{ reports: { report_id: string; name: string }[] }> =>
+    ): Promise<{ reports: CaseReportInfo[] }> =>
       fetch(`${API_BASE}/cases/${caseId}/materials/${materialId}/usage`).then((r) =>
-        json<{ reports: { report_id: string; name: string }[] }>(r)
+        json<{ reports: CaseReportInfo[] }>(r)
       ),
 
     remove: async (caseId: string, materialId: string): Promise<void> => {
@@ -1069,6 +1080,34 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(report),
       }).then((r) => json<{ report_id: string }>(r)),
+
+    /** Take or renew the editing lock. Rejects with the holder's name (409)
+     *  when somebody else has it. */
+    lock: async (caseId: string, reportId: string): Promise<{ mine: boolean; user_name: string; renew_seconds: number }> => {
+      const res = await fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}/lock`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(detail);
+      }
+      return res.json();
+    },
+
+    /** Give the lock back. Uses keepalive so a closing tab still releases it —
+     *  an ordinary fetch is cancelled when the page goes away, which would
+     *  leave the report locked until it expired. */
+    unlock: (caseId: string, reportId: string): Promise<void> =>
+      fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}/lock`, {
+        method: "DELETE",
+        keepalive: true,
+      }).then(() => undefined),
 
     update: (
       caseId: string,

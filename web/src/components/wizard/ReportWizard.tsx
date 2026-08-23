@@ -13,6 +13,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   FileXIcon,
+  LockIcon,
   Loader2Icon,
   PencilIcon,
   SaveIcon,
@@ -492,6 +493,50 @@ export default function ReportWizard({
   const draftRef = useRef<ReportDoc | null>(null);
   draftRef.current = draft;
 
+  // ── The editing lock ─────────────────────────────────────────────────────
+  // One person edits a report at a time. A save replaces the whole document,
+  // so without this a second editor's save erases everything the first did —
+  // including slides they never opened — and both saves succeed silently.
+  //
+  // Renewal is the part that matters. A crash, a closed laptop or a dropped
+  // network runs no cleanup, so a lock that only cleared on release would
+  // strand the report. The server expires it about two minutes after these
+  // stop arriving.
+  const [lockedBy, setLockedBy] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let timer: number | undefined;
+
+    const take = async () => {
+      try {
+        const held = await api.reports.lock(caseId, reportId);
+        if (!alive) return;
+        setLockedBy(null);
+        // Renew well inside the server's expiry, so one slow request or one
+        // sleeping tab does not drop a lock somebody is actively using.
+        timer = window.setTimeout(take, (held.renew_seconds || 30) * 1000);
+      } catch (e) {
+        if (!alive) return;
+        // Somebody else has it. Say who, and stop: this editor must not save.
+        setLockedBy(e instanceof Error ? e.message : "Someone else is editing this report.");
+      }
+    };
+    void take();
+
+    // Handing it back, three ways, because no single one is reliable: closing
+    // the report (unmount), and the tab going away — `pagehide` fires where
+    // `beforeunload` does not on mobile, and `keepalive` is what lets the
+    // request outlive the page.
+    const release = () => void api.reports.unlock(caseId, reportId);
+    window.addEventListener("pagehide", release);
+    return () => {
+      alive = false;
+      if (timer) window.clearTimeout(timer);
+      window.removeEventListener("pagehide", release);
+      release();
+    };
+  }, [caseId, reportId]);
+
   // ── The preview queue ────────────────────────────────────────────────────
   // One queue owns every kind of work a slide needs: its headline, its theme
   // bullets, and its picture — in that order, in one sequential pass per slide.
@@ -937,6 +982,28 @@ export default function ReportWizard({
 
   // Stale report id (404 after a backend restart / deletion elsewhere): show
   // an escapable error panel instead of trapping the user on a spinner.
+  // Somebody else has it open. The list normally stops you before this, so
+  // reaching here means they took it in the moment between — say so plainly
+  // and go back, rather than showing an editor whose saves would be refused.
+  if (lockedBy) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted">
+          <LockIcon className="size-7 text-muted-foreground" />
+        </div>
+        <h3 className={PANEL_TITLE}>Someone else is editing this report</h3>
+        <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+          {lockedBy} It opens again when they close it — or shortly after, if
+          they simply walked away.
+        </p>
+        <Button variant="outline" className="mt-5" onClick={onClose}>
+          <ChevronLeftIcon className="size-4" />
+          Back to reports
+        </Button>
+      </div>
+    );
+  }
+
   if (isError) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">

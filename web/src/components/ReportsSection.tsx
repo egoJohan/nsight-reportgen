@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   FileTextIcon,
+  LockIcon,
   PlusIcon,
   CopyIcon,
   Trash2Icon,
@@ -24,7 +25,6 @@ import {
   useCreateReport,
   useDeleteReport,
   useQuestions,
-  useReport,
   useCaseReports,
   useDuplicateReport,
   qk,
@@ -121,6 +121,10 @@ function ReportRow({
     name: string;
     createdAt?: string;
     renderedAt?: string;
+    modifiedAt?: string;
+    modifiedBy?: string;
+    lockedByName?: string;
+    lockedByMe?: boolean;
     rendered?: boolean;
     rendering?: boolean;
   };
@@ -130,8 +134,11 @@ function ReportRow({
   copyPending: boolean;
   onDelete: (id: string) => void;
 }) {
-  const { data: doc, isLoading } = useReport(caseId, report.id);
-  const n = doc?.charts?.length ?? null;
+  // No per-report fetch. This row used to load the whole report document —
+  // sixty charts, hundreds of kilobytes — to print "60 charts · 60 slides",
+  // once per row, which is what made the case page slow. Everything shown here
+  // now comes from the list's own response.
+  const n: number | null = null;
   // Four states now. Empty -> no charts. Draft -> charts, no deck. Generated
   // -> a deck exists, which is exactly when it becomes downloadable and when
   // a viewer can see it at all. Generating -> a render is in progress right
@@ -143,6 +150,9 @@ function ReportRow({
   // an already-finished report is still in progress, and showing the OLD
   // "Generated" badge while a NEW one is being built claims a fact ("this is
   // what a viewer would get") that is not settled yet.
+  // Locked by SOMEONE ELSE. Your own lock — a second tab, a refresh — is not a
+  // barrier and must not look like one.
+  const lockedByOther = !!report.lockedByName && !report.lockedByMe;
   const status = report.rendering
     ? "Generating…"
     : report.rendered
@@ -153,20 +163,20 @@ function ReportRow({
           ? "Empty"
           : "Draft";
   const created = formatReportDate(report.createdAt);
-  const base =
-    n == null
-      ? "Loading…"
-      : n === 0
-        ? "No charts yet"
-        : `${n} chart${n === 1 ? "" : "s"} · ${n} slide${n === 1 ? "" : "s"}`;
   // A viewer is looking at a deliverable, not a work in progress: the useful
   // fact is when the deck was generated, not how many charts went into it.
   // ("No charts yet" on a finished, downloadable report reads as broken.)
   const generated = formatReportDate(report.renderedAt);
+  const edited = formatReportDate(report.modifiedAt);
+  const editedLine = report.modifiedBy
+    ? `Edited by ${report.modifiedBy}${edited ? ` · ${edited}` : ""}`
+    : edited
+      ? `Edited ${edited}`
+      : created
+        ? `Created ${created}`
+        : "";
   const stat = canEdit
-    ? created
-      ? `${base} · ${created}`
-      : base
+    ? editedLine
     : generated
       ? `Generated ${generated}`
       : "Generated";
@@ -175,17 +185,48 @@ function ReportRow({
     <div
       className={
         "group flex items-center gap-3 px-4 py-3 transition-colors " +
-        (canEdit ? "cursor-pointer hover:bg-muted/50" : "")
+        (lockedByOther
+          ? "cursor-not-allowed opacity-60"
+          : canEdit
+            ? "cursor-pointer hover:bg-muted/50"
+            : "")
       }
-      onClick={canEdit ? () => onOpen(report.id) : undefined}
+      title={
+        lockedByOther
+          ? `${report.lockedByName} has this report open. Saving is a whole-document `
+            + `replace, so two editors would overwrite each other — it opens again `
+            + `when they close it.`
+          : undefined
+      }
+      onClick={
+        lockedByOther
+          ? () =>
+              toast.info(
+                `${report.lockedByName} is editing this report. It opens again when they close it.`
+              )
+          : canEdit
+            ? () => onOpen(report.id)
+            : undefined
+      }
     >
       <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
         <FileTextIcon className="size-4 text-primary" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{report.name}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {canEdit && isLoading ? "Loading…" : stat}
+        <p className="flex items-center gap-1.5 truncate text-sm font-medium">
+          {report.name}
+          {lockedByOther && (
+            <LockIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+        </p>
+        {/* Who has it, in place of the statistics — the one fact that decides
+            whether you can open it at all is more useful than a chart count. */}
+        <p
+          className={`mt-0.5 truncate text-xs ${
+            lockedByOther ? "text-muted-foreground italic" : "text-muted-foreground"
+          }`}
+        >
+          {lockedByOther ? `Locked by ${report.lockedByName}` : stat}
         </p>
       </div>
       {canEdit ? (
@@ -296,6 +337,10 @@ export default function ReportsSection({
     rendered: r.rendered,
     renderedAt: r.rendered_at,
     rendering: r.rendering,
+    modifiedAt: r.modified_at,
+    modifiedBy: r.modified_by,
+    lockedByName: r.locked_by_name,
+    lockedByMe: r.locked_by_me,
   }));
   const orderedReports = canEdit ? allReports : allReports.filter((r) => r.rendered);
 

@@ -100,6 +100,9 @@ class ReportRef:
     customer_id: str
     name: str
     modified_at: str = ""
+    #: The name of whoever saved it last. Empty on reports saved before this
+    #: was recorded — treat absence as "unknown", not as "nobody".
+    modified_by: str = ""
     #: True once a render has been stamped onto this report's meta sidecar
     #: (see Repository.save_render) — the deliverable a viewer may download.
     #: A report doc with no render behind it is the analyst's working state,
@@ -167,6 +170,21 @@ class AccessRequest:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _age_seconds(iso: str) -> float:
+    """How long ago *iso* was, in seconds. Unparseable or missing reads as
+    ancient — a timestamp nobody can read is not evidence that something is
+    still alive, and treating it as fresh would strand a lock for ever."""
+    if not iso:
+        return float("inf")
+    try:
+        then = datetime.fromisoformat(iso)
+    except ValueError:
+        return float("inf")
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - then).total_seconds()
 
 
 # Smaller number = more specific. A choice at a more specific level overrides a
@@ -505,7 +523,8 @@ class Repository:
         return f"Raportti {n + 1}"
 
     def save_report(self, auth: AuthContext, customer_id: str, case_id: str,
-                    report_json: str, report_id: str | None = None) -> ReportRef:
+                    report_json: str, report_id: str | None = None,
+                    modified_by: str = "") -> ReportRef:
         """Create, or replace in place when *report_id* is given.
 
         The JSON is stored verbatim — the serde round-trip
@@ -525,10 +544,117 @@ class Repository:
         # 30 KB report body just to learn its name.
         self._write_json(auth, P.report_meta_path(customer_id, case_id, rid),
                          {"id": rid, "case_id": case_id, "customer_id": customer_id,
-                          "name": name, "modified_at": modified_at},
+                          "name": name, "modified_at": modified_at,
+                          # Who, as well as when. A list that says "edited by
+                          # Johan 2h ago" answers the question a chart count
+                          # never did, and costs nothing extra to read: it is
+                          # already fetching this sidecar.
+                          "modified_by": modified_by},
                          [P.LABEL_REPORT_META])
         return ReportRef(id=rid, case_id=case_id, customer_id=customer_id,
-                         name=name, modified_at=modified_at)
+                         name=name, modified_at=modified_at,
+                         modified_by=modified_by)
+
+    # ── Editing locks ────────────────────────────────────────────────────
+    # One person edits a report at a time. Saving is a whole-document replace,
+    # so two editors do not merely conflict — the second one's save erases
+    # everything the first did, including slides they never touched, and nobody
+    # is told. The lock is what makes that impossible.
+    #
+    # It EXPIRES, and that is the important part. A browser that crashes, a
+    # laptop that closes, a network that drops: none of them run an unload
+    # handler, so a lock that only cleared on release would strand the report
+    # until someone went looking for it. The editor renews while it is open;
+    # the lock dies on its own shortly after the editor stops.
+
+    #: How long a lock survives without being renewed.
+    LOCK_TTL_SECONDS = 120
+    #: How often the editor should renew it. Well inside the TTL, so one missed
+    #: renewal (a slow request, a sleeping tab) does not drop a live lock.
+    LOCK_RENEW_SECONDS = 30
+
+    def _lock_state(self, auth: AuthContext, customer_id: str, case_id: str,
+                    report_id: str) -> dict | None:
+        """The live lock on this report, or None when there is none.
+
+        An expired lock is None: it is not deleted here, because reading is not
+        the moment to write, and the next acquire overwrites it anyway.
+        """
+        try:
+            d = self._read_json(
+                auth, P.report_lock_path(customer_id, case_id, report_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        if d.get("released"):
+            return None
+        if _age_seconds(d.get("renewed_at", "")) > self.LOCK_TTL_SECONDS:
+            return None
+        return d
+
+    def lock_report(self, auth: AuthContext, customer_id: str, case_id: str,
+                    report_id: str, user_id: str, user_name: str) -> tuple[bool, dict]:
+        """Take or renew the lock. Returns (mine, lock).
+
+        The same person always succeeds — a second tab, a refresh, a reconnect
+        or another device is the same human, and locking someone out of their
+        own work would be the most annoying possible failure. Anyone else is
+        refused while the lock is live.
+        """
+        held = self._lock_state(auth, customer_id, case_id, report_id)
+        if held and held.get("user_id") != user_id:
+            return False, held
+        now = _now()
+        lock = {
+            "report_id": report_id, "case_id": case_id, "customer_id": customer_id,
+            "user_id": user_id, "user_name": user_name,
+            "acquired_at": (held or {}).get("acquired_at") or now,
+            "renewed_at": now,
+        }
+        self._write_json(auth, P.report_lock_path(customer_id, case_id, report_id),
+                         lock, [P.LABEL_REPORT_LOCK])
+        return True, lock
+
+    def unlock_report(self, auth: AuthContext, customer_id: str, case_id: str,
+                      report_id: str, user_id: str) -> bool:
+        """Release the lock, if this user holds it. Returns whether it did.
+
+        Only the holder may release: a lock anyone can drop is not a lock. An
+        abandoned one is handled by expiry, not by other people tidying it up.
+        """
+        held = self._lock_state(auth, customer_id, case_id, report_id)
+        if held and held.get("user_id") != user_id:
+            return False
+        if held is None:
+            return True  # nothing to release; closing an editor is not an error
+        # Marked released rather than deleted. Deleting an object is gated
+        # behind datahive's consent mechanism (it asks a human to approve),
+        # which is right for a report and absurd for a lock somebody is trying
+        # to hand back — the release would fail and the report would stay
+        # locked until it expired. A released lock also leaves a trace of who
+        # had it and when, which a deletion would not.
+        self._write_json(
+            auth, P.report_lock_path(customer_id, case_id, report_id),
+            {**held, "released": True, "released_at": _now()},
+            [P.LABEL_REPORT_LOCK])
+        return True
+
+    def report_locks(self, auth: AuthContext, customer_id: str,
+                     case_id: str) -> dict[str, dict]:
+        """Every live lock in this case, by report id.
+
+        One listing call, then a read per lock that actually exists — normally
+        none or one. Listings carry no bytes, so the alternative (a read per
+        REPORT, locked or not) would cost the same as the chart counts this
+        replaced.
+        """
+        out: dict[str, dict] = {}
+        for info in self.store.list(auth, P.reports_prefix(customer_id, case_id),
+                                    labels=[P.LABEL_REPORT_LOCK]):
+            rid = info.path.rsplit("/", 1)[-1].removesuffix(".lock")
+            live = self._lock_state(auth, customer_id, case_id, rid)
+            if live:
+                out[rid] = live
+        return out
 
     def load_report(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str) -> str:
@@ -606,6 +732,7 @@ class Repository:
                          customer_id=d.get("customer_id", ""),
                          name=d.get("name") or d.get("id", ""),
                          modified_at=d.get("modified_at", ""),
+                         modified_by=d.get("modified_by", ""),
                          rendered_at=d.get("rendered_at", ""),
                          # A render stamps "render_key" onto this same sidecar
                          # (save_render) — its presence means an artefact

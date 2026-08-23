@@ -55,8 +55,15 @@ def _report_body(report: Report) -> dict:
 
 
 def _make_client() -> Mock:
-    """Return a fresh Mock that stands in for DataHiveClient."""
-    return Mock()
+    """Return a fresh Mock that stands in for DataHiveClient.
+
+    `report_lock` is stubbed to None — nobody is editing. A bare Mock answers
+    it with another Mock, which is truthy and belongs to nobody in particular,
+    so every save here would be refused as locked by a stranger.
+    """
+    m = Mock()
+    m.report_lock.return_value = None
+    return m
 
 
 # ---------------------------------------------------------------------------

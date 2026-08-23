@@ -44,6 +44,7 @@ LABEL_CUSTOMER = "nsight:customer"
 LABEL_CASE = "nsight:case"
 LABEL_REPORT = "nsight:report"
 LABEL_REPORT_META = "nsight:report-meta"
+LABEL_REPORT_LOCK = "nsight:report-lock"
 LABEL_RENDER = "nsight:render"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"
@@ -127,6 +128,17 @@ def report_meta_path(asiakas: str, case: str, report_id: str) -> str:
     Last-Modified. Verified 2026-08-18.
     """
     return f"{report_path(asiakas, case, report_id)}.meta"
+
+
+def report_lock_path(asiakas: str, case: str, report_id: str) -> str:
+    """Who currently has this report open in the editor.
+
+    Its OWN object, not a field on the meta sidecar, because `save_report`
+    rewrites that sidecar from scratch on every save — deliberately, so a stale
+    render key cannot survive a change to the report. A lock kept there would be
+    dropped by the very act of saving, which is the one moment it must not be.
+    """
+    return f"{report_path(asiakas, case, report_id)}.lock"
 
 
 def report_render_path(asiakas: str, case: str, report_id: str) -> str:

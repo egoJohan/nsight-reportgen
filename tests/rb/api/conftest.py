@@ -81,7 +81,20 @@ def rb_wire():
 def rb_mock() -> Mock:
     """A bare Mock standing in for DataHiveClient. Configure its return
     values before the request, same as before this fixture existed."""
-    return Mock()
+    return _mock_client()
+
+
+def _mock_client() -> Mock:
+    """A Mock client that reports no editing lock.
+
+    A bare Mock answers `report_lock()` with another Mock, which is truthy and
+    whose `.get("user_id")` is some object that is not the caller — so every
+    save looked locked by a stranger and was refused with 409. A stand-in that
+    says "nobody is editing this" is what a test about saving actually means.
+    """
+    m = Mock()
+    m.report_lock.return_value = None
+    return m
 
 
 @pytest.fixture

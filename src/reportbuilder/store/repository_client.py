@@ -104,16 +104,52 @@ class RepositoryClient:
     def save_report(self, case_id: str, report_id: str | None, report_json: str,
                     readable: str = "") -> str:
         k = self._case(case_id)
-        return self.repo.save_report(self.auth, k.customer_id, k.id, report_json,
-                                     report_id=report_id).id
+        return self.repo.save_report(
+            self.auth, k.customer_id, k.id, report_json, report_id=report_id,
+            modified_by=getattr(self.user, "name", "") or getattr(self.user, "email", "")
+        ).id
 
     def list_reports(self, case_id: str) -> list[dict]:
         k = self._case(case_id)
-        # "rendered" rides along so the read-only view can filter to finished
-        # reports without a round trip per report (see ReportsSection.tsx).
-        return [{"report_id": r.id, "name": r.name, "rendered": r.rendered, "rendered_at": r.rendered_at}
-                for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
-                                                user=self.user)]
+        # Everything the list needs, from sidecars only — no report bodies.
+        # The case page used to fetch each report in full just to count its
+        # charts, which is why it was slow; "edited by X, 2h ago" answers a more
+        # useful question and rides along on a read the listing already does.
+        locks = self.repo.report_locks(self.auth, k.customer_id, k.id)
+        me = getattr(self.user, "id", "")
+        out = []
+        for r in self.repo.list_reports(self.auth, k.customer_id, k.id, user=self.user):
+            lock = locks.get(r.id)
+            out.append({
+                "report_id": r.id, "name": r.name,
+                "rendered": r.rendered, "rendered_at": r.rendered_at,
+                "modified_at": r.modified_at, "modified_by": r.modified_by,
+                # Who has it open, and whether that is you — a report you left
+                # open in another tab must not look barred to you.
+                "locked_by": (lock or {}).get("user_id", ""),
+                "locked_by_name": (lock or {}).get("user_name", ""),
+                "locked_since": (lock or {}).get("acquired_at", ""),
+                "locked_by_me": bool(lock and lock.get("user_id") == me),
+            })
+        return out
+
+    # -- editing locks ----------------------------------------------------
+
+    def lock_report(self, case_id: str, report_id: str) -> tuple[bool, dict]:
+        k = self._case(case_id)
+        return self.repo.lock_report(
+            self.auth, k.customer_id, k.id, report_id,
+            getattr(self.user, "id", ""),
+            getattr(self.user, "name", "") or getattr(self.user, "email", ""))
+
+    def unlock_report(self, case_id: str, report_id: str) -> bool:
+        k = self._case(case_id)
+        return self.repo.unlock_report(self.auth, k.customer_id, k.id, report_id,
+                                       getattr(self.user, "id", ""))
+
+    def report_lock(self, case_id: str, report_id: str) -> dict | None:
+        k = self._case(case_id)
+        return self.repo._lock_state(self.auth, k.customer_id, k.id, report_id)
 
     def delete_report(self, case_id: str, report_doc_id: str) -> None:
         k = self._case(case_id)

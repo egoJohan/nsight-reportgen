@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.deps_auth import require_case, require_case_write
 from reportbuilder.auth.permissions import User
+from reportbuilder.store.repository import Repository
 from reportbuilder.model.report import Report, report_from_json, report_to_json
 from reportbuilder.store.datahive_client import DataHiveClient
 from reportbuilder.store.seam import NotFound
@@ -80,6 +81,11 @@ def list_case_reports(
     it right now (server-side state; see routes_render.is_render_active) — so
     the list can show a report someone left mid-render as exactly that, not as
     stuck on whatever it was before.
+
+    And who last edited it, when, and who has it open now. All of that comes
+    from sidecars, so the whole page is ONE request: the case page used to
+    fetch every report in full just to count its charts, which is what made it
+    slow.
     """
     from reportbuilder.api.routes_render import is_render_active
 
@@ -111,6 +117,22 @@ def update_report(
         raise HTTPException(
             status_code=404, detail=f"Report '{report_id}' not found"
         ) from exc
+
+    # Refuse a save from anyone but the person editing it.
+    #
+    # This is the check that actually prevents the loss; the lock icon in the
+    # list only explains it. A save replaces the WHOLE document, so without
+    # this a second editor does not merely conflict — their copy overwrites
+    # everything the first person did, including slides they never opened, and
+    # both saves return 200. Demonstrated against the running app before this
+    # existed: two users edited different slides and one edit simply vanished.
+    lock = client.report_lock(case_id, report_id)
+    if lock and lock.get("user_id") != getattr(user, "id", ""):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{lock.get('user_name') or 'Someone else'} is editing this "
+                   f"report. Your changes were not saved.")
+
     _report, report_json, readable = _canonicalize(body)
     returned_id = client.save_report(case_id, report_id, report_json, readable)
     return {"report_id": returned_id}
@@ -195,3 +217,47 @@ def duplicate_report(
     new_json = report_to_json(new_report)
     new_id = client.save_report(case_id, None, new_json, _readable(new_report))
     return {"report_id": new_id}
+
+
+@reports_router.post("/cases/{case_id}/reports/{report_id}/lock")
+def lock_report(
+    case_id: str,
+    report_id: str,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
+) -> dict:
+    """Take the editing lock, or renew one already held.
+
+    The editor calls this when it opens a report and every 30 seconds while it
+    stays open. Renewal is the whole design: a browser that crashes, a laptop
+    that closes and a network that drops all fail to run any release, so a lock
+    that only cleared on request would strand the report. This one dies on its
+    own about two minutes after the editor stops calling.
+
+    200 with mine=true when it is yours. 409 when somebody else has it, naming
+    them — refusing without saying who leaves the second person nothing to do
+    but guess.
+    """
+    mine, lock = client.lock_report(case_id, report_id)
+    if not mine:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{lock.get('user_name') or 'Someone else'} is editing this report.",
+            headers={"X-Locked-By": lock.get("user_name", "")})
+    return {"mine": True, **lock, "renew_seconds": Repository.LOCK_RENEW_SECONDS}
+
+
+@reports_router.delete("/cases/{case_id}/reports/{report_id}/lock")
+def unlock_report(
+    case_id: str,
+    report_id: str,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case_write),
+) -> dict:
+    """Give the lock back — closing the report, or leaving the page.
+
+    Only the holder may. A lock anyone can drop is not a lock; one that was
+    abandoned expires on its own rather than being tidied away by somebody who
+    wants the report.
+    """
+    return {"released": client.unlock_report(case_id, report_id)}
