@@ -498,44 +498,111 @@ export default function ReportWizard({
   // so without this a second editor's save erases everything the first did —
   // including slides they never opened — and both saves succeed silently.
   //
-  // Renewal is the part that matters. A crash, a closed laptop or a dropped
-  // network runs no cleanup, so a lock that only cleared on release would
-  // strand the report. The server expires it about two minutes after these
-  // stop arriving.
+  // Two different timeouts, for two different failures:
+  //
+  //   LIVENESS  the server expires a lock ~2 minutes after the editor stops
+  //             checking in. This is for a crash, a closed laptop, a dropped
+  //             network — none of which run any cleanup. It has to be short,
+  //             or one crash strands a report.
+  //
+  //   INACTIVITY  this editor stops checking in after hours without a click or
+  //             a keystroke. A renewal timer runs whether or not anyone is
+  //             there, so without this a report left open in a tab is locked
+  //             for ever: opened before lunch, still yours at five.
+  //
+  // Nothing is announced when a lock lapses. The tab keeps whatever is on
+  // screen, and the truth is found out on the next interaction: if nobody took
+  // the report, touching it takes the lock back silently; if somebody did, that
+  // is when — and only when — the author is told.
+  // Four hours in normal use. `?idleSeconds=N` shortens it so the behaviour can
+  // actually be exercised — waiting four hours is not a test.
+  const INACTIVITY_LIMIT_MS =
+    Number(new URLSearchParams(window.location.search).get("idleSeconds")) * 1000 ||
+    4 * 60 * 60_000;
+
   const [lockedBy, setLockedBy] = useState<string | null>(null);
+  const [hasLock, setHasLock] = useState(false);
+  const hasLockRef = useRef(false);
+  hasLockRef.current = hasLock;
+  const lastActivity = useRef(Date.now());
+
   useEffect(() => {
     let alive = true;
     let timer: number | undefined;
 
-    const take = async () => {
+    const release = () => void api.reports.unlock(caseId, reportId);
+
+    /** Take or renew the lock. Returns whether we hold it. */
+    const take = async (): Promise<boolean> => {
       try {
-        const held = await api.reports.lock(caseId, reportId);
-        if (!alive) return;
+        await api.reports.lock(caseId, reportId);
+        if (!alive) return false;
+        setHasLock(true);
         setLockedBy(null);
-        // Renew well inside the server's expiry, so one slow request or one
-        // sleeping tab does not drop a lock somebody is actively using.
-        timer = window.setTimeout(take, (held.renew_seconds || 30) * 1000);
+        return true;
       } catch (e) {
-        if (!alive) return;
-        // Somebody else has it. Say who, and stop: this editor must not save.
+        if (!alive) return false;
+        setHasLock(false);
         setLockedBy(e instanceof Error ? e.message : "Someone else is editing this report.");
+        return false;
       }
     };
-    void take();
 
-    // Handing it back, three ways, because no single one is reliable: closing
-    // the report (unmount), and the tab going away — `pagehide` fires where
-    // `beforeunload` does not on mobile, and `keepalive` is what lets the
-    // request outlive the page.
-    const release = () => void api.reports.unlock(caseId, reportId);
+    const beat = async () => {
+      if (!alive) return;
+      // Idle for hours: stop checking in and let the lock lapse on its own.
+      // Deliberately NOT released — releasing would be a decision, and this is
+      // an absence of one. If nobody wants the report, the next click here
+      // takes it straight back.
+      if (Date.now() - lastActivity.current > INACTIVITY_LIMIT_MS) {
+        setHasLock(false);
+        timer = window.setTimeout(beat, 60_000); // keep watching for a return
+        return;
+      }
+      await take();
+      timer = window.setTimeout(beat, 30_000);
+    };
+
+    void beat();
+
+    // Any interaction is a claim on the report. When we already hold it this
+    // only marks the tab as alive; when the lock has lapsed, it takes it back —
+    // or discovers that somebody else now has it.
+    const seen = () => {
+      const wasIdle = Date.now() - lastActivity.current > INACTIVITY_LIMIT_MS;
+      lastActivity.current = Date.now();
+      if (!hasLockRef.current && (wasIdle || lockedBy === null)) void take();
+    };
+    for (const ev of ["pointerdown", "keydown", "wheel"] as const) {
+      window.addEventListener(ev, seen, { passive: true });
+    }
+
+    // Handing it back, because closing IS a decision: on unmount, and on the
+    // tab going away — `pagehide` fires where `beforeunload` does not, and
+    // `keepalive` lets the request outlive the page.
     window.addEventListener("pagehide", release);
     return () => {
       alive = false;
       if (timer) window.clearTimeout(timer);
+      for (const ev of ["pointerdown", "keydown", "wheel"] as const) {
+        window.removeEventListener(ev, seen);
+      }
       window.removeEventListener("pagehide", release);
       release();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId, reportId]);
+
+  // Someone else took the report while this tab sat idle. Say so, and go back
+  // to the case — there is nothing useful to do here, and leaving an editor
+  // open whose every save is refused only invites work that cannot be kept.
+  useEffect(() => {
+    if (lockedBy && draft) {
+      toast.error(lockedBy);
+      onClose();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedBy]);
 
   // ── The preview queue ────────────────────────────────────────────────────
   // One queue owns every kind of work a slide needs: its headline, its theme
@@ -641,6 +708,10 @@ export default function ReportWizard({
   const save = useCallback(async (): Promise<boolean> => {
     const d = draftRef.current;
     if (!d) return false;
+    // Do not write without the lock. The server refuses too (409) — this is so
+    // an autosave does not fire a request every 1.5s that can only fail, and so
+    // the author is told by the banner rather than by a toast.
+    if (!hasLockRef.current) return false;
     const payload: ReportDoc = { ...d, charts: normalizeSlots(d.charts) };
     const serialized = JSON.stringify(payload);
     if (serialized === savedPayload.current) {
@@ -982,10 +1053,14 @@ export default function ReportWizard({
 
   // Stale report id (404 after a backend restart / deletion elsewhere): show
   // an escapable error panel instead of trapping the user on a spinner.
-  // Somebody else has it open. The list normally stops you before this, so
-  // reaching here means they took it in the moment between — say so plainly
+  // Somebody else had it when we arrived. The list normally stops you before
+  // this, so reaching here means they took it in the moment between — say so
   // and go back, rather than showing an editor whose saves would be refused.
-  if (lockedBy) {
+  //
+  // Only when we never got in. Losing the lock LATER shows a banner instead
+  // (see below): replacing a screen that holds unsaved work with an apology
+  // is how you turn a lock into data loss.
+  if (lockedBy && !draft) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-muted">
