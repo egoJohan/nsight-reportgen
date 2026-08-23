@@ -355,33 +355,12 @@ def _caps(shape, run, style) -> bool:
     return False
 
 
-def chart_ground(style) -> str:
-    """The slide background this template states, as #RRGGBB."""
-    bg = (getattr(style, "background", "") or "").strip()
-    if not bg:
-        return "#" + CREAM.lstrip("#")
-    return bg if bg.startswith("#") else f"#{bg}"
-
-
-def _legible_on(colour_hex: str, ground_hex: str) -> bool:
-    """Is *colour* readable on *ground*?
-
-    The renderer's OWN definition of dark (`_DARK_LUMINANCE_THRESHOLD`), not a
-    difference threshold: dark text belongs on a light ground and light text on
-    a dark one. A difference of 0.25 let black through on 37474F — it scores
-    0.267 away and is still unreadable — which is exactly the headline that
-    disappeared into the customer's own background.
-    """
-    from reportbuilder.render.house_style import (
-        _DARK_LUMINANCE_THRESHOLD, _relative_luminance,
-    )
-    try:
-        c = colour_hex if colour_hex.startswith("#") else f"#{colour_hex}"
-        text_is_dark = _relative_luminance(c) < _DARK_LUMINANCE_THRESHOLD
-        ground_is_dark = _relative_luminance(ground_hex) < _DARK_LUMINANCE_THRESHOLD
-        return text_is_dark != ground_is_dark
-    except Exception:  # noqa: BLE001 — a colour must never fail a preview
-        return True
+# Ground and legibility are NOT decided here — see render/resolved_style, which
+# is the one place that answers "what does this template say?" for the deck and
+# the preview alike.
+from reportbuilder.render.resolved_style import (  # noqa: E402
+    ground as chart_ground, legible_on as _legible_on,
+)
 
 
 def _inherited_placeholder_style(shape):
@@ -504,8 +483,8 @@ def _run_style(shape, para, run, style):
         # Nothing legible stated anywhere: the slide's own furniture ink, which
         # is what the chart on the same slide uses, so text agrees with charts
         # about what this background needs.
-        from reportbuilder.render.house_style import furniture_colors
-        colour = furniture_colors(chart_ground(style)).__getitem__(0).lstrip("#")
+        from reportbuilder.render.resolved_style import ink as _ink
+        colour = _ink(style).lstrip("#")
     return family, size_pt or 11.0, colour, bold, italic
 
 

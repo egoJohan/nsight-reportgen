@@ -18,6 +18,8 @@ Slide-text polish (R2):
 """
 from __future__ import annotations
 
+import logging
+
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
@@ -48,7 +50,8 @@ def _furniture_px(style) -> tuple:
     slide's own title/subtitle/footer text agrees with its charts about what
     "dark" means. A light/unstated background resolves to exactly PX_INK/
     PX_MUTED, unchanged."""
-    ink_hex, muted_hex, _grid = furniture_colors(getattr(style, "background", "") or "")
+    from reportbuilder.render.resolved_style import furniture
+    ink_hex, muted_hex, _grid = furniture(style)
     return (_rgb(ink_hex.lstrip("#")) or PX_INK,
             _rgb(muted_hex.lstrip("#")) or PX_MUTED)
 
@@ -414,6 +417,34 @@ def template_ground(slide, style) -> bool:
     return getattr(style, "chart_layout_index", None) is not None
 
 
+def _rendered_title_height(ph, text: str) -> int:
+    """How tall the fitted headline actually is in *ph*, in EMU.
+
+    Measured with the size the run now states and the width the text really
+    wraps inside — the box minus its own insets, which is what the renderer
+    draws into and what the fitter (using the full box width) does not see.
+    """
+    try:
+        from types import SimpleNamespace
+
+        from reportbuilder.render.image.fast_preview import (
+            _inherited_placeholder_style,
+        )
+        run = ph.text_frame.paragraphs[0].runs[0]
+        font, inherited_pt, _c, _b, caps = _inherited_placeholder_style(ph)
+        size_pt = run.font.size.pt if run.font.size is not None else (inherited_pt or TITLE_PT)
+        inset = int(ph.text_frame.margin_left or 0) + int(ph.text_frame.margin_right or 0)
+        width = max(1, int(ph.width or 0) - inset)
+        st = SimpleNamespace(size_pt=size_pt, width=width, height=int(ph.height or 0),
+                             font=font, caps=caps, line_spacing=0.0)
+        lines = measured_line_count(text, width, size_pt, st)
+        return int(lines * _title_line_height(size_pt, st))
+    except Exception:  # noqa: BLE001 — a title must never fail a render
+        logging.getLogger(__name__).warning("could not measure the title",
+                                            exc_info=True)
+        return 0
+
+
 def draw_template_heading(slide, style, text: str) -> int:
     """Put *text* where the template says a title goes; return its bottom edge.
 
@@ -431,7 +462,15 @@ def draw_template_heading(slide, style, text: str) -> int:
             _left, top, _width, height = harvested_title_box(profile, text)
             return top + height
         ph = slide.shapes.title
-        return int(ph.top or 0) + int(ph.height or 0) if ph is not None else 0
+        if ph is None:
+            return 0
+        # The BOX bottom is not the TEXT bottom. A customer's title box is drawn
+        # for the headline they wrote; ours is often longer and wraps past it,
+        # and the fitter only shrinks to `_TITLE_MIN_SCALE` — so on
+        # Egoiq_x_Rahoo a two-line headline ran straight over the subtitle in
+        # the deck and the preview both. Report where the text actually ends, so
+        # whatever the caller places next starts below it.
+        return int(ph.top or 0) + max(int(ph.height or 0), _rendered_title_height(ph, text))
 
     profile = harvested_profile(style)
     if not text or profile is None or not profile.title.positioned:
@@ -517,6 +556,35 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     tf = ph.text_frame
     tf.word_wrap = True
     tf.text = title
+
+    # Fit the headline to the placeholder's OWN box, and state the result.
+    #
+    # Nothing shrank a placeholder title before: `fit_title_size` was only used
+    # on the harvested-textbox path, so a long headline in a box drawn for a
+    # short one simply overflowed — Egoiq_x_Rahoo's 30pt Bebas Neue ran two
+    # lines down over the subtitle, in the deck as well as the preview.
+    #
+    # The size is written EXPLICITLY because that is the only way every renderer
+    # agrees: an unstated placeholder size is resolved differently by
+    # LibreOffice, PowerPoint and the compositor. Font, colour and weight are
+    # still left to inherit — only the fitted size is stated.
+    try:
+        from types import SimpleNamespace
+
+        from reportbuilder.render.image.fast_preview import (
+            _inherited_placeholder_style,
+        )
+        _font, inherited_pt, _col, _bold, caps = _inherited_placeholder_style(ph)
+        if inherited_pt and ph.width and ph.height:
+            st = SimpleNamespace(size_pt=inherited_pt, width=int(ph.width),
+                                 height=int(ph.height), font=_font, caps=caps,
+                                 line_spacing=0.0)
+            fitted = fit_title_size(st, title)
+            if fitted and abs(fitted - inherited_pt) > 0.01:
+                tf.paragraphs[0].runs[0].font.size = Pt(fitted)
+    except Exception:  # noqa: BLE001 — a title must never fail a render
+        logging.getLogger(__name__).warning(
+            "could not fit the title to its placeholder", exc_info=True)
 
     return True
 

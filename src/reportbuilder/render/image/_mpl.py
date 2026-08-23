@@ -278,9 +278,13 @@ def series_values(series):
 
 
 def chart_background(ctx) -> str:
-    """The colour a chart paints onto: the template's lt1, else house cream."""
-    value = getattr(ctx.style, "background", "") or ""
-    return f"#{value}" if value else CREAM
+    """The colour a chart paints onto — resolved in ONE place.
+
+    render/resolved_style.ground is that place: the text beside this chart reads
+    the same function, so the two cannot disagree about the ground they are on.
+    """
+    from reportbuilder.render.resolved_style import ground
+    return ground(ctx.style)
 
 
 def chart_ink(ctx) -> str:

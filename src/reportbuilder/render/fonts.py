@@ -471,3 +471,53 @@ def check_template_fonts(families, *, allow_network: bool = True,
         seen.add(key)
         out.append(ensure_font(family, allow_network=allow_network, fetch=fetch))
     return out
+
+# Typefaces that are never a template's design choice: theme references
+# ("+mj-lt"), and the CJK/symbol families PowerPoint writes alongside every
+# latin run whether or not the deck contains a word of Japanese.
+_NOT_A_DESIGN_CHOICE = {
+    "ＭＳ ｐゴシック", "ＭＳ pゴシック", "맑은 고딕", "wingdings", "symbol",
+}
+
+
+def families_in_template(pptx_path: str) -> list[str]:
+    """Every typeface the template actually names, most-used first.
+
+    The theme's major/minor pair is NOT the whole story and on real decks is
+    rarely even the interesting part: Egoiq_x_Rahoo declares Arial for both,
+    while its master sets the title in Bebas Neue and the body in Barlow
+    Condensed Medium. Checking only the theme meant nSight never learned it
+    needed either, never fetched them though both are open-licence Google
+    families, and rendered the customer's headline in a substitute — in the
+    deck AND in the preview, differently.
+
+    Reads the masters, layouts, theme and any slides, because a font can be
+    named in any of them.
+    """
+    import collections
+    import re
+    import zipfile
+
+    counts: collections.Counter = collections.Counter()
+    try:
+        with zipfile.ZipFile(pptx_path) as z:
+            for name in z.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                if not any(part in name for part in
+                           ("slideMaster", "slideLayout", "theme", "slides/")):
+                    continue
+                # <a:latin> only. A theme also carries a <a:font script="..">
+                # fallback table — Mongolian Baiti, DokChampa, thirty more —
+                # that PowerPoint writes into every file and nobody chose;
+                # fetching those would be dozens of pointless downloads.
+                for raw in re.findall(rb'<a:latin[^>]*typeface="([^"]+)"', z.read(name)):
+                    family = raw.decode("utf-8", "replace").strip()
+                    if not family or family.startswith("+"):
+                        continue
+                    if family.lower() in _NOT_A_DESIGN_CHOICE:
+                        continue
+                    counts[family] += 1
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return []
+    return [f for f, _n in counts.most_common()]

@@ -76,7 +76,7 @@ def _live_font_status(stored: list[dict], families: list[str]) -> list[dict]:
     return out
 
 
-def _resolve_template_fonts(theme) -> list[dict]:  # theme OR Template record
+def _resolve_template_fonts(theme, pptx_path: str = "") -> list[dict]:  # theme OR Template record
     """Install the fonts this template names, or record why we cannot.
 
     Done at UPLOAD, because that is when someone is looking and can act: get a
@@ -87,9 +87,16 @@ def _resolve_template_fonts(theme) -> list[dict]:  # theme OR Template record
     renders — it just renders in a substitute, which is exactly what the
     returned status says out loud.
     """
-    from reportbuilder.render.fonts import check_template_fonts
+    from reportbuilder.render.fonts import check_template_fonts, families_in_template
+    # Every font the FILE names, not just the theme's major/minor pair. On
+    # Egoiq_x_Rahoo the theme says Arial twice while the master sets the title in
+    # Bebas Neue and the body in Barlow Condensed Medium — both open-licence
+    # Google families nSight could have installed, and never learned it needed,
+    # so the customer's headline rendered in a substitute.
     families = [f for f in (getattr(theme, "heading_font", ""),
                             getattr(theme, "body_font", "")) if f]
+    if pptx_path:
+        families += families_in_template(pptx_path)
     try:
         return [st.as_dict() for st in check_template_fonts(families)]
     except Exception:  # noqa: BLE001 — a font check must not block an upload
@@ -115,6 +122,9 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
         tmp_path = tmp.name
     try:
         report = inspect_template(tmp_path)
+        # While the temp copy still exists: the font scan reads the FILE, and
+        # this is the only moment it is on disk.
+        font_status = _resolve_template_fonts(report.theme, tmp_path)
     finally:
         os.unlink(tmp_path)
 
@@ -130,7 +140,7 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
         "body_font": report.theme.body_font,
         "slide_width_in": report.slide_width_in,
         "slide_height_in": report.slide_height_in,
-        "fonts": _resolve_template_fonts(report.theme),
+        "fonts": font_status,
     }
     try:
         t = repo.upload_template(auth, customer_id, file.filename or "template.pptx",
