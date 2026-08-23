@@ -44,6 +44,43 @@ Verified by reading the code on 2026-08-23:
 * **`titleDataKey` already excludes presentation.** Chart type, colours, sort
   order and template are deliberately out of it (`charts.ts:95-125`), so a
   chart-type change must not regenerate a title.
+* **`previewContentKey` is a hand-maintained allow-list** of 25 fields
+  (`queries.ts:364`). Every new ChartSpec field must be remembered there or the
+  preview silently keeps showing the old image.
+
+## Scope
+
+This spec covers the pipeline **and** the open tickets that are really the same
+work — each one is a chart edit whose whole difficulty is "what has to be
+regenerated?", which is the question the pipeline answers:
+
+| Ticket | Requirement | Why it belongs here |
+|---|---|---|
+| **d95QXiWI** — Akselien nimien editointi | P-C-27: title, subtitle, value names and **axis names** editable in Design | The last of the four is missing. It is a presentation edit: re-render, never regenerate the title. |
+| **A9JtdqPZ** — Bottom-2 / Bottom-3 row summary | Row-summary options | Same class; tests already written and failing at `tests/suite/unit/stats/test_bottom_box_sort.py`. |
+
+**Not in scope: 7tGYRb8n** (classifying-variable menu rule, P-C-12) — it needs a
+definition session with nSight before any implementation. Worth noting for
+whoever picks it up that `classifying_var` *is* in `titleDataKey`, so changing
+it correctly regenerates the title; that ticket changes which variables are
+offered, not what happens when one is chosen.
+
+### Axis names (d95QXiWI)
+
+Today `elements.axis_names` is a boolean that only styles tick-label fonts
+(`elements.py:98-110`); no axis *title* text exists on either path.
+
+* `axis_x_title: str = ""` and `axis_y_title: str = ""` on `ChartSpec`
+  (`model/report.py`), empty meaning "no axis title", which is today's look.
+* Two text fields in the Design panel beside the existing title/subtitle ones.
+* Rendered on **both** paths, because a preview must match its slide: native
+  via `chart.value_axis.axis_title` / `category_axis.axis_title` in
+  `render/elements.py`, and image via `ax.set_xlabel` / `ax.set_ylabel` in the
+  matplotlib renderers, styled from the resolved template spec like all other
+  furniture. Chart families with no axes (pie, doughnut, radar) ignore both.
+* The existing `elements.axis_names` toggle keeps governing axis text: with it
+  off, axis titles are not drawn even when set, so one control still means
+  "no axis text on this slide".
 
 ## Design
 
@@ -61,93 +98,149 @@ def resolve(template_path: str) -> ResolvedTemplate:
     """Everything a render needs to know about a template. Cached."""
 ```
 
-`resolve()` wraps `load_style_spec` + `build_spec` behind an
-`lru_cache(maxsize=16)` keyed on `(path, st_size, st_mtime_ns)`. A re-uploaded
-template writes a different file (`_preview_template` already rewrites the temp
-copy when the size differs), so the key busts itself; nothing has to remember to
-invalidate.
+`resolve()` stats the file and calls an `lru_cache(maxsize=16)`'d inner function
+keyed on `(path, st_size, st_mtime_ns)`, wrapping `load_style_spec` +
+`build_spec`. Two callers change to it — the preview path
+(`routes_questions.py:1407,1463`) and the deck path (`routes_render.py:171`) —
+and `slide_chrome.py` stops calling `build_spec` at its three sites, reading the
+resolved spec that travels with the style instead.
 
-Both callers change to `resolve()`: the preview path
-(`routes_questions.py:1407,1463`) and the deck path (`routes_render.py:171`).
-`slide_chrome.py` stops calling `build_spec` at its three sites and reads the
-resolved spec that travels with the style.
+Concurrent first calls may compute twice under FastAPI's threadpool. That is
+harmless: the result is a value, not a resource.
 
-A 60-slide deck walks the template once instead of 60 times.
+**A pre-existing bug this inherits, and must fix.** `_preview_template` only
+rewrites its temp copy when `not f.exists() or f.stat().st_size != len(blob)`
+(`routes_questions.py:1330`), so a re-uploaded template that happens to be the
+same byte length is never written — and would now also never be re-resolved.
+Key the temp file on a content hash of the blob instead of its size.
 
-### 2. One producer registry
+A 60-slide deck then walks the template once instead of 60 times.
 
-Work is declared, not hardcoded. One entry per kind of thing a slide needs:
+### 2. Fingerprints, and which list a field belongs on
 
-```ts
-type ProducerId = "title" | "bullets" | "chart";   // + whatever comes later
-
-interface Producer {
-  id: ProducerId;
-  after: ProducerId[];                    // declared ordering
-  fingerprint(ctx): string;               // what this output depends on
-  storedFingerprint(ctx): string | null;  // what the existing output was made for
-  run(ctx): Promise<ChartPatch | void>;
-  onFailure: "continue" | "abort";
-}
-```
-
-Adding a future task is one registry entry. Nothing else changes — not the
-worker, not the queue, not the wizard.
-
-**Staleness is one rule for every producer:**
+Every producer answers one question: *is what I made still valid?* It does that
+by comparing the fingerprint of its inputs now against the fingerprint stored
+with its output.
 
 ```
 needed(p) = p.storedFingerprint(ctx) === null
          || p.storedFingerprint(ctx) !== p.fingerprint(ctx)
 ```
 
-| Producer  | applies to      | fingerprint                | stored as |
-|-----------|-----------------|----------------------------|-----------|
-| `title`   | every chart slide | `titleDataKey(chart)`    | `chart.slide_title_key` |
-| `bullets` | themes (open-ended) slides | `question_ref`  | presence of `options.bullets` |
-| `chart`   | every slide     | `previewContentKey(chart)` | the image's cache key |
+The two fingerprints are built by **opposite** rules, and the asymmetry is the
+point:
 
-Only automatic work belongs in the registry. "Shorten with AI"
-(`StepConfigure.tsx:1217`) is a button the user presses, and stays one — it is
-the worked example of how a later producer plugs in, should it ever become
-automatic: give it a fingerprint over the category label set, a stored key on
-the chart, and one registry entry. Note that `labelsPending` in the current
-`aiPending` map is vestigial — nothing ever sets it true — and goes with the
-rest of that machinery.
+* **The image fingerprint is a deny-list.** It hashes the whole `ChartSpec`
+  minus the five fields that provably cannot change pixels — `slide_id` and
+  `compare_group` (identity/provenance), `slide_title_key` (the title
+  producer's own bookkeeping), `template_slot` and `excluded` (deck placement,
+  not content) — plus the render context: template ref, report id, grouping and
+  render mode. `template_slot` matters especially: it is rewritten by
+  `normalizeSlots` on every reorder — `template_slot: \`s${i + 1}\`` for every
+  chart in the list (`charts.ts:514`) — so hashing it would re-render all 60
+  slides when the user drags one.
+  Anything new — `axis_x_title`, a future field nobody has thought of — makes
+  the image stale automatically. Getting this wrong costs one extra render;
+  getting an allow-list wrong costs a silently stale preview that looks like the
+  renderer is broken. Today's 25-field allow-list at `queries.ts:364` is
+  replaced.
+* **The title fingerprint stays an allow-list** — `titleDataKey`, unchanged.
+  Here the costs invert: an over-broad key means needless LLM calls, visible
+  churn and money, while a missed field means a title that is merely a bit
+  stale. Presentation stays out by construction.
 
-Two consequences worth stating, because both are properties the old code tried
-to maintain by hand:
+**The rule for anyone adding a chart field:** it lands in the image fingerprint
+automatically. Add it to `titleDataKey` **only** if it changes what the data
+*says*, not how it looks. `axis_x_title` and the bottom-2/3 row summary are both
+presentation, so neither goes in — and both re-render without touching a title.
 
-* A chart-type change moves `previewContentKey` but not `titleDataKey`, so the
-  slide re-renders and the title is left alone.
-* `previewContentKey` *contains* the title, so a title landing automatically
-  makes the image stale. Ordering is enforced by the fingerprints themselves,
-  and a late title re-renders its slide exactly once.
+| Producer  | applies to | fingerprint | stored as |
+|---|---|---|---|
+| `title` | every chart slide | `titleDataKey(chart)` | `chart.slide_title_key` |
+| `bullets` | themes (open-ended) slides | `question_ref` | presence of `options.bullets` — deliberately generate-once, as today |
+| `chart` | every slide, special ones included | image fingerprint | the queue's completed-fingerprint map |
 
-### 3. One function, run sequentially
+Two properties fall out, both of which the old code tried to maintain by hand:
+a chart-type change moves the image fingerprint but not `titleDataKey`, so the
+slide re-renders and the title is left alone; and because the image fingerprint
+covers the whole spec — title included — a title landing makes its own image
+stale, so ordering enforces itself and a late title re-renders its slide exactly
+once.
+
+### 3. One producer registry
+
+Work is declared, not hardcoded — an ordered array, one entry per kind of work:
+
+```ts
+type ProducerId = "title" | "bullets" | "chart";   // + whatever comes later
+
+interface Producer {
+  id: ProducerId;
+  fingerprint(ctx): string;
+  storedFingerprint(ctx): string | null;
+  run(ctx): Promise<ChartPatch | void>;
+  onFailure: "continue" | "abort";
+}
+
+const PRODUCERS: Producer[] = [title, bullets, chart];  // order is the order
+```
+
+Adding a future task is one entry. Nothing else changes — not the worker, not
+the queue, not the wizard.
+
+Only automatic work belongs here. "Shorten with AI"
+(`StepConfigure.tsx:1217`) is a button the user presses and stays one; it is the
+worked example of how a later producer plugs in, should it ever become
+automatic. `labelsPending` in the current `aiPending` map is vestigial —
+nothing ever sets it true — and goes with the rest of that machinery.
+
+### 4. One function, run sequentially
 
 ```ts
 async function producePreview(slideId: string): Promise<void> {
-  for (const p of PRODUCERS) {              // declared order
-    const ctx = readSlide(slideId);         // re-read every time — never a snapshot
-    if (!ctx) return;                       // slide deleted while queued
+  for (const p of PRODUCERS) {
+    const ctx = readSlide(slideId);      // re-read every time — never a snapshot
+    if (!ctx) return;                    // slide deleted while queued
     if (!needed(p, ctx)) continue;
+    const fp = p.fingerprint(ctx);       // capture what we are about to satisfy
     try {
       applyPatch(slideId, await p.run(ctx));
-      markDone(slideId, p.id);
+      markDone(slideId, p.id, fp);       // store THAT fingerprint, not a re-read one
     } catch (e) {
-      markFailed(slideId, p.id, p.fingerprint(ctx), e);
+      markFailed(slideId, p.id, fp, e);
       if (p.onFailure === "abort") return;
     }
   }
+  if (PRODUCERS.some((p) => needed(p, readSlide(slideId)))) enqueue(slideId);
 }
 ```
 
-The context is re-read before every producer, so `chart` computes
-`previewContentKey` *after* `title` applied its patch, and a slide edited while
-queued is never worked on from stale data.
+Three details carry the correctness:
 
-### 4. Failure
+* The context is re-read before every producer, so `chart` fingerprints *after*
+  `title` applied its patch, and a slide edited mid-run is never worked from
+  stale data. **`readSlide` must therefore read the queue's own working copy,
+  not React state.** Patches are flushed to the wizard in batches (§7), so a
+  producer reading React state would see the chart as it was *before* the
+  previous producer wrote to it: `chart` would fingerprint against the old
+  title, render, and the tail re-check would immediately find the title changed
+  and re-enqueue — forever. The queue applies each patch to its working copy
+  synchronously and flushes to React separately; producers read their own
+  writes.
+
+  The working copy is an *overlay*, not a second document: `readSlide` returns
+  the draft (via `slideSource`) merged with whatever patches this queue has
+  applied but not yet flushed, and a flush drops what it wrote. So the overlay
+  can never shadow a later user edit — it is empty again the moment the draft
+  holds the same values. A title patch racing a hand-edit of that same field
+  resolves the way it does today: hand-typed clears `slide_title_key`, and
+  whichever write lands last wins.
+* `markDone` stores the fingerprint captured at the start of that producer —
+  never one re-read afterwards, which would record work never actually done.
+* The tail re-check catches an edit that arrived while the slide was running,
+  and re-enqueues rather than leaving a stale output marked valid.
+
+### 5. Failure
 
 Per slide, per producer: `pending | running | done | failed`, recording the
 fingerprint the failure happened at.
@@ -159,24 +252,50 @@ fingerprint the failure happened at.
   done, so it stays retryable. It surfaces in the red warning button already
   above the preview, and retry re-enqueues just that producer.
 
-### 5. The queue
+### 6. The queue
 
 `web/src/lib/previewQueue.ts` replaces both existing queues.
 
 ```ts
 enqueue(slideId)     // dedupes by slideId; a queued slide is not queued twice
-promote(slideId)     // clicked slide jumps to the head; a running one is left alone
+promote(slideId)     // move to the head; no-op if running or already done
 isBusy()             // any producer running, anywhere
 subscribe(fn)        // components read status via useSyncExternalStore
 ```
 
-Entering Design enqueues the whole deck; clicking a slide promotes it to the
-head of the queue. Concurrency is per producer kind rather than one global
-number: the Design step's compositor renders are ~0.25 s and the queue is
-LLM-bound, while the Preview step's LibreOffice renders remain the expensive
-class. The old global 3 was sized for LibreOffice and is wrong for both.
+The queue is a module-level singleton, not React state, so it survives step
+changes (it does not survive a reload — see Out of scope). It is **keyed by
+report**: opening a different report calls `reset(reportId)`, or one report's
+statuses would be read as another's.
 
-### 6. What the wizard keeps
+Two seams connect it to the wizard, registered on mount, so the queue never
+imports React and the wizard never reaches into the queue:
+
+```ts
+setSlideSource(fn)  // how the queue reads the current draft
+setPatchSink(fn)    // where patches go; the wizard applies them to the draft
+```
+
+It owns one authoritative store: `Map<slideId, Map<ProducerId, {status, fingerprint}>>`,
+plus the working copy §4 depends on.
+Image bytes still live in the React Query cache (keyed by the image fingerprint,
+`staleTime: Infinity`), so existing consumers keep working and a stale image is
+simply never looked up.
+
+Entering Design enqueues the whole deck, and the wizard re-enqueues it whenever
+the chart list changes, so a slide added later is picked up; `enqueue` dedupes
+and `needed()` filters, so re-enqueueing a settled deck costs nothing. Clicking
+a slide promotes it. Because
+the Design preview and the Preview step now show the *same* image — the user's
+requirement that "we need to use exactly the same slides for both" — there is
+one `chart` producer and one image per slide, not one per step.
+
+Concurrency is per producer kind rather than one global number. The old 3 was
+sized for LibreOffice (~300 MB per process); the Design step now uses the
+compositor at ~0.25 s, so the queue is LLM-bound, and the two kinds should not
+share a limit.
+
+### 7. What the wizard keeps
 
 `ReportWizard` keeps exactly one job it does not delegate: it owns the draft.
 The queue never mutates the draft — it emits patches through a single seam,
@@ -186,48 +305,67 @@ Saving becomes one rule: **draft dirty AND `!queue.isBusy()` → debounced save*
 with a 90 s cap so a stranded producer can never mean the author's typing is
 lost. This replaces the `aiSaveTick`/`aiPending`/`aiBusy` machinery.
 
-### 7. Deleted
+### 8. Deleted
 
 * `ReportWizard.tsx`: `titleQueue`, `titleActive`, `pumpTitles`, `runTitle`,
   `titlesAttempted`, `ensureTitles`, `aiPending` (including the never-set
   `labelsPending`), `aiBusy`, `clearAiPending`
 * `api.ts`: `previewQueue`, `pumpPreview`, `serializePreview`,
   `setActivePreviewKey`
+* `queries.ts`: `previewContentKey`'s 25-field allow-list
 * `SlideTitleOverlay.tsx` — dead already
 * The `titlePending` props threaded through `StepConfigure`, `ChartThumb` and
   `DeckPrefetch`
 
+## Shipping order
+
+The backend half stands alone and lands first: the template cache and the
+temp-file hash fix are invisible to the frontend beyond being faster, and axis
+titles are additive (empty string = today's look). The frontend rewrite —
+registry, queue, wizard — is one change that cannot be half-done, because it
+deletes the two queues it replaces.
+
 ## Verification
 
-**Backend (pytest):** `resolve()` returns a cached instance for a repeated path;
-a template whose bytes change produces a fresh one; the resolved spec matches
-what `load_style_spec` + `build_spec` produced before.
+**Backend (pytest).** `resolve()` returns the same instance for a repeated path
+and a fresh one when the file's bytes change; the resolved spec matches what
+`load_style_spec` + `build_spec` produced before; a same-length re-upload is
+picked up (the temp-file hash fix); axis titles render on both paths and are
+ignored by pie/doughnut/radar.
 
-**Frontend** has no test runner, so it is verified by driving the real UI with
-Playwright against the dev stack, as done on 2026-08-23. A session cookie is
-minted with the backend's own `auth.session` module
-(`scratchpad/mint_session.py`). Against a 60-slide report the acceptance
-criteria are:
+**Frontend unit tests (new).** The fingerprint functions are the heart of this
+design and are pure, so they get real tests rather than a manual pass — the
+repo has no frontend runner today, so this adds **vitest** for pure modules
+only, no component rendering. Cases: a chart-type change moves the image
+fingerprint and not `titleDataKey`; adding `axis_x_title` moves the image
+fingerprint (the deny-list property, which is the whole point); `titleDataKey`
+is stable across colour, sort, template and row-summary edits; `needed()` is
+false for an untouched slide.
+
+**End-to-end**, driving the real UI with Playwright against the dev stack, as
+done on 2026-08-23 — a session cookie is minted with the backend's own
+`auth.session` module. Against a 60-slide report:
 
 | Scenario | Expected |
 |---|---|
 | Open Design on a title-less report | 60 title calls, 60 renders, **1** save |
-| Open Design on a fully titled report | 0 title calls, 0 saves |
+| Open Design on a fully titled report | 0 title calls, 0 renders, 0 saves |
 | Change one chart's type | 1 render, **0** title calls |
-| Edit a slide title by hand | 1 save, ~2 s later |
+| Edit an axis name | 1 render, **0** title calls |
+| Edit a slide title by hand | 1 render, 1 save, no title call |
 | Click an unrendered slide mid-warm-up | it renders next |
 | LLM title fails | slide still renders; failure shown in the warning button |
+| Design → Preview | no re-render; the same images |
 
-Baseline for comparison, measured today: 60 titles → 17 saves before the
-interim fix, 1 after; 28 saves observed in the original backend log.
+Baseline measured on 2026-08-23: 60 titles → 17 saves before the interim fix, 1
+after; 28 saves in the original backend log.
 
 ## Out of scope
 
-Named so they are not lost, and neither is part of this work:
+Named so they are not lost, and none is part of this work:
 
 * Previews do not survive a page reload — the client image cache is not
   persisted.
 * The backend preview disk cache is salted per process, so a restart
   re-renders everything.
-* bottom-2 / bottom-3 sorting, parked with failing tests at
-  `tests/suite/unit/stats/test_bottom_box_sort.py`.
+* 7tGYRb8n, the classifying-variable menu rule, which needs definition first.
