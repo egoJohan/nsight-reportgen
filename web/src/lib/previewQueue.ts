@@ -52,6 +52,10 @@ type SlideSource = (slideId: string) => ChartSpec | null;
 type PatchSink = (slideId: string, patch: Partial<ChartSpec>) => void;
 
 let slideSource: SlideSource = () => null;
+/** Every slide in the report, in order. Told to the queue by the wizard, so a
+ *  context change can refill the queue with the whole deck without asking
+ *  anyone. */
+let deck: string[] = [];
 let patchSink: PatchSink = () => {};
 let renderContext: RenderContext = {
   templateRef: "",
@@ -62,6 +66,11 @@ let renderContext: RenderContext = {
 
 export function setSlideSource(fn: SlideSource) {
   slideSource = fn;
+}
+
+/** The slides this report has, in order. */
+export function setDeck(slideIds: string[]) {
+  deck = slideIds.filter(Boolean);
 }
 export function setPatchSink(fn: PatchSink) {
   patchSink = fn;
@@ -74,18 +83,53 @@ export function setPatchSink(fn: PatchSink) {
 let contextGeneration = 0;
 
 export function setRenderContext(ctx: RenderContext) {
-  const changed = JSON.stringify(ctx) !== JSON.stringify(renderContext);
+  if (JSON.stringify(ctx) === JSON.stringify(renderContext)) return;
   const before = renderContext;
+  const wasQueued = queue.length;
+  const wasRunning = running.size;
   renderContext = ctx;
-  if (changed) {
-    contextGeneration += 1;
-    say("context-changed", {
-      detail:
-        `gen=${contextGeneration} template "${before.templateRef}" -> ` +
-        `"${ctx.templateRef}"; ${running.size} running will be abandoned, ` +
-        `${queue.length} queued will be re-checked under the new one`,
-    });
-  }
+
+  // Changing the template (or the grouping) restyles the whole deck, so the
+  // queue starts again, deliberately and in one place:
+  //
+  //   stop  — work in flight was started for the previous template, so bumping
+  //           the generation makes it abandon itself when it returns;
+  //   clear — everything queued was queued for that template too;
+  //   refill — every slide, in order, from the top.
+  //
+  // Each slide then decides for itself what it actually needs, which is where
+  // "do not rewrite a headline that is already correct" lives: a title is about
+  // the DATA, and the template did not change the data, so the title producer
+  // finds itself up to date and only the picture is redrawn.
+  //
+  // Doing this here rather than leaving it to whichever component noticed is
+  // the point. It used to be spread across an effect, a debounce and a tail
+  // re-check, and slides fell between them.
+  restartDeck(
+    `template "${before.templateRef}" -> "${ctx.templateRef}"; ` +
+    `dropped ${wasQueued} queued, ${wasRunning} running will abandon`
+  );
+}
+
+/** Stop, clear, and re-queue the whole deck.
+ *
+ *  Stop  — work in flight was started for the previous state, so bumping the
+ *          generation makes it abandon itself when it returns.
+ *  Clear — everything queued was queued for that state too.
+ *  Refill — every slide, in order, from the top.
+ *
+ *  Each slide then decides for itself what it actually needs, which is where
+ *  "do not rewrite a headline that is already correct" lives: a title is about
+ *  the DATA, and a template change did not change the data, so the title
+ *  producer finds itself up to date and only the picture is redrawn.
+ */
+export function restartDeck(reason: string) {
+  contextGeneration += 1;
+  queue = [];
+  queued = new Set();
+  say("restart", { detail: `gen=${contextGeneration} ${reason}; re-queueing ${deck.length} slides` });
+  for (const slideId of deck) enqueue(slideId);
+  pump();
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -248,6 +292,21 @@ function debugToConsole(): boolean {
   }
 }
 
+/** A component is asking for a slide's picture under this fingerprint.
+ *
+ *  Recorded because the failure that is hardest to see from outside is a
+ *  MISMATCH: the queue renders every slide, reports itself finished, and the
+ *  screen stays blank because the thing displaying is keyed on something
+ *  slightly different. Both halves are in the trace now, so they can be
+ *  compared instead of reasoned about.
+ */
+export function noteWanted(slideId: string, fingerprint: string, hasImage: boolean) {
+  say("wanted", {
+    slideId,
+    detail: `fp=${short(fingerprint)} ${hasImage ? "hit" : "MISS"}`,
+  });
+}
+
 /** The recorded sequence. */
 export function getTrace(): TraceEvent[] {
   return trace;
@@ -265,6 +324,15 @@ export function snapshot() {
     for (const [id, e] of byProducer) if (e.status !== "done") parts.push(`${id}:${e.status}`);
     if (parts.length) pending[slideId] = parts.join(",");
   }
+  // What each slide's picture was last rendered FOR. The failure that is
+  // invisible from outside is a mismatch — the queue reports itself finished
+  // and the screen stays blank because the two are keyed on different things —
+  // so this is here to be compared against what a component asks for.
+  const renderedFor: Record<string, string> = {};
+  for (const [slideId, byProducer] of statuses) {
+    const e = byProducer.get("chart");
+    if (e?.fingerprint) renderedFor[slideId] = short(e.fingerprint);
+  }
   return {
     queued: [...queued],
     running: [...running],
@@ -275,6 +343,8 @@ export function snapshot() {
     context: renderContext,
     unfinished: pending,
     slidesTracked: statuses.size,
+    renderedFor,
+    knows: (slideId: string) => statuses.has(slideId),
   };
 }
 

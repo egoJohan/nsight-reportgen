@@ -5,7 +5,7 @@ import {
   keepPreviousData,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { api, ApiError } from "./api";
 import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
@@ -143,7 +143,10 @@ export function useSubstitutions() {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["template-detail"] });
       qc.invalidateQueries({ queryKey: ["templates"] });
-      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+      // A stand-in font is not part of the fingerprint either: same reasoning
+      // as the chart font above.
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      previewQueue.restartDeck("a font substitution changed");
     },
   });
   return { ...query, save };
@@ -162,8 +165,12 @@ export function useSetChartFont() {
     mutationFn: api.settings.setChartFont,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings", "chart-font"] });
-      // Every rendered thumbnail was drawn with the previous font.
-      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+      // Every rendered thumbnail was drawn with the previous font. The font is
+      // not part of the image fingerprint — it is a server-side setting, not a
+      // property of the slide — so the pictures have to be dropped and made
+      // again, and the queue has to be told, or it will consider them done.
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      previewQueue.restartDeck("the chart font changed");
     },
   });
 }
@@ -227,13 +234,17 @@ export function useTemplateActions(customerId: string | undefined) {
     qc.invalidateQueries({ queryKey: ["customer"] });
     qc.invalidateQueries({ queryKey: ["customers"] });
     qc.invalidateQueries({ queryKey: ["case"] });
-    // Every chart preview is a picture of a slide IN a template — its ground,
-    // its title font, its palette — so changing the template makes all of them
-    // wrong. They are not keyed on the template (the chart's own content is the
-    // key), so they are REMOVED rather than invalidated: dropped from the cache
-    // and re-rendered on demand, instead of showing the old template's slide
-    // until something else happens to refetch them.
-    qc.removeQueries({ queryKey: ["chart-preview"] });
+    // NOT removeQueries any more, and the difference is the whole bug.
+    //
+    // Previews ARE keyed on the template now — it is part of the image
+    // fingerprint — so a template change asks for different keys and the old
+    // template's pictures are simply never looked up again. Wiping the cache on
+    // top of that was actively destructive: this runs when the mutation
+    // settles, by which time the queue has already rendered slides under the
+    // NEW key, and it deleted those. The queue had recorded them as done, so
+    // nothing rendered them a second time, and the pane stayed blank for ever
+    // however long you waited. That is the "preview never gets ready" this
+    // chased for days.
   };
   return {
     upload: useMutation({
@@ -441,6 +452,30 @@ export function useChartPreview(
     if (priority && slideId) previewQueue.promote(slideId);
   }, [priority, slideId]);
 
+  // Keep the previous picture only while looking at the SAME slide.
+  //
+  // Holding it across a change of slide is how the Design pane appeared to
+  // freeze after a template switch: every slide's image was being remade, the
+  // one you clicked was not ready, and `keepPreviousData` filled the gap with
+  // the picture of the slide you had just left. Clicking through the deck
+  // showed one unchanging image. Editing a slide still keeps its own last
+  // picture up, dimmed, which is what that behaviour is for.
+  // Record what this component is asking for, next to what the queue rendered.
+  const qcForNote = useQueryClient();
+  useEffect(() => {
+    if (!slideId) return;
+    previewQueue.noteWanted(
+      slideId,
+      String(queryKey[2] ?? ""),
+      qcForNote.getQueryData(queryKey) !== undefined
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slideId, String(queryKey[2] ?? "")]);
+
+  const lastSlide = useRef(slideId);
+  const sameSlide = lastSlide.current === slideId;
+  lastSlide.current = slideId;
+
   // Cache-only. The preview queue is the ONLY thing that fetches an image, so
   // that a slide's headline is written before its picture is drawn and the
   // slide is rendered once rather than twice. A component that fetched on its
@@ -452,7 +487,7 @@ export function useChartPreview(
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     retry: false,
-    placeholderData: keepPreviousData,
+    placeholderData: sameSlide ? keepPreviousData : undefined,
   });
 }
 
@@ -466,22 +501,33 @@ export function chartPreviewKey(
   return ["chart-preview", materialId, imageFingerprint(chart, ctx)];
 }
 
-/** Fetch one slide's image into the cache. Called by the queue, nowhere else. */
+/** Fetch one slide's image into the cache, under the fingerprint the QUEUE
+ *  computed. Called by the queue, nowhere else.
+ *
+ *  The fingerprint is passed in rather than recomputed here, and that is the
+ *  whole point. It used to be recomputed from a render context captured in a
+ *  closure — and a template change refills the queue synchronously, starting
+ *  renders before the new closure is installed. Those renders stored their
+ *  picture under the OLD template's key while the queue recorded the new one as
+ *  done, so every slide was rendered, the queue reported itself finished, and
+ *  the screen stayed blank. One fingerprint, computed once, used for both the
+ *  key and the "do I have it?" check.
+ */
 export async function fetchChartPreviewInto(
   qc: QueryClient,
   materialId: string,
   chart: ChartSpec,
-  ctx: RenderContext,
-  grouping: GroupingOverride | undefined
+  fingerprint: string,
+  opts: { renderTitle: boolean; reportId: string; grouping: GroupingOverride | undefined }
 ): Promise<void> {
   await qc.fetchQuery<ChartPreviewResult>({
-    queryKey: chartPreviewKey(materialId, chart, ctx),
+    queryKey: ["chart-preview", materialId, fingerprint],
     queryFn: () =>
       api.materials
         .previewChart(materialId, chart, {
-          renderTitle: ctx.renderTitle,
-          grouping,
-          reportId: ctx.reportId,
+          renderTitle: opts.renderTitle,
+          grouping: opts.grouping,
+          reportId: opts.reportId,
         })
         .then(async ({ blob, titleMeta }) => ({
           dataUrl: await blobToDataURL(blob),
@@ -615,7 +661,8 @@ export function useSetWordMerges(materialId: string) {
       api.materials.setWordMerges(materialId, qid, merges),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["question-words", materialId] });
-      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      previewQueue.restartDeck("word merges changed");
       qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
     },
   });
@@ -632,7 +679,8 @@ export function useSetQuestionLabel(materialId: string) {
       qc.invalidateQueries({ queryKey: qk.questions(materialId) });
       qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
       qc.invalidateQueries({ queryKey: ["regrouped-questions", materialId] });
-      qc.invalidateQueries({ queryKey: ["chart-preview"] });
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      previewQueue.restartDeck("a question was renamed");
     },
   });
 }

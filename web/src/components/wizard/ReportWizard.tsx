@@ -508,6 +508,7 @@ export default function ReportWizard({
     previewQueue.setSlideSource(
       (id) => draftRef.current?.charts.find((c) => c.slide_id === id) ?? null
     );
+    previewQueue.setDeck((draftRef.current?.charts ?? []).map((c) => c.slide_id ?? ""));
     previewQueue.setPatchSink((id, patch) => updateChartById(id, patch));
   }, [reportId, updateChartById]);
 
@@ -528,8 +529,15 @@ export default function ReportWizard({
       grouping: () => draftRef.current?.grouping,
       hasImage: (fingerprint) =>
         qc.getQueryData(["chart-preview", materialId, fingerprint]) !== undefined,
-      fetchImage: (chart) =>
-        fetchChartPreviewInto(qc, materialId, chart, ctx, draftRef.current?.grouping),
+      // The fingerprint the QUEUE computed, not one recomputed from `ctx` —
+      // which is captured here and is one statement stale the moment a template
+      // change refills the queue and starts rendering synchronously.
+      fetchImage: (chart, fingerprint) =>
+        fetchChartPreviewInto(qc, materialId, chart, fingerprint, {
+          renderTitle: false,
+          reportId,
+          grouping: draftRef.current?.grouping,
+        }),
     });
   }, [materialId, reportId, draft?.template_ref, groupingKey, qc]);
 
@@ -541,14 +549,17 @@ export default function ReportWizard({
   // type or a headline leaves the ids identical, and because components only
   // read the cache now, nothing would ever draw the new version. The author's
   // edit saved and the picture never moved.
-  // What a slide's picture depends on: the slide itself AND the context it is
-  // drawn in. The template belongs here — changing it restyles every slide, but
-  // it does not touch a single chart, so watching the charts alone meant picking
-  // a new template updated nothing on screen until something else was edited.
-  const renderSalt = `${draft?.template_ref ?? ""}|${JSON.stringify(draft?.grouping ?? {})}`;
-  const signatureOf = (c: ChartSpec) => `${JSON.stringify(c)}|${renderSalt}`;
+  // The wizard tells the queue three things, and nothing else:
+  //
+  //   the deck      — which slides exist, so a context change can re-queue them
+  //   the context   — the template and grouping every slide is drawn in
+  //   what changed  — a slide whose own content the author edited
+  //
+  // A template change is NOT in that last category: it changes no chart. The
+  // queue handles it in one place (see setRenderContext), which is what this
+  // used to do here, badly, across an effect and a debounce.
   const chartsSignature = (draft?.charts ?? [])
-    .map((c) => `${c.slide_id ?? ""}=${signatureOf(c)}`)
+    .map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
     .join("\u0000");
   const resolvedCount = questionByRef.size;
   const lastSeen = useRef<Map<string, string>>(new Map());
@@ -561,9 +572,11 @@ export default function ReportWizard({
     if (!resolvedCount) return;
     // Debounced, so holding a key down does not queue a render per keystroke.
     const h = setTimeout(() => {
+      const charts = draftRef.current?.charts ?? [];
+      previewQueue.setDeck(charts.map((c) => c.slide_id ?? ""));
       const next = new Map<string, string>();
-      for (const c of draftRef.current?.charts ?? []) {
-        if (c.slide_id) next.set(c.slide_id, signatureOf(c));
+      for (const c of charts) {
+        if (c.slide_id) next.set(c.slide_id, JSON.stringify(c));
       }
       for (const [id, sig] of next) {
         if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
@@ -571,7 +584,6 @@ export default function ReportWizard({
       lastSeen.current = next;
     }, 350);
     return () => clearTimeout(h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartsSignature, resolvedCount]);
 
   // "Is the queue doing anything?" — the one signal the save rule needs.
