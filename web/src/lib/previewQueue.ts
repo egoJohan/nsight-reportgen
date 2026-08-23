@@ -108,6 +108,20 @@ export function isBusy(): boolean {
   return active > 0 || queue.length > 0;
 }
 
+/** This slide's statuses as a stable STRING.
+ *
+ * useSyncExternalStore compares snapshots by identity, so a hook returning a
+ * fresh object every render would re-render for ever. The string only changes
+ * when a status does.
+ */
+export function statusKeyOf(slideId: string): string {
+  const forSlide = statuses.get(slideId);
+  if (!forSlide) return "";
+  const parts: string[] = [];
+  for (const [id, e] of forSlide) parts.push(`${id}:${e.status}`);
+  return parts.join(",");
+}
+
 export function statusOf(slideId: string): Partial<Record<ProducerId, Status>> {
   const out: Partial<Record<ProducerId, Status>> = {};
   for (const [id, e] of statuses.get(slideId) ?? []) out[id] = e.status;

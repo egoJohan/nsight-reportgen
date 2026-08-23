@@ -3,10 +3,12 @@ import {
   useMutation,
   useQueryClient,
   keepPreviousData,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { api, ApiError, setActivePreviewKey } from "./api";
-import { imageFingerprint } from "./previewFingerprint";
+import { api, ApiError } from "./api";
+import { imageFingerprint, type RenderContext } from "./previewFingerprint";
+import * as previewQueue from "./previewQueue";
 import type { Substitutions } from "./api";
 import type {
   AccessMode,
@@ -430,39 +432,64 @@ export function useChartPreview(
       renderTitle,
     }),
   ];
-  // Stable string key shared with the render gate so it can match this slide's
-  // queued render and promote it when this slide is the active one.
-  const gateKey = JSON.stringify(queryKey);
   const priority = opts?.priority ?? false;
-  // The ACTIVE slide announces its key so the gate runs its render first (in the
-  // reserved slot) even if the background prefetch already queued it.
+  const slideId = chart.slide_id ?? "";
+  // The slide the author is looking at renders next. The queue owns ordering,
+  // so this is a promotion, not a second lane: whichever slide is selected goes
+  // to the head of the one queue.
   useEffect(() => {
-    if (!priority) return;
-    setActivePreviewKey(gateKey);
-    return () => setActivePreviewKey(null);
-  }, [priority, gateKey]);
+    if (priority && slideId) previewQueue.promote(slideId);
+  }, [priority, slideId]);
+
+  // Cache-only. The preview queue is the ONLY thing that fetches an image, so
+  // that a slide's headline is written before its picture is drawn and the
+  // slide is rendered once rather than twice. A component that fetched on its
+  // own would be a second queue again, which is the arrangement this replaced.
   return useQuery<ChartPreviewResult>({
     queryKey,
+    queryFn: () => Promise.reject(new Error("previews are produced by previewQueue")),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The cache key an image is stored under. Shared with the queue's `chart`
+ *  producer so the thing that fetches and the thing that reads cannot drift. */
+export function chartPreviewKey(
+  materialId: string,
+  chart: ChartSpec,
+  ctx: RenderContext
+): unknown[] {
+  return ["chart-preview", materialId, imageFingerprint(chart, ctx)];
+}
+
+/** Fetch one slide's image into the cache. Called by the queue, nowhere else. */
+export async function fetchChartPreviewInto(
+  qc: QueryClient,
+  materialId: string,
+  chart: ChartSpec,
+  ctx: RenderContext,
+  grouping: GroupingOverride | undefined
+): Promise<void> {
+  await qc.fetchQuery<ChartPreviewResult>({
+    queryKey: chartPreviewKey(materialId, chart, ctx),
     queryFn: () =>
       api.materials
         .previewChart(materialId, chart, {
-          renderTitle,
-          key: gateKey,
-          grouping: opts?.grouping,
-          reportId: opts?.reportId,
+          renderTitle: ctx.renderTitle,
+          grouping,
+          reportId: ctx.reportId,
         })
         .then(async ({ blob, titleMeta }) => ({
           dataUrl: await blobToDataURL(blob),
           titleMeta,
         })),
-    enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     retry: false,
-    // Keep the previously rendered slide visible while the new render loads, so
-    // editing a spec shows the old image + an "Updating…" badge instead of
-    // flashing the whole-slide "Rendering preview…" placeholder.
-    placeholderData: keepPreviousData,
   });
 }
 

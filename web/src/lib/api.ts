@@ -410,71 +410,6 @@ function postAi<T>(materialId: string, kind: string, body: unknown): Promise<T> 
   return aiPost<T>(`/materials/${materialId}/ai/${kind}`, body);
 }
 
-// The backend renders previews through LibreOffice (a small pool of isolated
-// profiles). Run previews through a bounded, KEY-AWARE pool so the deck warms in
-// the background — but the slide the user is LOOKING AT is never stuck behind it.
-//
-// Why key-aware: React Query dedupes by query key, so the active slide and the
-// background deck-prefetch share ONE request. A boolean "priority" on the request
-// can't help — whichever observer created it first (usually the background
-// prefetch) decides its lane. Instead the active slide announces its KEY via
-// setActivePreviewKey(); the gate then PROMOTES whichever queued task matches
-// that key, running it immediately in a reserved slot. So selecting a not-yet-
-// rendered slide from the end of the deck renders it right away.
-// 3, not 4: background renders now run 2 at a time. Each one is a LibreOffice
-// process (~300 MB, CPU-bound) on the SAME box as the API the UI is talking to,
-// so a wider pool warms the deck slightly sooner and makes everything else —
-// including switching slides — feel stuck while it does. Two background renders
-// plus the reserved slot keeps the machine answering.
-const PREVIEW_CONCURRENCY = 3;
-const PRIORITY_RESERVE = 1; // slot kept free so the active slide can always start
-let previewActive = 0;
-let activePreviewKey: string | null = null;
-const previewQueue: Array<{ start: () => void; key: string }> = [];
-
-// The slide the user is currently viewing (its render-content key). Its queued
-// render jumps the queue. Called by useChartPreview for the active preview.
-export function setActivePreviewKey(key: string | null) {
-  activePreviewKey = key;
-  pumpPreview();
-}
-
-function pumpPreview() {
-  // 1) The active slide's queued render runs first and may use the reserved slot.
-  if (activePreviewKey) {
-    let i: number;
-    while (
-      previewActive < PREVIEW_CONCURRENCY &&
-      (i = previewQueue.findIndex((q) => q.key === activePreviewKey)) !== -1
-    ) {
-      previewActive++;
-      previewQueue.splice(i, 1)[0].start();
-    }
-  }
-  // 2) Background renders fill the rest, but stay below the pool size so the
-  //    reserved slot is always free for a freshly-selected slide.
-  while (
-    previewQueue.length &&
-    previewActive < PREVIEW_CONCURRENCY - PRIORITY_RESERVE
-  ) {
-    previewActive++;
-    previewQueue.shift()!.start();
-  }
-}
-
-function serializePreview<T>(task: () => Promise<T>, key = ""): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const start = () => {
-      task().then(resolve, reject).finally(() => {
-        previewActive--;
-        pumpPreview();
-      });
-    };
-    previewQueue.push({ start, key });
-    pumpPreview();
-  });
-}
-
 // The fast preview path (render_title=false) reports the template's title box
 // in response headers rather than the body, which is PNG bytes — see
 // routes_questions.py and title_box_headers() in fast_preview.py. Absent
@@ -1001,7 +936,9 @@ export const api = {
       chart: ChartSpec,
       opts?: {
         renderTitle?: boolean;
-        key?: string;
+        /** This is the slide the author is looking at: ask the backend for its
+         *  reserved render slot. */
+        priority?: boolean;
         grouping?: GroupingOverride;
         // Which report this preview belongs to, so the backend's
         // resolve_template can see ITS template choice (and any pin) rather
@@ -1010,8 +947,9 @@ export const api = {
         reportId?: string;
       }
     ): Promise<{ blob: Blob; titleMeta: ChartPreviewTitleMeta | null }> => {
-      const key = opts?.key ?? "";
-      return serializePreview(async () => {
+      // No gate here any more: previewQueue owns ordering and concurrency, so
+      // that a slide's headline is written before its picture is drawn.
+      return (async () => {
         // When renderTitle is false the PNG omits the baked title block, so the
         // frontend owns the title region (progressive preview overlay). The
         // report's grouping is included so a chart on a manually-grouped question
@@ -1022,12 +960,11 @@ export const api = {
           ...(opts?.grouping ? { grouping: opts.grouping } : {}),
           ...(opts?.reportId ? { report_id: opts.reportId } : {}),
         };
-        // If this render IS the slide the user is currently viewing (its key is the
-        // active one when it starts), ask the backend to use its RESERVED soffice
-        // slot so it never waits behind background deck-prefetch renders.
-        const priority = key !== "" && key === activePreviewKey;
+        // The backend keeps a reserved soffice slot for the slide the author is
+        // looking at. The queue promotes that slide to the head of one queue, so
+        // it is already first here; the flag stays for the backend's own pool.
         const res = await fetch(
-          `${API_BASE}/materials/${materialId}/preview-chart${priority ? "?priority=1" : ""}`,
+          `${API_BASE}/materials/${materialId}/preview-chart${opts?.priority ? "?priority=1" : ""}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1046,7 +983,7 @@ export const api = {
           throw new Error(detail);
         }
         return { blob: await res.blob(), titleMeta: readTitleMeta(res.headers) };
-      }, key);
+      })();
     },
 
     // AI: generate a descriptive slide title. Goes through the shared AI gate

@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
+import { usePreviewStatus } from "@/lib/usePreviewStatus";
 import { useDragReorder } from "@/lib/useDragReorder";
 import { slideTitle } from "@/components/wizard/slideTitle";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -49,7 +50,6 @@ import {
   slideSubtitle,
   SLIDE_ASPECT,
   defaultRowSummaryLabel,
-  titleDataKey,
 } from "@/lib/charts";
 
 // The report's grouping override, shared with the leaf preview components so a
@@ -101,23 +101,26 @@ function ChartPreview({
   void questionText;
   const grouping = useContext(GroupingCtx);
   const { reportId, templateRef } = useContext(PreviewTemplateCtx);
-  // Do NOT render while the headline is still being generated. The title is
-  // baked into the slide, so rendering first and titling second means every
-  // slide is drawn twice — once wrong — and the second pass lands while the
-  // author is already clicking. `titlePending` is the flag the wizard already
-  // sets for exactly this moment; it used to only dim the image.
+  // The queue draws this slide's headline before its picture, so there is no
+  // "render now, title later" to guard against any more. `priority` promotes the
+  // selected slide to the head of that one queue.
   const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
-    { renderTitle: false, priority: true, grouping, reportId, templateRef,
-      enabled: !titlePending }
+    { renderTitle: false, priority: true, grouping, reportId, templateRef }
   );
   const url = data?.dataUrl;
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   // Any pending state (re-rendering, or AI title / label generation) shows the single
   // "Updating…" animation over a dimmed slide — no separate per-region placeholders.
-  const busy = loading || titlePending || labelsPending;
+  // "Is anything still being made for this slide?" — asked of the thing doing
+  // the work, rather than of a flag threaded down from the wizard that could
+  // disagree with it (and, when one was stranded, did).
+  const queued = usePreviewStatus(debounced.slide_id ?? "");
+  const producing =
+    queued.title === "running" || queued.bullets === "running" || queued.chart === "running";
+  const busy = loading || producing || titlePending || labelsPending;
 
   return (
     // Full-width preview: no padding — the border frames the slide itself. The
@@ -1516,69 +1519,11 @@ function SpecialSlideControls({
 }
 
 // ── Main Configure step ─────────────────────────────────────────────────────
-// Warm ONE slide's preview into the shared cache (renders nothing).
-function PrefetchOne({
-  materialId,
-  chart,
-}: {
-  materialId: string;
-  chart: ChartSpec;
-}) {
-  const grouping = useContext(GroupingCtx);
-  const { reportId, templateRef } = useContext(PreviewTemplateCtx);
-  // Warm the composited full-slide preview — the ONE variant both the Design
-  // so switching slides there does not wait on a ~4.4s LibreOffice render.
-  //
-  // NOT the grid's variant as well: warming both doubles the requests for no
-  // gain the user can see, and the expensive half of this is already the reason
-  // opening a deck spends a long time rendering.
-  useChartPreview(materialId, chart, {
-    renderTitle: false,
-    enabled: true,
-    grouping,
-    reportId,
-    templateRef,
-  });
-  return null;
-}
-
-// Lazily render EVERY slide's preview in the background so the whole deck is
-// ready without the user clicking each slide one by one. Renders nothing; the
-// shared content-keyed cache + the previewChart concurrency gate keep the UI
-// responsive (a few render at a time). Debounced so live edits don't spam.
-function DeckPrefetch({
-  materialId,
-  charts,
-  aiPending,
-}: {
-  materialId: string;
-  charts: ChartSpec[];
-  aiPending?: AiPendingMap;
-}) {
-  // Warming a slide whose title is still coming renders it twice: once titleless,
-  // then again when the headline lands. Wait for it — the prefetch exists to be
-  // ahead of the author, not to spend a LibreOffice render on a slide we know is
-  // about to change.
-  charts = charts.filter((c) => !aiPending?.[c.slide_id ?? ""]?.titlePending);
-  const key = JSON.stringify(charts);
-  const [debounced, setDebounced] = useState(charts);
-  useEffect(() => {
-    const h = setTimeout(() => setDebounced(charts), 400);
-    return () => clearTimeout(h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return (
-    <>
-      {debounced.map((c, i) => (
-        <PrefetchOne
-          key={`${c.question_ref}-${i}`}
-          materialId={materialId}
-          chart={c}
-        />
-      ))}
-    </>
-  );
-}
+// There is no deck-prefetch component here any more. Warming every slide was a
+// second queue in all but name: it had its own debounce, its own ordering and
+// its own idea of when a title was still coming, none of which agreed with the
+// render gate's. The wizard enqueues the whole deck on the ONE queue instead,
+// and scrolling or selecting a slide promotes it.
 
 /** Chart types that draw ONE panel per classifier group, and the most a 4:3
  *  slide holds. Kept next to the rule that reads them; the renderer's own copy
@@ -1636,7 +1581,6 @@ function StepConfigureInner({
   setActive,
   onReorder,
   onUpdateChart,
-  onEnsureTitles,
   onRegenerateSpecial,
 }: {
   materialId: string;
@@ -1652,7 +1596,6 @@ function StepConfigureInner({
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   // Called with every chart's slide_id when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
-  onEnsureTitles?: (slideIds: string[]) => void;
   // Regenerate a special (non-chart) slide's AI content. Adding/removing/reordering
   // slides lives in the Select step now — Design only edits slide CONTENT.
   onRegenerateSpecial?: (chart: ChartSpec) => void;
@@ -1715,20 +1658,10 @@ function StepConfigureInner({
   }, [questions]);
 
   // Auto-generate AI slide titles for every chart once Design is open (batched,
-  // just like the thumbnails) — not on report load, and not gated on opening each
-  // chart. The dependency below is a per-chart DATA fingerprint (titleDataKey), not
-  // just the ref list, so it re-fires within the SAME mount the instant a
-  // classifying variable, a grouping, or a label override changes — while a
-  // template swap, a re-sort, or a colour change never touch it, so no title
-  // regenerates and no AI call fires.
-  const titleFingerprint = charts
-    .map((c) => titleDataKey(c, questionMap.get(c.question_ref)))
-    .join("|");
-  useEffect(() => {
-    if (charts.length)
-      onEnsureTitles?.(charts.map((c) => c.slide_id ?? c.question_ref));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [titleFingerprint, onEnsureTitles]);
+  // Titles are not requested from here any more. The preview queue owns them,
+  // along with the bullets and the picture, and decides for itself what a slide
+  // still needs by comparing fingerprints — so a step no longer has to notice
+  // that a classifying variable changed and go asking.
 
   if (isError) {
     return (
@@ -1789,7 +1722,6 @@ function StepConfigureInner({
     <div className="space-y-4">
       {/* Background: warm every slide's preview so the deck (and the Preview grid)
           are ready without clicking each slide (renders nothing). */}
-      <DeckPrefetch materialId={materialId} charts={charts} aiPending={aiPending} />
 
       {/* Top: slide list (left) + preview (right), EQUAL HEIGHT. The list is an
           absolutely-positioned scroll area so it never grows the row — the PREVIEW

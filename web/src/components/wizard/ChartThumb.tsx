@@ -3,6 +3,7 @@ import { AlertCircleIcon, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
+import * as previewQueue from "@/lib/previewQueue";
 
 /**
  * A cached chart preview thumbnail. Backed by the shared useChartPreview cache,
@@ -19,7 +20,6 @@ export default function ChartThumb({
   chart,
   className,
   renderTitle,
-  titlePending = false,
   grouping,
   reportId,
   templateRef,
@@ -31,7 +31,6 @@ export default function ChartThumb({
   // below over the image instead of baked into the PNG. A caller that needs
   // the exact baked slide (WYSIWYG against the deck) passes renderTitle: true.
   renderTitle?: boolean;
-  titlePending?: boolean;
   grouping?: GroupingOverride;
   // Which report (and its own template choice) this is a preview for — see
   // SlideGrid.tsx's SlideThumb for why both matter.
@@ -57,12 +56,17 @@ export default function ChartThumb({
     return () => io.disconnect();
   }, [seen]);
 
+  // Scrolling a thumbnail into view moves its slide up the queue rather than
+  // starting a render of its own — the queue is what decides that a headline is
+  // written before a picture is drawn, and a component that fetched on its own
+  // would render the slide once without its title and again with it.
+  const slideId = chart.slide_id ?? "";
+  useEffect(() => {
+    if (seen && slideId) previewQueue.promote(slideId);
+  }, [seen, slideId]);
+
   const { data, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
-    // `seen` alone was not enough: a thumbnail scrolled into view while its
-    // headline is still being generated renders titleless and then again a
-    // second later. The title is part of the picture now.
-    enabled: seen && !titlePending,
     grouping,
     reportId,
     templateRef,
