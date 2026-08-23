@@ -118,13 +118,27 @@ class TestTheTitleFollowsTheTemplate:
         assert run.font.size.pt == 22.0
 
     def test_a_layout_title_goes_in_the_placeholder_and_inherits(self):
-        """Nothing is set but the text: size, font and colour stay the
-        customer's, which is the whole point of using their layout."""
+        """Font, colour and position stay the customer's — the whole point of
+        using their layout. The SIZE is the one thing stated, and only because
+        it was fitted to their own box.
+
+        It used to be inherited too, which sounds more faithful and is not: a
+        placeholder written by python-pptx carries nothing to inherit FROM, so
+        each renderer picked its own answer — LibreOffice one size, PowerPoint
+        another, the preview compositor a third. Stating the fitted size is what
+        makes the deck and the preview show the same slide, and what stops a
+        long headline running over the subtitle at the template's own size.
+        """
         _style, _prs, slide = _render("attendo")
         assert slide.shapes.title is not None
         assert slide.shapes.title.text_frame.text == _LONG
         run = slide.shapes.title.text_frame.paragraphs[0].runs[0]
-        assert run.font.size is None
+        # Fitted, not invented: never larger than the template's own title size.
+        assert run.font.size is not None
+        assert run.font.size.pt <= 30.0
+        # Still the customer's in every other respect.
+        assert run.font.name is None
+        assert run.font.color.type is None
 
 
 class TestWhereEverythingElseGoes:

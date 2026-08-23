@@ -245,7 +245,7 @@ def _title_line_height(size_pt: float, st) -> int:
     return int(Pt(size_pt * (st.line_spacing or 1.25)))
 
 
-def fit_title_size(st, text: str) -> float:
+def fit_title_size(st, text: str, max_growth: float | None = None) -> float:
     """The size to actually render *text* at in title style *st*.
 
     Starts at the template's own size — the common case, a customer-length
@@ -258,7 +258,14 @@ def fit_title_size(st, text: str) -> float:
     if not text or not st.width or not st.height:
         return base
     floor = base * _TITLE_MIN_SCALE
-    max_height = int(st.height) * _TITLE_MAX_GROWTH
+    # `max_growth` lets a caller say how far past the template's own box the
+    # headline may run. The harvested TEXTBOX may overrun a little (1.35) — it
+    # owns the space under it. A layout PLACEHOLDER may not: the slide below it
+    # is the template's, so a title that outgrows its box takes room that
+    # belongs to the subtitle and the chart, and reads as oversized because it
+    # is. See the caller in _fill_title_placeholder.
+    max_height = int(st.height) * (
+        _TITLE_MAX_GROWTH if max_growth is None else max_growth)
     size = base
     while True:
         # An all-caps title wraps sooner than the same string in mixed case,
@@ -424,6 +431,12 @@ _SUBTITLE_GAP = Inches(0.18)
 # How close to the top edge a headline may start. Small on purpose: the band
 # above a title is dead space, and a two-line headline needs the room.
 _MIN_TITLE_TOP = int(Inches(0.30))
+# How much taller a rendered line really is than PIL measures it. LibreOffice
+# renders the deck and lays Bebas Neue out this much taller; measured on
+# Egoiq_x_Rahoo, where a title the box said ended at 1.34" was drawing at 1.55".
+# One constant, used BOTH to reserve height and to fit the size, so the two
+# cannot drift apart.
+_RENDERER_LINE_BOX = 1.18
 # Room for the question to grow UPWARD into. Four lines at the largest step;
 # the box is bottom-anchored, so unused height is invisible.
 _SUBTITLE_MAX_H = Inches(1.10)
@@ -456,6 +469,45 @@ def title_left_width(slide, style, title: str) -> tuple[int, int]:
     return 0, 0
 
 
+def fit_subtitle_size(text: str, width_emu: int, height_emu: int, font: str,
+                      *, max_pt: float = 15.0, min_pt: float = 11.0) -> float:
+    """The largest size *text* fits its box at, between *min_pt* and *max_pt*.
+
+    Replaces a ladder keyed on character count (15pt to 110 chars, then 13, 12,
+    11), which could only guess: it knew nothing about the width it had or the
+    height it was given, so on a template with a roomy header it shrank a
+    question that would have fitted comfortably — Attendo's came out at 12pt in
+    a box with space for more.
+
+    Measured with the same font resolution and the same renderer line box the
+    title uses, so the two agree about what fits.
+    """
+    from types import SimpleNamespace
+
+    if not text or width_emu <= 0 or height_emu <= 0:
+        return max_pt
+    st = SimpleNamespace(size_pt=max_pt, width=width_emu, height=height_emu,
+                         font=font, caps=False, line_spacing=0.0)
+    size = max_pt
+    while size > min_pt:
+        lines = measured_line_count(text, width_emu, size, st)
+        if lines * _title_line_height(size, st) * _RENDERER_LINE_BOX <= height_emu:
+            break
+        size -= 0.5
+    return max(size, min_pt)
+
+
+def _inherited_title_font(ph) -> str:
+    """The face the template's own chain gives this title, if any."""
+    try:
+        from reportbuilder.render.image.fast_preview import (
+            _inherited_placeholder_style,
+        )
+        return _inherited_placeholder_style(ph)[0]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _rendered_title_height(ph, text: str) -> int:
     """How tall the fitted headline actually is in *ph*, in EMU.
 
@@ -483,7 +535,7 @@ def _rendered_title_height(ph, text: str) -> int:
         # still drawing at 1.55" and came down across the subtitle. Reserving the
         # difference is what keeps the deck and the preview agreeing about where
         # the header ends.
-        return int(lines * _title_line_height(size_pt, st) * 1.18)
+        return int(lines * _title_line_height(size_pt, st) * _RENDERER_LINE_BOX)
     except Exception:  # noqa: BLE001 — a title must never fail a render
         logging.getLogger(__name__).warning("could not measure the title",
                                             exc_info=True)
@@ -626,53 +678,26 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     except (AttributeError, TypeError):
         pass
 
-    # Fit the headline to the placeholder's OWN box, and state the result.
+    # The size comes from the TEMPLATE SPEC — resolved once per template, from
+    # the font's own cap height, so every deck's headline renders the same
+    # physical size whatever face it is set in. It is stated explicitly because
+    # an unstated placeholder size is resolved differently by LibreOffice,
+    # PowerPoint and the preview compositor; font, colour and position are still
+    # the template's.
     #
-    # Nothing shrank a placeholder title before: `fit_title_size` was only used
-    # on the harvested-textbox path, so a long headline in a box drawn for a
-    # short one simply overflowed — Egoiq_x_Rahoo's 30pt Bebas Neue ran two
-    # lines down over the subtitle, in the deck as well as the preview.
-    #
-    # The size is written EXPLICITLY because that is the only way every renderer
-    # agrees: an unstated placeholder size is resolved differently by
-    # LibreOffice, PowerPoint and the compositor. Font, colour and weight are
-    # still left to inherit — only the fitted size is stated.
+    # Nothing is fitted or shrunk here. A headline too long for its box
+    # OVERFLOWS, deliberately: that is the signal to the author to write a
+    # shorter one, and it is the same signal in the deck and in the preview.
     try:
-        from types import SimpleNamespace
+        from reportbuilder.render.resolved_style import build_spec
 
-        from reportbuilder.render.image.fast_preview import (
-            _inherited_placeholder_style,
-        )
-        _font, inherited_pt, _col, _bold, caps = _inherited_placeholder_style(ph)
-        if inherited_pt and ph.width and ph.height:
-            # The width the text really wraps inside: the box minus its own
-            # insets. Measuring the full box made the fitter believe a headline
-            # fitted on one line that the renderer then wrapped onto two — the
-            # scaling looked broken because it was answering a different
-            # question than the one being drawn.
-            inset = int(tf.margin_left or 0) + int(tf.margin_right or 0)
-            st = SimpleNamespace(size_pt=inherited_pt,
-                                 width=max(1, int(ph.width) - inset),
-                                 height=int(ph.height), font=_font, caps=caps,
-                                 line_spacing=0.0)
-            fitted = fit_title_size(st, title)
-            if fitted and abs(fitted - inherited_pt) > 0.01:
-                tf.paragraphs[0].runs[0].font.size = Pt(fitted)
-            # Let the BOX admit the text it now holds. A template's title box is
-            # drawn for the headline the customer wrote; ours wraps to two lines
-            # and LibreOffice simply overflows the box downward — straight across
-            # the subtitle — while every measurement of "where the title ends"
-            # kept reading the box and believing it. Growing the box is what makes
-            # the layout below it true.
-            needed = _rendered_title_height(ph, title)
-            if needed > int(ph.height or 0):
-                ph.left, ph.width = int(ph.left or 0), int(ph.width or 0)
-                ph.top = int(ph.top or 0)
-                ph.height = needed
+        spec = build_spec(style, title_font=_inherited_title_font(ph)) if style else None
+        if spec is not None and spec.title.size_pt:
+            run = tf.paragraphs[0].runs[0]
+            run.font.size = Pt(spec.title.size_pt)
     except Exception:  # noqa: BLE001 — a title must never fail a render
-        logging.getLogger(__name__).warning(
-            "could not fit the title to its placeholder", exc_info=True)
-
+        logging.getLogger(__name__).warning("could not size the title",
+                                            exc_info=True)
     return True
 
 
@@ -793,8 +818,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # long question always fits the box and is NEVER clipped at the top
             # (a bottom-anchored box clips overflow above it), while staying as
             # large as possible.
-            n = len(secondary)
-            s_size = 15 if n <= 110 else (13 if n <= 180 else (12 if n <= 260 else 11))
+            s_size = 15.0   # replaced by the template spec below
             # With a template, the subtitle belongs to the TITLE — a line of
             # explanation directly under it, which is where every one of the
             # real client decks puts it. Left hanging off the chart instead it
@@ -848,12 +872,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             else:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
+            s_font = _body_font(ctx)
+            s_size = fit_subtitle_size(secondary, sub_w, sub_h, s_font)
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
                 [(secondary, s_size, _muted, False)],
                 anchor=anchor,
-                font=_body_font(ctx),
+                font=s_font,
             )
 
     # 4 — Methodology footer bottom-left (REQ-C-24h)
