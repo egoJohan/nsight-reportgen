@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -24,7 +32,10 @@ import {
   useResolvedCase,
   useCaseTemplate,
   useTemplateActions,
+  fetchChartPreviewInto,
 } from "@/lib/queries";
+import * as previewQueue from "@/lib/previewQueue";
+import { installProducers, setProducerEnv } from "@/lib/previewProducers";
 import { useWorkspace } from "@/lib/workspace";
 import {
   buildDemographicsGrids,
@@ -36,7 +47,6 @@ import {
   makeSpecialSlide,
   newSlideId,
   normalizeSlots,
-  titleDataKey,
 } from "@/lib/charts";
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
@@ -196,6 +206,7 @@ export default function ReportWizard({
       { titlePending: boolean; labelsPending: boolean; bulletsPending?: boolean }
     >
   >({});
+
 
   // Initialise the working draft once the report loads.
   useEffect(() => {
@@ -481,6 +492,84 @@ export default function ReportWizard({
   const draftRef = useRef<ReportDoc | null>(null);
   draftRef.current = draft;
 
+  // ── The preview queue ────────────────────────────────────────────────────
+  // One queue owns every kind of work a slide needs: its headline, its theme
+  // bullets, and its picture — in that order, in one sequential pass per slide.
+  // The wizard's only job here is to say how the queue reads the draft and
+  // where its patches go; it never reaches into the queue, and the queue never
+  // imports React.
+  const qc = useQueryClient();
+  const questionByRefRef = useRef(questionByRef);
+  questionByRefRef.current = questionByRef;
+
+  useEffect(() => {
+    installProducers();
+    previewQueue.reset(reportId);
+    previewQueue.setSlideSource(
+      (id) => draftRef.current?.charts.find((c) => c.slide_id === id) ?? null
+    );
+    previewQueue.setPatchSink((id, patch) => updateChartById(id, patch));
+  }, [reportId, updateChartById]);
+
+  // The render context and the producers' environment change with the template
+  // and the grouping, so they are refreshed rather than registered once.
+  const groupingKey = JSON.stringify(draft?.grouping ?? {});
+  useEffect(() => {
+    const ctx = {
+      templateRef: draft?.template_ref ?? "",
+      reportId,
+      groupingKey,
+      renderTitle: false,
+    };
+    previewQueue.setRenderContext(ctx);
+    setProducerEnv({
+      materialId,
+      questionFor: (ref) => questionByRefRef.current.get(ref),
+      grouping: () => draftRef.current?.grouping,
+      hasImage: (fingerprint) =>
+        qc.getQueryData(["chart-preview", materialId, fingerprint]) !== undefined,
+      fetchImage: (chart) =>
+        fetchChartPreviewInto(qc, materialId, chart, ctx, draftRef.current?.grouping),
+    });
+  }, [materialId, reportId, draft?.template_ref, groupingKey, qc]);
+
+  // Warm the whole deck, and pick up slides added later. `enqueue` dedupes and
+  // each producer decides for itself whether it is needed, so re-enqueueing a
+  // settled deck costs nothing.
+  // Every slide whose CONTENT changed goes back on the queue — not just slides
+  // that were added. Watching the id list alone was not enough: editing a chart
+  // type or a headline leaves the ids identical, and because components only
+  // read the cache now, nothing would ever draw the new version. The author's
+  // edit saved and the picture never moved.
+  const chartsSignature = (draft?.charts ?? [])
+    .map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
+    .join("\u0000");
+  const resolvedCount = questionByRef.size;
+  const lastSeen = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    // Not before the questions have resolved. A headline is written ABOUT the
+    // question as the current grouping resolves it, so starting earlier means
+    // the first few slides — exactly as many as the queue runs at once — find
+    // nothing to write about and are recorded as needing nothing. That is how
+    // the first four slides of a sixty-slide report came out untitled.
+    if (!resolvedCount) return;
+    // Debounced, so holding a key down does not queue a render per keystroke.
+    const h = setTimeout(() => {
+      const next = new Map<string, string>();
+      for (const c of draftRef.current?.charts ?? []) {
+        if (c.slide_id) next.set(c.slide_id, JSON.stringify(c));
+      }
+      for (const [id, sig] of next) {
+        if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
+      }
+      lastSeen.current = next;
+    }, 350);
+    return () => clearTimeout(h);
+  }, [chartsSignature, resolvedCount]);
+
+  // "Is the queue doing anything?" — the one signal the save rule needs.
+  const queueBusy = useSyncExternalStore(previewQueue.subscribe, previewQueue.isBusy);
+
   const save = useCallback(async (): Promise<boolean> => {
     const d = draftRef.current;
     if (!d) return false;
@@ -515,6 +604,11 @@ export default function ReportWizard({
   saveRef.current = save;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
+  // When the current run of unsaved changes began — the clock the cap above
+  // reads. Cleared whenever the draft is clean again.
+  const dirtySince = useRef<number | null>(null);
+  if (!dirty) dirtySince.current = null;
+  else if (dirtySince.current === null) dirtySince.current = Date.now();
   useEffect(() => {
     return () => {
       if (dirtyRef.current) void saveRef.current();
@@ -528,209 +622,37 @@ export default function ReportWizard({
   // immediately); `dirty` still drives the Save button's state, so it goes
   // back to "Saved" on its own once the autosave lands.
   const AUTOSAVE_DELAY_MS = 1500;
+  const MAX_AI_SAVE_HOLD_MS = 90_000;
   useEffect(() => {
-    if (!dirty) return;
+    // Hold off entirely while the queue is still producing. It lands 60 titles
+    // and 60 renders over about a minute, in bursts with pauses between them,
+    // and each pause longer than the delay above used to be its own save: 17
+    // writes of a 60-chart document during the exact minute the author is
+    // trying to click something. Waiting for the queue to go idle turns the
+    // whole generation phase into ONE save — the effect re-runs when it clears, with the draft still
+    // dirty, and saves then. Nothing is at risk in the meantime: closing the
+    // report saves through the unmount cleanup above, and a producer that fails
+    // still leaves the queue idle.
+    //
+    // The wait is CAPPED. Suppressing a save is only ever a courtesy to the
+    // generation phase; if a pending flag were somehow stranded, an uncapped
+    // gate would mean the author's typing is never written at all — a far worse
+    // bug than the one it fixes. After MAX_AI_SAVE_HOLD_MS of being dirty we
+    // save regardless of what the AI passes think they are still doing.
+    const held = dirtySince.current !== null
+      && Date.now() - dirtySince.current > MAX_AI_SAVE_HOLD_MS;
+    if (!dirty || (queueBusy && !held)) return;
     const h = setTimeout(() => {
       if (dirtyRef.current) void saveRef.current();
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(h);
-  }, [dirty, draft]);
+  }, [dirty, draft, queueBusy]);
 
-  // ── Auto AI slide titles (batched, like the chart thumbnails) ─────────────
-  // When the Design step is open, titles are generated automatically for every
-  // chart — the same way the thumbnails auto-render — NOT eagerly on report
-  // load and NOT only for the chart you click. egoHive is slow and a report can
-  // hold 100+ charts, so the work runs through a bounded-concurrency queue.
-  // While a chart's title is in flight the preview covers the title band with a
-  // dashed placeholder; the AI key-message replaces it automatically when it
-  // lands. Graceful fallback to the question text on failure; one attempt per
-  // (ref, data key) per session — see ensureTitles for what "data key" means and
-  // why a template/design change never lands here at all.
-  const TITLE_CONCURRENCY = 3;
-  const titlesAttempted = useRef<Set<string>>(new Set());
-  const titleQueue = useRef<string[]>([]);
-  const titleActive = useRef(0);
-  // Bumped when a batch drains; a separate effect then persists the result so
-  // every generated patch has flushed into the draft before we read it.
-  const [aiSaveTick, setAiSaveTick] = useState(0);
-
-  const runTitle = useCallback(
-    async (slideId: string) => {
-      const chart = draftRef.current?.charts.find((c) => c.slide_id === slideId);
-      if (!chart) return;
-      const ref = chart.question_ref;
-      // Recomputed here (not just trusted from the caller) because runTitle is
-      // also reached for a themes chart's bullets alone — the title half of the
-      // work below still needs its own up-to-date needs-it check.
-      const resolved = questionByRef.get(ref);
-      const currentKey = titleDataKey(chart, resolved);
-      const keyStale =
-        !!chart.slide_title_key && chart.slide_title_key !== currentKey;
-      const needsTitleNow = !chart.slide_title || keyStale;
-      // A "themes" chart (open-ended) generates theme bullets AND an AI heading
-      // (a key message from the answers) — otherwise it falls back to showing its
-      // raw, often messy, question text as the title.
-      if (isThemes(chart)) {
-        const hasBullets = !!(chart.options?.bullets as string[] | undefined)
-          ?.length;
-        const bulletsP = hasBullets
-          ? Promise.resolve()
-          : api.materials
-              .aiThemes(materialId, { question_ref: ref })
-              .then(({ bullets }) =>
-                updateChartById(slideId, {
-                  options: { ...(chart.options ?? {}), bullets },
-                })
-              )
-              .catch(() => {
-                /* graceful: leave empty */
-              })
-              .finally(() =>
-                setAiPending((prev) => ({
-                  ...prev,
-                  [slideId]: { ...prev[slideId], bulletsPending: false },
-                }))
-              );
-        const titleP = !needsTitleNow
-          ? Promise.resolve()
-          : api.materials
-              .aiSlideTitle(materialId, {
-                question_ref: ref,
-                statistic: chart.statistic,
-                grouping: draftRef.current?.grouping,
-              })
-              .then(({ title }) => {
-                if (title)
-                  updateChartById(slideId, {
-                    slide_title: title,
-                    slide_title_key: currentKey,
-                  });
-              })
-              .catch(() => {
-                /* graceful: fall back to the question text */
-              })
-              .finally(() =>
-                setAiPending((prev) => ({
-                  ...prev,
-                  [slideId]: { ...prev[slideId], titlePending: false },
-                }))
-              );
-        await Promise.all([bulletsP, titleP]);
-        return;
-      }
-      try {
-        // Only the headline (slide_title) is AI-generated. The subtitle is left to
-        // default to the MATERIAL question text (deterministic), not an AI line.
-        const { title } = await api.materials.aiSlideTitle(materialId, {
-          question_ref: ref,
-          statistic: chart.statistic,
-          classifying_var: chart.classifying_var,
-          show_not_answered: chart.show_not_answered,
-          not_answered_codes: chart.not_answered_codes,
-          grouping: draftRef.current?.grouping,
-        });
-        const patch: Partial<ChartSpec> = {};
-        // Tag the title with the data it was generated for, so it survives a
-        // template swap, a re-sort, a re-colour — anything that isn't the data —
-        // and only regenerates once that same fingerprint changes again.
-        if (title) {
-          patch.slide_title = title;
-          patch.slide_title_key = currentKey;
-        }
-        if (Object.keys(patch).length) updateChartById(slideId, patch);
-      } catch {
-        /* graceful: fall back to the question text */
-      } finally {
-        setAiPending((prev) => ({
-          ...prev,
-          [slideId]: { ...prev[slideId], titlePending: false },
-        }));
-      }
-    },
-    [materialId, updateChartById, questionByRef]
-  );
-
-  const pumpTitles = useCallback(() => {
-    while (
-      titleActive.current < TITLE_CONCURRENCY &&
-      titleQueue.current.length > 0
-    ) {
-      const slideId = titleQueue.current.shift()!;
-      titleActive.current += 1;
-      void runTitle(slideId).finally(() => {
-        titleActive.current -= 1;
-        if (titleActive.current === 0 && titleQueue.current.length === 0) {
-          // Batch settled — persist all generated titles in one save.
-          setAiSaveTick((t) => t + 1);
-        }
-        pumpTitles();
-      });
-    }
-  }, [runTitle]);
-
-  // Enqueue titles for every chart that still needs one. A title is "needed" when
-  // there isn't one yet, OR one exists but its stored slide_title_key no longer
-  // matches titleDataKey(chart) — the DATA it was written about has since moved
-  // (a different classifying variable, grouping, or label override). A title with
-  // NO key (never generated by this feature, or hand-typed — see SlideTitleField)
-  // is never touched on key grounds alone; only an empty title forces a fresh one.
-  // Mark the title regions pending up front so their placeholders appear
-  // immediately, then drain through the bounded queue.
-  const ensureTitles = useCallback(
-    (slideIds: string[]) => {
-      let added = false;
-      for (const id of slideIds) {
-        if (!id) continue;
-        const chart = draftRef.current?.charts.find((c) => c.slide_id === id);
-        if (!chart) continue;
-        if (isSpecialSlide(chart)) continue; // special slides carry bullets, not a title
-        // titleDataKey needs the question as the CURRENT grouping resolves it;
-        // hold off until useRegroupedQuestions has it rather than key against a
-        // guess that would just flip (and re-fire) the moment the real one lands.
-        const resolved = questionByRef.get(chart.question_ref);
-        if (!resolved) continue;
-        const themes = isThemes(chart);
-        const needsBullets =
-          themes && !((chart.options?.bullets as string[] | undefined)?.length);
-        const currentKey = titleDataKey(chart, resolved);
-        const keyStale =
-          !!chart.slide_title_key && chart.slide_title_key !== currentKey;
-        const needsTitle = !chart.slide_title || keyStale;
-        // Themes charts generate BOTH bullets and an AI heading; other charts
-        // generate a title (unless they already have one, at its current key).
-        if (themes ? !needsBullets && !needsTitle : !needsTitle) continue;
-        // One attempt per (slide, data key) per session.
-        const attemptToken = `${id}${currentKey}`;
-        if (titlesAttempted.current.has(attemptToken)) continue;
-        titlesAttempted.current.add(attemptToken);
-        titleQueue.current.push(id);
-        added = true;
-        setAiPending((prev) => ({
-          ...prev,
-          [id]: themes
-            ? {
-                titlePending: needsTitle,
-                labelsPending: prev[id]?.labelsPending ?? false,
-                bulletsPending: needsBullets,
-              }
-            : {
-                titlePending: true,
-                labelsPending: prev[id]?.labelsPending ?? false,
-              },
-        }));
-      }
-      if (added) pumpTitles();
-    },
-    [pumpTitles, questionByRef]
-  );
-
-  // Persist generated overrides/titles once an auto-format pass settles. Runs
-  // post-commit so draftRef already reflects every generated patch.
-  useEffect(() => {
-    if (aiSaveTick === 0) return;
-    void save();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiSaveTick]);
+  // Slide titles, theme bullets and the rendered picture are ALL produced by
+  // the preview queue registered above — one sequential pass per slide, in
+  // that order. The wizard used to run its own bounded-concurrency title
+  // queue here, independent of the render queue, which is why a slide
+  // rendered once without its headline and then again with it.
 
   // ── Special (non-chart) slides: Overview / Conclusion / Demographics ──────
   const SPECIAL_HEADINGS: Record<string, string> = {
@@ -889,7 +811,6 @@ export default function ReportWizard({
           toast.error(`Could not generate slide: ${errMsg(e)}`);
         } finally {
           setBulletsPending(group, false);
-          setAiSaveTick((t) => t + 1);
         }
       })();
       return group;
@@ -915,7 +836,6 @@ export default function ReportWizard({
           toast.error(`Could not regenerate themes: ${errMsg(e)}`);
         } finally {
           setBulletsPending(slideId, false);
-          setAiSaveTick((t) => t + 1);
         }
         return;
       }
@@ -942,7 +862,6 @@ export default function ReportWizard({
         toast.error(`Could not regenerate slide: ${errMsg(e)}`);
       } finally {
         setBulletsPending(group, false);
-        setAiSaveTick((t) => t + 1);
       }
     },
     [
@@ -985,7 +904,6 @@ export default function ReportWizard({
     if (!next || next === draft?.name) return;
     mutate((d) => ({ ...d, name: next }));
     renameReport(reportId, next);
-    setAiSaveTick((t) => t + 1); // persist via the post-commit save effect
   }
 
   // Self-heal a stale/deleted report id out of the workspace, once.
@@ -1197,7 +1115,6 @@ export default function ReportWizard({
               reorderCharts(includedToFull[from] ?? from, includedToFull[to] ?? to)
             }
             onUpdateChart={(i, patch) => updateChart(includedToFull[i] ?? i, patch)}
-            onEnsureTitles={ensureTitles}
             onRegenerateSpecial={regenerateSpecial}
           />
         )}

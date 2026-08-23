@@ -7,7 +7,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SortSpec:
-    basis: str                                  # "data_order"|"pct"|"topbox_sum"|"mean"|"count" (REQ-S-01)
+    basis: str                                  # "data_order"|"pct"|"topbox_sum"|"top3_sum"|"bottom2_sum"|"bottom3_sum"|"mean"|"count" (REQ-S-01)
     topbox_codes: tuple[float, ...] = ()        # for "topbox_sum" (REQ-S-02)
     descending: bool = True
 
@@ -55,6 +55,13 @@ class ChartSpec:
     slide_title_key: str | None = None
     slide_description: str | None = None        # subtitle line shown under the title (REQ-C-24a, D-04)
     footer_note: str | None = None              # override methodology footer; None = auto ("<stat> · n = N"). "{n}" expands to the base.
+    # Axis titles (P-C-27, the fourth editable text property beside the title,
+    # subtitle and value names). Empty = no axis title, which is how every chart
+    # looked before this existed, so old reports are unchanged.
+    # `elements.axis_names` still governs axis text as a whole: with it off,
+    # these are not drawn even when set.
+    axis_x_title: str = ""
+    axis_y_title: str = ""
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
     # Cross-tab percentage DIRECTION for a classified chart:
@@ -72,7 +79,7 @@ class ChartSpec:
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
     # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
     # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
-    row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|sum|mean|net
+    row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|bottom2_sum|bottom3_sum|sum|mean|net
     row_summary_codes: tuple[float, ...] = ()        # for "sum"
     row_summary_pos_codes: tuple[float, ...] = ()    # for "net"
     row_summary_neg_codes: tuple[float, ...] = ()    # for "net"
@@ -155,6 +162,8 @@ class Report:
 _ROW_SUMMARY_DEFAULT_LABEL = {
     "top2_sum": "Top 2",
     "top3_sum": "Top 3",
+    "bottom2_sum": "Bottom 2",
+    "bottom3_sum": "Bottom 3",
     "sum": "Sum",
     "mean": "Keskiarvo",
     "net": "Net",
@@ -244,6 +253,8 @@ def report_from_json(data: dict | str) -> Report:
             slide_title_key=c.get("slide_title_key"),
             slide_description=c.get("slide_description"),
             footer_note=c.get("footer_note"),
+            axis_x_title=c.get("axis_x_title", "") or "",
+            axis_y_title=c.get("axis_y_title", "") or "",
             show_empty_categories=c.get("show_empty_categories", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),

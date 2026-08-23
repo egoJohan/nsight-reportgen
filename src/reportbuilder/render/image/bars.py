@@ -33,8 +33,8 @@ import re
 import textwrap
 
 import numpy as np
-from reportbuilder.render.image._mpl import (chart_accent, chart_furniture,
-    new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
+from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
+    chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
     place_picture_square, series_values, format_value, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     _new_agg_figure, _EMU_PER_IN,
@@ -345,6 +345,7 @@ def _apply_bar_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct") ->
     ax.set_xticks(ticks)
     ax.set_xticklabels([_tick_text(v) for v in ticks], fontsize=9.5, color=muted)
     ax.set_xlim(0, ax_max)
+    apply_axis_titles(ax, ctx.spec, _ink)
 
 
 def _apply_column_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct") -> None:
@@ -367,6 +368,7 @@ def _apply_column_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct")
     ax.set_yticks(y_ticks)
     ax.set_yticklabels([_tick_text(v) for v in y_ticks], fontsize=9.5, color=muted)
     ax.set_ylim(0, ax_max)
+    apply_axis_titles(ax, ctx.spec, _ink)
 
 
 def _label_offset(max_val: float) -> float:

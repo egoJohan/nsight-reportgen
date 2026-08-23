@@ -3,9 +3,12 @@ import {
   useMutation,
   useQueryClient,
   keepPreviousData,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { api, ApiError, setActivePreviewKey } from "./api";
+import { api, ApiError } from "./api";
+import { imageFingerprint, type RenderContext } from "./previewFingerprint";
+import * as previewQueue from "./previewQueue";
 import type { Substitutions } from "./api";
 import type {
   AccessMode,
@@ -358,57 +361,6 @@ export function useDeleteCase() {
   });
 }
 
-// ---- Chart preview cache ----
-// Only the fields that change the rendered PNG; identical content → identical
-// cache entry → the preview is formed ONCE and reused across mounts/steps.
-function previewContentKey(chart: ChartSpec, renderTitle: boolean) {
-  // Kept in the fingerprint because it selects WHICH renderer draws the
-  // slide (compositor vs LibreOffice), and their output is not identical.
-  const key: Record<string, unknown> = {
-    render_title: renderTitle,
-    question_ref: chart.question_ref,
-    chart_type: chart.chart_type,
-    statistic: chart.statistic,
-    classifying_var: chart.classifying_var,
-    classifying_var_2: chart.classifying_var_2 ?? null,
-    // The cross-tab percentage DIRECTION changes the numbers in the PNG, so a change
-    // must re-render the preview (else switching direction silently shows the old one).
-    percent_base: chart.percent_base ?? "auto",
-    // Showing/hiding the "Total" reference series changes the PNG too.
-    show_total: chart.show_total ?? "auto",
-    number_format: chart.number_format,
-    sort: chart.sort,
-    elements: chart.elements,
-    scatter_xy: chart.scatter_xy,
-    show_not_answered: chart.show_not_answered,
-    show_empty_categories: chart.show_empty_categories,
-    not_answered_codes: chart.not_answered_codes,
-    category_label_overrides: chart.category_label_overrides,
-    options: chart.options ?? null,
-    // The methodology footer is baked into the PNG regardless of render_title (it lives
-    // outside the title block), so a footer edit must always re-render the preview.
-    footer_note: chart.footer_note,
-    // The row-summary column (function/codes/header) is baked into the chart PNG, so
-    // any change must re-render the preview.
-    row_summary_fn: chart.row_summary_fn ?? "none",
-    row_summary_codes: chart.row_summary_codes ?? null,
-    row_summary_pos_codes: chart.row_summary_pos_codes ?? null,
-    row_summary_neg_codes: chart.row_summary_neg_codes ?? null,
-    row_summary_label: chart.row_summary_label ?? "",
-  };
-  // The title is baked into the PNG on BOTH paths now — the composited one draws
-  // it server-side in the template's own face, because the browser does not have
-  // that font. So it belongs in the key unconditionally.
-  //
-  // It used to be added only when render_title was on, back when the frontend
-  // drew the title itself and editing it had to NOT re-render. Leaving that
-  // condition after the change meant an AI-generated headline arrived, the spec
-  // changed, the key did not, and the preview went on serving the image rendered
-  // before the title existed — titles simply never appeared.
-  key.slide_title = chart.slide_title;
-  key.slide_description = chart.slide_description;
-  return key;
-}
 
 // Cache data URLs (plain strings), not object URLs: they are freed with the
 // cache entry, so no manual revoke is needed and a cached preview survives
@@ -466,48 +418,78 @@ export function useChartPreview(
 ) {
   const renderTitle = opts?.renderTitle ?? false;
   const groupingKey = JSON.stringify(opts?.grouping ?? {});
+  // One fingerprint, computed by exclusion — see previewFingerprint.ts. The
+  // 25-field allow-list this replaced had to be remembered every time ChartSpec
+  // gained a field, and forgetting meant the preview silently kept showing the
+  // previous image.
   const queryKey = [
     "chart-preview",
     materialId,
-    opts?.reportId ?? "",
-    opts?.templateRef ?? "",
-    renderTitle,
-    previewContentKey(chart, renderTitle),
-    groupingKey,
+    imageFingerprint(chart, {
+      templateRef: opts?.templateRef ?? "",
+      reportId: opts?.reportId ?? "",
+      groupingKey,
+      renderTitle,
+    }),
   ];
-  // Stable string key shared with the render gate so it can match this slide's
-  // queued render and promote it when this slide is the active one.
-  const gateKey = JSON.stringify(queryKey);
   const priority = opts?.priority ?? false;
-  // The ACTIVE slide announces its key so the gate runs its render first (in the
-  // reserved slot) even if the background prefetch already queued it.
+  const slideId = chart.slide_id ?? "";
+  // The slide the author is looking at renders next. The queue owns ordering,
+  // so this is a promotion, not a second lane: whichever slide is selected goes
+  // to the head of the one queue.
   useEffect(() => {
-    if (!priority) return;
-    setActivePreviewKey(gateKey);
-    return () => setActivePreviewKey(null);
-  }, [priority, gateKey]);
+    if (priority && slideId) previewQueue.promote(slideId);
+  }, [priority, slideId]);
+
+  // Cache-only. The preview queue is the ONLY thing that fetches an image, so
+  // that a slide's headline is written before its picture is drawn and the
+  // slide is rendered once rather than twice. A component that fetched on its
+  // own would be a second queue again, which is the arrangement this replaced.
   return useQuery<ChartPreviewResult>({
     queryKey,
+    queryFn: () => Promise.reject(new Error("previews are produced by previewQueue")),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The cache key an image is stored under. Shared with the queue's `chart`
+ *  producer so the thing that fetches and the thing that reads cannot drift. */
+export function chartPreviewKey(
+  materialId: string,
+  chart: ChartSpec,
+  ctx: RenderContext
+): unknown[] {
+  return ["chart-preview", materialId, imageFingerprint(chart, ctx)];
+}
+
+/** Fetch one slide's image into the cache. Called by the queue, nowhere else. */
+export async function fetchChartPreviewInto(
+  qc: QueryClient,
+  materialId: string,
+  chart: ChartSpec,
+  ctx: RenderContext,
+  grouping: GroupingOverride | undefined
+): Promise<void> {
+  await qc.fetchQuery<ChartPreviewResult>({
+    queryKey: chartPreviewKey(materialId, chart, ctx),
     queryFn: () =>
       api.materials
         .previewChart(materialId, chart, {
-          renderTitle,
-          key: gateKey,
-          grouping: opts?.grouping,
-          reportId: opts?.reportId,
+          renderTitle: ctx.renderTitle,
+          grouping,
+          reportId: ctx.reportId,
         })
         .then(async ({ blob, titleMeta }) => ({
           dataUrl: await blobToDataURL(blob),
           titleMeta,
         })),
-    enabled: (opts?.enabled ?? true) && !!materialId,
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     retry: false,
-    // Keep the previously rendered slide visible while the new render loads, so
-    // editing a spec shows the old image + an "Updating…" badge instead of
-    // flashing the whole-slide "Rendering preview…" placeholder.
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -671,8 +653,19 @@ export function useUpdateReport(caseId: string) {
       reportId: string;
       report: ReportDoc;
     }) => api.reports.update(caseId, reportId, report),
+    // Mark the cached document stale, but do NOT pull it back right now.
+    //
+    // The saver already holds the authoritative version — it is what we just
+    // sent — so refetching teaches us nothing, and a plain invalidate made every
+    // save of a 60-chart report cost a PUT *and* a full GET. `refetchType:
+    // "none"` keeps the freshness guarantee (anything mounting later, or this
+    // query on its next observer, fetches the server's copy) without the round
+    // trip behind each save.
     onSuccess: (_data, vars) =>
-      qc.invalidateQueries({ queryKey: qk.report(caseId, vars.reportId) }),
+      qc.invalidateQueries({
+        queryKey: qk.report(caseId, vars.reportId),
+        refetchType: "none",
+      }),
   });
 }
 

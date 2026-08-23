@@ -216,7 +216,8 @@ def test_stacked_horizontal_row_summary_fields():
               if f.key == "row_summary_fn")
     assert fn.widget == "select"
     assert {v for v, _ in fn.options} == {
-        "none", "top2_sum", "top3_sum", "sum", "mean", "net"}
+        "none", "top2_sum", "top3_sum", "bottom2_sum", "bottom3_sum",
+        "sum", "mean", "net"}
     # the default stacked schema (used by vertical) does NOT include it
     assert "row_summary_fn" not in [f.key for f in stacked_schema()]
 

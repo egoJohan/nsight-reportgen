@@ -5,7 +5,7 @@ from reportbuilder.model.report import SortSpec
 _KEY = {"pct": "pct", "count": "count", "mean": "mean", "topbox_sum": "topbox"}
 # Stacked-only bases reorder the BARS in the engine; for CATEGORY sorting they carry no
 # per-category key, so they keep data order here rather than erroring.
-_STACKED_ONLY = {"top3_sum"}
+_STACKED_ONLY = {"top3_sum", "bottom2_sum", "bottom3_sum"}
 
 
 def sort_categories(rows: list[tuple[str, float, dict]], spec: SortSpec) -> list[str]:

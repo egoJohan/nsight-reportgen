@@ -541,14 +541,39 @@ def _missing_counts(data: pd.DataFrame, var: Variable, eff: set[float],
 _STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
 
 
-def _top_scale_categories(var: Variable, categories: list[str], n: int) -> list[str]:
+#: Sort bases that rank bars by a summed share of one END of the scale, as
+#: (how many levels, from the bottom?). Top-box answers "who agrees most";
+#: bottom-box answers "where is the dissatisfaction", which a reader could
+#: previously only approximate by reading a top-box sort backwards — not the
+#: same thing when the mass sits in the middle of the scale.
+_BOX_SORT_BASES = {
+    "topbox_sum": (2, False),
+    "top3_sum": (3, False),
+    "bottom2_sum": (2, True),
+    "bottom3_sum": (3, True),
+}
+
+#: The same idea for the row-summary column. Named separately because the
+#: row-summary vocabulary has always used "top2_sum" where the sort basis says
+#: "topbox_sum".
+_BOX_ROW_SUMMARIES = {
+    "top2_sum": (2, False),
+    "top3_sum": (3, False),
+    "bottom2_sum": (2, True),
+    "bottom3_sum": (3, True),
+}
+
+
+def _top_scale_categories(var: Variable, categories: list[str], n: int,
+                          lowest: bool = False) -> list[str]:
     """The display labels of the `n` HIGHEST rating-scale points of `var` that are
-    present in `categories` (e.g. the top-2 or top-3 agreement levels). Empty when the
-    variable isn't a rating scale."""
+    present in `categories` (e.g. the top-2 or top-3 agreement levels), or the `n`
+    LOWEST when `lowest`. Empty when the variable isn't a rating scale."""
     lv = scale_levels(var)                     # [(code, label, point), …]
     if not lv:
         return []
-    ranked = [label for _c, label, _p in sorted(lv, key=lambda t: t[2], reverse=True)]
+    ranked = [label for _c, label, _p in sorted(lv, key=lambda t: t[2],
+                                                reverse=not lowest)]
     out: list[str] = []
     for label in ranked:
         if label in categories and label not in out:
@@ -755,9 +780,9 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # top-2/top-3 summed share of each bar's HIGHEST scale levels — so the most-"agree"
     # group leads while the scale stack stays 1..N. (customer: sort the categories, not
     # the values)
-    if _bars_are_segments and spec.sort.basis in ("topbox_sum", "top3_sum"):
-        n_top = 3 if spec.sort.basis == "top3_sum" else 2
-        top_cats = _top_scale_categories(var, categories, n_top)
+    if _bars_are_segments and spec.sort.basis in _BOX_SORT_BASES:
+        n_top, _lowest = _BOX_SORT_BASES[spec.sort.basis]
+        top_cats = _top_scale_categories(var, categories, n_top, lowest=_lowest)
         if top_cats:
             def _topbox(seg: str) -> float:
                 return sum((cells.get((c, seg)) or Cell(pct=None)).pct or 0.0
@@ -1499,9 +1524,10 @@ def _compute_row_summaries(spec, statements, levels, points, cells):
     decimals = nf.mean_decimals if fn == "mean" else nf.pct_decimals
     out = []
     for stmt in statements:
-        if fn in ("top2_sum", "top3_sum"):
-            n_top = 3 if fn == "top3_sum" else 2
-            val = sum(cell_pct(l, stmt) for l in levels[-n_top:])
+        if fn in _BOX_ROW_SUMMARIES:
+            n_top, _lowest = _BOX_ROW_SUMMARIES[fn]
+            picked_levels = levels[:n_top] if _lowest else levels[-n_top:]
+            val = sum(cell_pct(l, stmt) for l in picked_levels)
         elif fn == "sum":
             val = sum(cell_pct(l, stmt) for l in picked(spec.row_summary_codes))
         elif fn == "net":
@@ -1577,9 +1603,10 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # derives the top-N from the scale, so it works for any N. (REQ-S-04)
     # With a split, statements are reordered as a BLOCK (ranked by their Total) so the
     # per-statement groups stay intact.
-    if spec.sort.basis in ("topbox_sum", "top3_sum") and len(levels) >= 2:
-        n_top = 3 if spec.sort.basis == "top3_sum" else 2
-        top = levels[-n_top:]
+    if spec.sort.basis in _BOX_SORT_BASES and len(levels) >= 2:
+        n_top, _lowest = _BOX_SORT_BASES[spec.sort.basis]
+        # `levels` runs low -> high, so one end is a head slice and the other a tail.
+        top = levels[:n_top] if _lowest else levels[-n_top:]
 
         def _topbox(bar: str) -> float:
             return sum((cells[(lvl, bar)].pct or 0.0) for lvl in top)

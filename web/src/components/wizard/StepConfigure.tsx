@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
+import { usePreviewStatus } from "@/lib/usePreviewStatus";
+import * as previewQueue from "@/lib/previewQueue";
 import { useDragReorder } from "@/lib/useDragReorder";
 import { slideTitle } from "@/components/wizard/slideTitle";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
@@ -49,7 +51,6 @@ import {
   slideSubtitle,
   SLIDE_ASPECT,
   defaultRowSummaryLabel,
-  titleDataKey,
 } from "@/lib/charts";
 
 // The report's grouping override, shared with the leaf preview components so a
@@ -101,6 +102,9 @@ function ChartPreview({
   void questionText;
   const grouping = useContext(GroupingCtx);
   const { reportId, templateRef } = useContext(PreviewTemplateCtx);
+  // The queue draws this slide's headline before its picture, so there is no
+  // "render now, title later" to guard against any more. `priority` promotes the
+  // selected slide to the head of that one queue.
   const { data, error: qError, isFetching: loading } = useChartPreview(
     materialId,
     debounced,
@@ -111,7 +115,13 @@ function ChartPreview({
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   // Any pending state (re-rendering, or AI title / label generation) shows the single
   // "Updating…" animation over a dimmed slide — no separate per-region placeholders.
-  const busy = loading || titlePending || labelsPending;
+  // "Is anything still being made for this slide?" — asked of the thing doing
+  // the work, rather than of a flag threaded down from the wizard that could
+  // disagree with it (and, when one was stranded, did).
+  const queued = usePreviewStatus(debounced.slide_id ?? "");
+  const producing =
+    queued.title === "running" || queued.bullets === "running" || queued.chart === "running";
+  const busy = loading || producing || titlePending || labelsPending;
 
   return (
     // Full-width preview: no padding — the border frames the slide itself. The
@@ -893,6 +903,7 @@ function ChartControls({
         scaleGloss={question?.scale_gloss ?? ""}
         onChange={onChange}
       />
+      <AxisTitleFields chart={chart} onChange={onChange} />
       <FooterNoteField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
@@ -935,6 +946,39 @@ function SlideTitleField({
         Enter to break it onto up to three lines. The preview updates live.
       </p>
     </Field>
+  );
+}
+
+// ── Editable axis titles (P-C-27's fourth text property) ─────────────────────
+// The requirement asks that a chart's title, subtitle, value names and AXIS names
+// all be editable here. The first three were; axis names had only an on/off
+// toggle and no text field anywhere.
+//
+// These are PRESENTATION: they are in the image fingerprint, so editing one
+// re-renders the slide, and deliberately not in titleDataKey, so it never spends
+// an LLM call rewriting the headline. Chart families with no axes ignore them.
+function AxisTitleFields({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <Field label="X axis title">
+        <Input
+          value={chart.axis_x_title ?? ""}
+          onChange={(e) => onChange({ axis_x_title: e.target.value })}
+        />
+      </Field>
+      <Field label="Y axis title">
+        <Input
+          value={chart.axis_y_title ?? ""}
+          onChange={(e) => onChange({ axis_y_title: e.target.value })}
+        />
+      </Field>
+    </div>
   );
 }
 
@@ -1476,62 +1520,11 @@ function SpecialSlideControls({
 }
 
 // ── Main Configure step ─────────────────────────────────────────────────────
-// Warm ONE slide's preview into the shared cache (renders nothing).
-function PrefetchOne({
-  materialId,
-  chart,
-}: {
-  materialId: string;
-  chart: ChartSpec;
-}) {
-  const grouping = useContext(GroupingCtx);
-  const { reportId, templateRef } = useContext(PreviewTemplateCtx);
-  // Warm the composited full-slide preview — the ONE variant both the Design
-  // so switching slides there does not wait on a ~4.4s LibreOffice render.
-  //
-  // NOT the grid's variant as well: warming both doubles the requests for no
-  // gain the user can see, and the expensive half of this is already the reason
-  // opening a deck spends a long time rendering.
-  useChartPreview(materialId, chart, {
-    renderTitle: false,
-    enabled: true,
-    grouping,
-    reportId,
-    templateRef,
-  });
-  return null;
-}
-
-// Lazily render EVERY slide's preview in the background so the whole deck is
-// ready without the user clicking each slide one by one. Renders nothing; the
-// shared content-keyed cache + the previewChart concurrency gate keep the UI
-// responsive (a few render at a time). Debounced so live edits don't spam.
-function DeckPrefetch({
-  materialId,
-  charts,
-}: {
-  materialId: string;
-  charts: ChartSpec[];
-}) {
-  const key = JSON.stringify(charts);
-  const [debounced, setDebounced] = useState(charts);
-  useEffect(() => {
-    const h = setTimeout(() => setDebounced(charts), 400);
-    return () => clearTimeout(h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return (
-    <>
-      {debounced.map((c, i) => (
-        <PrefetchOne
-          key={`${c.question_ref}-${i}`}
-          materialId={materialId}
-          chart={c}
-        />
-      ))}
-    </>
-  );
-}
+// There is no deck-prefetch component here any more. Warming every slide was a
+// second queue in all but name: it had its own debounce, its own ordering and
+// its own idea of when a title was still coming, none of which agreed with the
+// render gate's. The wizard enqueues the whole deck on the ONE queue instead,
+// and scrolling or selecting a slide promotes it.
 
 /** Chart types that draw ONE panel per classifier group, and the most a 4:3
  *  slide holds. Kept next to the rule that reads them; the renderer's own copy
@@ -1557,6 +1550,45 @@ type SlideProblem = { id: string; title: string; detail: string };
  *  can legitimately differ and this stays advisory. The slide's own footer is the
  *  authoritative record of what was omitted. (spec 2026-08-22)
  */
+/** What the preview queue could not produce for this slide, in the author's
+ *  terms. A failed generation is not a crash and does not stop the slide being
+ *  drawn — the headline falls back to the question text — but the author should
+ *  be able to find out why their slide says something blander than usual. */
+function producerProblems(chart: ChartSpec | undefined): SlideProblem[] {
+  const failures = previewQueue.failuresOf(chart?.slide_id ?? "");
+  const say: Record<string, { title: string; detail: string }> = {
+    title: {
+      title: "The AI headline could not be written",
+      detail:
+        "This slide shows its question text instead, which is what every slide " +
+        "showed before AI headlines existed. Nothing else about the slide is " +
+        "affected. Editing the slide, or reopening the report, tries again.",
+    },
+    bullets: {
+      title: "The theme bullets could not be generated",
+      detail:
+        "The open-ended answers could not be summarised into themes. The slide " +
+        "is otherwise complete; you can type bullets yourself, or try again by " +
+        "reopening the report.",
+    },
+    chart: {
+      title: "The slide could not be rendered",
+      detail:
+        "The picture for this slide failed to draw. The deck cannot include it " +
+        "until it does — changing anything on the slide will try again.",
+    },
+  };
+  return failures.map((f) => {
+    const copy = say[f.id];
+    const why = f.error instanceof Error ? f.error.message : "";
+    return {
+      id: `producer-${f.id}`,
+      title: copy.title,
+      detail: why ? `${copy.detail}\n\nThe service said: ${why}` : copy.detail,
+    };
+  });
+}
+
 function slideProblems(
   chart: ChartSpec | undefined,
   variables: Variable[] | undefined
@@ -1589,7 +1621,6 @@ function StepConfigureInner({
   setActive,
   onReorder,
   onUpdateChart,
-  onEnsureTitles,
   onRegenerateSpecial,
 }: {
   materialId: string;
@@ -1605,7 +1636,6 @@ function StepConfigureInner({
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
   // Called with every chart's slide_id when Design opens so AI slide titles are
   // generated automatically in the background (batched, like the thumbnails).
-  onEnsureTitles?: (slideIds: string[]) => void;
   // Regenerate a special (non-chart) slide's AI content. Adding/removing/reordering
   // slides lives in the Select step now — Design only edits slide CONTENT.
   onRegenerateSpecial?: (chart: ChartSpec) => void;
@@ -1668,20 +1698,10 @@ function StepConfigureInner({
   }, [questions]);
 
   // Auto-generate AI slide titles for every chart once Design is open (batched,
-  // just like the thumbnails) — not on report load, and not gated on opening each
-  // chart. The dependency below is a per-chart DATA fingerprint (titleDataKey), not
-  // just the ref list, so it re-fires within the SAME mount the instant a
-  // classifying variable, a grouping, or a label override changes — while a
-  // template swap, a re-sort, or a colour change never touch it, so no title
-  // regenerates and no AI call fires.
-  const titleFingerprint = charts
-    .map((c) => titleDataKey(c, questionMap.get(c.question_ref)))
-    .join("|");
-  useEffect(() => {
-    if (charts.length)
-      onEnsureTitles?.(charts.map((c) => c.slide_id ?? c.question_ref));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [titleFingerprint, onEnsureTitles]);
+  // Titles are not requested from here any more. The preview queue owns them,
+  // along with the bullets and the picture, and decides for itself what a slide
+  // still needs by comparing fingerprints — so a step no longer has to notice
+  // that a classifying variable changed and go asking.
 
   if (isError) {
     return (
@@ -1715,7 +1735,18 @@ function StepConfigureInner({
   const activeChart = activeIndex >= 0 ? charts[activeIndex] : charts[0];
   // What this slide will NOT show. A pure read of the active chart and the
   // material's variables; declared here because both are only in scope now.
-  const activeProblems = slideProblems(activeChart, panelVariables);
+  // Both kinds: what the slide will not SHOW (too many groups for one slide),
+  // and what could not be MADE for it (a generation that failed). They belong in
+  // the same button because they are the same question to an author looking at a
+  // slide that is not what they expected.
+  // Subscribed, so a failure appearing while the author is looking at the slide
+  // lights the button then — not on the next unrelated re-render.
+  const activeStatus = usePreviewStatus(activeChart?.slide_id ?? "");
+  void activeStatus;
+  const activeProblems = [
+    ...slideProblems(activeChart, panelVariables),
+    ...producerProblems(activeChart),
+  ];
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
   // A "themes" chart is an open-ended question rendered as bullets — unlike a true
@@ -1742,7 +1773,6 @@ function StepConfigureInner({
     <div className="space-y-4">
       {/* Background: warm every slide's preview so the deck (and the Preview grid)
           are ready without clicking each slide (renders nothing). */}
-      <DeckPrefetch materialId={materialId} charts={charts} />
 
       {/* Top: slide list (left) + preview (right), EQUAL HEIGHT. The list is an
           absolutely-positioned scroll area so it never grows the row — the PREVIEW
@@ -1908,7 +1938,14 @@ function StepConfigureInner({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangleIcon className="size-5 shrink-0" />
-              This slide won't show everything
+              {/* Two different things land in this dialog: content the slide
+                  leaves OUT because it does not fit, and content that could not
+                  be MADE. "Won't show everything" is right for the first and
+                  simply wrong for the second — a slide whose headline failed
+                  shows everything it has. */}
+              {activeProblems.some((p) => p.id.startsWith("producer-"))
+                ? "Something on this slide could not be generated"
+                : "This slide won't show everything"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">

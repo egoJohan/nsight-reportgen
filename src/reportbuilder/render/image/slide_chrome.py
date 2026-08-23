@@ -498,7 +498,16 @@ def fit_subtitle_size(text: str, width_emu: int, height_emu: int, font: str,
 
 
 def _spec_title_pt(style, font: str) -> float:
-    """The title size this template's spec states, or 0.0 if it cannot say."""
+    """The title size this template's spec states, or 0.0 if it cannot say.
+
+    Read, not measured: `template_cache.resolve` settles the whole spec once per
+    template, before any slide is built. The measuring path below is the
+    fallback for a style that did not come through it — a house style, or a test
+    building one directly.
+    """
+    spec = getattr(style, "resolved_spec", None)
+    if spec is not None:
+        return spec.title.size_pt
     try:
         from reportbuilder.render.resolved_style import build_spec
         return build_spec(style, title_font=font).title.size_pt
@@ -508,6 +517,9 @@ def _spec_title_pt(style, font: str) -> float:
 
 def _spec_subtitle_pt(style, font: str) -> float:
     """The subtitle size this template's spec states, or 0.0."""
+    spec = getattr(style, "resolved_spec", None)
+    if spec is not None:
+        return spec.subtitle.size_pt
     try:
         from reportbuilder.render.resolved_style import build_spec
         return build_spec(style, subtitle_font=font).subtitle.size_pt
@@ -712,9 +724,12 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     # OVERFLOWS, deliberately: that is the signal to the author to write a
     # shorter one, and it is the same signal in the deck and in the preview.
     try:
-        from reportbuilder.render.resolved_style import build_spec
-
-        spec = build_spec(style, title_font=_inherited_title_font(ph)) if style else None
+        spec = getattr(style, "resolved_spec", None) if style else None
+        if spec is None and style is not None:
+            # A style that did not come through template_cache.resolve. Measure,
+            # as this did for every slide before the spec was resolved once.
+            from reportbuilder.render.resolved_style import build_spec
+            spec = build_spec(style, title_font=_inherited_title_font(ph))
         if spec is not None and spec.title.size_pt:
             run = tf.paragraphs[0].runs[0]
             run.font.size = Pt(spec.title.size_pt)

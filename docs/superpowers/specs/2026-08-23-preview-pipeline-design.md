@@ -99,11 +99,22 @@ def resolve(template_path: str) -> ResolvedTemplate:
 ```
 
 `resolve()` stats the file and calls an `lru_cache(maxsize=16)`'d inner function
-keyed on `(path, st_size, st_mtime_ns)`, wrapping `load_style_spec` +
-`build_spec`. Two callers change to it — the preview path
-(`routes_questions.py:1407,1463`) and the deck path (`routes_render.py:171`) —
-and `slide_chrome.py` stops calling `build_spec` at its three sites, reading the
-resolved spec that travels with the style instead.
+keyed on `(path, st_size, st_mtime_ns)`. Two callers change to it — the preview
+path (`routes_questions.py:1407,1463`) and the deck path
+(`routes_render.py:171`).
+
+**`build_spec` is called once, here, and never again.** Today
+`slide_chrome.py` calls it per slide at three sites (`:504`, `:513`, `:717`),
+passing a font it derives per slide from the title placeholder's inheritance
+chain (`_inherited_title_font`). But every chart slide is built from the SAME
+layout — `style.chart_layout_index` — so that font is a property of the
+template, and deriving it per slide is pure waste: it re-loads a TTF through
+PIL inside `size_for_cap_height` every time. `resolve()` walks that chain once,
+on the layout's own title placeholder, and builds the spec from it. The
+resolved spec travels with the style, so the three call sites become reads.
+
+That is also why there is no separate font-metric cache: with the spec built
+once per template there is nothing left to cache.
 
 Concurrent first calls may compute twice under FastAPI's threadpool. That is
 harmless: the result is a value, not a resource.

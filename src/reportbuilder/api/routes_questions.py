@@ -28,7 +28,7 @@ from reportbuilder.api.deps import get_client
 from reportbuilder.api.deps_auth import current_user, require_material, require_material_write
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth.permissions import User
-from reportbuilder.render.style_spec import load_style_spec as _load_style_spec
+from reportbuilder.render.template_cache import resolve as _resolve_template
 from reportbuilder.store import paths as _paths
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -1180,6 +1180,10 @@ class ChartSpecBody(BaseModel):
     slide_title: str | None = None
     slide_description: str | None = None
     footer_note: str | None = None  # override methodology footer; "{n}" expands to the base
+    # Axis titles (P-C-27). Part of the preview's cache key via model_dump_json,
+    # so editing one re-renders the image.
+    axis_x_title: str = ""
+    axis_y_title: str = ""
     # Preview-only: when False the rendered PNG omits the title block (accent bar +
     # title + description) so the frontend can own that region with a progressive
     # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
@@ -1263,6 +1267,8 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         slide_title=body.slide_title,
         slide_description=body.slide_description,
         footer_note=body.footer_note,
+        axis_x_title=body.axis_x_title,
+        axis_y_title=body.axis_y_title,
         options=dict(body.options or {}),
     )
 
@@ -1303,6 +1309,19 @@ def _preview_headline(body) -> str:
     return (getattr(body, "slide_title", None) or "").strip()
 
 
+def _preview_template_filename(template_id: str, blob: bytes) -> str:
+    """The temp-file name for this exact template CONTENT.
+
+    Named by content hash, not by length. The previous rule rewrote the file
+    only when its size differed, so re-uploading a template that happened to be
+    the same number of bytes kept rendering from the old one — and now that
+    template resolution is cached on the file (template_cache.resolve), it would
+    keep that template's fonts, palette and type sizes too.
+    """
+    digest = hashlib.sha256(blob).hexdigest()[:16]
+    return f"{template_id or 'default'}.{digest}.pptx"
+
+
 def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
@@ -1330,8 +1349,8 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tupl
         import tempfile as _tf
         path = pathlib.Path(_tf.gettempdir()) / "nsight-preview-templates"
         path.mkdir(parents=True, exist_ok=True)
-        f = path / f"{template_id or 'default'}.pptx"
-        if not f.exists() or f.stat().st_size != len(blob):
+        f = path / _preview_template_filename(template_id, blob)
+        if not f.exists():
             f.write_bytes(blob)
         return str(f), template_id or "default"
     except Exception:  # noqa: BLE001 — styling must never break a preview
@@ -1404,7 +1423,7 @@ def preview_chart(
     style = None
     if not body.render_title and template_path:
         try:
-            style = _load_style_spec(template_path)
+            style = _resolve_template(template_path).style
             # The headline this slide will carry, so the reported size is the
             # one the deck would use for THIS text rather than the template's
             # nominal size — see title_box_headers.
@@ -1460,7 +1479,7 @@ def preview_chart(
         # case, render_title=False) rather than parsing the template twice.
         if style is None and template_path:
             try:
-                style = _load_style_spec(template_path)
+                style = _resolve_template(template_path).style
             except Exception:  # noqa: BLE001
                 style = None
 

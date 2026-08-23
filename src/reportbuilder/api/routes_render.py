@@ -160,15 +160,16 @@ def orchestrate_render(
     uid = uuid.uuid4().hex[:8]
     work_pptx = os.path.join(str(out_dir), f"deck.{uid}.pptx")
     try:
-        # The client's template, when one resolved. load_style_spec reads its
-        # slots and fonts, and deck.py opens it as the base Presentation — so
+        # The client's template, when one resolved. template_cache.resolve reads
+        # its slots, fonts and type sizes — once per template, not once per
+        # slide — and deck.py opens it as the base Presentation, so
         # the deck inherits the client's masters, theme and page size instead of
         # being a blank deck wearing nSight's colours.
         style = None
         if template_path:
             try:
-                from reportbuilder.render.style_spec import load_style_spec
-                style = load_style_spec(template_path)
+                from reportbuilder.render.template_cache import resolve
+                style = resolve(template_path).style
             except Exception:  # noqa: BLE001
                 # An unreadable template must not fail the render; the deck
                 # falls back to the generic style it used before templates.

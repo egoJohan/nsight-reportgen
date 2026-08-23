@@ -3,6 +3,7 @@ import { AlertCircleIcon, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec, GroupingOverride } from "@/lib/api";
 import { useChartPreview } from "@/lib/queries";
+import * as previewQueue from "@/lib/previewQueue";
 
 /**
  * A cached chart preview thumbnail. Backed by the shared useChartPreview cache,
@@ -55,9 +56,17 @@ export default function ChartThumb({
     return () => io.disconnect();
   }, [seen]);
 
+  // Scrolling a thumbnail into view moves its slide up the queue rather than
+  // starting a render of its own — the queue is what decides that a headline is
+  // written before a picture is drawn, and a component that fetched on its own
+  // would render the slide once without its title and again with it.
+  const slideId = chart.slide_id ?? "";
+  useEffect(() => {
+    if (seen && slideId) previewQueue.promote(slideId);
+  }, [seen, slideId]);
+
   const { data, error, isFetching } = useChartPreview(materialId, chart, {
     renderTitle,
-    enabled: seen,
     grouping,
     reportId,
     templateRef,

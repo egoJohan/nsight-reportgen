@@ -208,6 +208,11 @@ export const SORT_OPTIONS: SortOption[] = [
   // itself stays 1..N.
   { id: "topbox_sum", label: "Top 2 sum" },
   { id: "top3_sum", label: "Top 3 sum" },
+  // The same question asked the other way round: where the DISSATISFACTION sits.
+  // Not a reversed top-box sort — that ranks by the high end read backwards, which
+  // says something different whenever the mass sits in the middle of the scale.
+  { id: "bottom2_sum", label: "Bottom 2 sum" },
+  { id: "bottom3_sum", label: "Bottom 3 sum" },
 ];
 
 export const SORT_ITEMS: Record<string, string> = Object.fromEntries(
@@ -260,6 +265,8 @@ export function defaultRowSummaryLabel(fn?: string): string {
   switch (fn) {
     case "top2_sum": return "Top 2";
     case "top3_sum": return "Top 3";
+    case "bottom2_sum": return "Bottom 2";
+    case "bottom3_sum": return "Bottom 3";
     case "sum": return "Sum";
     case "mean": return "Keskiarvo";
     case "net": return "Net";
