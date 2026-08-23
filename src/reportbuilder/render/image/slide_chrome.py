@@ -497,6 +497,24 @@ def fit_subtitle_size(text: str, width_emu: int, height_emu: int, font: str,
     return max(size, min_pt)
 
 
+def _spec_title_pt(style, font: str) -> float:
+    """The title size this template's spec states, or 0.0 if it cannot say."""
+    try:
+        from reportbuilder.render.resolved_style import build_spec
+        return build_spec(style, title_font=font).title.size_pt
+    except Exception:  # noqa: BLE001 — never fail a render over a font metric
+        return 0.0
+
+
+def _spec_subtitle_pt(style, font: str) -> float:
+    """The subtitle size this template's spec states, or 0.0."""
+    try:
+        from reportbuilder.render.resolved_style import build_spec
+        return build_spec(style, subtitle_font=font).subtitle.size_pt
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _inherited_title_font(ph) -> str:
     """The face the template's own chain gives this title, if any."""
     try:
@@ -574,7 +592,12 @@ def draw_template_heading(slide, style, text: str) -> int:
         return 0
     st = profile.title
     left, top, width, height = harvested_title_box(profile, text)
-    size = fit_title_size(st, text)
+    # ONE source for the size: the template spec, sized from the font's own cap
+    # height. This path used to fit against the template's stated size instead,
+    # so a template whose title lands here rendered at a different physical size
+    # than one whose title goes in a layout placeholder — the same deck, two
+    # sizes, depending on a detail of how the template was built.
+    size = _spec_title_pt(style, st.font) or fit_title_size(st, text)
     _textbox(slide, left, top, width, height,
              [(text, size, title_colour_for(st, style),
                True if st.bold is None else st.bold)],
@@ -770,8 +793,10 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             gloss = scale_endpoint_gloss(ctx.series.categories)
             if gloss:
                 secondary = f"{secondary}   {gloss}" if secondary else gloss
-        # One fixed title size for every slide (no length-based stepping).
-        t_size = TITLE_PT
+        # One fixed title size for every slide, from the template spec (the
+        # house style is a template too, and is sized the same way).
+        t_size = _spec_title_pt(ctx.style,
+                               getattr(ctx.style, "heading_font", "")) or TITLE_PT
 
         # 3 — Teal accent bar. House furniture, so it is skipped on a templated
         #     slide: the customer's layout decides what sits beside a title.
@@ -873,7 +898,10 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
             s_font = _body_font(ctx)
-            s_size = fit_subtitle_size(secondary, sub_w, sub_h, s_font)
+            # From the spec, not fitted to the box: the question must be the
+            # same size on every slide of every deck, which is the whole point
+            # of sizing by cap height.
+            s_size = _spec_subtitle_pt(ctx.style, s_font) or 13.0
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,

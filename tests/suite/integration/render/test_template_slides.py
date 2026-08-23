@@ -108,6 +108,17 @@ class TestWhichWayTheSlideIsBuilt:
 
 class TestTheTitleFollowsTheTemplate:
     def test_a_harvested_title_sits_in_the_templates_own_box(self):
+        """Box, position and face are the customer's. The SIZE is not: it is
+        whatever renders their face at the house cap height.
+
+        This asserted the template's own 22pt. Different faces at the same point
+        size are different sizes on a slide, so following the number made one
+        customer's headline visibly bigger than another's; sizing by cap height
+        makes every deck's title the same physical height, which is what the
+        number was standing in for.
+        """
+        from reportbuilder.render.resolved_style import build_spec
+
         style, _prs, slide = _render("synsam")
         title = _title_shape(slide, _LONG)
         assert title is not None
@@ -115,7 +126,8 @@ class TestTheTitleFollowsTheTemplate:
         assert title.top == style.profile.title.top
         run = title.text_frame.paragraphs[0].runs[0]
         assert run.font.name == "Avenir Next LT Pro Demi"
-        assert run.font.size.pt == 22.0
+        assert run.font.size.pt == build_spec(
+            style, title_font=run.font.name).title.size_pt
 
     def test_a_layout_title_goes_in_the_placeholder_and_inherits(self):
         """Font, colour and position stay the customer's — the whole point of
@@ -254,7 +266,12 @@ class TestBulletSlidesFollowTheTemplateToo:
         shape = _title_shape(slide, _HEADING)
         assert shape is not None
         assert shape.top == style.profile.title.top
-        assert shape.text_frame.paragraphs[0].runs[0].font.size.pt == 22.0
+        # Sized by cap height, like every other heading — see the title test.
+        from reportbuilder.render.resolved_style import build_spec
+
+        run = shape.text_frame.paragraphs[0].runs[0]
+        assert run.font.size.pt == build_spec(
+            style, title_font=run.font.name or "").title.size_pt
 
     def test_the_bullet_glyph_is_the_clients_accent(self):
         """House teal dots down an Attendo navy deck was the giveaway."""

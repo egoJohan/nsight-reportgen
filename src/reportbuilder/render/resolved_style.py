@@ -118,8 +118,8 @@ def title_colour(stated: str, style) -> str:
 #
 # Start here and tune by looking: these are the numbers the eye judges, so they
 # are meant to be adjusted against rendered slides rather than argued about.
-TARGET_TITLE_CAP_IN = 0.26
-TARGET_SUBTITLE_CAP_IN = 0.13
+TARGET_TITLE_CAP_IN = 0.20
+TARGET_SUBTITLE_CAP_IN = 0.15
 
 _MEASURE_PX = 200.0        # measure once, big enough that rounding does not matter
 
