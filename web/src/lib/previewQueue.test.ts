@@ -249,3 +249,80 @@ describe("the queue", () => {
     off();
   });
 });
+
+describe("work abandoned because the context changed", () => {
+  it("re-queues a slide whose render was abandoned mid-run", async () => {
+    // THE regression. `enqueue` drops a slide that is already running, and both
+    // the abandon path and the tail re-check call it from INSIDE the run — so
+    // an abandoned slide was never picked up again and sat unfinished for ever.
+    // That is what switching templates looked like: nothing ever finished.
+    put("s1");
+    let runs = 0;
+    q.__setProducersForTest([
+      producer("chart", {
+        fingerprint: () => `ctx-${q.__generationForTest()}`,
+        storedFingerprint: () => null,
+        run: async () => {
+          runs += 1;
+          if (runs === 1) {
+            // The author picks a different template while this render is out.
+            q.setRenderContext({
+              templateRef: "tpl-2",
+              reportId: "r1",
+              groupingKey: "{}",
+              renderTitle: false,
+            });
+          }
+        },
+      }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+    expect(runs).toBe(2); // abandoned once, then done under the new context
+    expect(q.isBusy()).toBe(false);
+  });
+
+  it("leaves nothing running or queued once it settles", async () => {
+    ["a", "b", "c", "d"].forEach((id) => put(id));
+    let first = true;
+    q.__setProducersForTest([
+      producer("chart", {
+        fingerprint: () => `ctx-${q.__generationForTest()}`,
+        storedFingerprint: () => null,
+        run: async () => {
+          if (first) {
+            first = false;
+            q.setRenderContext({
+              templateRef: "tpl-9",
+              reportId: "r1",
+              groupingKey: "{}",
+              renderTitle: false,
+            });
+          }
+        },
+      }),
+    ]);
+    ["a", "b", "c", "d"].forEach(q.enqueue);
+    await q.__drainForTest();
+    const state = q.snapshot();
+    expect(state.running).toEqual([]);
+    expect(state.queued).toEqual([]);
+    expect(state.requeue).toEqual([]);
+    // And nothing is left claiming it still has work to do.
+    expect(Object.keys(state.unfinished)).toEqual([]);
+  });
+
+  it("records what it did, so a stuck queue can be diagnosed", async () => {
+    put("s1");
+    q.clearTrace();
+    q.__setProducersForTest([producer("chart", { run: async () => {} })]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+    const events = q.getTrace().map((e) => e.event);
+    expect(events).toContain("enqueue");
+    expect(events).toContain("start");
+    expect(events).toContain("run");
+    expect(events).toContain("done");
+    expect(events).toContain("settled");
+  });
+});

@@ -75,8 +75,17 @@ let contextGeneration = 0;
 
 export function setRenderContext(ctx: RenderContext) {
   const changed = JSON.stringify(ctx) !== JSON.stringify(renderContext);
+  const before = renderContext;
   renderContext = ctx;
-  if (changed) contextGeneration += 1;
+  if (changed) {
+    contextGeneration += 1;
+    say("context-changed", {
+      detail:
+        `gen=${contextGeneration} template "${before.templateRef}" -> ` +
+        `"${ctx.templateRef}"; ${running.size} running will be abandoned, ` +
+        `${queue.length} queued will be re-checked under the new one`,
+    });
+  }
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -97,6 +106,17 @@ let queued = new Set<string>();
  *  arrived mid-run. Without this, every keystroke during a render started a
  *  second pass over the same slide. */
 let running = new Set<string>();
+/** Slides that asked to be queued again WHILE they were running.
+ *
+ *  `enqueue` refuses a running slide on purpose — an edit arriving mid-run is
+ *  caught by the pass's own tail re-check, so queueing it twice would just do
+ *  the work twice. But that same refusal silently swallowed the two calls that
+ *  come FROM inside a run: the tail re-check itself, and the abandon path when
+ *  the template changes under it. A slide abandoned mid-render was therefore
+ *  never picked up again, and sat unfinished for ever — which is exactly what
+ *  switching templates looked like. These are remembered and queued the moment
+ *  the pass ends. */
+let requeue = new Set<string>();
 let active = 0;
 let concurrency = 4;
 let currentReportId = "";
@@ -150,12 +170,112 @@ export function failuresOf(slideId: string): Array<{ id: ProducerId; error: unkn
  *  report's as another's would show finished work that was never done. */
 export function reset(reportId: string) {
   if (reportId === currentReportId) return;
+  say("reset", { detail: `report ${currentReportId || "(none)"} -> ${reportId}` });
   currentReportId = reportId;
   statuses = new Map();
   overlay = new Map();
   queue = [];
   queued = new Set();
+  requeue = new Set();
   notify();
+}
+
+
+// ── Tracing ──────────────────────────────────────────────────────────────────
+// Every decision this queue makes, in order, with the reason.
+//
+// The queue is asynchronous, ordered, and its bugs are all of the form "this
+// slide never finished" — which is invisible from outside: the screen simply
+// shows an old picture for ever. Working out WHY needs the sequence, so the
+// sequence is recorded rather than reconstructed.
+//
+// In the browser: `window.__previewQueue.trace()` for the table,
+// `window.__previewQueue.state()` for what is queued/running right now, and
+// `localStorage.previewQueueDebug = "1"` to mirror it to the console live.
+
+export interface TraceEvent {
+  /** ms since the trace started */
+  t: number;
+  event: string;
+  slideId?: string;
+  producer?: ProducerId;
+  detail?: string;
+  /** queued / running / active, at the moment of the event */
+  q?: string;
+}
+
+/** Fingerprints are long JSON strings; the trace only needs them to be
+ *  comparable at a glance. */
+function short(fp: string): string {
+  let h = 0;
+  for (let i = 0; i < fp.length; i++) h = (h * 31 + fp.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+const TRACE_CAP = 4000;
+let trace: TraceEvent[] = [];
+const traceStart = typeof performance !== "undefined" ? performance.now() : 0;
+
+function say(event: string, data: Omit<TraceEvent, "t" | "event"> = {}) {
+  const now = typeof performance !== "undefined" ? performance.now() : 0;
+  const e: TraceEvent = {
+    t: Math.round(now - traceStart),
+    event,
+    ...data,
+    q: `q${queue.length}/r${running.size}/a${active}`,
+  };
+  trace.push(e);
+  // A cap, because this runs for the life of the tab: the last few thousand
+  // events are what a diagnosis needs, and an unbounded array is a leak.
+  if (trace.length > TRACE_CAP) trace = trace.slice(-TRACE_CAP / 2);
+  if (debugToConsole()) {
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[queue ${e.t}ms ${e.q}] ${event}`,
+      e.slideId ?? "",
+      e.producer ?? "",
+      e.detail ?? ""
+    );
+  }
+}
+
+function debugToConsole(): boolean {
+  try {
+    return typeof localStorage !== "undefined"
+      && localStorage.getItem("previewQueueDebug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** The recorded sequence. */
+export function getTrace(): TraceEvent[] {
+  return trace;
+}
+
+export function clearTrace() {
+  trace = [];
+}
+
+/** What the queue is doing right now — the answer to "is it stuck?". */
+export function snapshot() {
+  const pending: Record<string, string> = {};
+  for (const [slideId, byProducer] of statuses) {
+    const parts: string[] = [];
+    for (const [id, e] of byProducer) if (e.status !== "done") parts.push(`${id}:${e.status}`);
+    if (parts.length) pending[slideId] = parts.join(",");
+  }
+  return {
+    queued: [...queued],
+    running: [...running],
+    requeue: [...requeue],
+    active,
+    concurrency,
+    generation: contextGeneration,
+    context: renderContext,
+    unfinished: pending,
+    slidesTracked: statuses.size,
+  };
 }
 
 // ── Reading and writing a slide ──────────────────────────────────────────────
@@ -215,6 +335,19 @@ export function setProducers(ps: Producer[]) {
 
 export { completedFingerprint };
 
+/** Was this thrown because the work was called off, rather than because it went
+ *  wrong? The client cancels a fetch nobody is observing any more, which is the
+ *  normal consequence of the author changing the template mid-render. */
+function isCancellation(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name ?? "";
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return (
+    name === "CancelledError" ||
+    name === "AbortError" ||
+    /cancel|abort/i.test(msg)
+  );
+}
+
 function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">): ProducerCtx | null {
   const fingerprint = p.fingerprint(base);
   const c: ProducerCtx = { ...base, fingerprint };
@@ -235,7 +368,8 @@ async function producePreview(slideId: string): Promise<void> {
   for (const p of PRODUCERS) {
     const chart = readSlide(slideId);
     if (!chart) {
-      statuses.delete(slideId); // deleted while queued
+      say("slide-gone", { slideId, detail: "deleted while queued" });
+      statuses.delete(slideId);
       notify();
       return;
     }
@@ -243,29 +377,63 @@ async function producePreview(slideId: string): Promise<void> {
     if (!c) {
       // Not needed after all: clear the pending mark set at enqueue, or the
       // slide would sit showing "updating" for work nobody is going to do.
+      say("skip", { slideId, producer: p.id, detail: "already up to date" });
       if (statuses.get(slideId)?.get(p.id)?.status === "pending") {
         setStatus(slideId, p.id, "done", p.fingerprint({ slideId, chart, ctx: renderContext }));
       }
       continue;
     }
     handled.set(p.id, c.fingerprint);
+    say("run", { slideId, producer: p.id, detail: `fp=${short(c.fingerprint)}` });
     setStatus(slideId, p.id, "running", c.fingerprint);
     try {
       const patch = await p.run(c);
       if (abandoned()) {
+        say("abandon", {
+          slideId,
+          producer: p.id,
+          detail: `started under gen ${startedUnder}, now ${contextGeneration}`,
+        });
         // Drop the result and start this slide again under the new context.
         // Recording it would cache a picture of the template the author just
         // moved away from, under a fingerprint nothing will ask for.
         setStatus(slideId, p.id, "pending", null);
-        enqueue(slideId);
+        requeueAfterRun(slideId, "context changed under it");
         return;
       }
       if (patch) applyPatch(slideId, patch);
       // The fingerprint captured BEFORE the run, never one re-read after it:
       // re-reading would record work that was never done.
       setStatus(slideId, p.id, "done", c.fingerprint);
+      say("done", { slideId, producer: p.id });
     } catch (e) {
+      // A cancellation is not a failure.
+      //
+      // When the template changes, the components stop observing the old
+      // fingerprint's query and the client cancels its in-flight fetch. That
+      // arrives here as an error, and treating it as one was fatal: the slide
+      // was marked failed, `onFailure: "abort"` stopped the pass, and because
+      // that return skipped the tail re-check below, nothing ever queued the
+      // slide again. Twenty slides of a sixty-slide deck ended a burst of
+      // template switching stuck on "failed" with no picture — the "never
+      // finishes" this whole queue was accused of.
+      if (abandoned() || isCancellation(e)) {
+        say("cancelled", { slideId, producer: p.id, detail: "superseded; will run again" });
+        setStatus(slideId, p.id, "pending", null);
+        requeueAfterRun(slideId, "its work was cancelled");
+        return;
+      }
+      say("failed", {
+        slideId,
+        producer: p.id,
+        detail: e instanceof Error ? e.message : String(e),
+      });
       setStatus(slideId, p.id, "failed", c.fingerprint, e);
+      // Stop, and do NOT fall through to the tail re-check. Producers after
+      // this one never ran, so they are absent from `handled`, and the tail
+      // check reads "absent" as "changed" — which queues the slide again, to
+      // fail again, for ever. (Work that was merely superseded is handled
+      // above and does come back.)
       if (p.onFailure === "abort") return;
     }
   }
@@ -284,15 +452,38 @@ async function producePreview(slideId: string): Promise<void> {
     const c = needed(p, { slideId, chart, ctx: renderContext });
     return c !== null && c.fingerprint !== handled.get(p.id);
   });
-  if (moved) enqueue(slideId);
+  if (moved) {
+    requeueAfterRun(slideId, "changed while it ran");
+  } else {
+    say("settled", { slideId });
+  }
 }
 
 // ── The queue ────────────────────────────────────────────────────────────────
+
+/** Queue this slide again once the pass currently running it has ended.
+ *
+ *  For the queue's OWN two callers — the abandon path and the tail re-check —
+ *  which both run inside a pass, when the slide is still marked running.
+ *  `enqueue` drops a running slide on purpose, so those calls were silently
+ *  swallowed: a render abandoned because the template changed under it was
+ *  never picked up again and the slide sat unfinished for ever, which is
+ *  exactly what switching templates looked like.
+ *
+ *  Not the same as `enqueue` refusing a running slide from OUTSIDE. There, the
+ *  refusal is right: an edit arriving mid-run is caught by that pass's own tail
+ *  re-check, and queueing it as well would do the work twice.
+ */
+function requeueAfterRun(slideId: string, why: string) {
+  requeue.add(slideId);
+  say("requeue-after-run", { slideId, detail: why });
+}
 
 export function enqueue(slideId: string) {
   if (!slideId || queued.has(slideId) || running.has(slideId)) return;
   queued.add(slideId);
   queue.push(slideId);
+  say("enqueue", { slideId });
   // Mark it pending NOW. A slide waiting its turn behind fifty others is not
   // finished, and showing it as finished is why changing the template looked
   // like nothing had happened: the work was queued, the screen just never said
@@ -314,6 +505,7 @@ export function promote(slideId: string) {
   if (i > 0) {
     queue.splice(i, 1);
     queue.unshift(slideId);
+    say("promote", { slideId, detail: `from position ${i}` });
   }
   pump();
 }
@@ -324,10 +516,15 @@ function pump() {
     queued.delete(slideId);
     running.add(slideId);
     active += 1;
+    say("start", { slideId });
     notify();
     void producePreview(slideId).finally(() => {
       running.delete(slideId);
       active -= 1;
+      if (requeue.delete(slideId)) {
+        say("requeue", { slideId, detail: "asked for while it was running" });
+        enqueue(slideId);
+      }
       notify();
       if (!isBusy()) {
         const waiters = idleWaiters;
@@ -361,6 +558,12 @@ export function __setConcurrencyForTest(n: number) {
 export function __drainForTest(): Promise<void> {
   return whenIdle();
 }
+/** The context generation, for tests that need to make a fingerprint move when
+ *  the template changes — which is what the real image fingerprint does. */
+export function __generationForTest(): number {
+  return contextGeneration;
+}
+
 export function __resetForTest() {
   currentReportId = "";
   statuses = new Map();
@@ -368,9 +571,57 @@ export function __resetForTest() {
   queue = [];
   queued = new Set();
   running = new Set();
+  requeue = new Set();
   active = 0;
+  contextGeneration = 0;
+  trace = [];
   concurrency = 4;
   PRODUCERS = [];
 }
 
 export { imageFingerprint };
+
+// ── The console handle ───────────────────────────────────────────────────────
+// `window.__previewQueue` in any environment that has a window. Not gated to
+// dev builds on purpose: the reports that matter come from someone using the
+// real thing, and "reproduce it locally first" is how a queue bug survives.
+declare global {
+  interface Window {
+    __previewQueue?: {
+      state: () => ReturnType<typeof snapshot>;
+      trace: () => TraceEvent[];
+      table: () => void;
+      clear: () => void;
+      debug: (on?: boolean) => string;
+    };
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.__previewQueue = {
+    state: snapshot,
+    trace: getTrace,
+    table: () => {
+      // eslint-disable-next-line no-console
+      console.table(
+        getTrace().map((e) => ({
+          "t(ms)": e.t,
+          event: e.event,
+          slide: e.slideId ?? "",
+          producer: e.producer ?? "",
+          "queue(q/r/a)": e.q ?? "",
+          detail: e.detail ?? "",
+        }))
+      );
+    },
+    clear: clearTrace,
+    debug: (on = true) => {
+      try {
+        localStorage.setItem("previewQueueDebug", on ? "1" : "0");
+      } catch {
+        /* private mode: the trace still records, it just does not mirror */
+      }
+      return on ? "logging queue events to the console" : "console logging off";
+    },
+  };
+}
