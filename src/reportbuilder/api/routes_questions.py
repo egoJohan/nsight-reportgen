@@ -1184,6 +1184,18 @@ class ChartSpecBody(BaseModel):
     # so editing one re-renders the image.
     axis_x_title: str = ""
     axis_y_title: str = ""
+    # WHICH template to draw on, decided by the caller.
+    #
+    # Absent means "work it out from the report", which is what this always did
+    # — and which is a race the caller cannot win: choosing a template in the
+    # editor persists the choice and re-renders at the same time, so the render
+    # regularly arrived before the binding did and came back drawn on the
+    # PREVIOUS template. The client then cached that picture under the new
+    # template's key and the deck was wrong until something else disturbed it.
+    # "" means "ignore the report's own binding and inherit from the case,
+    # asiakas or default", which is what the editor sends for "Use parent
+    # setting"; a template id means exactly that template.
+    template_id: str | None = None
     # Preview-only: when False the rendered PNG omits the title block (accent bar +
     # title + description) so the frontend can own that region with a progressive
     # "Generating title…" placeholder. Does NOT affect the persisted chart / deck.
@@ -1322,7 +1334,8 @@ def _preview_template_filename(template_id: str, blob: bytes) -> str:
     return f"{template_id or 'default'}.{digest}.pptx"
 
 
-def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tuple[str | None, str]:
+def _preview_template(repo, auth, material_id: str, report_id: str = "",
+                      chosen: str | None = None) -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
     *report_id* is the report the preview belongs to, when the caller has one
@@ -1339,8 +1352,20 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "") -> tupl
         m = repo.find_material(auth, material_id)
         if m is None:
             return None, ""
-        template_id, _level = repo.resolve_template(
-            auth, m.customer_id, m.case_id, report_id)
+        if chosen is None:
+            # No opinion from the caller: resolve as before.
+            template_id, _level = repo.resolve_template(
+                auth, m.customer_id, m.case_id, report_id)
+        elif chosen:
+            # The caller named one. Use it, without consulting a binding that
+            # may not have been written yet.
+            template_id = chosen
+        else:
+            # "" — inherit deliberately: resolve WITHOUT the report's own
+            # binding, which is exactly what "Use parent setting" means and
+            # which a lagging unbind would otherwise contradict.
+            template_id, _level = repo.resolve_template(
+                auth, m.customer_id, m.case_id, "")
         blob = (repo.get_template_bytes(auth, m.customer_id, template_id)
                 if template_id else
                 repo.store.get(auth, _paths.default_template_path()))
@@ -1405,7 +1430,7 @@ def preview_chart(
     # default while the deck comes out in the client's template is a WYSIWYG
     # guarantee that quietly stopped being true.
     template_path, template_id = _preview_template(
-        repo, auth, material_id, body.report_id or "")
+        repo, auth, material_id, body.report_id or "", body.template_id)
 
     # The template is part of the cache identity by its CONTENT, not its id.
     # `_preview_template` names its temp copy `<id>.<content-hash>.pptx`, so

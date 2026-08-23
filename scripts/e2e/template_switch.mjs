@@ -152,6 +152,25 @@ const startedWith = renders;
 console.log(`rendering under way: ${startedWith} started, ${completed} finished`);
 check("rendering starts on open", startedWith > 0, `${startedWith} renders`);
 
+/** The bytes of the picture the pane is showing, so two templates can be told
+ *  apart. Counting renders proves work happened; only the PIXELS prove the work
+ *  was done on the template the author chose. Every earlier version of this
+ *  test asserted on counts and keys, passed, and shipped a deck still drawn on
+ *  the previous template. */
+async function paneImage() {
+  for (let i = 0; i < 40; i++) {
+    const img = page.locator("img[alt='Chart preview']").first();
+    if (await img.count()) {
+      const src = await img.getAttribute("src");
+      if (src && src.startsWith("data:image")) return src.slice(0, 200);
+    }
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
+const beforeSwitch = await paneImage();
+
 // ── 2. Switch the template mid-flight ──────────────────────────────────────
 const inFlight = renders - completed;
 renders = 0;
@@ -179,6 +198,14 @@ console.log(`after the switch: ${renders} renders started, ${completed} finished
 // reached a particular count; the end state is checked below and is the thing
 // that actually matters.
 check("the switch was acted on", renders > 0, `${renders} renders started`);
+
+// THE check. Not "did it re-render" but "is the picture actually different".
+const afterImage = await paneImage();
+check(
+  "the slide is drawn on the NEW template",
+  beforeSwitch !== null && afterImage !== null && afterImage !== beforeSwitch,
+  afterImage === beforeSwitch ? "identical picture — still the old template" : "picture changed"
+);
 check("everything it started, it finished", completed >= renders, `${completed}/${renders}`);
 
 // ── 4. Several changes in a row: the LAST one wins ─────────────────────────

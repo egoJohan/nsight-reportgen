@@ -939,6 +939,10 @@ export const api = {
         /** This is the slide the author is looking at: ask the backend for its
          *  reserved render slot. */
         priority?: boolean;
+        /** The template to draw on: an id, or "" for "inherit from the case".
+         *  Absent leaves the server to resolve it, which only the deck export
+         *  should rely on. */
+        templateRef?: string;
         grouping?: GroupingOverride;
         // Which report this preview belongs to, so the backend's
         // resolve_template can see ITS template choice (and any pin) rather
@@ -959,6 +963,16 @@ export const api = {
           ...(opts?.renderTitle === undefined ? {} : { render_title: opts.renderTitle }),
           ...(opts?.grouping ? { grouping: opts.grouping } : {}),
           ...(opts?.reportId ? { report_id: opts.reportId } : {}),
+          // WHICH template, said outright rather than looked up server-side.
+          //
+          // Choosing a template persists the choice and re-renders at the same
+          // moment, and the render regularly won: the server had not stored the
+          // binding yet, answered with the PREVIOUS template, and that picture
+          // was cached under the new template's key. The deck then stayed on
+          // the old template however long you waited, which is the bug that
+          // outlasted every other fix. "" is not absent — it means "inherit
+          // from the case or asiakas", the editor's "Use parent setting".
+          ...(opts?.templateRef === undefined ? {} : { template_id: opts.templateRef }),
         };
         // The backend keeps a reserved soffice slot for the slide the author is
         // looking at. The queue promotes that slide to the head of one queue, so

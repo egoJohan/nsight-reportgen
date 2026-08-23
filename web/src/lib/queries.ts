@@ -518,7 +518,14 @@ export async function fetchChartPreviewInto(
   materialId: string,
   chart: ChartSpec,
   fingerprint: string,
-  opts: { renderTitle: boolean; reportId: string; grouping: GroupingOverride | undefined }
+  opts: {
+    renderTitle: boolean;
+    reportId: string;
+    grouping: GroupingOverride | undefined;
+    /** The template this fingerprint was computed FOR — sent to the server so
+     *  the picture cannot be drawn on a different one. */
+    templateRef: string;
+  }
 ): Promise<void> {
   await qc.fetchQuery<ChartPreviewResult>({
     queryKey: ["chart-preview", materialId, fingerprint],
@@ -528,6 +535,7 @@ export async function fetchChartPreviewInto(
           renderTitle: opts.renderTitle,
           grouping: opts.grouping,
           reportId: opts.reportId,
+          templateRef: opts.templateRef,
         })
         .then(async ({ blob, titleMeta }) => ({
           dataUrl: await blobToDataURL(blob),

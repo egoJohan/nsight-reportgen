@@ -25,8 +25,19 @@ export interface ProducerEnv {
   grouping: () => GroupingOverride | undefined;
   /** Is this image already in the client cache? */
   hasImage: (fingerprint: string) => boolean;
-  /** Fetch it and put it there. */
-  fetchImage: (chart: ChartSpec, fingerprint: string) => Promise<void>;
+  /** Fetch it and put it there.
+   *
+   *  Takes the render context the QUEUE ran with — not one captured in a
+   *  closure. A template change refills the queue synchronously, starting work
+   *  before the new closure is installed, so a closure-held context names the
+   *  PREVIOUS template: the picture came back drawn on it and was stored under
+   *  the new template's fingerprint. Every slide was rendered, every count was
+   *  right, and the deck stayed on the old template. */
+  fetchImage: (
+    chart: ChartSpec,
+    fingerprint: string,
+    ctx: { templateRef: string; reportId: string }
+  ) => Promise<void>;
 }
 
 let env: ProducerEnv | null = null;
@@ -120,7 +131,10 @@ const chart: Producer = {
     // Not "nothing to do": recording a render that never happened would leave
     // the slide blank with no way back. Failing marks it retryable instead.
     if (!env) throw new Error("preview producers used before setProducerEnv");
-    await env.fetchImage(c.chart, c.fingerprint);
+    await env.fetchImage(c.chart, c.fingerprint, {
+      templateRef: c.ctx.templateRef,
+      reportId: c.ctx.reportId,
+    });
   },
 
   // Nothing downstream should pretend an image exists.

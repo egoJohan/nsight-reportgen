@@ -532,11 +532,15 @@ export default function ReportWizard({
       // The fingerprint the QUEUE computed, not one recomputed from `ctx` —
       // which is captured here and is one statement stale the moment a template
       // change refills the queue and starts rendering synchronously.
-      fetchImage: (chart, fingerprint) =>
+      // Everything that identifies the picture comes from the queue's own
+      // context, passed in — nothing is read from this closure, which is one
+      // statement stale the moment a template change refills the queue.
+      fetchImage: (chart, fingerprint, runCtx) =>
         fetchChartPreviewInto(qc, materialId, chart, fingerprint, {
           renderTitle: false,
-          reportId,
+          reportId: runCtx.reportId,
           grouping: draftRef.current?.grouping,
+          templateRef: runCtx.templateRef,
         }),
     });
   }, [materialId, reportId, draft?.template_ref, groupingKey, qc]);
