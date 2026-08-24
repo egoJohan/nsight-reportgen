@@ -128,3 +128,43 @@ def test_identical_spec_served_from_cache(client_mock, require_soffice):
     assert r1.content[:4] == b"\x89PNG"
     # The expensive build ran exactly once; the second call hit the cache.
     assert calls["n"] == 1, f"expected 1 underlying render, got {calls['n']}"
+
+
+@pytest.mark.export
+def test_renaming_a_question_changes_the_preview(client_memory, synthetic_bytes,
+                                                 require_soffice):
+    """The preview has to show what the deck will show.
+
+    The preview route read the SAV and applied the grouping override by hand,
+    which skipped the rest of the model seam — the material's question renames
+    and value merges. And its cache key was built from the request body, which
+    does not carry them. So an author renamed a question, watched the list
+    update everywhere else, and the slide kept the SAV's own wording; the deck
+    then rendered the new one. Two defects with the same symptom, and either
+    alone is enough to cause it.
+    """
+    # client_memory, not client_mock: the mock does not persist a material
+    # config, so a rename made through it never happens and the test would pass
+    # against the defect.
+    cid = client_memory.post("/customers", json={"name": "Asiakas"}).json()["id"]
+    kid = client_memory.post(f"/customers/{cid}/cases",
+                             json={"name": "Tutkimus"}).json()["id"]
+    mat = client_memory.post(
+        f"/cases/{kid}/materials",
+        files={"file": ("s.sav", synthetic_bytes, "application/octet-stream")},
+    ).json()["material_id"]
+    qid = client_memory.get(f"/materials/{mat}/questions").json()["questions"][0]["qid"]
+    spec = _spec(chart_type="vertical_bar", question_ref=qid)
+
+    before = client_memory.post(f"/materials/{mat}/preview-chart", json=spec)
+    assert before.status_code == 200, before.text
+    assert before.content[:4] == b"\x89PNG"
+
+    renamed = client_memory.patch(
+        f"/materials/{mat}/questions/{qid}/label",
+        json={"label": "Aivan toinen kysymysteksti tähän dialle"})
+    assert renamed.status_code == 200, renamed.text
+
+    after = client_memory.post(f"/materials/{mat}/preview-chart", json=spec)
+    assert after.status_code == 200
+    assert after.content != before.content, "the preview still shows the old wording"

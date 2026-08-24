@@ -1447,7 +1447,17 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "",
         path.mkdir(parents=True, exist_ok=True)
         f = path / _preview_template_filename(template_id, blob)
         if not f.exists():
-            f.write_bytes(blob)
+            # Written aside and moved into place, never written where a reader
+            # is looking. Previews run concurrently — the whole deck at once
+            # after a template switch — and with a plain write the first request
+            # creates the file while the rest see it exist and parse it half
+            # finished. python-pptx raises on that, the guard below turns it
+            # into "no template", and the slide renders in HOUSE STYLE. Which is
+            # then cached under a key that says it is this template, so the
+            # wrong-looking slide stays wrong until something else moves.
+            tmp = path / f"{f.name}.{uuid.uuid4().hex[:8]}.part"
+            tmp.write_bytes(blob)
+            os.replace(tmp, f)
         return str(f), template_id or "default"
     except Exception:  # noqa: BLE001 — styling must never break a preview
         return None, ""
@@ -1511,8 +1521,17 @@ def preview_chart(
     # literal string "default" however many different files pass through it, so
     # replacing the tenant's default kept serving pictures of the old one.
     _template_identity = os.path.basename(template_path) if template_path else "none"
+    # The material's curation — question renames, value merges — is part of what
+    # the picture SHOWS but is stored beside the material rather than sent in the
+    # body, so without it here a rename produced the same key and the cache
+    # handed back the picture with the old wording. The author renamed a
+    # question, watched the list update, and the slide did not move.
+    _curation_identity = hashlib.md5(
+        json.dumps(material_config(material_id, client), sort_keys=True,
+                   ensure_ascii=False).encode()).hexdigest()[:12]
     out_dir = _preview_out_dir(
-        material_id, body.model_dump_json() + f"|{_template_identity}")
+        material_id,
+        f"{body.model_dump_json()}|{_template_identity}|{_curation_identity}")
     cached_png = out_dir / "preview.png"
 
     # Where the template puts its title, for a caller that draws the title
@@ -1540,19 +1559,17 @@ def preview_chart(
                          headers=fast_headers)
     started = time.monotonic()
 
-    # 1. Load material data
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        tmp_path = tmp.name
-    try:
-        df, model = read_sav(tmp_path)
-    finally:
-        os.unlink(tmp_path)
-
-    # df is passed so indicator-family (banner) groups resolve here too — without
-    # it the picker offers a banner classifier the PREVIEW then silently ignores.
-    model = apply_grouping_override(model, body.grouping or {}, df=df)
+    # 1. Load material data, through the SAME seam every other path uses.
+    #
+    # This used to read the SAV and apply the grouping override by hand, which
+    # skipped the rest of what the seam does: the material's question renames
+    # and its value merges. So an author who shortened a question or merged two
+    # answer categories saw the change everywhere except in the picture — the
+    # preview showed the SAV's own labels while the deck showed theirs, which
+    # is precisely the preview/deck disagreement this pipeline exists to
+    # prevent. (df is passed inside, so indicator-family banner groups still
+    # resolve here.)
+    df, model = df_model_for_material(material_id, client, body.grouping or {})
 
     # A stacked chart with no classifying variable is a valid single 100%-stacked
     # distribution bar (the "total-only" case) — it renders the answer categories
