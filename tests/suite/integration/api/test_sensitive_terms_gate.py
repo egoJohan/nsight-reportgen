@@ -131,3 +131,57 @@ def test_a_case_with_no_material_is_not_blocked(client_memory):
     kid = client_memory.post(f"/customers/{cid}/cases",
                              json={"name": "K"}).json()["id"]
     assert _new_report(client_memory, kid).status_code == 200
+
+
+class TestTheTermsMustActuallyReachDatahive:
+    """Acceptance is recorded only if registration succeeded.
+
+    The other order is the failure this feature exists to prevent: an
+    acceptance stored locally whose terms never reached the thing that does the
+    masking. The report gate would open, nothing would be masked, and nothing
+    would look wrong.
+    """
+
+    def test_a_failed_registration_is_not_recorded_as_accepted(
+            self, case_with_data, monkeypatch):
+        from reportbuilder.store import datahive_pii
+
+        client, kid, mid = case_with_data
+        monkeypatch.setenv("NSIGHT_DATAHIVE_URL", "http://unreachable:7891")
+
+        def boom(*_a, **_k):
+            raise datahive_pii.RegistrationFailed("no route to host")
+
+        # The real wrapper, so the conversion to 503 is what is under test.
+        monkeypatch.setattr(datahive_pii, "register_sensitive_terms", boom)
+
+        refused = client.put(f"/materials/{mid}/sensitive-terms",
+                             json={"terms": ["Attendo"]})
+        assert refused.status_code == 503, refused.text
+
+        # Nothing was recorded...
+        assert client.get(f"/materials/{mid}/sensitive-terms").json()["accepted"] is None
+        # ...so the gate is still shut.
+        assert _new_report(client, kid).status_code == 409
+
+    def test_the_terms_are_sent_before_being_stored(self, case_with_data, monkeypatch):
+        from reportbuilder.api import routes_questions as rq
+
+        client, _kid, mid = case_with_data
+        order: list[str] = []
+        monkeypatch.setattr(rq, "_register_with_datahive",
+                            lambda auth, terms: order.append(f"registered:{terms}"))
+
+        client.put(f"/materials/{mid}/sensitive-terms", json={"terms": ["Attendo"]})
+        order.append("stored")
+        assert order[0].startswith("registered:"), order
+
+    def test_without_a_hive_configured_there_is_nothing_to_register(
+            self, case_with_data, monkeypatch):
+        """The in-memory store used by tests and a dev boot never talks to a
+        model either, so there is nothing to protect and nothing to fail on."""
+        monkeypatch.delenv("NSIGHT_DATAHIVE_URL", raising=False)
+        client, kid, mid = case_with_data
+        assert client.put(f"/materials/{mid}/sensitive-terms",
+                          json={"terms": ["Attendo"]}).status_code == 200
+        assert _new_report(client, kid).status_code == 200

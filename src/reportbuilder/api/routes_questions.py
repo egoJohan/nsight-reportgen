@@ -1748,6 +1748,7 @@ def accept_sensitive_terms(
     material_id: str,
     body: AcceptTermsBody,
     client: DataHiveClient = Depends(get_client),
+    auth: AuthContext = Depends(get_auth),
     user: User = Depends(require_material_write),
 ) -> dict:
     """Accept the terms to be pseudonymised before any text leaves for a model.
@@ -1755,8 +1756,42 @@ def accept_sensitive_terms(
     Accepting an EMPTY list is a real answer — "I looked, this study names no
     companies" — and is not the same as never having looked, which is what the
     report gate refuses on.
+
+    The terms reach datahive FIRST, and the acceptance is recorded only if that
+    succeeded. The other order is the failure this whole feature exists to
+    prevent: an acceptance stored locally whose terms never reached the thing
+    that does the masking would open the report gate while nothing is masked,
+    and nothing would look wrong.
     """
+    _register_with_datahive(auth, body.terms)
     return client.accept_sensitive_terms(material_id, body.terms)
+
+
+def _register_with_datahive(auth: AuthContext, terms: list[str]) -> None:
+    """Push the terms to datahive's policy, or refuse the acceptance.
+
+    A 503 rather than a 500: the terms are fine, the store is not reachable,
+    and the analyst should try again rather than think they did something
+    wrong. Without a hive configured there is nothing to register with and
+    nothing to protect — the in-memory store used by tests and by a dev boot
+    never talks to a model either.
+    """
+    url = os.environ.get("NSIGHT_DATAHIVE_URL")
+    if not url:
+        return
+    from reportbuilder.store.datahive_pii import (
+        RegistrationFailed, register_sensitive_terms,
+    )
+    try:
+        register_sensitive_terms(url, auth.token, terms)
+    except RegistrationFailed as exc:
+        log.warning("pii: refusing to accept terms that did not register: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=("The terms could not be registered with the data store, so "
+                    "they have not been accepted. Nothing would be masked "
+                    "until they are — please try again."),
+        ) from exc
 
 
 class MarkClassifierBody(BaseModel):
