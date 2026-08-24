@@ -23,7 +23,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatReportDate } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { classifyLockFailure } from "@/lib/reportLock";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import TemplateSelect from "@/components/TemplateSelect";
 import {
@@ -517,6 +518,9 @@ export default function ReportWizard({
   // is when — and only when — the author is told.
   // Four hours in normal use. `?idleSeconds=N` shortens it so the behaviour can
   // actually be exercised — waiting four hours is not a test.
+  // The server drops a lock nobody has renewed after this long
+  // (Repository.LOCK_TTL_SECONDS). Past it we cannot claim to hold one.
+  const LOCK_TTL_MS = 120_000;
   const INACTIVITY_LIMIT_MS =
     Number(new URLSearchParams(window.location.search).get("idleSeconds")) * 1000 ||
     4 * 60 * 60_000;
@@ -535,6 +539,9 @@ export default function ReportWizard({
   const lostRef = useRef(false);
   const hasLockRef = useRef(false);
   hasLockRef.current = hasLock;
+  //: When lock requests started failing for a reason that is NOT a refusal.
+  //  Null whenever the last one succeeded.
+  const unreachableSince = useRef<number | null>(null);
   const lastActivity = useRef(Date.now());
 
   useEffect(() => {
@@ -548,14 +555,27 @@ export default function ReportWizard({
       try {
         await api.reports.lock(caseId, reportId, tabId.current);
         if (!alive) return false;
+        unreachableSince.current = null;
         setHasLock(true);
         setLockedBy(null);
         return true;
       } catch (e) {
         if (!alive) return false;
-        setHasLock(false);
-        lostRef.current = true;
-        setLockedBy(e instanceof Error ? e.message : "Someone else is editing this report.");
+        // Only a 409 is somebody else holding it. A network drop or a 500 is a
+        // failure to FIND OUT, and treating those as a refusal closed the
+        // editor and discarded whatever was on screen unsaved.
+        if (classifyLockFailure(e) === "taken") {
+          setHasLock(false);
+          lostRef.current = true;
+          setLockedBy(
+            e instanceof Error ? e.message : "Someone else is editing this report."
+          );
+          return false;
+        }
+        // Keep the report open and keep asking. The server holds the lock for
+        // us for a couple of minutes yet, and the next beat is in thirty
+        // seconds; if it really was taken, that beat says so with a 409.
+        unreachableSince.current ??= Date.now();
         return false;
       }
     };
@@ -572,6 +592,13 @@ export default function ReportWizard({
         return;
       }
       await take();
+      // Long enough unable to renew and the server's own TTL has run out, so we
+      // genuinely no longer hold it — say so, rather than showing an editing
+      // badge for a lock we lost. Saving stays open: only a 409 refuses that.
+      if (unreachableSince.current &&
+          Date.now() - unreachableSince.current > LOCK_TTL_MS) {
+        setHasLock(false);
+      }
       timer = window.setTimeout(beat, 30_000);
     };
 
@@ -733,10 +760,13 @@ export default function ReportWizard({
   const save = useCallback(async (): Promise<boolean> => {
     const d = draftRef.current;
     if (!d) return false;
-    // Do not write without the lock. The server refuses too (409) — this is so
-    // an autosave does not fire a request every 1.5s that can only fail, and so
-    // the author is told by the banner rather than by a toast.
-    if (!hasLockRef.current) return false;
+    // Do not write into somebody else's report. This is only about the case we
+    // have been TOLD about (409): it keeps an autosave from firing every 1.5s
+    // to no purpose, and lets the banner do the telling instead of a toast.
+    // A lock we merely could not confirm is not a reason to withhold a save —
+    // the server is the authority and refuses if it must, and refusing to
+    // write here would strand the author's work in the tab.
+    if (lostRef.current) return false;
     const payload: ReportDoc = { ...d, charts: normalizeSlots(d.charts) };
     const serialized = JSON.stringify(payload);
     if (serialized === savedPayload.current) {
@@ -754,6 +784,14 @@ export default function ReportWizard({
       setSavedAt(Date.now());
       return true;
     } catch (e) {
+      // A refused save is the other way we learn the report changed hands —
+      // and the only one when the lock beat is what is failing.
+      if (e instanceof ApiError && e.status === 409) {
+        lostRef.current = true;
+        setHasLock(false);
+        setLockedBy(e.message);
+        return false;
+      }
       toast.error(
         `Save failed: ${e instanceof Error ? e.message : "unknown error"}`
       );

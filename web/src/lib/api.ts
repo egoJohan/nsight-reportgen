@@ -1105,8 +1105,10 @@ export const api = {
         body: JSON.stringify(report),
       }).then((r) => json<{ report_id: string }>(r)),
 
-    /** Take or renew the editing lock. Rejects with the holder's name (409)
-     *  when somebody else has it. */
+    /** Take or renew the editing lock. Rejects with an ApiError carrying the
+     *  status: 409 (and ONLY 409) means somebody else has it. Anything else is
+     *  a failure to find out, which the caller must not confuse with a refusal
+     *  — see lib/reportLock. */
     lock: async (caseId: string, reportId: string, tabId: string): Promise<{ mine: boolean; user_name: string; renew_seconds: number }> => {
       const res = await fetch(
         `${API_BASE}/cases/${caseId}/reports/${reportId}/lock?tab=${encodeURIComponent(tabId)}`,
@@ -1120,7 +1122,7 @@ export const api = {
         } catch {
           /* not JSON */
         }
-        throw new Error(detail);
+        throw new ApiError(res.status, detail);
       }
       return res.json();
     },
