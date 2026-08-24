@@ -18,7 +18,7 @@ caller and goes. When the file is empty, the migration is done.
 from __future__ import annotations
 
 from reportbuilder.auth.permissions import may_write
-from reportbuilder.store.repository import Repository
+from reportbuilder.store.repository import Repository, _now
 from reportbuilder.store.seam import AuthContext, NotFound
 
 
@@ -168,6 +168,62 @@ class RepositoryClient:
         m = self._material(material_id)
         return self.repo.update_material_config(self.auth, m.customer_id, m.case_id,
                                                 m.id, mutate)
+
+    # -- sensitive terms: what must never reach an LLM ---------------------
+
+    #: Where the accepted terms live inside a material's curation config.
+    SENSITIVE_TERMS_KEY = "sensitive_terms"
+
+    def sensitive_terms(self, material_id: str) -> dict:
+        """This material's accepted sensitive terms, and when they were accepted.
+
+        ``{"accepted": [...], "accepted_at": "...", "accepted_by": "..."}`` —
+        or ``{"accepted": None}`` when nobody has reviewed them yet, which is
+        what the report-creation gate refuses on. An empty LIST is a real
+        answer ("I looked; there are none"); ``None`` means "not looked at".
+        """
+        try:
+            m = self._material(material_id)
+        except MaterialNotFound:
+            return {"accepted": None}
+        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        stored = cfg.get(self.SENSITIVE_TERMS_KEY)
+        if not isinstance(stored, dict):
+            return {"accepted": None}
+        terms = stored.get("accepted")
+        return {
+            "accepted": [str(t) for t in terms] if isinstance(terms, list) else None,
+            "accepted_at": stored.get("accepted_at", ""),
+            "accepted_by": stored.get("accepted_by", ""),
+        }
+
+    def accept_sensitive_terms(self, material_id: str, terms: list[str]) -> dict:
+        """Record the terms an analyst confirmed, with who and when.
+
+        Who and when are not decoration: this list is the thing that gets
+        registered with datahive and decides what is masked before any text
+        reaches a model. If a name later turns out to have leaked, the first
+        question is who accepted the list that omitted it.
+        """
+        m = self._material(material_id)
+        cleaned = [t.strip() for t in terms if isinstance(t, str) and t.strip()]
+        # Longest first: "Esperi Care Oy" must be substituted before "Esperi",
+        # or the shorter match leaves " Care Oy" stranded beside a surrogate.
+        cleaned = sorted(dict.fromkeys(cleaned), key=lambda t: (-len(t), t.lower()))
+        record = {
+            "accepted": cleaned,
+            "accepted_at": _now(),
+            "accepted_by": (getattr(self.user, "name", "")
+                            or getattr(self.user, "email", "")),
+        }
+
+        def apply(cfg: dict) -> dict:
+            cfg[self.SENSITIVE_TERMS_KEY] = record
+            return cfg
+
+        self.repo.update_material_config(self.auth, m.customer_id, m.case_id, m.id,
+                                         apply)
+        return record
 
     def load_material_config(self, material_id: str) -> str | None:
         """Returns JSON TEXT, not a dict: the legacy callers parse it themselves,

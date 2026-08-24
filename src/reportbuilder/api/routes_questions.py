@@ -1707,6 +1707,58 @@ def preview_chart(
     return Response(content=png_bytes, media_type="image/png")
 
 
+class AcceptTermsBody(BaseModel):
+    """The terms an analyst confirmed are company/brand names."""
+
+    terms: list[str] = []
+
+
+@questions_router.get("/materials/{material_id}/sensitive-terms")
+def get_sensitive_terms(
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
+) -> dict:
+    """What must never reach an LLM from this dataset — proposed and accepted.
+
+    `proposed` is read from the study's own structure: the members of its
+    batteries and the categories of its questions. That is not a heuristic
+    standing in for entity recognition, it is reading the answer off the
+    source — and it matters because recognition does not work here. On a real
+    Finnish study the shipped spaCy model found 15 % of brand mentions and this
+    found all nine brands.
+
+    `accepted` is null until somebody reviews them. A report cannot be created
+    before that (see routes_reports.create_report).
+    """
+    from reportbuilder.api.model_loader import model_for_material
+    from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
+
+    try:
+        model = model_for_material(material_id, client)
+    except Exception:  # noqa: BLE001 — an unreadable file proposes nothing
+        proposed: list[str] = []
+    else:
+        proposed = propose_sensitive_terms(model)
+    return {"proposed": proposed, **client.sensitive_terms(material_id)}
+
+
+@questions_router.put("/materials/{material_id}/sensitive-terms")
+def accept_sensitive_terms(
+    material_id: str,
+    body: AcceptTermsBody,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material_write),
+) -> dict:
+    """Accept the terms to be pseudonymised before any text leaves for a model.
+
+    Accepting an EMPTY list is a real answer — "I looked, this study names no
+    companies" — and is not the same as never having looked, which is what the
+    report gate refuses on.
+    """
+    return client.accept_sensitive_terms(material_id, body.terms)
+
+
 class MarkClassifierBody(BaseModel):
     """One variable, marked or unmarked, for this dataset."""
 

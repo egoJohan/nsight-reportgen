@@ -59,9 +59,81 @@ def create_report(
     user: User = Depends(require_case_write),
 ) -> dict:
     """Create a new report doc under a case. Returns the new report_id. (REQ-C-08, REQ-C-10, REQ-C-11)"""
+    _refuse_until_sensitive_terms_accepted(client, case_id)
     _report, report_json, readable = _canonicalize(body)
     rid, version = client.save_report(case_id, None, report_json, readable)
     return {"report_id": rid, "version": version}
+
+
+def _refuse_until_sensitive_terms_accepted(client, case_id: str) -> None:
+    """No report until somebody has said which names must not reach a model.
+
+    A report is the thing that generates headlines, themes and summaries, and
+    every one of those sends the study's own wording to an LLM. The terms that
+    must be pseudonymised first are proposed automatically from the study's
+    structure, but a person has to confirm them — "Ahne" ("greedy") and
+    "Validia" are both capitalised battery members and only a human tells the
+    image attribute from the care provider.
+
+    Gating REPORT CREATION rather than the LLM call is deliberate. It is one
+    checkpoint, at the moment somebody is present and deciding, instead of a
+    check on every code path that might one day reach a model — and a gate that
+    depends on every future call site remembering is not a gate.
+
+    Accepting an empty list is a valid answer and passes. Never having looked
+    is what this refuses. A store that cannot answer does not block the app.
+    """
+    reader = getattr(client, "sensitive_terms", None)
+    if reader is None:
+        return
+    materials = getattr(client, "list_materials", None)
+    try:
+        # Materialise inside the guard: a test double hands back a Mock, which
+        # is truthy and not iterable, so deferring the list() to the loop threw
+        # past this except and 500'd report creation.
+        mats = list(materials(case_id) or []) if materials else []
+    except Exception:  # noqa: BLE001 — a store that cannot answer must not
+        return         # brick report creation
+    for m in mats:
+        # The listing keys this "material_id"; a bare "id" is the shape other
+        # listings use. Reading only one of them made this gate silently find
+        # no materials and let every report through.
+        mid = (m.get("material_id") or m.get("id")) if isinstance(m, dict) \
+            else getattr(m, "id", None)
+        if not mid:
+            continue
+        try:
+            if reader(mid).get("accepted") is not None:
+                continue        # somebody reviewed this material already
+            # Only refuse when there is something to review. A study whose
+            # structure names no companies has nothing to show and nothing to
+            # accept, and blocking it would be a gate on the fixture rather
+            # than on the risk.
+            #
+            # The residual is deliberate and worth naming: a study that names
+            # companies ONLY in free-text answers proposes nothing, so no gate
+            # fires and nothing is registered. Structured studies — every one
+            # seen so far — are covered; verbatims are not.
+            from reportbuilder.api.model_loader import model_for_material
+            from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
+            try:
+                proposed = propose_sensitive_terms(
+                    model_for_material(mid, client))
+            except Exception:  # noqa: BLE001 — unreadable file proposes nothing
+                proposed = []
+            if proposed:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"{len(proposed)} possible company names were found "
+                            "in this study and have not been reviewed yet. "
+                            "Accept them on the case page before creating a "
+                            "report — they are what gets pseudonymised before "
+                            "any text reaches a model."),
+                )
+        except HTTPException:
+            raise
+        except Exception:  # noqa: BLE001 — a store that cannot answer must not
+            return        # brick report creation
 
 
 def _base_version(request: Request) -> int | None:

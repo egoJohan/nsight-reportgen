@@ -1,0 +1,113 @@
+"""Which strings in a study might name a company.
+
+The terms that must never reach an LLM are not hidden in prose — they are in
+the study's own structure. A brand tracker enumerates its brands as data: they
+are the members of its batteries and the categories of its questions. Measured
+against a real Finnish study, reading that structure found every one of the
+nine brands, where the best general-purpose NER available found 15-20%.
+
+This PROPOSES; an analyst confirms. "Ahne" (greedy) and "Validia" are both
+capitalised battery members and only a human reliably tells which is an image
+attribute and which is a care provider.
+"""
+from __future__ import annotations
+
+from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
+from reportbuilder.model.question import QuestionModel, ValueLabel, Variable
+
+
+def _model(*variables: Variable) -> QuestionModel:
+    return QuestionModel(variables={v.name: v for v in variables}, questions=[])
+
+
+def _var(name: str, label: str = "", values: tuple[str, ...] = ()) -> Variable:
+    return Variable(name=name, label=label, measurement="categorical",
+                    value_labels=tuple(ValueLabel(float(i + 1), t)
+                                       for i, t in enumerate(values)),
+                    missing_values=frozenset())
+
+
+def test_it_finds_the_members_of_a_brand_battery():
+    """The shape a brand tracker actually has: "<brand>:<shared question>"."""
+    model = _model(
+        _var("q1a", "Attendo:Mitä seuraavista tunnet?"),
+        _var("q1b", "Esperi:Mitä seuraavista tunnet?"),
+        _var("q1c", "Humana:Mitä seuraavista tunnet?"),
+    )
+    assert set(propose_sensitive_terms(model)) >= {"Attendo", "Esperi", "Humana"}
+
+
+def test_a_member_named_once_is_not_proposed():
+    """One appearance is a question, not a battery member — proposing every
+    colon-prefix would bury the analyst in the study's own wording."""
+    model = _model(_var("q1", "Yksittäinen:Kysymys tästä aiheesta"))
+    assert propose_sensitive_terms(model) == []
+
+
+def test_it_finds_brands_on_the_other_side_of_the_colon():
+    """Real studies put the member on either side: "Ahne:Rinnekodit" pairs an
+    image attribute with the provider it was attributed to."""
+    model = _model(
+        _var("q2a", "Ahne:Rinnekodit"),
+        _var("q2b", "Luotettava:Rinnekodit"),
+        _var("q2c", "Ahne:Ykköskodit"),
+        _var("q2d", "Luotettava:Ykköskodit"),
+    )
+    proposed = set(propose_sensitive_terms(model))
+    assert {"Rinnekodit", "Ykköskodit"} <= proposed
+
+
+def test_value_labels_count_too():
+    """A "which of these do you use" question carries its brands as answers."""
+    model = _model(
+        _var("q3", "Mitä palveluntarjoajaa käytät?",
+             values=("Attendo", "Esperi", "En mitään näistä")),
+        _var("q4", "Mitä palveluntarjoajaa suosittelisit?",
+             values=("Attendo", "Esperi", "En mitään näistä")),
+    )
+    proposed = set(propose_sensitive_terms(model))
+    assert {"Attendo", "Esperi"} <= proposed
+
+
+def test_it_leaves_out_the_obvious_non_answers():
+    """"En osaa sanoa" is in every study and is nobody's brand."""
+    model = _model(
+        _var("q5", "Kysymys", values=("En osaa sanoa", "Ei mikään näistä")),
+        _var("q6", "Toinen", values=("En osaa sanoa", "Ei mikään näistä")),
+    )
+    assert propose_sensitive_terms(model) == []
+
+
+def test_it_leaves_out_scale_points():
+    """A rating scale's levels repeat across every battery member and would
+    otherwise dominate the proposal."""
+    scale = ("Täysin eri mieltä", "Jokseenkin eri mieltä",
+             "Jokseenkin samaa mieltä", "Täysin samaa mieltä")
+    model = _model(_var("q7", "Väite A", values=scale),
+                   _var("q8", "Väite B", values=scale))
+    assert propose_sensitive_terms(model) == []
+
+
+def test_it_proposes_rather_than_decides():
+    """Image attributes and brands are both capitalised battery members. The
+    proposal includes both; a human picks. Being wrong in this direction is
+    safe — an extra term is masked needlessly, a missing one leaks."""
+    model = _model(
+        _var("a1", "Ahne:Rinnekodit"), _var("a2", "Ahne:Ykköskodit"),
+        _var("a3", "Luotettava:Rinnekodit"), _var("a4", "Luotettava:Ykköskodit"),
+    )
+    proposed = propose_sensitive_terms(model)
+    assert "Ahne" in proposed, "the attribute is proposed too — a human decides"
+
+
+def test_spss_multi_response_markers_are_not_proposed():
+    """"Checked"/"Unchecked" are the value labels of every multi-response
+    indicator, so they appear in more grids than any brand does. They are file
+    format, not data, and they led the proposal list on both real studies."""
+    model = _model(
+        _var("m1", "Attendo:Mitä tunnet?", values=("Checked", "Unchecked")),
+        _var("m2", "Esperi:Mitä tunnet?", values=("Checked", "Unchecked")),
+    )
+    proposed = propose_sensitive_terms(model)
+    assert "Checked" not in proposed and "Unchecked" not in proposed
+    assert {"Attendo", "Esperi"} <= set(proposed)
