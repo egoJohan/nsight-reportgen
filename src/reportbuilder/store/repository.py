@@ -17,6 +17,7 @@ per container (`customer.json`, `case.json`).
 """
 from __future__ import annotations
 
+import threading
 import hashlib
 import json
 import re
@@ -441,6 +442,42 @@ class Repository:
             ).get("config") or {}
         except (NotFound, ValueError, UnicodeDecodeError):
             return {}
+
+    #: One lock per material config, so the three editors that read-modify-write
+    #: it cannot lose each other's changes.
+    #:
+    #: Renaming a question, merging words and marking a classifier all load the
+    #: WHOLE config, change their own corner and write it back. Two of them at
+    #: once and the second write puts back what it read before the first — the
+    #: rename lands, the merge lands, and one of them is silently gone. It takes
+    #: two people on the same material, or one person and a slow store.
+    #:
+    #: In process, because this deployment is one uvicorn process (server.py
+    #: starts no workers). With more than one, this wants a conditional write in
+    #: the store instead — noted here rather than discovered later.
+    _config_locks: dict[str, threading.Lock] = {}
+    _config_locks_guard = threading.Lock()
+
+    @classmethod
+    def _config_lock(cls, path: str) -> threading.Lock:
+        with cls._config_locks_guard:
+            return cls._config_locks.setdefault(path, threading.Lock())
+
+    def update_material_config(self, auth: AuthContext, customer_id: str,
+                               case_id: str, material_id: str, mutate) -> dict:
+        """Read the curation, apply `mutate(cfg)` to it, write it back — with
+        nothing else doing the same in between. Returns the config as written.
+
+        `mutate` may change the dict in place or return a new one.
+        """
+        path = P.material_config_path(customer_id, case_id, material_id)
+        with self._config_lock(path):
+            cfg = self.load_material_config(auth, customer_id, case_id, material_id)
+            updated = mutate(cfg)
+            if updated is None:
+                updated = cfg
+            self.save_material_config(auth, customer_id, case_id, material_id, updated)
+            return updated
 
     def save_material_config(self, auth: AuthContext, customer_id: str, case_id: str,
                              material_id: str, config: dict) -> None:

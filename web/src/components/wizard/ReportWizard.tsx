@@ -516,14 +516,20 @@ export default function ReportWizard({
   // screen, and the truth is found out on the next interaction: if nobody took
   // the report, touching it takes the lock back silently; if somebody did, that
   // is when — and only when — the author is told.
-  // Four hours in normal use. `?idleSeconds=N` shortens it so the behaviour can
-  // actually be exercised — waiting four hours is not a test.
   // The server drops a lock nobody has renewed after this long
   // (Repository.LOCK_TTL_SECONDS). Past it we cannot claim to hold one.
   const LOCK_TTL_MS = 120_000;
+  // Four hours in normal use. `?idleSeconds=N` shortens it so the behaviour can
+  // actually be exercised — waiting four hours is not a test — and it is a DEV
+  // affordance only. In a build anyone could put it in a URL, and a link passed
+  // around or a bookmark that kept it would drop that person's lock within
+  // seconds of them looking away, letting a colleague take the report they are
+  // in the middle of. A test knob that can lose somebody's work is not one to
+  // leave switched on in production.
   const INACTIVITY_LIMIT_MS =
-    Number(new URLSearchParams(window.location.search).get("idleSeconds")) * 1000 ||
-    4 * 60 * 60_000;
+    (import.meta.env.DEV
+      ? Number(new URLSearchParams(window.location.search).get("idleSeconds")) * 1000
+      : 0) || 4 * 60 * 60_000;
 
   // This editor's own identity. Two tabs of the SAME person both hold the
   // report, and closing one must not take it from the other — without this,

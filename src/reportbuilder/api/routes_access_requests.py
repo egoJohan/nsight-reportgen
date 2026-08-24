@@ -27,6 +27,7 @@ from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.api.routes_auth import public_origin
 from reportbuilder.auth import access_request_mail
+from reportbuilder.auth import session
 from reportbuilder.auth.permissions import EDIT, VIEW, Grant, User, may_read, may_write
 from reportbuilder.store.repository import AccessRequest, Repository
 from reportbuilder.store.seam import AuthContext, NotFound
@@ -180,6 +181,9 @@ def approve_access_request(request_id: str, auth: AuthContext = Depends(get_auth
     # would silently strip every other customer this person can already see.
     rest = [g for g in target.grants if g.scope != r.customer_id]
     repo.set_grants(auth, r.user_id, [*rest, Grant(r.customer_id, r.mode)])
+    # So the person who asked sees the customer on their next click rather than
+    # within the identity cache's TTL. They are almost certainly watching.
+    session.forget_user(r.user_id)
     decided = repo.decide_access_request(auth, request_id, "granted", user.id)
     return _request_out(repo, auth, decided)
 

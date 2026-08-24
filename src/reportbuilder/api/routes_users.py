@@ -10,10 +10,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 
+import logging
+
 from reportbuilder.api.deps_auth import require_admin
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.api.routes_auth import public_origin
-from reportbuilder.auth import invites, users
+from reportbuilder.auth import invites, session, users
 from reportbuilder.auth.permissions import Grant, User
 from reportbuilder.store.repository import Invite, Repository
 from reportbuilder.store.seam import AuthContext, ConsentRequired
@@ -95,6 +97,13 @@ def put_user_grants(user_id: str, body: dict = Body(...),
         raise HTTPException(404, f"User '{user_id}' not found")
     grants = _parse_grants(body.get("grants") or [])
     repo.set_grants(auth, user_id, grants)
+    # At once, not within the cache TTL. Identity is cached per session, so a
+    # grant TAKEN AWAY kept working for up to CACHE_TTL_SECONDS on every node
+    # that had it cached: an admin removes somebody's access, is told it is
+    # done, and that person carries on reading the customer for another half
+    # minute. Adding a grant was already invalidated here — for convenience.
+    # Removing one is the direction that matters.
+    session.forget_user(user_id)
     return _user_row(repo, auth, repo.get_user(auth, user_id))
 
 
@@ -112,6 +121,9 @@ def patch_user(user_id: str, body: dict = Body(...),
     result = users.set_admin(repo, auth, user_id, bool(body["is_admin"]))
     if isinstance(result, users.LastAdminRefused):
         raise HTTPException(409, result.reason)
+    # A demotion has to bite immediately — see put_user_grants. Admin is the
+    # grant that opens every route there is.
+    session.forget_user(user_id)
     return _user_row(repo, auth, result)
 
 
@@ -134,6 +146,16 @@ def remove_user_route(user_id: str, auth: AuthContext = Depends(get_auth),
         }) from exc
     if isinstance(result, users.LastAdminRefused):
         raise HTTPException(409, result.reason)
+    # Their sessions are gone with them; drop the cached identity too, or a
+    # deleted user's request is still answered from memory. Their editing locks
+    # go as well — nobody is coming back for them, and leaving them would bar
+    # those reports until they expired.
+    session.forget_user(user_id)
+    try:
+        repo.release_user_locks(auth, user_id)
+    except Exception:  # noqa: BLE001 — the user is gone either way
+        logging.getLogger(__name__).warning(
+            "could not release the locks of a removed user", exc_info=True)
 
 
 def _invite_out(i: Invite) -> dict:

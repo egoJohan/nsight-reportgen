@@ -118,16 +118,31 @@ class RepositoryClient:
         label edits too — a blind overwrite would drop them.
         """
         m = self._material(material_id)
-        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
-        current = [str(n) for n in (cfg.get(self.MARKED_CLASSIFIERS_KEY) or [])
-                   if isinstance(n, str)]
-        if marked and name not in current:
-            current.append(name)
-        elif not marked and name in current:
-            current.remove(name)
-        cfg[self.MARKED_CLASSIFIERS_KEY] = current
-        self.repo.save_material_config(self.auth, m.customer_id, m.case_id, m.id, cfg)
-        return current
+        result: list[str] = []
+
+        def mark(cfg: dict) -> dict:
+            current = [str(n) for n in (cfg.get(self.MARKED_CLASSIFIERS_KEY) or [])
+                       if isinstance(n, str)]
+            if marked and name not in current:
+                current.append(name)
+            elif not marked and name in current:
+                current.remove(name)
+            cfg[self.MARKED_CLASSIFIERS_KEY] = current
+            result[:] = current
+            return cfg
+
+        # Through update_material_config, so a rename or a word merge happening
+        # at the same time is not thrown away — all three edit the same object.
+        self.repo.update_material_config(self.auth, m.customer_id, m.case_id, m.id,
+                                         mark)
+        return result
+
+    def update_material_config(self, material_id: str, mutate) -> dict:
+        """Read-modify-write this material's curation, serialised against the
+        other editors of it. See Repository.update_material_config."""
+        m = self._material(material_id)
+        return self.repo.update_material_config(self.auth, m.customer_id, m.case_id,
+                                                m.id, mutate)
 
     def load_material_config(self, material_id: str) -> str | None:
         """Returns JSON TEXT, not a dict: the legacy callers parse it themselves,

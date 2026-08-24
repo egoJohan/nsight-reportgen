@@ -8,6 +8,7 @@ same right as managing users.
 """
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -26,6 +27,19 @@ from reportbuilder.store.seam import AuthContext
 
 backup_router = APIRouter(tags=["backup"])
 
+# WARNING, not INFO, and deliberately so. These two operations are the most
+# sensitive the app has — one hands over every password hash and the session
+# signing key, the other rewrites the store — and neither left any record that
+# it had happened. "Who took a copy of everything, and when" is the first
+# question anyone asks after an incident, and the answer was nowhere. A log
+# line is not a full audit trail, but it is the difference between a question
+# that can be answered and one that cannot.
+log = logging.getLogger(__name__)
+
+
+def _who(admin: User) -> str:
+    return f"{getattr(admin, 'email', '') or '?'} ({getattr(admin, 'id', '') or '?'})"
+
 # A backup is streamed to a temp file rather than built in memory: the SAVs
 # alone can be hundreds of megabytes, and holding the whole archive in RAM to
 # hand it to the browser is the one part of this that does not scale.
@@ -42,14 +56,20 @@ def create_backup(auth: AuthContext = Depends(get_auth),
                   repo: Repository = Depends(get_repository),
                   admin: User = Depends(require_admin)):
     """The whole store as one zip, minus rendered decks and sessions."""
+    log.warning("backup: %s is downloading the whole store "
+                "(includes password hashes and the session signing key)",
+                _who(admin))
     fd, tmp = tempfile.mkstemp(prefix="nsight-backup-", suffix=".zip")
     os.close(fd)
     try:
         with open(tmp, "wb") as fh:
             backup.write(repo, auth, fh)
     except Exception:
+        log.warning("backup: failed for %s", _who(admin), exc_info=True)
         os.unlink(tmp)
         raise
+    log.warning("backup: %s downloaded %s bytes", _who(admin),
+                os.path.getsize(tmp))
     # The response owns the file from here: FileResponse streams it, then the
     # background task removes it whether the download finished or not.
     return FileResponse(
@@ -74,6 +94,8 @@ async def restore_backup(file: UploadFile = File(...),
     holding an uploaded archive in memory to get it is how a large restore
     runs the host out of RAM.
     """
+    log.warning("restore: %s is replacing the store from '%s'",
+                _who(admin), getattr(file, "filename", "") or "?")
     fd, tmp = tempfile.mkstemp(prefix="nsight-restore-", suffix=".zip")
     os.close(fd)
     try:
@@ -93,6 +115,9 @@ async def restore_backup(file: UploadFile = File(...),
     # Users, grants and the signing key have all just been replaced. Every
     # cached identity now describes a store that no longer exists.
     session.forget_all()
+    log.warning("restore: %s restored %s object(s), %s bytes, %s problem(s)",
+                _who(admin), summary.restored, summary.total_bytes,
+                len(summary.problems))
     return {
         "restored": summary.restored,
         "total_bytes": summary.total_bytes,

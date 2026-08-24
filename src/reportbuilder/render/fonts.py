@@ -50,6 +50,7 @@ URL shape as commercial Century Gothic.
 """
 from __future__ import annotations
 
+import logging
 import contextlib
 import os
 import pathlib
@@ -256,6 +257,35 @@ def _refresh_font_cache() -> None:
         pass
 
 
+def _refresh_matplotlib_fonts(path=None) -> None:
+    """Make a font we just installed visible to the IMAGE renderer as well.
+
+    `fc-cache` above covers LibreOffice, which starts a fresh process per render
+    and so re-reads fontconfig every time. matplotlib does not: it builds its
+    font list once per process and keeps it. So a font installed through
+    Settings was verified through fontconfig, reported INSTALLED, and then went
+    on being substituted in every preview until somebody restarted the server —
+    with the settings page saying, correctly and uselessly, that it was there.
+
+    `addfont` for an install, which is public API and cheap. A removal has no
+    such call, so it rebuilds; that costs a second or so and happens when an
+    admin deletes a font, which is rare.
+
+    Never raises. A preview drawn in the wrong font is a worse outcome than
+    before, but a 500 from the settings page is worse still.
+    """
+    try:
+        from matplotlib import font_manager
+
+        if path is not None:
+            font_manager.fontManager.addfont(str(path))
+        else:
+            font_manager._load_fontmanager(try_read_cache=False)
+    except Exception:  # noqa: BLE001 — see above
+        logging.getLogger(__name__).warning(
+            "fonts: could not refresh matplotlib's font list", exc_info=True)
+
+
 # --- substitutions ----------------------------------------------------------
 
 _SUB_HEADER = """<?xml version="1.0"?>
@@ -386,8 +416,10 @@ def install_font_bytes(blob: bytes, *, filename: str = "font.ttf",
     FONT_DIR.mkdir(parents=True, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9]+", "-", detected).strip("-") or "font"
     suffix = ".otf" if blob[:4] == b"OTTO" else ".ttf"
-    (FONT_DIR / f"{safe}{suffix}").write_bytes(blob)
+    installed_path = FONT_DIR / f"{safe}{suffix}"
+    installed_path.write_bytes(blob)
     _refresh_font_cache()
+    _refresh_matplotlib_fonts(installed_path)
 
     if is_installed_after_refresh(detected):
         return FontStatus(detected, INSTALLED, source="upload")
@@ -407,6 +439,7 @@ def remove_font_file(family: str) -> bool:
             removed = True
     if removed:
         _refresh_font_cache()
+        _refresh_matplotlib_fonts()
         installed_families(refresh=True)
     return removed
 

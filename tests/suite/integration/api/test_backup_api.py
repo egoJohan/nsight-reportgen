@@ -169,3 +169,34 @@ class TestFormat:
         m = json.loads(z.read("manifest.json"))
         assert m["format"] == backup.FORMAT
         assert m["version"] == backup.VERSION
+
+
+class TestItLeavesARecord:
+    """Who took a copy of everything, and when.
+
+    These two operations are the most sensitive the app has, and neither left
+    any trace that it had happened. That is the first question anyone asks
+    after an incident, and the answer was nowhere. A log line is not a full
+    audit trail; it is the difference between a question that can be answered
+    and one that cannot.
+    """
+
+    def test_downloading_a_backup_names_the_admin(self, store, caplog):
+        client, _, _ = _client(store)
+        with caplog.at_level("WARNING", logger="reportbuilder.api.routes_backup"):
+            assert client.get("/admin/backup").status_code == 200
+        logged = " ".join(r.getMessage() for r in caplog.records)
+        assert "a@example.com" in logged and "usr-1" in logged
+        assert "password hashes" in logged, "say what was handed over, not just that it was"
+
+    def test_restoring_names_the_admin_and_what_it_did(self, store, caplog):
+        client, _, _ = _client(store)
+        archive = client.get("/admin/backup").content
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="reportbuilder.api.routes_backup"):
+            r = client.post("/admin/restore",
+                            files={"file": ("b.zip", archive, "application/zip")})
+        assert r.status_code == 200, r.text
+        logged = " ".join(rec.getMessage() for rec in caplog.records)
+        assert "a@example.com" in logged
+        assert "restored" in logged

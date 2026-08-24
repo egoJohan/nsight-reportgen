@@ -485,7 +485,14 @@ export function useChartPreview(
     queryFn: () => Promise.reject(new Error("previews are produced by previewQueue")),
     enabled: false,
     staleTime: Infinity,
-    gcTime: 30 * 60_000,
+    // Ten minutes, not thirty. Every entry here is a base64 PNG — a few hundred
+    // KB — and a new one appears for every slide under every template anyone
+    // switches to, so a deck of sixty and a few template changes is tens of MB
+    // held in the tab. gcTime only evicts entries nothing is OBSERVING, so this
+    // never takes the picture out from under a slide on screen; the cost is a
+    // re-render for a slide nobody has looked at for ten minutes, which the
+    // fast path does in about a fifth of a second.
+    gcTime: 10 * 60_000,
     retry: false,
     placeholderData: sameSlide ? keepPreviousData : undefined,
   });
@@ -542,7 +549,7 @@ export async function fetchChartPreviewInto(
           titleMeta,
         })),
     staleTime: Infinity,
-    gcTime: 30 * 60_000,
+    gcTime: 10 * 60_000,   // matches the reader above
     retry: false,
   });
 }

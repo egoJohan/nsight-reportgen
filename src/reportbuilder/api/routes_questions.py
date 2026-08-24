@@ -1075,6 +1075,21 @@ def regroup(
     }
 
 
+def _update_config(client, material_id: str, mutate) -> dict:
+    """Read-modify-write a material's curation under the store's own lock.
+
+    Falls back to load-then-save for a client that has no such method (the test
+    doubles) — which is the racy behaviour, but only where there is one caller.
+    """
+    updater = getattr(client, "update_material_config", None)
+    if updater is not None:
+        return updater(material_id, mutate)
+    cfg = material_config(material_id, client)
+    updated = mutate(cfg) or cfg
+    client.save_material_config(material_id, json.dumps(updated))
+    return updated
+
+
 class QuestionLabelBody(BaseModel):
     label: str = ""
 
@@ -1091,23 +1106,21 @@ def set_question_label(
     material config as {question_labels: {qid: text}}; a blank label reverts to the
     original SAV label. The rename flows through the model seam to the questions
     list, reports, previews, and the rendered deck."""
-    raw = client.load_material_config(material_id)
-    try:
-        cfg = json.loads(raw) if raw else {}
-    except (ValueError, TypeError):
-        cfg = {}
-    if not isinstance(cfg, dict):
-        cfg = {}
-    labels = cfg.get("question_labels")
-    if not isinstance(labels, dict):
-        labels = {}
     text = (body.label or "").strip()
-    if text:
-        labels[qid] = text
-    else:
-        labels.pop(qid, None)
-    cfg["question_labels"] = labels
-    client.save_material_config(material_id, json.dumps(cfg))
+
+    def apply(cfg: dict) -> dict:
+        labels = cfg.get("question_labels")
+        if not isinstance(labels, dict):
+            labels = {}
+        if text:
+            labels[qid] = text
+        else:
+            labels.pop(qid, None)
+        cfg["question_labels"] = labels
+        return cfg
+
+    # See question_word_merges: one config, three editors, one at a time.
+    _update_config(client, material_id, apply)
     return {"qid": qid, "label": text or None}
 
 
@@ -1170,22 +1183,28 @@ def set_word_merges(
     Stored as {value_merges: {qid: [[label, member, …], …]}}; members are lowercased
     to match tokens. An empty body clears the qid's merges. The merge applies to every
     word cloud of the question (preview + deck) via the model seam."""
-    cfg = material_config(material_id, client)
-    vm = cfg.get("value_merges")
-    if not isinstance(vm, dict):
-        vm = {}
     groups: list[list[str]] = []
     for g in body.merges:
         label = (g.label or "").strip()
         members = [w.strip().lower() for w in g.words if w.strip()]
         if label and members:
             groups.append([label, *members])
-    if groups:
-        vm[qid] = groups
-    else:
-        vm.pop(qid, None)
-    cfg["value_merges"] = vm
-    client.save_material_config(material_id, json.dumps(cfg))
+
+    def apply(cfg: dict) -> dict:
+        vm = cfg.get("value_merges")
+        if not isinstance(vm, dict):
+            vm = {}
+        if groups:
+            vm[qid] = groups
+        else:
+            vm.pop(qid, None)
+        cfg["value_merges"] = vm
+        return cfg
+
+    # Read-modify-write of the whole config, serialised — a rename or a
+    # classifier mark landing between the read and the write would otherwise be
+    # put back as it was, and disappear with no sign of it.
+    _update_config(client, material_id, apply)
     return {"qid": qid, "merges": [{"label": g[0], "words": g[1:]} for g in groups]}
 
 
