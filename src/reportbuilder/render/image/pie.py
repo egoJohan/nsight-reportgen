@@ -163,7 +163,17 @@ def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool):
     fracs = [(v or 0.0) / total * 100.0 for v in vals]
 
     def _autopct(pct: float) -> str:
-        return format_value(pct, statistic, fmt, fracs) if pct >= _MIN_WEDGE_PCT else ""
+        if pct < _MIN_WEDGE_PCT:
+            return ""
+        if statistic == "pct":
+            return format_value(pct, statistic, fmt, fracs)
+        # matplotlib hands autopct the wedge's PERCENTAGE — it has no idea what
+        # went in. Printing that under any other statistic labelled a wedge of
+        # 300 respondents "300/total×100", and since the count formatter drops
+        # the % sign and rounds to a whole number, "30" read as a count. The
+        # wedge angle IS the value's share of the total, so the value comes back
+        # out of it exactly.
+        return format_value(pct * total / 100.0, statistic, fmt, list(vals))
 
     wedgeprops = dict(linewidth=1.4, edgecolor=bg)
     if donut:

@@ -565,15 +565,24 @@ _BOX_ROW_SUMMARIES = {
 
 
 def _top_scale_categories(var: Variable, categories: list[str], n: int,
-                          lowest: bool = False) -> list[str]:
+                          lowest: bool = False,
+                          overrides: dict[str, str] | None = None) -> list[str]:
     """The display labels of the `n` HIGHEST rating-scale points of `var` that are
     present in `categories` (e.g. the top-2 or top-3 agreement levels), or the `n`
-    LOWEST when `lowest`. Empty when the variable isn't a rating scale."""
+    LOWEST when `lowest`. Empty when the variable isn't a rating scale.
+
+    `overrides` is the author's category-label map, and it has to be applied here:
+    `categories` are DISPLAY labels while a scale level knows only the label on the
+    variable. Without it, shortening one label to fit a slide meant nothing matched,
+    the caller found no levels to sum, and the sort silently did nothing while the
+    control still read "Top 2".
+    """
     lv = scale_levels(var)                     # [(code, label, point), …]
     if not lv:
         return []
-    ranked = [label for _c, label, _p in sorted(lv, key=lambda t: t[2],
-                                                reverse=not lowest)]
+    shown = overrides or {}
+    ranked = [shown.get(label, label)
+              for _c, label, _p in sorted(lv, key=lambda t: t[2], reverse=not lowest)]
     out: list[str] = []
     for label in ranked:
         if label in categories and label not in out:
@@ -804,7 +813,8 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # the values)
     if _bars_are_segments and spec.sort.basis in _BOX_SORT_BASES:
         n_top, _lowest = _BOX_SORT_BASES[spec.sort.basis]
-        top_cats = _top_scale_categories(var, categories, n_top, lowest=_lowest)
+        top_cats = _top_scale_categories(var, categories, n_top, lowest=_lowest,
+                                         overrides=overrides)
         if top_cats:
             def _topbox(seg: str) -> float:
                 return sum((cells.get((c, seg)) or Cell(pct=None)).pct or 0.0
