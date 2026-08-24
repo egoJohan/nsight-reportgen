@@ -16,7 +16,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from reportbuilder.api.deps_auth import (
-    require_case, require_case_write, require_customer, require_customer_write,
+    require_case, require_case_in_customer, require_case_in_customer_write,
+    require_case_write, require_customer, require_customer_write,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth.permissions import User
@@ -254,7 +255,7 @@ def bind_customer_template(customer_id: str, body: TemplateBinding,
 def bind_case_template(customer_id: str, case_id: str, body: TemplateBinding,
                        auth: AuthContext = Depends(get_auth),
                        repo: Repository = Depends(get_repository),
-                       user: User = Depends(require_case_write)) -> dict:
+                       user: User = Depends(require_case_in_customer_write)) -> dict:
     try:
         repo.set_template(auth, body.template_id, customer_id=customer_id,
                           case_id=case_id)
@@ -269,7 +270,7 @@ def bind_report_template(customer_id: str, case_id: str, report_id: str,
                          body: TemplateBinding,
                          auth: AuthContext = Depends(get_auth),
                          repo: Repository = Depends(get_repository),
-                         user: User = Depends(require_case_write)) -> dict:
+                         user: User = Depends(require_case_in_customer_write)) -> dict:
     """Set (or clear) a template on a single report.
 
     A report's choice lives in its own definition rather than beside it, because
@@ -314,7 +315,7 @@ def bind_report_template(customer_id: str, case_id: str, report_id: str,
 def case_template(customer_id: str, case_id: str,
                   auth: AuthContext = Depends(get_auth),
                   repo: Repository = Depends(get_repository),
-                  user: User = Depends(require_case)) -> dict:
+                  user: User = Depends(require_case_in_customer)) -> dict:
     """What this tutkimus renders with, and where that came from."""
     template_id, level = repo.resolve_case_template(auth, customer_id, case_id)
     name = ""
@@ -330,7 +331,7 @@ def case_template(customer_id: str, case_id: str,
 def report_template(customer_id: str, case_id: str, report_id: str,
                     auth: AuthContext = Depends(get_auth),
                     repo: Repository = Depends(get_repository),
-                    user: User = Depends(require_case)) -> dict:
+                    user: User = Depends(require_case_in_customer)) -> dict:
     """What this report renders with, and WHERE that came from.
 
     The level is what lets the UI say "inherited from Attendo" rather than
@@ -350,7 +351,7 @@ def report_template(customer_id: str, case_id: str, report_id: str,
 def refresh_report_template(customer_id: str, case_id: str, report_id: str,
                             auth: AuthContext = Depends(get_auth),
                             repo: Repository = Depends(get_repository),
-                            user: User = Depends(require_case_write)) -> dict:
+                            user: User = Depends(require_case_in_customer_write)) -> dict:
     """The card's "päivitys pitää erikseen pyytää": move a delivered report onto
     whatever its tutkimus or asiakas now specifies."""
     repo.clear_pinned_template(auth, customer_id, case_id, report_id)

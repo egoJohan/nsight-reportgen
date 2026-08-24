@@ -111,6 +111,33 @@ def _case_guard(write: bool):
     return guard
 
 
+def _case_in_customer_guard(write: bool):
+    """For routes addressed by BOTH ids — /customers/{c}/cases/{k}/…
+
+    The case id is what authorises; the customer id then ADDRESSES storage. So
+    the two have to be the same customer, and nothing checked that they were: a
+    caller with a grant on one customer's case could pass ANY customer id
+    alongside it and have the route read and write under that customer's tree.
+    It leaked template names across customers, and the report-binding PUT wrote
+    a report doc into the other customer's path.
+
+    A mismatch is a 404, not a 403: the pair does not exist, and saying "you may
+    not" would confirm that the customer does.
+    """
+    def guard(customer_id: str, case_id: str,
+              user: User = Depends(current_user),
+              auth: AuthContext = Depends(get_auth),
+              repo: Repository = Depends(get_repository)) -> User:
+        case = repo.find_case(auth, case_id, user=user)
+        if case is None or case.customer_id != customer_id:
+            raise HTTPException(404, f"Case '{case_id}' not found")
+        _check(user, f"{case.customer_id}/{case.id}", write)
+        return user
+    guard.__name__ = ("require_case_in_customer_write" if write
+                      else "require_case_in_customer")
+    return guard
+
+
 def _material_guard(write: bool):
     """The material-addressed routes (spec §5.1).
 
@@ -136,6 +163,8 @@ require_customer = _customer_guard(False)
 require_customer_write = _customer_guard(True)
 require_case = _case_guard(False)
 require_case_write = _case_guard(True)
+require_case_in_customer = _case_in_customer_guard(False)
+require_case_in_customer_write = _case_in_customer_guard(True)
 require_material = _material_guard(False)
 require_material_write = _material_guard(True)
 
@@ -144,5 +173,6 @@ GUARD_NAMES = frozenset({
     "current_user", "require_admin",
     "require_customer", "require_customer_write",
     "require_case", "require_case_write",
+    "require_case_in_customer", "require_case_in_customer_write",
     "require_material", "require_material_write",
 })

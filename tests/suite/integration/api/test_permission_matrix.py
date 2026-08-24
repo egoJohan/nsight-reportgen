@@ -199,3 +199,56 @@ def test_customer_can_edit_ignores_is_admin(client_memory, two_customers, monkey
     a = two_customers["Attendo"]
     body = client_memory.get(f"/customers/{a['cid']}").json()
     assert body["can_edit"] is False
+
+
+# ---------------------------------------------------------------------------
+# Routes addressed by BOTH ids: /customers/{c}/cases/{k}/…
+#
+# The case id is what authorises; the customer id then ADDRESSES storage. Nobody
+# checked they were the same customer, so an analyst could take a case they DO
+# hold and paste any other customer's id beside it.
+# ---------------------------------------------------------------------------
+
+def test_a_foreign_customer_id_beside_your_own_case_reads_nothing(
+        client_memory, as_attendo_editor):
+    """It answered with Synsam's template binding — the id and its name."""
+    mine, theirs = as_attendo_editor["Attendo"], as_attendo_editor["Synsam"]
+    r = client_memory.get(f"/customers/{theirs['cid']}/cases/{mine['kid']}/template")
+    assert r.status_code == 404, r.text
+
+
+def test_the_same_holds_for_a_report_under_someone_elses_customer(
+        client_memory, as_attendo_editor):
+    mine, theirs = as_attendo_editor["Attendo"], as_attendo_editor["Synsam"]
+    r = client_memory.get(
+        f"/customers/{theirs['cid']}/cases/{mine['kid']}/reports/{mine['rid']}/template")
+    assert r.status_code == 404, r.text
+
+
+def test_and_nothing_can_be_written_under_a_customer_you_do_not_hold(
+        client_memory, as_attendo_editor):
+    """The write half, which was NOT reachable: both of these address storage by
+    the customer id they were handed, and both happened to fail on the lookup
+    that pairing produces. Pinned so it stays that way — the guard is now what
+    stops them, rather than luck about which lookup runs first.
+    """
+    mine, theirs = as_attendo_editor["Attendo"], as_attendo_editor["Synsam"]
+    r = client_memory.put(
+        f"/customers/{theirs['cid']}/cases/{mine['kid']}/reports/{mine['rid']}/template",
+        json={"template_id": ""})
+    assert r.status_code == 404, r.text
+
+    r = client_memory.put(f"/customers/{theirs['cid']}/cases/{mine['kid']}/template",
+                          json={"template_id": "whatever"})
+    assert r.status_code == 404, r.text
+
+
+def test_your_own_pair_still_works(client_memory, as_attendo_editor):
+    """The check must not cost the ordinary case anything."""
+    mine = as_attendo_editor["Attendo"]
+    assert client_memory.get(
+        f"/customers/{mine['cid']}/cases/{mine['kid']}/template").status_code == 200
+    assert client_memory.get(
+        f"/customers/{mine['cid']}/cases/{mine['kid']}/materials").status_code == 200
+    assert client_memory.get(
+        f"/customers/{mine['cid']}/cases/{mine['kid']}").status_code == 200

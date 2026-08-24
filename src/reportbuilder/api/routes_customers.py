@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from reportbuilder.api.deps_auth import (
-    current_user, require_case, require_case_write, require_customer,
+    current_user, require_case, require_case_in_customer,
+    require_case_in_customer_write, require_case_write, require_customer,
     require_customer_write, require_material,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
@@ -279,7 +280,7 @@ def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
 @customers_router.get("/customers/{customer_id}/cases/{case_id}")
 def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_auth),
              repo: Repository = Depends(get_repository),
-             user: User = Depends(require_case)) -> dict:
+             user: User = Depends(require_case_in_customer)) -> dict:
     try:
         k = repo.get_case(auth, customer_id, case_id)
     except NotFound:
@@ -292,7 +293,7 @@ def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_aut
 def rename_case(customer_id: str, case_id: str, body: NameBody,
                 auth: AuthContext = Depends(get_auth),
                 repo: Repository = Depends(get_repository),
-                user: User = Depends(require_case_write)) -> dict:
+                user: User = Depends(require_case_in_customer_write)) -> dict:
     try:
         k = repo.rename_case(auth, customer_id, case_id, _name(body))
     except NotFound:
@@ -391,7 +392,7 @@ async def create_case_from_material(
 def list_case_materials(customer_id: str, case_id: str,
                         auth: AuthContext = Depends(get_auth),
                         repo: Repository = Depends(get_repository),
-                        user: User = Depends(require_case)) -> list[dict]:
+                        user: User = Depends(require_case_in_customer)) -> list[dict]:
     return [{"id": m.id, "name": m.name, "size": m.size}
             for m in repo.list_materials(auth, customer_id, case_id, user=user)]
 
