@@ -156,3 +156,14 @@ def _forget_sign_in_attempts():
     routes_auth._LOGIN_ATTEMPTS.reset()
     routes_auth._LOGIN_ATTEMPTS_BY_ADDRESS.reset()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _forget_parsed_savs():
+    """Parsed SAVs are cached for the life of the process, keyed by content. Two
+    tests that build the same synthetic file would otherwise share a parse, and a
+    test asserting that something reads storage would quietly stop testing it."""
+    from reportbuilder.api import model_loader
+
+    model_loader._forget_parsed_savs()
+    yield

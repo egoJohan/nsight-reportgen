@@ -9,26 +9,73 @@ like the previous ``enrich_model`` auto-detection.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import os
 import tempfile
+from collections import OrderedDict
 
 from reportbuilder.ingest.grouping_override import apply_grouping_override
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.model.question import QuestionModel
 
 
+#: Parsed SAVs, newest last, keyed by the CONTENT of the file.
+#:
+#: Parsing one costs ~350 ms for a typical study (229 variables, 1000
+#: respondents) and every model load paid it — so previewing a sixty-slide deck
+#: spent twenty seconds re-reading the same file, on the CPU, while the requests
+#: fought each other for it.
+#:
+#: Keyed by digest rather than by material id, so it cannot go stale: different
+#: bytes are a different key, and re-uploading a material can never be served
+#: the previous parse. The cost is one hash of the blob per load (a few ms
+#: against 350) and holding a handful of DataFrames.
+_PARSED: OrderedDict[str, tuple[object, QuestionModel, str]] = OrderedDict()
+
+#: How many to keep. Small on purpose: a study is a few MB in memory and the
+#: access pattern is one material at a time, occasionally two while somebody
+#: compares waves.
+_PARSED_MAX = 4
+
+
+def _parse(raw: bytes):
+    """Parse a SAV blob, or hand back the parse we already have of it."""
+    key = hashlib.sha256(raw).hexdigest()
+    cached = _PARSED.get(key)
+    if cached is None:
+        with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
+            tmp.write(raw)
+            path = tmp.name
+        try:
+            df, model = read_sav(path)
+            label = sav_file_label(path) or ""
+        finally:
+            os.unlink(path)
+        cached = (df, model, label)
+        _PARSED[key] = cached
+        while len(_PARSED) > _PARSED_MAX:
+            _PARSED.popitem(last=False)
+    else:
+        _PARSED.move_to_end(key)
+    df, model, label = cached
+    # The frame is copied and the model is not. Nothing in the codebase mutates
+    # either — checked — but a DataFrame is the one people reach for a column
+    # assignment on, and a shared one would corrupt the NEXT request rather than
+    # this one, which is the worst kind of bug to be handed. A copy is a few ms
+    # against the 350 saved. The model is immutable by construction: every
+    # transform below builds a new QuestionModel.
+    return df.copy(), model, label
+
+
+def _forget_parsed_savs() -> None:
+    """Drop the parse cache. For tests, and for anything that needs to prove it
+    is reading from storage."""
+    _PARSED.clear()
+
+
 def _read(material_id: str, client):
-    raw = client.get_material(material_id)
-    with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
-        tmp.write(raw)
-        path = tmp.name
-    try:
-        df, model = read_sav(path)
-        label = sav_file_label(path) or ""
-    finally:
-        os.unlink(path)
-    return df, model, label
+    return _parse(client.get_material(material_id))
 
 
 def material_config(material_id: str, client) -> dict:
