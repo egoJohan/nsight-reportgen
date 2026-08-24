@@ -520,6 +520,14 @@ export default function ReportWizard({
     Number(new URLSearchParams(window.location.search).get("idleSeconds")) * 1000 ||
     4 * 60 * 60_000;
 
+  // This editor's own identity. Two tabs of the SAME person both hold the
+  // report, and closing one must not take it from the other — without this,
+  // closing a second window released the lock outright and the remaining tab
+  // only got it back on its next renewal, thirty seconds during which anyone
+  // could have taken the report from someone who never left.
+  const tabId = useRef(
+    (globalThis.crypto?.randomUUID?.() ?? `tab-${Math.random().toString(36).slice(2)}`)
+  );
   const [lockedBy, setLockedBy] = useState<string | null>(null);
   const [hasLock, setHasLock] = useState(false);
   const hasLockRef = useRef(false);
@@ -530,12 +538,12 @@ export default function ReportWizard({
     let alive = true;
     let timer: number | undefined;
 
-    const release = () => void api.reports.unlock(caseId, reportId);
+    const release = () => void api.reports.unlock(caseId, reportId, tabId.current);
 
     /** Take or renew the lock. Returns whether we hold it. */
     const take = async (): Promise<boolean> => {
       try {
-        await api.reports.lock(caseId, reportId);
+        await api.reports.lock(caseId, reportId, tabId.current);
         if (!alive) return false;
         setHasLock(true);
         setLockedBy(null);

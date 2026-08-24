@@ -135,17 +135,19 @@ class RepositoryClient:
 
     # -- editing locks ----------------------------------------------------
 
-    def lock_report(self, case_id: str, report_id: str) -> tuple[bool, dict]:
+    def lock_report(self, case_id: str, report_id: str,
+                    tab_id: str = "") -> tuple[bool, dict]:
         k = self._case(case_id)
         return self.repo.lock_report(
             self.auth, k.customer_id, k.id, report_id,
             getattr(self.user, "id", ""),
-            getattr(self.user, "name", "") or getattr(self.user, "email", ""))
+            getattr(self.user, "name", "") or getattr(self.user, "email", ""),
+            tab_id=tab_id)
 
-    def unlock_report(self, case_id: str, report_id: str) -> bool:
+    def unlock_report(self, case_id: str, report_id: str, tab_id: str = "") -> bool:
         k = self._case(case_id)
         return self.repo.unlock_report(self.auth, k.customer_id, k.id, report_id,
-                                       getattr(self.user, "id", ""))
+                                       getattr(self.user, "id", ""), tab_id=tab_id)
 
     def report_lock(self, case_id: str, report_id: str) -> dict | None:
         k = self._case(case_id)

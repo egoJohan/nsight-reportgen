@@ -101,6 +101,7 @@ def test_a_lock_with_an_unreadable_timestamp_is_treated_as_dead(repo, auth, repo
     path = P.report_lock_path(cust, case, rid)
     d = repo._read_json(auth, path)
     d["renewed_at"] = "not a timestamp"
+    d["tabs"] = {tab: "not a timestamp" for tab in (d.get("tabs") or {"_": ""})}
     repo._write_json(auth, path, d, [P.LABEL_REPORT_LOCK])
     assert repo._lock_state(auth, cust, case, rid) is None
 
@@ -159,12 +160,18 @@ def test_saving_records_who_saved_it(repo, auth, report):
 
 
 def _age_the_lock(repo, auth, cust, case, rid, *, seconds: float) -> None:
-    """Backdate the lock's renewal, as an editor that stopped checking in would."""
+    """Backdate the lock, as an editor that stopped checking in would.
+
+    Both the lock's own renewal AND every tab's, because a lock is kept alive by
+    its open editors: ageing only the outer timestamp would leave the tabs
+    looking fresh, which is not a state any real editor produces.
+    """
     path = P.report_lock_path(cust, case, rid)
     d = repo._read_json(auth, path)
-    d["renewed_at"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=seconds)
-    ).isoformat(timespec="seconds")
+    stale = (datetime.now(timezone.utc)
+             - timedelta(seconds=seconds)).isoformat(timespec="seconds")
+    d["renewed_at"] = stale
+    d["tabs"] = {tab: stale for tab in (d.get("tabs") or {"_": stale})}
     repo._write_json(auth, path, d, [P.LABEL_REPORT_LOCK])
 
 
@@ -191,3 +198,53 @@ def test_signing_out_hands_back_every_lock_that_person_holds(repo, auth, report)
 
 def test_signing_out_with_nothing_open_is_harmless(repo, auth):
     assert repo.release_user_locks(auth, "nobody") == 0
+
+
+def test_closing_one_tab_does_not_take_the_report_from_your_other_tab(repo, auth, report):
+    """The self-inflicted lockout, and the one failure this must not have.
+
+    Two tabs, one person. Closing one released the lock outright — the other tab
+    got the report back only because it re-acquired on its next renewal, and in
+    the thirty seconds between, anybody could have taken it. With unsaved work
+    on screen in the tab that never left.
+    """
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-a")
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-b")
+
+    # Tab B closes.
+    assert repo.unlock_report(auth, cust, case, rid, "u1", tab_id="tab-b") is False
+    # Tab A is still editing, so the report is still hers.
+    held = repo._lock_state(auth, cust, case, rid)
+    assert held is not None
+    assert set(held["tabs"]) == {"tab-a"}
+    mine, _ = repo.lock_report(auth, cust, case, rid, "u2", "Maija")
+    assert mine is False
+
+
+def test_closing_the_last_tab_does_release_it(repo, auth, report):
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-a")
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-b")
+    repo.unlock_report(auth, cust, case, rid, "u1", tab_id="tab-b")
+    assert repo.unlock_report(auth, cust, case, rid, "u1", tab_id="tab-a") is True
+    mine, _ = repo.lock_report(auth, cust, case, rid, "u2", "Maija")
+    assert mine is True
+
+
+def test_a_tab_that_stops_checking_in_stops_holding_it(repo, auth, report):
+    """A crashed tab must not keep the report for the tab that is still alive
+    forever — nor take it from it. Each editor stands on its own."""
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-a")
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="tab-b")
+    # Tab B's machine sleeps; tab A keeps working.
+    path = P.report_lock_path(cust, case, rid)
+    d = repo._read_json(auth, path)
+    d["tabs"]["tab-b"] = (datetime.now(timezone.utc)
+                          - timedelta(seconds=Repository.LOCK_TTL_SECONDS + 5)
+                          ).isoformat(timespec="seconds")
+    repo._write_json(auth, path, d, [P.LABEL_REPORT_LOCK])
+
+    held = repo._lock_state(auth, cust, case, rid)
+    assert set(held["tabs"]) == {"tab-a"}

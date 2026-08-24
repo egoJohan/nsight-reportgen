@@ -577,6 +577,14 @@ class Repository:
                     report_id: str) -> dict | None:
         """The live lock on this report, or None when there is none.
 
+        A lock is held by a PERSON but kept alive by their open editors, one per
+        tab, each checking in on its own. It survives while any of them is still
+        checking in — closing one tab must not hand the report away while
+        another is still editing in it. That is not a hypothetical: it happened
+        within thirty seconds in a two-tab test, and the second tab only got the
+        report back because it re-acquired on its next renewal. In between,
+        anyone could have taken it.
+
         An expired lock is None: it is not deleted here, because reading is not
         the moment to write, and the next acquire overwrites it anyway.
         """
@@ -587,12 +595,30 @@ class Repository:
             return None
         if d.get("released"):
             return None
-        if _age_seconds(d.get("renewed_at", "")) > self.LOCK_TTL_SECONDS:
+        live = self._live_tabs(d)
+        if not live:
             return None
-        return d
+        return {**d, "tabs": live}
+
+    @staticmethod
+    def _live_tabs(lock: dict) -> dict:
+        """The editors still checking in, by tab id.
+
+        Locks written before tabs were tracked have none, and are judged by the
+        lock's own renewal time — so an old lock still expires rather than
+        living for ever or dying at once.
+        """
+        tabs = lock.get("tabs")
+        if not isinstance(tabs, dict):
+            return ({"_": lock.get("renewed_at", "")}
+                    if _age_seconds(lock.get("renewed_at", "")) <= Repository.LOCK_TTL_SECONDS
+                    else {})
+        return {tab: seen for tab, seen in tabs.items()
+                if _age_seconds(seen) <= Repository.LOCK_TTL_SECONDS}
 
     def lock_report(self, auth: AuthContext, customer_id: str, case_id: str,
-                    report_id: str, user_id: str, user_name: str) -> tuple[bool, dict]:
+                    report_id: str, user_id: str, user_name: str,
+                    tab_id: str = "") -> tuple[bool, dict]:
         """Take or renew the lock. Returns (mine, lock).
 
         The same person always succeeds — a second tab, a refresh, a reconnect
@@ -604,18 +630,22 @@ class Repository:
         if held and held.get("user_id") != user_id:
             return False, held
         now = _now()
+        tabs = dict(held.get("tabs") or {}) if held else {}
+        tabs[tab_id or "_"] = now
         lock = {
             "report_id": report_id, "case_id": case_id, "customer_id": customer_id,
             "user_id": user_id, "user_name": user_name,
             "acquired_at": (held or {}).get("acquired_at") or now,
             "renewed_at": now,
+            # One entry per open editor. The lock lives while any of them does.
+            "tabs": tabs,
         }
         self._write_json(auth, P.report_lock_path(customer_id, case_id, report_id),
                          lock, [P.LABEL_REPORT_LOCK])
         return True, lock
 
     def unlock_report(self, auth: AuthContext, customer_id: str, case_id: str,
-                      report_id: str, user_id: str) -> bool:
+                      report_id: str, user_id: str, tab_id: str = "") -> bool:
         """Release the lock, if this user holds it. Returns whether it did.
 
         Only the holder may release: a lock anyone can drop is not a lock. An
@@ -626,6 +656,17 @@ class Repository:
             return False
         if held is None:
             return True  # nothing to release; closing an editor is not an error
+        # Closing ONE editor gives up that editor, not the report. Another tab
+        # of the same person may still be working in it, and taking the lock
+        # away from them because they closed a different window would be a
+        # self-inflicted lockout — the one failure this design must not have.
+        remaining = {t: seen for t, seen in (held.get("tabs") or {}).items()
+                     if t != (tab_id or "_")}
+        if remaining:
+            self._write_json(
+                auth, P.report_lock_path(customer_id, case_id, report_id),
+                {**held, "tabs": remaining}, [P.LABEL_REPORT_LOCK])
+            return False  # still held, by this person's other editor
         # Marked released rather than deleted. Deleting an object is gated
         # behind datahive's consent mechanism (it asks a human to approve),
         # which is right for a report and absurd for a lock somebody is trying

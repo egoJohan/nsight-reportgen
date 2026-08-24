@@ -223,6 +223,7 @@ def duplicate_report(
 def lock_report(
     case_id: str,
     report_id: str,
+    tab: str = "",
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case_write),
 ) -> dict:
@@ -238,7 +239,7 @@ def lock_report(
     them — refusing without saying who leaves the second person nothing to do
     but guess.
     """
-    mine, lock = client.lock_report(case_id, report_id)
+    mine, lock = client.lock_report(case_id, report_id, tab_id=tab)
     if not mine:
         raise HTTPException(
             status_code=409,
@@ -251,6 +252,7 @@ def lock_report(
 def unlock_report(
     case_id: str,
     report_id: str,
+    tab: str = "",
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case_write),
 ) -> dict:
@@ -259,5 +261,10 @@ def unlock_report(
     Only the holder may. A lock anyone can drop is not a lock; one that was
     abandoned expires on its own rather than being tidied away by somebody who
     wants the report.
+
+    `tab` identifies THIS editor. Closing one of your own tabs gives up that
+    editor, not the report: another tab of yours may still be working in it, and
+    taking the report away because you closed a different window is a lockout
+    you inflicted on yourself.
     """
-    return {"released": client.unlock_report(case_id, report_id)}
+    return {"released": client.unlock_report(case_id, report_id, tab_id=tab)}

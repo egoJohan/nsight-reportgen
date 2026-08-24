@@ -1083,10 +1083,11 @@ export const api = {
 
     /** Take or renew the editing lock. Rejects with the holder's name (409)
      *  when somebody else has it. */
-    lock: async (caseId: string, reportId: string): Promise<{ mine: boolean; user_name: string; renew_seconds: number }> => {
-      const res = await fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}/lock`, {
-        method: "POST",
-      });
+    lock: async (caseId: string, reportId: string, tabId: string): Promise<{ mine: boolean; user_name: string; renew_seconds: number }> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/lock?tab=${encodeURIComponent(tabId)}`,
+        { method: "POST" }
+      );
       if (!res.ok) {
         let detail = `${res.status} ${res.statusText}`;
         try {
@@ -1103,11 +1104,11 @@ export const api = {
     /** Give the lock back. Uses keepalive so a closing tab still releases it —
      *  an ordinary fetch is cancelled when the page goes away, which would
      *  leave the report locked until it expired. */
-    unlock: (caseId: string, reportId: string): Promise<void> =>
-      fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}/lock`, {
-        method: "DELETE",
-        keepalive: true,
-      }).then(() => undefined),
+    unlock: (caseId: string, reportId: string, tabId: string): Promise<void> =>
+      fetch(
+        `${API_BASE}/cases/${caseId}/reports/${reportId}/lock?tab=${encodeURIComponent(tabId)}`,
+        { method: "DELETE", keepalive: true }
+      ).then(() => undefined),
 
     update: (
       caseId: string,
