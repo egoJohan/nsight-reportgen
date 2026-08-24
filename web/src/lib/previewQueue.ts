@@ -41,6 +41,11 @@ export interface Producer {
    *  Returning `c.fingerprint` means "already up to date, leave it alone". */
   storedFingerprint(c: ProducerCtx): string | null;
   run(c: ProducerCtx): Promise<Partial<ChartSpec> | void>;
+  /** Whether the author overtook this work while it was running: `before` is the
+   *  slide the run started from, `after` the slide as it is now. True means throw
+   *  the result away. A model round trip is seconds long, and a person editing
+   *  the same field in that window must win — they are looking at it. */
+  supersededBy?(before: ChartSpec, after: ChartSpec): boolean;
   onFailure: "continue" | "abort";
 }
 
@@ -161,6 +166,10 @@ let running = new Set<string>();
  *  switching templates looked like. These are remembered and queued the moment
  *  the pass ends. */
 let requeue = new Set<string>();
+/** (slide, producer, fingerprint) triples that have already had their one
+ *  retry after a failure. Bounds the retry to exactly one per attempt, and
+ *  is cleared with the rest of the session state. */
+let retried = new Set<string>();
 let active = 0;
 let concurrency = 4;
 let currentReportId = "";
@@ -210,10 +219,18 @@ export function failuresOf(slideId: string): Array<{ id: ProducerId; error: unkn
   return out;
 }
 
-/** Start over for a different report. Statuses are per report — reading one
- *  report's as another's would show finished work that was never done. */
+/** Start over. Statuses and patches are per EDITING SESSION — reading one
+ *  report's as another's would show finished work that was never done, and
+ *  reading the last session's as this one's is just as wrong.
+ *
+ *  This used to return early when the report id was unchanged, which made
+ *  reopening the same report keep the previous session's overlay. The overlay
+ *  normally cleans itself up once the draft catches up, but a patch written
+ *  moments before the editor closes never gets that far — its React state
+ *  update dies with the unmount — and that dead patch was then laid back over
+ *  a draft freshly fetched from the server. The caller decides when a session
+ *  starts; this just does as it is told. */
 export function reset(reportId: string) {
-  if (reportId === currentReportId) return;
   say("reset", { detail: `report ${currentReportId || "(none)"} -> ${reportId}` });
   currentReportId = reportId;
   statuses = new Map();
@@ -221,6 +238,7 @@ export function reset(reportId: string) {
   queue = [];
   queued = new Set();
   requeue = new Set();
+  retried = new Set();
   notify();
 }
 
@@ -471,6 +489,16 @@ async function producePreview(slideId: string): Promise<void> {
         requeueAfterRun(slideId, "context changed under it");
         return;
       }
+      const now = patch && p.supersededBy ? readSlide(slideId) : null;
+      if (now && p.supersededBy!(chart, now)) {
+        // The author changed this under us while the request was out. Their
+        // version stands; ours is recorded as satisfied so nothing re-runs it
+        // and overwrites them a second time.
+        say("discard", { slideId, producer: p.id, detail: "author overtook it" });
+        setStatus(slideId, p.id, "done",
+                  p.fingerprint({ slideId, chart: now, ctx: renderContext }));
+        continue;
+      }
       if (patch) applyPatch(slideId, patch);
       // The fingerprint captured BEFORE the run, never one re-read after it:
       // re-reading would record work that was never done.
@@ -498,6 +526,21 @@ async function producePreview(slideId: string): Promise<void> {
         producer: p.id,
         detail: e instanceof Error ? e.message : String(e),
       });
+      // One retry, then believe it. Most failures here are transient — the
+      // backend restarting, a proxy timing out, a request that lost its
+      // connection — and before this the slide simply stayed broken until the
+      // author noticed and edited it, which they will not do for a slide they
+      // are not looking at. Keyed on the fingerprint, so a genuinely broken
+      // slide fails exactly twice and then stops rather than looping. It goes
+      // to the BACK of the queue, which is also the delay.
+      const attempt = `${slideId}|${p.id}|${c.fingerprint}`;
+      if (!retried.has(attempt)) {
+        retried.add(attempt);
+        say("retry", { slideId, producer: p.id, detail: "first failure; trying once more" });
+        setStatus(slideId, p.id, "pending", null);
+        requeueAfterRun(slideId, "one retry after a failure");
+        return;
+      }
       setStatus(slideId, p.id, "failed", c.fingerprint, e);
       // Stop, and do NOT fall through to the tail re-check. Producers after
       // this one never ran, so they are absent from `handled`, and the tail
@@ -642,6 +685,7 @@ export function __resetForTest() {
   queued = new Set();
   running = new Set();
   requeue = new Set();
+  retried = new Set();
   active = 0;
   contextGeneration = 0;
   trace = [];

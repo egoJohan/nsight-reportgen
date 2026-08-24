@@ -326,3 +326,128 @@ describe("work abandoned because the context changed", () => {
     expect(events).toContain("settled");
   });
 });
+
+describe("work the author overtook while it was running", () => {
+  it("does not write a generated title over one typed while it was in flight", async () => {
+    // The window is real and not small: the title request is a round trip to a
+    // model. The author sees an untitled slide, types a headline, and a few
+    // seconds later it is replaced by a machine's — with no undo, because the
+    // typing was never saved as anything the queue knew about.
+    put("s1");
+    let release!: () => void;
+    const inFlight = new Promise<void>((r) => (release = r));
+    q.__setProducersForTest([
+      producer("title", {
+        run: async () => {
+          await inFlight;
+          return { slide_title: "What the model wrote", slide_title_key: "fp" };
+        },
+        supersededBy: (before, after) =>
+          (after.slide_title ?? "") !== (before.slide_title ?? "") &&
+          !after.slide_title_key,
+      }),
+    ]);
+    q.enqueue("s1");
+    const drained = q.__drainForTest();
+    // The author types while the request is out.
+    slides.set("s1", { ...slides.get("s1")!, slide_title: "My own headline",
+                       slide_title_key: null } as ChartSpec);
+    release();
+    await drained;
+
+    expect(slides.get("s1")!.slide_title).toBe("My own headline");
+  });
+
+  it("still writes it when the author did not touch the slide", async () => {
+    put("s1");
+    q.__setProducersForTest([
+      producer("title", {
+        run: async () => ({ slide_title: "What the model wrote", slide_title_key: "fp" }),
+        supersededBy: (before, after) =>
+          (after.slide_title ?? "") !== (before.slide_title ?? "") &&
+          !after.slide_title_key,
+      }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    expect(slides.get("s1")!.slide_title).toBe("What the model wrote");
+  });
+});
+
+describe("opening the same report again", () => {
+  it("does not shadow the reloaded draft with the last session's patches", async () => {
+    // The overlay exists so a producer reads its own writes mid-pass, and it
+    // usually cleans itself up: once the draft catches up, readSlide drops the
+    // key. The case where it does NOT is the one that matters — a patch written
+    // moments before the editor closes, whose React state update dies with the
+    // unmount and never reaches the server.
+    //
+    // reset() then skipped clearing it, because the report id was unchanged. So
+    // reopening that report laid the dead patch back over a draft freshly
+    // fetched from the server, and the slide came back showing something that
+    // was never saved.
+    put("s1");
+    q.setPatchSink(() => {});   // the update dies on unmount
+    q.__setProducersForTest([
+      producer("title", { run: async () => ({ slide_title: "Never saved" }) }),
+    ]);
+    q.reset("r1");
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    // Reopened: the wizard remounts on the SAME report with a fresh draft.
+    put("s1");
+    q.reset("r1");
+
+    let sawTitle: unknown = "unset";
+    q.__setProducersForTest([
+      producer("probe", { run: async (c) => { sawTitle = c.chart.slide_title; } }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+    expect(sawTitle).toBeNull();
+  });
+});
+
+describe("a producer that fails", () => {
+  it("is tried once more before the slide is given up on", async () => {
+    // Most failures here are transient — the backend restarting, a proxy timing
+    // out. Before this the slide simply stayed broken until the author noticed
+    // and edited it, which nobody does for a slide they are not looking at.
+    put("s1");
+    let attempts = 0;
+    q.__setProducersForTest([
+      producer("chart", {
+        onFailure: "abort",
+        run: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("connection reset");
+          return { slide_title: "drew on the second go" };
+        },
+      }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    expect(attempts).toBe(2);
+    expect(q.failuresOf("s1")).toEqual([]);
+    expect(slides.get("s1")!.slide_title).toBe("drew on the second go");
+  });
+
+  it("gives up after that one retry rather than looping", async () => {
+    put("s1");
+    let attempts = 0;
+    q.__setProducersForTest([
+      producer("chart", {
+        onFailure: "abort",
+        run: async () => { attempts += 1; throw new Error("genuinely broken"); },
+      }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    expect(attempts).toBe(2);
+    expect(q.failuresOf("s1").map((f) => f.id)).toEqual(["chart"]);
+  });
+});

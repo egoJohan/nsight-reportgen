@@ -623,6 +623,20 @@ export default function ReportWizard({
       window.addEventListener(ev, seen, { passive: true });
     }
 
+    // Coming back to a backgrounded tab. Browsers throttle a hidden tab's
+    // timers hard — Chrome stops running them altogether after a few minutes —
+    // so the thirty-second renewal may not have fired for far longer than the
+    // server's two-minute TTL, and the lock is gone without anything here
+    // noticing. Renew the moment the tab is looked at again, rather than
+    // waiting for the first click, by which time the author is already typing
+    // into a report somebody else may now hold.
+    const woke = () => {
+      if (document.visibilityState !== "visible" || lostRef.current) return;
+      lastActivity.current = Date.now();
+      void take();
+    };
+    document.addEventListener("visibilitychange", woke);
+
     // Handing it back, because closing IS a decision: on unmount, and on the
     // tab going away — `pagehide` fires where `beforeunload` does not, and
     // `keepalive` lets the request outlive the page.
@@ -633,6 +647,7 @@ export default function ReportWizard({
       for (const ev of ["pointerdown", "keydown", "wheel"] as const) {
         window.removeEventListener(ev, seen);
       }
+      document.removeEventListener("visibilitychange", woke);
       window.removeEventListener("pagehide", release);
       release();
     };
@@ -666,9 +681,16 @@ export default function ReportWizard({
   const questionByRefRef = useRef(questionByRef);
   questionByRefRef.current = questionByRef;
 
+  // A new editing session: throw away the last one's statuses and patches. This
+  // must NOT re-run when a callback identity changes, or it would wipe work in
+  // progress — hence its own effect, keyed on the report alone.
   useEffect(() => {
     installProducers();
     previewQueue.reset(reportId);
+  }, [reportId]);
+
+  // The seams, re-registered whenever the callbacks they close over change.
+  useEffect(() => {
     previewQueue.setSlideSource(
       (id) => draftRef.current?.charts.find((c) => c.slide_id === id) ?? null
     );

@@ -87,6 +87,13 @@ const title: Producer = {
     return { slide_title: text, slide_title_key: c.fingerprint };
   },
 
+  // The request is a round trip to a model — seconds, not milliseconds — and an
+  // author looking at an untitled slide types a headline into exactly that gap.
+  // Theirs stands. A typed title is one with no key: SlideTitleField clears the
+  // key on every keystroke, which is the same signal storedFingerprint reads.
+  supersededBy: (before, after) =>
+    (after.slide_title ?? "") !== (before.slide_title ?? "") && !after.slide_title_key,
+
   // A headline nobody could write does not stop the slide being drawn: it falls
   // back to the question text, which is what happened before AI titles existed.
   onFailure: "continue",
