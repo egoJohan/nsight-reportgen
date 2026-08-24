@@ -1041,7 +1041,17 @@ function SlideTitleField({
 //
 // These are PRESENTATION: they are in the image fingerprint, so editing one
 // re-renders the slide, and deliberately not in titleDataKey, so it never spends
-// an LLM call rewriting the headline. Chart families with no axes ignore them.
+// an LLM call rewriting the headline.
+//
+// Chart families with no axes do not show the fields at all. A pie has nothing to
+// name, a funnel draws with its axes switched off, and a radar's are angular —
+// offering the field there means the author types a name, watches the field keep
+// it, and gets a chart without it, with nothing saying the chart type was why.
+const CHART_TYPES_WITH_AXES = new Set([
+  "vertical_bar", "horizontal_bar", "stacked_vertical_bar", "stacked_horizontal_bar",
+  "line", "scatter", "combo",
+]);
+
 function AxisTitleFields({
   chart,
   onChange,
@@ -1049,6 +1059,7 @@ function AxisTitleFields({
   chart: ChartSpec;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
+  if (!CHART_TYPES_WITH_AXES.has(chart.chart_type)) return null;
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="X axis title">

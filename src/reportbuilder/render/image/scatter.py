@@ -18,7 +18,7 @@ Returns None. Requires ctx.spec.scatter_xy to be set.
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values,
+    apply_axis_titles, new_figure, render_png, place_picture, series_values,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import TEAL
@@ -75,6 +75,11 @@ def build_image_scatter(ctx) -> None:
 
     # Light grid
     ax.grid(color=grid, linewidth=0.7, zorder=0)
+
+    # Last, so an author's own axis title replaces the variable name this chart
+    # defaults to — naming the axes is the whole point of a scatter, and the
+    # default is a variable name, not always a sentence anyone wants on a slide.
+    apply_axis_titles(ax, ctx.spec, ink)
 
     png = render_png(fig)
     place_picture(ctx, png)

@@ -112,18 +112,31 @@ def apply_elements(chart, ctx: RenderContext, title: str = "") -> None:
             # draws the same text from the same fields — see
             # image/_mpl.apply_axis_titles — because a preview that omits what
             # the deck shows is the bug the preview pipeline exists to prevent.
-            x_title = getattr(ctx.spec, "axis_x_title", "") or ""
-            y_title = getattr(ctx.spec, "axis_y_title", "") or ""
-            if x_title:
-                chart.category_axis.has_title = True
-                chart.category_axis.axis_title.text_frame.text = x_title
-            if y_title:
-                chart.value_axis.has_title = True
-                chart.value_axis.axis_title.text_frame.text = y_title
+            _title_axis(chart, "category_axis",
+                        getattr(ctx.spec, "axis_x_title", "") or "")
+            _title_axis(chart, "value_axis",
+                        getattr(ctx.spec, "axis_y_title", "") or "")
         except (AttributeError, ValueError):
-            # pie / doughnut / radar / scatter have no value_axis or category_axis;
+            # pie / doughnut / radar have no value_axis or category_axis;
             # python-pptx raises ValueError("chart has no value axis") for those types.
             pass
+
+
+def _title_axis(chart, axis_name: str, text: str) -> None:
+    """Name one axis, if this chart has that axis and the author named it.
+
+    Each axis on its own, because they used to share a try block: an XY scatter
+    has no `category_axis`, so reaching for it raised and took the Y title with
+    it — the author named both axes and the deck showed neither.
+    """
+    if not text:
+        return
+    try:
+        axis = getattr(chart, axis_name)
+        axis.has_title = True
+        axis.axis_title.text_frame.text = text
+    except (AttributeError, ValueError):
+        pass
 
 
 # ---------------------------------------------------------------------------

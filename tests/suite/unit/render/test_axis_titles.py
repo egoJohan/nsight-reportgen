@@ -92,3 +92,53 @@ def test_the_preview_request_carries_them_to_the_chart_spec():
     spec = _chart_spec_from_body(body)
     assert spec.axis_x_title == "Osuus vastaajista (%)"
     assert spec.axis_y_title == "Vastausvaihtoehto"
+
+
+# ---------------------------------------------------------------------------
+# Which charts actually draw them.
+#
+# The helper was written once and wired into the bar builders only, so on a line
+# or a scatter the author typed an axis name, saw the field keep it, and got a
+# chart without it. Nothing said the chart type was the reason.
+# ---------------------------------------------------------------------------
+
+_AXED = ["vertical_bar", "horizontal_bar", "stacked_vertical_bar",
+         "stacked_horizontal_bar", "line", "scatter", "combo"]
+
+
+def _drawn_labels(chart_type: str, monkeypatch) -> tuple[str, str]:
+    """Render a real chart of this type and read the axis labels off the figure.
+
+    Read at render time, through the builder's own `render_png`, because the
+    builder closes its figure on the way out — and read off the AXES rather than
+    checked by spying on the helper, since "the builder called something" is not
+    the claim. The claim is that the words reach the picture.
+    """
+    import sys
+
+    from reportbuilder.render.image import IMAGE_BUILDERS
+    from suite._helpers import make_ctx
+    from suite.integration.render._series import series_for
+
+    module = sys.modules[IMAGE_BUILDERS[chart_type].__module__]
+    seen: dict[str, tuple[str, str]] = {}
+    original = module.render_png
+
+    def spy(fig, *a, **k):
+        ax = fig.axes[0]
+        seen["labels"] = (ax.get_xlabel(), ax.get_ylabel())
+        return original(fig, *a, **k)
+
+    monkeypatch.setattr(module, "render_png", spy)
+
+    series, extra = series_for(chart_type)
+    kw = dict(axis_x_title="Ikäryhmä", axis_y_title="Osuus vastaajista", **extra)
+    _prs, _slide, _slot, ctx = make_ctx(chart_type, series, **kw)
+    IMAGE_BUILDERS[chart_type](ctx)
+    return seen.get("labels", ("<never rendered>", ""))
+
+
+def test_every_chart_with_axes_draws_the_authors_axis_names(monkeypatch):
+    missing = [t for t in _AXED
+               if _drawn_labels(t, monkeypatch) != ("Ikäryhmä", "Osuus vastaajista")]
+    assert missing == [], f"axis titles typed but never drawn on: {missing}"

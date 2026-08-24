@@ -19,7 +19,7 @@ Returns None.
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
-    new_figure, render_png, place_picture, series_values,
+    apply_axis_titles, new_figure, render_png, place_picture, series_values,
     format_value, chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import TEAL, TEAL_LT
@@ -100,6 +100,10 @@ def build_image_combo(ctx) -> None:
                 for t in leg.get_texts():
                     t.set_color(ink)
     # Bars-only combo (no secondary line) → no legend: the question is in the subtitle.
+
+    # On the PRIMARY axis. The secondary axis is the line's own scale and is
+    # named by the legend entry that describes the line.
+    apply_axis_titles(ax, ctx.spec, ink)
 
     png = render_png(fig)
     place_picture(ctx, png)

@@ -11,7 +11,8 @@ Returns None.
 """
 from __future__ import annotations
 
-from reportbuilder.render.image._mpl import (chart_accent, chart_background,
+from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
+    chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
     format_value, style_legend, wrap_label,
 )
@@ -95,6 +96,8 @@ def build_image_line(ctx) -> None:
 
     if ctx.spec.elements.legend and len(segs) > 1:
         style_legend(ax, ctx, loc="best")
+
+    apply_axis_titles(ax, ctx.spec, ink)
 
     png = render_png(fig)
     place_picture(ctx, png)
