@@ -31,6 +31,44 @@ def test_it_takes_no_arguments_from_the_request():
     assert list(inspect.signature(get_auth).parameters) == []
 
 
+def test_a_caller_supplying_a_bearer_does_not_change_which_hive_we_reach():
+    """The behaviour, not the signature.
+
+    The two tests above would also "fail" against the old code for an
+    incidental reason — the reverted default is a fastapi Header object, so
+    `.lower()` raises — and neither says anything about the header being
+    ignored. This drives a real route with an attacker's Authorization on it
+    and looks at the credential the store was actually handed.
+    """
+    import os
+
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+
+    from reportbuilder.api.deps_store import get_auth as dep
+
+    seen: list[str] = []
+    app = FastAPI()
+
+    @app.get("/probe")
+    def probe(auth=Depends(dep)):
+        seen.append(auth.token)
+        return {"ok": True}
+
+    os.environ["NSIGHT_DATAHIVE_TOKEN"] = "the-service-token"
+    try:
+        client = TestClient(app)
+        assert client.get("/probe").status_code == 200
+        assert client.get(
+            "/probe", headers={"Authorization": "Bearer attacker-token"}
+        ).status_code == 200
+    finally:
+        os.environ.pop("NSIGHT_DATAHIVE_TOKEN", None)
+
+    assert seen == ["the-service-token", "the-service-token"], seen
+    assert "attacker-token" not in seen
+
+
 def test_it_fails_closed_when_unconfigured(monkeypatch):
     """Booting without it used to mean an in-memory store that lost everything
     on restart, silently."""

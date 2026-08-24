@@ -24,6 +24,30 @@ def store(client_memory):
     return client_memory, overrides[get_repository](), overrides[get_auth]()
 
 
+def _run_with_consent(repo, call, rounds: int = 12):
+    """Run `call`, approving datahive's delete gate as it asks.
+
+    Deleting is consent-gated (floor rule 4) and a removal touches several
+    objects, so it raises once per object until each is approved. Production's
+    admin bearer already carries that authority; in a memory store we stand in
+    for `datahive consent approve`.
+    """
+    from reportbuilder.store.seam import ConsentRequired
+
+    for _ in range(rounds):
+        try:
+            return call()
+        except ConsentRequired as exc:
+            repo.store.approve(exc.request_id)
+    raise AssertionError("still asking for consent after several approvals")
+
+
+def _remove_with_consent(repo, auth, user_id: str):
+    from reportbuilder.auth import users
+
+    return _run_with_consent(repo, lambda: users.remove_user(repo, auth, user_id))
+
+
 def _cached_ids() -> set[str]:
     return {v.id for v, _at, _ttl in session._cache._entries.values() if v is not None}
 
@@ -57,11 +81,42 @@ def test_demoting_an_admin_drops_it_too(store):
 
 
 def test_deleting_a_user_drops_it(store):
-    client, repo, auth = store
-    them = repo.save_user(auth, User(id="", email="gone@egoiq.com", name="Gone"))
-    session._cache.put("their-session", them)
+    """Against `users.remove_user` rather than the route.
 
-    r = client.delete(f"/users/{them.id}")
-    assert r.status_code in (204, 409), r.text
-    if r.status_code == 204:
-        assert them.id not in _cached_ids()
+    The route is consent-gated in this fixture and always answers 409, so an
+    earlier version of this test hid its only real assertion behind
+    `if status == 204` and passed with the invalidation removed from all three
+    routes. This drives the function every deletion path shares.
+    """
+    from reportbuilder.auth import users
+
+    _client, repo, auth = store
+    them = repo.save_user(auth, User(id="", email="gone@egoiq.com", name="Gone"))
+    repo.save_user(auth, User(id="", email="admin@egoiq.com", name="A", is_admin=True))
+    session._cache.put("their-session", them)
+    assert them.id in _cached_ids()
+
+    _remove_with_consent(repo, auth, them.id)
+    assert them.id not in _cached_ids()
+
+
+def test_revoking_an_accepted_invitation_drops_it_too(store):
+    """The second caller of remove_user, and the one that did not invalidate.
+
+    Revoking an accepted invitation removes the user behind it — spec §6 — and
+    that path went straight to the store, so the person kept full access until
+    the cache expired.
+    """
+    from reportbuilder.auth import invites
+
+    _client, repo, auth = store
+    repo.save_user(auth, User(id="", email="admin@egoiq.com", name="A", is_admin=True))
+    invite = repo.create_invite(auth, email="guest@egoiq.com", grants=(),
+                                invited_by="A", lifetime_seconds=3600)
+    them = repo.save_user(auth, User(id="", email="guest@egoiq.com", name="Guest"))
+    repo.mark_invite_accepted(auth, invite.id, them.id)
+    session._cache.put("their-session", them)
+    assert them.id in _cached_ids()
+
+    _run_with_consent(repo, lambda: invites.revoke_invitation(repo, auth, invite.id))
+    assert them.id not in _cached_ids()

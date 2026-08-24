@@ -155,6 +155,12 @@ class TestRestore:
         backup.read(fresh, auth, io.BytesIO(data))
         restored = fresh.list_reports(auth, c.id, k.id)[0]
         assert restored.rendered is False
+        # And not merely "not current": the archive holds no deck at all, so it
+        # must not claim one was ever produced either. `has_render` is what a
+        # view-only client is shown by, and it SURVIVES a save by design — so a
+        # sidecar carrying it with no render_key beside it is the ordinary case,
+        # and it went through the stripper untouched.
+        assert restored.has_render is False
         assert fresh.load_render(auth, c.id, k.id, r.id, key="k1") is None
 
     def test_restoring_overwrites_what_is_there_and_keeps_what_is_not(

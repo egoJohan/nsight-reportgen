@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
+from urllib.parse import quote
 import os
 
 import httpx
@@ -227,6 +228,15 @@ def _safe_next(value: str | None) -> str:
         return "/"
     if any(c in v for c in "\r\n\t\x00"):
         return "/"
+    # A Location header is latin-1 on the wire. A path with non-latin-1 text in
+    # it — "/日本", or a stray U+2028 — raised inside the response and turned the
+    # END of a real sign-in into a 500. Percent-encode rather than refuse: the
+    # author of that link is usually the app itself, deep-linking to a case with
+    # a Finnish name.
+    try:
+        v.encode("latin-1")
+    except UnicodeEncodeError:
+        v = quote(v, safe="/?&=#%+,;:@!$'()*~[]")
     return v
 
 

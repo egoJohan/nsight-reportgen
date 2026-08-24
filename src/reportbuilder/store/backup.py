@@ -99,6 +99,12 @@ def _strip_render_stamp(data: bytes) -> bytes:
     generated and 404 when downloaded. Dropping it here — rather than at
     restore time — keeps the archive self-consistent: what it says is what it
     holds.
+
+    `has_render` says the same thing more weakly ("a deck was produced at some
+    point") and drives what a view-only client is SHOWN, so it has to go too.
+    It was missed when it was added, and because it SURVIVES a save — that is
+    its whole purpose — the common sidecar carries it with no render_key
+    beside it, which the old early-return then waved through untouched.
     """
     try:
         d = json.loads(data.decode("utf-8"))
@@ -106,10 +112,11 @@ def _strip_render_stamp(data: bytes) -> bytes:
         return data  # not JSON we understand; store it untouched
     if not isinstance(d, dict):
         return data
-    if "render_key" not in d and "rendered_at" not in d:
+    stamps = ("render_key", "rendered_at", "has_render")
+    if not any(k in d for k in stamps):
         return data
-    d.pop("render_key", None)
-    d.pop("rendered_at", None)
+    for k in stamps:
+        d.pop(k, None)
     return json.dumps(d).encode("utf-8")
 
 

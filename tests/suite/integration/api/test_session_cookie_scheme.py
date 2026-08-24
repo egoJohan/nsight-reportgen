@@ -67,12 +67,40 @@ def test_the_signed_in_session_actually_works_over_plain_http(client):
 
 def test_the_oidc_handshake_cookie_follows_the_same_rule(client, monkeypatch):
     """It is set on the way OUT to the provider and read on the way back; a
-    cookie the browser refuses to return breaks the state/nonce check."""
+    cookie the browser refuses to return breaks the state/nonce check.
+
+    The provider is seeded through the SETTINGS STORE, which is where OIDC
+    config lives. An earlier version set NSIGHT_GOOGLE_* environment variables
+    — names that appear nowhere in src/ — so /auth/login/google answered 503
+    and the skip below fired 100 % of the time, here and everywhere.
+    """
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.auth import oidc
+
     monkeypatch.setenv("NSIGHT_PUBLIC_URL", "https://nsight.example.com")
-    monkeypatch.setenv("NSIGHT_GOOGLE_CLIENT_ID", "cid")
-    monkeypatch.setenv("NSIGHT_GOOGLE_CLIENT_SECRET", "sec")
+    overrides = client.app.dependency_overrides
+    repo, auth = overrides[get_repository](), overrides[get_auth]()
+    repo.set_setting(auth, "oidc.json",
+                     {"google": {"client_id": "cid", "client_secret": "sec"}})
+    monkeypatch.setattr(
+        oidc, "begin",
+        lambda *a, **k: _Resolved(("https://accounts.example/auth", "st", "no")))
+
     r = client.get("/auth/login/google", follow_redirects=False)
-    if r.status_code != 302:
-        pytest.skip(f"google login not configured in this build ({r.status_code})")
-    assert "Secure" in next(v.decode() for k, v in r.headers.raw
-                            if k.decode().lower() == "set-cookie")
+    assert r.status_code == 302, f"the provider was not configured: {r.text[:120]}"
+    cookie = next(v.decode() for k, v in r.headers.raw
+                  if k.decode().lower() == "set-cookie")
+    assert "nsight_oauth=" in cookie
+    assert "Secure" in cookie
+
+
+class _Resolved:
+    """`oidc.begin` is awaited; this stands in without a provider round trip."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __await__(self):
+        async def _v():
+            return self._value
+        return _v().__await__()

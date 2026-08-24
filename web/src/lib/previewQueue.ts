@@ -129,6 +129,12 @@ export function setRenderContext(ctx: RenderContext) {
  *  producer finds itself up to date and only the picture is redrawn.
  */
 export function restartDeck(reason: string) {
+  // `enqueue` refuses with no report open, so this would be a no-op with a
+  // misleading trace line. Say so and stop.
+  if (!currentReportId) {
+    say("restart", { detail: `${reason}; no report open, nothing to re-queue` });
+    return;
+  }
   contextGeneration += 1;
   queue = [];
   queued = new Set();
@@ -244,6 +250,13 @@ export function reset(reportId: string) {
   queued = new Set();
   requeue = new Set();
   retried = new Set();
+  // In-flight bookkeeping too. A producer already awaiting cannot be recalled,
+  // but its result is abandoned by the generation bump above — so counting it
+  // as running afterwards makes isBusy() report the PREVIOUS session's work.
+  // The wizard gates autosave on that, so a new report's first save waited on a
+  // closed report's renders.
+  running = new Set();
+  active = 0;
   notify();
 }
 
@@ -544,7 +557,12 @@ async function producePreview(slideId: string): Promise<void> {
         say("retry", { slideId, producer: p.id, detail: "first failure; trying once more" });
         setStatus(slideId, p.id, "pending", null);
         requeueAfterRun(slideId, "one retry after a failure");
-        return;
+        // A producer that fails soft does not stop the slide — a headline
+        // nobody could write must not also cost the slide its picture for this
+        // pass. Only an "abort" producer ends it, which is what that flag
+        // means; the retry itself is carried by the requeue either way.
+        if (p.onFailure === "abort") return;
+        continue;
       }
       setStatus(slideId, p.id, "failed", c.fingerprint, e);
       // Stop, and do NOT fall through to the tail re-check. Producers after
@@ -607,6 +625,12 @@ function requeueAfterRun(slideId: string, why: string) {
 }
 
 export function enqueue(slideId: string) {
+  // Nothing runs when no report is open. `requeueAfterRun` already refused, but
+  // this door was left open: renaming a question or editing word merges from
+  // the CASE page calls restartDeck, which enqueued every slide of the report
+  // last closed — an AI title call and a full render per slide, posted into an
+  // unmounted component.
+  if (!currentReportId) return;
   if (!slideId || queued.has(slideId) || running.has(slideId)) return;
   queued.add(slideId);
   queue.push(slideId);

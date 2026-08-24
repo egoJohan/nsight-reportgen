@@ -15,9 +15,30 @@ import { ApiError } from "./api";
 export type LockFailure =
   /** The server says another person holds this report. */
   | "taken"
+  /** This report is not ours to edit any more — deleted, or our access
+   *  revoked. Also a reason to close, with a different thing to say. */
+  | "gone"
   /** We could not find out. Keep the report open and keep asking. */
   | "unreachable";
 
 export function classifyLockFailure(e: unknown): LockFailure {
-  return e instanceof ApiError && e.status === 409 ? "taken" : "unreachable";
+  if (!(e instanceof ApiError)) return "unreachable";
+  if (e.status === 409) return "taken";
+  // 404: the case or report is gone, or was never visible to us. 403: the
+  // grant that let us edit it has been taken away. Treating these as "we could
+  // not find out" left the author editing a report that no longer exists —
+  // renewing every thirty seconds for ever, with a failed-save toast each time
+  // and nothing ever saying why. Before this classifier existed, the editor
+  // closed and said so; it has to keep doing that.
+  if (e.status === 404 || e.status === 403) return "gone";
+  return "unreachable";
+}
+
+/** What to tell the author when a lock failure means the editor must close. */
+export function lockFailureMessage(kind: LockFailure, fallback: string): string {
+  if (kind === "gone") {
+    return "This report is no longer available to you — it may have been " +
+      "deleted, or your access to it changed.";
+  }
+  return fallback;
 }

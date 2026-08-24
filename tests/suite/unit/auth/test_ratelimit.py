@@ -63,6 +63,20 @@ def test_it_says_how_long_to_wait(limiter, clock):
     assert 39 <= limiter.retry_after("a") <= 41
 
 
+def test_asking_repeatedly_does_not_grow_it_either(clock):
+    """The narrower version of the test below, and the reachable one.
+
+    `_refuse_if_too_many_attempts` calls `allows()` BEFORE anything is
+    recorded, so a limiter that trimmed only on record_failure grew on a path
+    no failure ever reached.
+    """
+    limiter = RateLimiter(limit=3, window=60.0, clock=clock)
+    limiter.MAX_KEYS = 50
+    for i in range(500):
+        limiter.allows(f"asked-{i}")
+    assert len(limiter._hits) <= 50
+
+
 def test_it_does_not_grow_without_bound(clock):
     """The key is an email or an address — something the attacker picks. A
     counter that keeps one entry per value invented is itself the attack."""

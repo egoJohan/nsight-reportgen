@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from reportbuilder.auth import session
 from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -58,6 +59,12 @@ def remove_user(repo: Repository, auth: AuthContext,
         return LastAdminRefused("the last admin cannot be removed")
     repo.delete_sessions_for_user(auth, user_id)
     repo.delete_user(auth, user_id)
+    # And the cached identity, here rather than in the route: `remove_user` has
+    # two callers — the Users list and revoking an ACCEPTED invitation — and
+    # only the first invalidated it, so a user removed the second way kept full
+    # access until the cache expired. Sessions are gone from the store above;
+    # without this the node that deleted them still answers from memory.
+    session.forget_user(user_id)
     return None
 
 

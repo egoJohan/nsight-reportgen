@@ -88,6 +88,13 @@ services:
       # building the OAuth redirect_uri. See routes_auth.py's
       # _trust_forwarded_headers.
       NSIGHT_TRUST_FORWARDED_HEADERS: "1"
+      # The browser-facing origin, and the LAST WORD on it. Without this,
+      # public_origin falls back to the forwarded Host — i.e. to the caller's
+      # own Host header — and that value builds the OAuth redirect_uri and the
+      # links in notification emails. Any signed-in user could make nSight mail
+      # every admin a genuine permission request whose "Decide it here" link
+      # pointed at a domain they chose.
+      NSIGHT_PUBLIC_URL: "${NSIGHT_PUBLIC_URL:-http://localhost:8090}"
       # The report-title writer (src/nsight/agent). Optional: without these the
       # app runs and every slide keeps whatever title the author typed — the
       # generated ones simply never arrive. Set them in .env; see .env.example.

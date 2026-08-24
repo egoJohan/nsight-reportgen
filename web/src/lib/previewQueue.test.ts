@@ -511,3 +511,58 @@ describe("closing the editor", () => {
     expect(attempts).toBeGreaterThan(1);
   });
 });
+
+describe("with no report open", () => {
+  it("refuses work the case page asks for after the editor closed", async () => {
+    // Renaming a question or editing word merges from the CASE page calls
+    // restartDeck. That used to re-queue every slide of the report last closed:
+    // an AI-title call and a full render each, posted into a component that is
+    // gone.
+    put("s1");
+    put("s2");
+    const ran: string[] = [];
+    q.setDeck(["s1", "s2"]);
+    q.__setProducersForTest([producer("chart", { run: async (c) => { ran.push(c.slideId); } })]);
+
+    q.reset("");
+    q.restartDeck("a question was renamed");
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    expect(ran).toEqual([]);
+  });
+
+  it("reports itself idle once the session ends", async () => {
+    put("s1");
+    q.__setProducersForTest([producer("chart", { run: async () => {} })]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+    q.reset("");
+    expect(q.isBusy()).toBe(false);
+  });
+});
+
+describe("a producer that fails soft", () => {
+  it("does not cost the slide the producers after it", async () => {
+    // A headline nobody could write must not also cost the slide its picture.
+    put("s1");
+    const ran: string[] = [];
+    let titleAttempts = 0;
+    q.__setProducersForTest([
+      producer("title", {
+        onFailure: "continue",
+        run: async () => {
+          titleAttempts += 1;
+          ran.push("title");
+          if (titleAttempts === 1) throw new Error("the model was busy");
+        },
+      }),
+      producer("chart", { run: async () => { ran.push("chart"); } }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+
+    expect(ran.filter((r) => r === "chart").length).toBeGreaterThan(0);
+    expect(ran.indexOf("chart")).toBeLessThan(3);
+  });
+});

@@ -6,9 +6,16 @@ on:
   pull_request:
 
 # Three lanes (Phase 9.5):
-#  - objective:   unit + render + the synthetic E2E. Always runs. Needs LibreOffice
-#                 (pptx -> pdf) + poppler so the E2E/fidelity tests run fully rather
-#                 than skipping.
+#  - objective:   unit + render + the synthetic E2E, over BOTH test roots. Always
+#                 runs. Needs LibreOffice (pptx -> pdf) + poppler so the
+#                 E2E/fidelity tests run fully rather than skipping.
+#
+#                 `tests/suite` is named explicitly beside `tests/rb`, and that
+#                 is not cosmetic: every lane here used to run `tests/rb` alone,
+#                 so the ~2100 tests under tests/suite — the whole permission
+#                 matrix, the auth flows, the store, the preview pipeline — had
+#                 never run in CI. A round of review found defects in code those
+#                 tests cover, which is exactly what CI is for.
 #  - judge:       Claude-as-judge tests. Self-gate: each test skips without
 #                 ANTHROPIC_API_KEY, so the lane is a no-op (all skipped) on forks /
 #                 when the secret is unset.
@@ -28,10 +35,20 @@ jobs:
       - name: Sync dependencies
         run: uv sync --extra dev
       - name: Run objective suite
-        run: uv run pytest tests/rb -m "not judge and not integration" -q
-      # Flutter UI tests land with Phase 8 (ui/ is not scaffolded yet):
-      # - name: Flutter widget + integration tests
-      #   run: cd ui && flutter test
+        run: uv run pytest tests/rb tests/suite -m "not judge and not integration" -q
+      - name: Set up Node (frontend tests + typecheck)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frontend dependencies
+        run: cd web && npm ci
+      # `npm run build` runs tsc over the tests too, which `tsc -p tsconfig.json`
+      # does not — a producer id that is not a ProducerId passed locally and
+      # failed the image build.
+      - name: Frontend unit tests + typecheck
+        run: cd web && npx vitest run && npm run build
 
   judge:
     name: Judge (Claude-as-judge; skips without ANTHROPIC_API_KEY)
@@ -47,7 +64,7 @@ jobs:
       - name: Run judge lane (tests self-skip without the API key)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: uv run pytest tests/rb -m "judge" -q
+        run: uv run pytest tests/rb tests/suite -m "judge" -q
 
   integration:
     name: Integration (real assets / test hive; skips when absent)
@@ -64,4 +81,4 @@ jobs:
         env:
           NSIGHT_TEST_HIVE_URL: ${{ secrets.NSIGHT_TEST_HIVE_URL }}
           NSIGHT_TEST_HIVE_TOKEN: ${{ secrets.NSIGHT_TEST_HIVE_TOKEN }}
-        run: uv run pytest tests/rb -m "integration" -q
+        run: uv run pytest tests/rb tests/suite -m "integration" -q

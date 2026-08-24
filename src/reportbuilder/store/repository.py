@@ -621,6 +621,17 @@ class Repository:
         skips the check, for callers with nothing to compare.
         """
         rid = report_id or _new_id("rep")
+        # Everything from here to the sidecar write happens under the sidecar's
+        # own lock. Without it a render finishing inside this window had its
+        # `has_render` and `render_key` erased by the stale snapshot taken at
+        # the top — the deck was written and then disowned.
+        with self._config_lock(P.report_meta_path(customer_id, case_id, rid)):
+            return self._save_report_locked(auth, customer_id, case_id, rid,
+                                            report_json, modified_by, base_version)
+
+    def _save_report_locked(self, auth: AuthContext, customer_id: str, case_id: str,
+                            rid: str, report_json: str, modified_by: str,
+                            base_version: int | None) -> ReportRef:
         meta_path = P.report_meta_path(customer_id, case_id, rid)
         try:
             previous = self._read_json(auth, meta_path)
@@ -787,8 +798,16 @@ class Repository:
         # of the same person may still be working in it, and taking the lock
         # away from them because they closed a different window would be a
         # self-inflicted lockout — the one failure this design must not have.
+        gone = tab_id or "_"
         remaining = {t: seen for t, seen in (held.get("tabs") or {}).items()
-                     if t != (tab_id or "_")}
+                     if t != gone}
+        # Prune the session map with it, or the two drift: a later sign-out
+        # would find a tab that no longer exists, rewrite the lock unchanged and
+        # still report one released.
+        held = {**held,
+                "tab_sessions": {t: sid for t, sid
+                                 in (held.get("tab_sessions") or {}).items()
+                                 if t in remaining}}
         if remaining:
             self._write_json(
                 auth, P.report_lock_path(customer_id, case_id, report_id),
@@ -1866,28 +1885,24 @@ class Repository:
                      report_id: str, template_id: str, level: str = "customer") -> None:
         """Record what a report rendered with, so a later change upstream does
         not silently restyle it."""
-        path = P.report_meta_path(customer_id, case_id, report_id)
-        try:
-            d = self._read_json(auth, path)
-        except (NotFound, ValueError, UnicodeDecodeError):
-            d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
-        d["pinned_template"] = template_id
         # The level matters as much as the id: it is what lets a later, MORE
         # specific choice override the pin while a broader one does not.
-        d["pinned_level"] = level
-        self._write_json(auth, path, d, [P.LABEL_REPORT_META])
+        self._merge_report_meta(auth, customer_id, case_id, report_id,
+                                {"pinned_template": template_id,
+                                 "pinned_level": level})
 
     def clear_pinned_template(self, auth: AuthContext, customer_id: str,
                               case_id: str, report_id: str) -> None:
         """The explicit "update this report to the current template" request."""
         path = P.report_meta_path(customer_id, case_id, report_id)
-        try:
-            d = self._read_json(auth, path)
-        except (NotFound, ValueError, UnicodeDecodeError):
-            return
-        d.pop("pinned_template", None)
-        d.pop("pinned_level", None)
-        self._write_json(auth, path, d, [P.LABEL_REPORT_META])
+        with self._config_lock(path):
+            try:
+                d = self._read_json(auth, path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                return
+            d.pop("pinned_template", None)
+            d.pop("pinned_level", None)
+            self._write_json(auth, path, d, [P.LABEL_REPORT_META])
 
     # -- Rendered deck (a cache, in the store) ----------------------------
 
@@ -1953,24 +1968,40 @@ class Repository:
         except Exception:  # noqa: BLE001 — styling must never break a render
             return "template:unresolved"
 
+    def _merge_report_meta(self, auth: AuthContext, customer_id: str, case_id: str,
+                           report_id: str, changes: dict) -> dict:
+        """Read-modify-write the report sidecar, under the same lock the
+        curation config uses.
+
+        Several writers touch this object — a save, a render, a template pin —
+        and each used to read it, change its own corner and write the whole
+        thing back. Interleave two and the second undoes the first: a render
+        landing inside a save's window put `version` BACK, so the editor's next
+        save was told "somebody else saved this" when nobody had.
+        """
+        path = P.report_meta_path(customer_id, case_id, report_id)
+        with self._config_lock(path):
+            try:
+                d = self._read_json(auth, path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
+            d.update(changes)
+            self._write_json(auth, path, d, [P.LABEL_REPORT_META])
+            return d
+
     def save_render(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, pptx: bytes, key: str) -> None:
         """Store a rendered deck and stamp the key it was rendered from."""
         self.store.put(auth, P.report_render_path(customer_id, case_id, report_id),
                        pptx, _PPTX, labels=[P.LABEL_RENDER])
-        meta_path = P.report_meta_path(customer_id, case_id, report_id)
-        try:
-            d = self._read_json(auth, meta_path)
-        except (NotFound, ValueError, UnicodeDecodeError):
-            d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
-        d["render_key"] = key
-        d["has_render"] = True
-        # When, not only what from. A finished report's most useful fact to
-        # someone who did not build it is the day the deck was generated —
-        # "12 charts" is the author's business, "generated 3 March" is the
-        # reader's. Absent on decks rendered before this was recorded.
-        d["rendered_at"] = _now()
-        self._write_json(auth, meta_path, d, [P.LABEL_REPORT_META])
+        # Merged, not written over: this used to rewind `version`, telling the
+        # editor its next save was somebody else's work. "When, not only what
+        # from" — a finished report's most useful fact to someone who did not
+        # build it is the day the deck was generated. Absent on decks rendered
+        # before this was recorded.
+        self._merge_report_meta(auth, customer_id, case_id, report_id,
+                                {"render_key": key, "has_render": True,
+                                 "rendered_at": _now()})
 
     def load_render(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, key: str) -> bytes | None:

@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, formatReportDate } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
-import { classifyLockFailure } from "@/lib/reportLock";
+import { classifyLockFailure, lockFailureMessage } from "@/lib/reportLock";
 import type { ChartSpec, Question, ReportDoc } from "@/lib/api";
 import TemplateSelect from "@/components/TemplateSelect";
 import {
@@ -567,15 +567,18 @@ export default function ReportWizard({
         return true;
       } catch (e) {
         if (!alive) return false;
-        // Only a 409 is somebody else holding it. A network drop or a 500 is a
-        // failure to FIND OUT, and treating those as a refusal closed the
+        // A 409 is somebody else holding it; a 404/403 means the report is not
+        // ours to edit any more. Both close the editor. A network drop or a 500
+        // is a failure to FIND OUT, and treating THOSE as a refusal closed the
         // editor and discarded whatever was on screen unsaved.
-        if (classifyLockFailure(e) === "taken") {
+        const why = classifyLockFailure(e);
+        if (why === "taken" || why === "gone") {
           setHasLock(false);
           lostRef.current = true;
-          setLockedBy(
+          setLockedBy(lockFailureMessage(
+            why,
             e instanceof Error ? e.message : "Someone else is editing this report."
-          );
+          ));
           return false;
         }
         // Keep the report open and keep asking. The server holds the lock for

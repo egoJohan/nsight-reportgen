@@ -279,41 +279,6 @@ def test_a_locked_report_cannot_be_deleted_by_someone_else(repo, auth, report):
     _refuse_if_locked_elsewhere(_Client(), case, rid, holder, "deleted")
 
 
-def test_deleting_the_whole_study_does_not_take_a_report_someone_has_open(repo, auth,
-                                                                         report):
-    """The bigger version of the same failure.
-
-    Guarding the single-report delete left the case delete open, and that one
-    removes every report in the study — so the report being edited went anyway,
-    along with everything beside it. A lost edit is recoverable from the
-    author's screen; this is not recoverable from anywhere.
-    """
-    from fastapi import HTTPException
-
-    from reportbuilder.api.routes_cases import _locks
-    from reportbuilder.auth.permissions import User
-
-    cust, case, rid = report
-    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="a")
-
-    class _Client:
-        def report_locks(self, case_id):
-            return repo.report_locks(auth, cust, case_id)
-
-    client = _Client()
-    other = User(id="u2", email="m@example.com", name="Maija")
-    held = {r: lk for r, lk in _locks(client, case).items()
-            if lk.get("user_id") != other.id}
-    assert held, "the open report is not visible to the delete guard"
-    assert held[rid]["user_name"] == "Johan"
-
-    # And the holder is not blocked from deleting their own study.
-    holder = User(id="u1", email="j@example.com", name="Johan")
-    mine = {r: lk for r, lk in _locks(client, case).items()
-            if lk.get("user_id") != holder.id}
-    assert mine == {}
-
-
 def test_a_store_that_cannot_answer_does_not_block_the_delete(repo, auth, report):
     """A legacy client or a test double reports no locks rather than making the
     study undeletable — the guard must fail open, not brick the app."""
@@ -329,6 +294,10 @@ def test_a_store_that_cannot_answer_does_not_block_the_delete(repo, auth, report
     _cust, case, _rid = report
     assert _locks(_Mute(), case) == {}
     assert _locks(_Broken(), case) == {}
+    # The guard itself is exercised through the ROUTE, in
+    # tests/suite/integration/api/test_case_delete_lock.py — this file only
+    # covers the fallback, because a test that re-implements the guard's own
+    # filtering and asserts on that passes with the guard deleted outright.
 
 
 # ---------------------------------------------------------------------------

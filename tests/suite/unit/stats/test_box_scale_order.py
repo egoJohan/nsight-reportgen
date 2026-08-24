@@ -122,6 +122,8 @@ def test_the_printed_top_box_does_not_depend_on_the_file_order():
 
     from PIL import Image
 
+    _CROP_SIZE: list[int] = [0, 0]
+
     from reportbuilder.render.image import IMAGE_BUILDERS
     from suite._helpers import assert_single_picture, make_ctx, make_spec
 
@@ -145,9 +147,17 @@ def test_the_printed_top_box_does_not_depend_on_the_file_order():
         w, h = img.size
         # Right of where a 100 % bar ends, above the legend — the legend lists the
         # levels in the file's own order, so it differs between the two by design.
-        return img.crop((int(w * 0.9), 0, w, int(h * 0.85))).tobytes()
+        crop = img.crop((int(w * 0.9), 0, w, int(h * 0.85)))
+        _CROP_SIZE[:] = crop.size
+        return crop.tobytes()
 
-    assert strip(ascending=True) == strip(ascending=False)
+    a, b = strip(ascending=True), strip(ascending=False)
+    assert a == b
+    # Two blank crops would also be equal. Check there is something drawn in
+    # there before believing the comparison means anything.
+    from PIL import Image as _I
+    assert len(set(_I.frombytes("RGB", _CROP_SIZE, a).getdata())) > 1, (
+        "the summary column is blank — this comparison proves nothing")
 
 
 # ── What the label SAYS decides, not whether it parsed a digit ─────────────

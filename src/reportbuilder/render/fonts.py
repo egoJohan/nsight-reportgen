@@ -314,6 +314,15 @@ def rendering_fingerprint() -> str:
     picture of a chart in a template AS THIS HOST DRAWS IT, and a stand-in font
     changes that without changing the chart or the template — so an admin who
     picked a new stand-in kept being served the picture drawn with the old one.
+
+    WHICH FONTS ARE INSTALLED counts for exactly the same reason, and was
+    missing. The sequence that matters: an admin names a chart font the host
+    does not have (everything re-renders in the fallback, correctly), then
+    uploads the .ttf. Installing it refreshes fontconfig and matplotlib, so new
+    renders are right — but this hash did not move, so every cached preview and
+    every stored deck was still considered current and went on being handed back
+    drawn in the fallback face. Previews recovered after the 24-hour sweep;
+    decks never did. Removing a font has the same shape.
     """
     import hashlib
     import json
@@ -324,7 +333,14 @@ def rendering_fingerprint() -> str:
         chart_font = H.current_chart_font()
     except Exception:  # noqa: BLE001 — a fingerprint must never break a render
         chart_font = ""
-    raw = json.dumps({"subs": substitutions(), "chart_font": chart_font},
+    try:
+        # Sorted names only: the set is what changes what can be drawn, and a
+        # file mtime would move the fingerprint on every container restart.
+        installed = sorted(installed_families())
+    except Exception:  # noqa: BLE001 — see above
+        installed = []
+    raw = json.dumps({"subs": substitutions(), "chart_font": chart_font,
+                      "installed": installed},
                      sort_keys=True)
     return hashlib.md5(raw.encode()).hexdigest()[:8]
 
