@@ -2003,6 +2003,38 @@ class Repository:
                                 {"render_key": key, "has_render": True,
                                  "rendered_at": _now()})
 
+    def backfill_has_render(self, auth: AuthContext) -> int:
+        """Stamp `has_render` on reports that were rendered before it existed.
+
+        `has_render` records that a deck was produced at all, and it is what a
+        view-only client is shown by. A report rendered and then EDITED by an
+        earlier release carries neither it nor `render_key` — a save clears the
+        latter on purpose — while its deck is still sitting in the store. So a
+        client silently lost a deck that had already been delivered to them.
+
+        One pass at startup, bounded by the number of reports, and idempotent:
+        a report that already has the flag, or has no stored deck, is skipped.
+        Returns how many it stamped.
+        """
+        stamped = 0
+        for info in self.store.list(auth, "", labels=[P.LABEL_REPORT_META]):
+            try:
+                d = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            if d.get("has_render") or not d.get("id"):
+                continue
+            cust, case, rid = d.get("customer_id"), d.get("case_id"), d["id"]
+            if not (cust and case):
+                continue
+            try:
+                self.store.get(auth, P.report_render_path(cust, case, rid))
+            except (NotFound, ValueError):
+                continue    # no deck behind it; the flag would be a lie
+            self._merge_report_meta(auth, cust, case, rid, {"has_render": True})
+            stamped += 1
+        return stamped
+
     def load_render(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, key: str) -> bytes | None:
         """The stored deck, or None when it is missing or stale.

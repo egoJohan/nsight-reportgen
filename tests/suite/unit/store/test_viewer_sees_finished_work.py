@@ -103,3 +103,27 @@ def test_a_report_that_was_never_rendered_stays_out_of_sight(world):
                      report_id=wip)
     client = _client(repo, auth, cust, case, VIEW)
     assert wip not in {r["report_id"] for r in client.list_reports(case)}
+
+
+def test_a_deck_from_before_the_flag_existed_is_still_the_clients(world):
+    """`has_render` is new. A report rendered and then EDITED by an earlier
+    release carries neither it nor `render_key` — a save clears the latter on
+    purpose — while its deck is still sitting in the store. Without a backfill
+    the client silently loses something already delivered to them."""
+    from reportbuilder.store import paths as P
+
+    repo, auth, cust, case, done, _wip = world
+    meta = P.report_meta_path(cust, case, done)
+    d = repo._read_json(auth, meta)
+    for stamp in ("has_render", "render_key", "rendered_at"):
+        d.pop(stamp, None)
+    repo._write_json(auth, meta, d, [P.LABEL_REPORT_META])
+
+    client = _client(repo, auth, cust, case, VIEW)
+    assert [r["report_id"] for r in client.list_reports(case)] == [], "before"
+
+    assert repo.backfill_has_render(auth) == 1
+    assert [r["report_id"] for r in client.list_reports(case)] == [done]
+
+    # Idempotent, and never a lie: the unrendered report has no deck to find.
+    assert repo.backfill_has_render(auth) == 0

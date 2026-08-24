@@ -1671,6 +1671,21 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     scale_pts = battery_scale_levels(vars_)            # [(point, label)], 1..N ascending
     points = [p for p, _lbl in scale_pts]
     levels = [lbl for _p, lbl in scale_pts]            # stack-segment labels
+    # The SAV code behind each level, from the first member that has a scale.
+    # `sum`/`net` name their levels by CODE — that is what the editor's picker
+    # offers (question.values) and what a single stacked bar looks them up by.
+    # This path looked them up by scale POINT, so the same picked code selected
+    # a different level here than there: on a reverse-coded file, ticking the
+    # code for "Täysin samaa mieltä" summed 100 % in a single bar and 0 % in a
+    # battery of the same data.
+    _code_for_point: dict[float, float] = {}
+    for _v in vars_:
+        _lv = scale_levels(_v)
+        if _lv:
+            for _code, _lbl, _pt in _lv:
+                _code_for_point.setdefault(_pt, _code)
+            break
+    codes = [_code_for_point.get(p, p) for p in points]
     # Bar labels (member order), honouring the author's category-label overrides —
     # the editor lists the member labels, so a shortened label must reach the bars.
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
@@ -1744,6 +1759,8 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # them together and crushes the plot. The statement-major ORDER already puts
         # each statement's segments adjacent, and every bar keeps its own readable
         # "<statement> · <segment>" tick. (spec 2026-08-02 §2.4)
-        row_summaries=_compute_row_summaries(spec, bars, levels, points, cells),
+        row_summaries=_compute_row_summaries(spec, bars, levels, codes, cells,
+                                             scale_levels=levels,
+                                             scale_points=points),
         row_summary_keys=tuple(bars),
     )

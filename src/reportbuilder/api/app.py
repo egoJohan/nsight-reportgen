@@ -111,6 +111,32 @@ def create_app(client=None) -> FastAPI:
             logging.getLogger(__name__).warning(
                 "default template: could not seed", exc_info=True)
 
+    def _backfill_has_render() -> None:
+        """One-time stamp for reports rendered before `has_render` existed.
+
+        Viewers are shown finished work only, and that flag is how a report is
+        known to have produced a deck. A report rendered and then edited by an
+        earlier release has neither it nor `render_key`, while its deck is
+        still in the store — so a client lost sight of something already
+        delivered to them. Idempotent, so it costs one listing on every later
+        boot and nothing else.
+        """
+        import logging
+
+        from reportbuilder.api.deps_store import get_repository, service_auth
+
+        try:
+            auth = service_auth()
+            if auth is None:
+                return
+            stamped = get_repository().backfill_has_render(auth)
+            if stamped:
+                logging.getLogger(__name__).info(
+                    "backfill: stamped has_render on %s report(s)", stamped)
+        except Exception:  # noqa: BLE001 — never stop the app starting
+            logging.getLogger(__name__).warning(
+                "backfill: could not stamp has_render", exc_info=True)
+
     @contextlib.asynccontextmanager
     async def _lifespan(_app: FastAPI):
         task = None
@@ -119,6 +145,7 @@ def create_app(client=None) -> FastAPI:
             # fc-cache or reach for datahive on import.
             await asyncio.to_thread(_sync_fonts)
             await asyncio.to_thread(_seed_default_template)
+            await asyncio.to_thread(_backfill_has_render)
         # Opt out for tests and one-shot scripts, where a background task that
         # deletes files is noise at best.
         if os.environ.get("NSIGHT_DISABLE_CLEANUP") != "1":

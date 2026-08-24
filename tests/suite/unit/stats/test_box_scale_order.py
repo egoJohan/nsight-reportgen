@@ -228,3 +228,44 @@ def test_two_levels_shortened_to_one_label_do_not_pull_in_the_level_below():
     top = _top_scale_categories(var, shown, 2, overrides=overrides)
     assert "3 - Ei kumpaakaan" not in top, "the neutral level is not agreement"
     assert top == ["Samaa mieltä"]
+
+
+def test_a_picked_code_means_the_same_in_a_battery_as_in_a_single_bar():
+    """"Sum these codes" has to select the same answers either way.
+
+    The editor's code picker offers SAV codes (question.values). A single
+    stacked bar looked them up by code; a battery looked them up by scale
+    POINT. On a reverse-coded file — the label reading "5" stored on code 1 —
+    ticking that code summed 100 % in one and 0 % in the other, from identical
+    data.
+    """
+    import pandas as pd
+
+    from reportbuilder.model.report import ChartSpec, ElementToggles, NumberFormat, SortSpec
+
+    labels = [(1.0, "5 - Täysin samaa mieltä"), (2.0, "4"), (3.0, "3"),
+              (4.0, "2"), (5.0, "1 - Täysin eri mieltä")]
+
+    def _var(name):
+        return Variable(name=name, label=f"Väite {name}", measurement="categorical",
+                        value_labels=tuple(ValueLabel(v, t) for v, t in labels),
+                        missing_values=frozenset())
+
+    def _spec():
+        return ChartSpec(question_ref="q", chart_type="stacked_horizontal_bar",
+                         statistic="pct", classifying_var=None,
+                         number_format=NumberFormat(), sort=SortSpec(basis="data_order"),
+                         template_slot="s", elements=ElementToggles(),
+                         row_summary_fn="sum", row_summary_codes=(1.0,))
+
+    single = engine.compute(
+        Question(qid="q", kind="single", variables=("a",), text="Väite"), _spec(),
+        pd.DataFrame({"a": [1.0] * 50}),
+        QuestionModel(variables={"a": _var("a")}, questions=[]))
+    battery = engine.compute(
+        Question(qid="q", kind="battery", variables=("a", "b"), text="Väite"), _spec(),
+        pd.DataFrame({"a": [1.0] * 50, "b": [1.0] * 50}),
+        QuestionModel(variables={"a": _var("a"), "b": _var("b")}, questions=[]))
+
+    assert single.row_summaries == (100.0,)
+    assert battery.row_summaries == (100.0, 100.0)
