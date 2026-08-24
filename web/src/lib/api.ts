@@ -61,6 +61,16 @@ export interface Variable {
   // Whether this is a meaningful classifying/segmentation variable (background/
   // demographic categorical, not a Likert item) — drives the classifier picker.
   segmentable?: boolean;
+  /** Where this sits in the classifying-variable picker: 0 background (age,
+   *  region, segment flags), 1 a rating item, 2 offered only when the analyst
+   *  asks to see everything. A marked variable reports 0 however it looks. */
+  classifier_tier?: number;
+  /** Somebody chose this deliberately for this dataset. */
+  marked_classifier?: boolean;
+  /** Why it is not in the default list, in an analyst's words. Empty when it
+   *  is. Said out loud because silence was the actual defect: an absent
+   *  variable could not be told from one the file never had. */
+  not_offered_because?: string;
   // True for a BANNER classifier — a question-backed classifier (one indicator
   // column per group, e.g. Polku1+Polku2) whose segments may overlap, so it
   // supports neither a second classifier nor the "within each category" direction.
@@ -1050,6 +1060,20 @@ export const api = {
     }> => postAi(materialId, "demographics", body),
 
     // AI: summarise an open-ended question's answers into key themes (bullets).
+    /** Mark (or unmark) a variable as a classifying variable for this dataset.
+     *  Anyone who may edit the material may mark: the analyst doing the work is
+     *  the one who knows what the variable means. */
+    markClassifier: (
+      materialId: string,
+      name: string,
+      marked: boolean
+    ): Promise<{ marked_classifiers: string[] }> =>
+      fetch(`${API_BASE}/materials/${materialId}/classifiers`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, marked }),
+      }).then((r) => json<{ marked_classifiers: string[] }>(r)),
+
     aiThemes: (
       materialId: string,
       body: { question_ref: string }

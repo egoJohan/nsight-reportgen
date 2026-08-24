@@ -75,6 +75,45 @@ class RepositoryClient:
                 for m in self.repo.list_materials(self.auth, k.customer_id, k.id,
                                                   user=self.user)]
 
+    # -- classifying variables the analysts chose themselves ---------------
+
+    #: Where the marks live inside a material's curation config.
+    MARKED_CLASSIFIERS_KEY = "marked_classifiers"
+
+    def marked_classifiers(self, material_id: str) -> list[str]:
+        """Variable names somebody marked as classifiers for THIS dataset.
+
+        Per material, because the data is what a variable means: the same name in
+        next year's wave may be a different question, and a mark that followed
+        the name would quietly mis-describe it (P-C-12, agreed 2026-08-24).
+        """
+        try:
+            m = self._material(material_id)
+        except MaterialNotFound:
+            return []
+        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        names = cfg.get(self.MARKED_CLASSIFIERS_KEY) or []
+        return [str(n) for n in names if isinstance(n, str)]
+
+    def set_marked_classifier(self, material_id: str, name: str,
+                              marked: bool) -> list[str]:
+        """Mark or unmark one variable; returns the full list afterwards.
+
+        Read-modify-write on the material's config, which holds the groupings and
+        label edits too — a blind overwrite would drop them.
+        """
+        m = self._material(material_id)
+        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        current = [str(n) for n in (cfg.get(self.MARKED_CLASSIFIERS_KEY) or [])
+                   if isinstance(n, str)]
+        if marked and name not in current:
+            current.append(name)
+        elif not marked and name in current:
+            current.remove(name)
+        cfg[self.MARKED_CLASSIFIERS_KEY] = current
+        self.repo.save_material_config(self.auth, m.customer_id, m.case_id, m.id, cfg)
+        return current
+
     def load_material_config(self, material_id: str) -> str | None:
         """Returns JSON TEXT, not a dict: the legacy callers parse it themselves,
         and model_loader tolerates malformed input by design."""

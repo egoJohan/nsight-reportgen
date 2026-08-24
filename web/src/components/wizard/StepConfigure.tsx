@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   AlertTriangleIcon,
@@ -382,12 +383,22 @@ function SwitchWidget({ field, chart, onChange }: WidgetProps) {
 // high-cardinality list. Keep the chart's own variable(s) selectable-by-value
 // even if filtered, so an existing pick is never hidden.
 function isSegmenter(v: Variable): boolean {
-  // Prefer the backend's meaningful-classifier flag (excludes Likert rating
-  // items, keeps demographic/segment categoricals). Fall back to a cardinality
-  // heuristic only when the flag is absent (older payloads).
+  // The backend ranks rather than decides (P-C-12, agreed 2026-08-24): tier 0 is
+  // a background variable, tier 1 a rating item — both legitimate things to
+  // split by — and tier 2 is offered only when the analyst asks to see
+  // everything. Rating items used to be refused outright, which made "show this
+  // by how satisfied they are" impossible.
+  if (typeof v.classifier_tier === "number") return v.classifier_tier <= 1;
   if (typeof v.segmentable === "boolean") return v.segmentable;
   const n = v.n_values ?? 0;
   return v.measurement === "categorical" && n >= 2 && n <= 15;
+}
+
+/** Background variables first, then rating items, each in file order.
+ *  An analyst reaches for age and region far more often than for a Likert item,
+ *  so the ordering keeps the common case at the top of the list. */
+function byClassifierTier(a: Variable, b: Variable): number {
+  return (a.classifier_tier ?? 0) - (b.classifier_tier ?? 0);
 }
 
 /** True when the chart's primary classifier is a BANNER — a question-backed
@@ -401,7 +412,14 @@ function usesBannerClassifier(chart: ChartSpec, variables?: Variable[]): boolean
   );
 }
 
-function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps) {
+function ClassifyingVarWidget({
+  field,
+  chart,
+  materialId,
+  variables,
+  onChange,
+}: WidgetProps) {
+  const qc = useQueryClient();
   // Generic over the field key so it drives BOTH the primary classifying_var and
   // the secondary classifying_var_2 (cross-tab).
   const key = field.key as "classifying_var" | "classifying_var_2";
@@ -416,12 +434,33 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
     key === "classifying_var_2" ? chart.classifying_var : chart.classifying_var_2 ?? null;
   const required = !!field.required;
   const missing = required && !current;
-  const candidates = (variables ?? []).filter(
-    (v) => (isSegmenter(v) || v.name === current) && v.name !== other
-  );
+  // "Show everything" — the answer to the failure this rule replaced.
+  //
+  // Every reported problem was a variable that SHOULD have been a classifier and
+  // was not offered, with nothing said: the packaging study's polku column,
+  // derived 0/1 segment flags, analyst recodes whose names look like paradata.
+  // Each was fixed by adding a heuristic, and each fix left the next file's
+  // surprise in place — because whether a variable is background or measured is
+  // a fact about the researcher's intent, and SPSS metadata does not record
+  // intent. So nothing is unreachable now, and picking something the heuristic
+  // did not offer teaches it (see onValueChange).
+  const [showAll, setShowAll] = useState(false);
+  const offered = (variables ?? []).filter((v) => v.name !== other);
+  const suggested = offered.filter((v) => isSegmenter(v) || v.name === current);
+  const rest = offered.filter((v) => !suggested.includes(v));
+  const candidates = [...suggested].sort(byClassifierTier);
+  const extra = showAll ? rest : [];
   const items: Record<string, string> = {
     __none__: "None",
     ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
+    ...Object.fromEntries(
+      extra.map((v) => [
+        v.name,
+        // Say why it was held back, so choosing it is an informed act rather
+        // than a guess.
+        v.not_offered_because ? `${v.label} — ${v.not_offered_because}` : v.label,
+      ])
+    ),
   };
   // A banner classifier cannot be CROSSED with a second variable (its groups come
   // from separate columns and can overlap), but it can sit beside one. Whenever the
@@ -447,6 +486,10 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
     return patch;
   };
   const reason = noPrimary ? "Choose a classifying variable first." : undefined;
+  // How many the heuristic held back. A rule nobody can inspect is a rule
+  // nobody can trust, and this is the difference between "the tool is wrong"
+  // and "the tool made a choice I can change".
+  const hiddenCount = rest.length;
   return (
     <Field
       label={field.label}
@@ -457,11 +500,27 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
         items={items}
         value={current ?? "__none__"}
         disabled={noPrimary}
-        onValueChange={(v) =>
+        onValueChange={(v) => {
+          // Choosing something the heuristic did not offer marks it for this
+          // dataset, so it appears normally for every colleague and every later
+          // report on the same data. The team teaches the tool about their file
+          // once, instead of a new rule being shipped per customer.
+          const picked = rest.find((x) => x.name === v);
+          if (picked && materialId) {
+            void api.materials
+              .markClassifier(materialId, picked.name, true)
+              .then(() => {
+                qc.invalidateQueries({ queryKey: ["variables", materialId] });
+                toast.success(`"${picked.label}" is now offered as a classifying variable`);
+              })
+              .catch(() => {
+                /* the pick still works for this chart; only the memory failed */
+              });
+          }
           onChange(
             withBannerGuard({ [key]: v === "__none__" ? null : v } as Partial<ChartSpec>)
-          )
-        }
+          );
+        }}
       >
         <SelectTrigger
           className={cn("w-full", missing && "border-destructive")}
@@ -476,8 +535,30 @@ function ClassifyingVarWidget({ field, chart, variables, onChange }: WidgetProps
               {v.label}
             </SelectItem>
           ))}
+          {/* Held back by the heuristic, shown on request — each with the
+              reason, so choosing one is an informed act rather than a guess. */}
+          {extra.map((v) => (
+            <SelectItem key={v.name} value={v.name}>
+              {v.not_offered_because ? `${v.label} — ${v.not_offered_because}` : v.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
+      {/* What the list is NOT showing, and a way to look.
+          Silence was the actual defect: a variable the heuristic judged
+          unsuitable looked exactly like one the file never contained, so every
+          case became a support question. */}
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          className="mt-1 text-left text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          onClick={() => setShowAll((x) => !x)}
+        >
+          {showAll
+            ? "Show only the usual variables"
+            : `${hiddenCount} more variable${hiddenCount === 1 ? "" : "s"} not usually used for splitting — show them`}
+        </button>
+      )}
       {key === "classifying_var_2" && current && chart.classifying_var && (
         <button
           type="button"

@@ -302,6 +302,50 @@ def _string_cats(var, df) -> tuple[str, ...]:
     return string_categories(df[var.name])
 
 
+#: Where a variable sits in the classifying-variable picker.
+#:
+#: P-C-12 asked how a variable comes to appear there. The answer agreed with
+#: nSight: the heuristic ranks rather than decides. A rating item IS a legitimate
+#: thing to split by ("show this by how satisfied they are") — it was excluded on
+#: an assumption nobody had checked — so it is offered, after the background
+#: variables an analyst reaches for first. Everything else stays out of the
+#: default list and is reachable through "show all", because a variable the tool
+#: silently refuses to name is the failure this whole rule replaced.
+CLASSIFIER_TIER_BACKGROUND = 0   # age, region, gender, segment flags
+CLASSIFIER_TIER_RATING = 1       # a 1..N Likert item
+CLASSIFIER_TIER_OTHER = 2        # offered only when the analyst asks to see everything
+
+
+def _classifier_tier(var, df=None) -> int:
+    """Which tier of the picker this variable belongs in."""
+    if _segmentable(var, df) or _is_binary_flag(var, df):
+        return CLASSIFIER_TIER_BACKGROUND
+    if var.measurement == "categorical" and var.value_labels and _is_likert_scale(var):
+        return CLASSIFIER_TIER_RATING
+    return CLASSIFIER_TIER_OTHER
+
+
+def _why_not_offered(var, df=None) -> str:
+    """Why this variable is not in the default list, in an analyst's words.
+
+    Said out loud because the old behaviour was silence: the variable was simply
+    absent, and nobody could tell a variable the tool judged unsuitable from one
+    the file never contained.
+    """
+    if var.measurement != "categorical":
+        return "not a categorical variable"
+    if _is_metadata(var.name, var.label or var.name):
+        return "survey metadata"
+    n = len(var.value_labels) or len(_string_cats(var, df))
+    if n > 10:
+        return f"too many categories ({n})"
+    if n < 2:
+        return "fewer than two categories"
+    if not _has_real_category_labels(var, df):
+        return "categories are flags, not names"
+    return "not a background variable"
+
+
 def _segmentable(var, df=None) -> bool:
     """True when a variable is a MEANINGFUL classifying/segmentation variable.
 
@@ -800,7 +844,22 @@ def list_variables(
             return True
         return _segmentable(v, _df_or_none()) and _has_real_category_labels(v, _df_or_none())
 
-    all_vars = [v for v in model.variables.values() if _keep(v)]
+    # Variables this material's analysts marked as classifiers themselves.
+    #
+    # The heuristic will always be wrong about somebody's file — whether a
+    # variable is background or measured is a fact about the researcher's
+    # intent, and SPSS metadata does not record intent. So a person can say so
+    # once, per dataset, and it holds for every colleague and every later report
+    # on that data (P-C-12, agreed 2026-08-24).
+    try:
+        marked = set(client.marked_classifiers(material_id) or [])
+    except Exception:  # noqa: BLE001
+        # Best effort. The marks are an enhancement; the variable list is what
+        # the picker needs to work at all, and losing a curation sidecar must
+        # not empty it.
+        marked = set()
+
+    all_vars = [v for v in model.variables.values() if _keep(v) or v.name in marked]
     # Stable sort: categorical before scale; original file order within each tier.
     all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
     return {
@@ -824,6 +883,18 @@ def list_variables(
                 # classifying-variable picker.
                 "segmentable": (_segmentable(var, _df_or_none())
                                 or _is_binary_flag(var, _df_or_none())),
+                # Where this sits in the classifying-variable picker: 0
+                # background, 1 a rating item, 2 offered only on request. A
+                # marked variable is treated as background however it looks.
+                "classifier_tier": (CLASSIFIER_TIER_BACKGROUND if var.name in marked
+                                    else _classifier_tier(var, _df_or_none())),
+                # Somebody chose this deliberately for this dataset.
+                "marked_classifier": var.name in marked,
+                # Why it is not in the default list. Empty when it is.
+                "not_offered_because": (
+                    "" if (var.name in marked
+                           or _classifier_tier(var, _df_or_none()) != CLASSIFIER_TIER_OTHER)
+                    else _why_not_offered(var, _df_or_none())),
                 # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
                 "tickbox": _is_binary(var),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
@@ -1598,3 +1669,32 @@ def preview_chart(
              material_id, body.chart_type, time.monotonic() - started,
              built - started, converted - built, rastered - converted)
     return Response(content=png_bytes, media_type="image/png")
+
+
+class MarkClassifierBody(BaseModel):
+    """One variable, marked or unmarked, for this dataset."""
+
+    name: str
+    marked: bool = True
+
+
+@questions_router.put("/materials/{material_id}/classifiers")
+def mark_classifier(
+    material_id: str,
+    body: MarkClassifierBody,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material_write),
+) -> dict:
+    """Mark (or unmark) a variable as a classifying variable for this dataset.
+
+    P-C-12 asked how a variable comes to appear in the picker. The heuristic
+    ranks the obvious ones, and this is the answer for everything else: the
+    person who knows what the variable means says so, once, and it holds for
+    every colleague and every later report on the same data.
+
+    Anyone who may edit the material may mark — the analyst doing the work is
+    the one who knows the file, and they can already reshape its questions and
+    groupings.
+    """
+    names = client.set_marked_classifier(material_id, body.name, body.marked)
+    return {"marked_classifiers": names}

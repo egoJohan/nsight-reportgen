@@ -120,7 +120,11 @@ def test_variables_sorted_categorical_first_with_expected_keys(client_mock):
     assert variables
     expected_keys = {"name", "label", "measurement", "n_values",
                      "aggregatable", "segmentable", "tickbox", "scale", "scale_key",
-                     "scale_compat_key"}
+                     "scale_compat_key",
+                     # Where the variable sits in the classifying-variable
+                     # picker, whether somebody marked it for this dataset, and
+                     # why it is not in the default list (P-C-12).
+                     "classifier_tier", "marked_classifier", "not_offered_because"}
     for v in variables:
         assert set(v.keys()) == expected_keys
     # Categorical variables sort ahead of scale variables (stable tiering).
