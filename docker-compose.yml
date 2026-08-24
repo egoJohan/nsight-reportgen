@@ -101,6 +101,14 @@ services:
       EGOHIVE_MODEL: "${EGOHIVE_MODEL:-}"
       EGOHIVE_EMAIL: "${EGOHIVE_EMAIL:-}"
       EGOHIVE_PASSWORD: "${EGOHIVE_PASSWORD:-}"
+    extra_hosts:
+      # So a host-local egoHive is reachable from in here. Inside a container
+      # 127.0.0.1 is the container, so an EGOHIVE_BASE_URL of
+      # http://127.0.0.1:8000 — which is what a developer running egoHive on
+      # their own machine has — resolves to nothing and every generated title
+      # fails with "AI service unavailable", while the same URL works perfectly
+      # from a shell. Point EGOHIVE_BASE_URL at host.docker.internal instead.
+      - "host.docker.internal:host-gateway"
     depends_on:
       - datahive
     expose:

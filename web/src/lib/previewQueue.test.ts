@@ -406,7 +406,7 @@ describe("opening the same report again", () => {
 
     let sawTitle: unknown = "unset";
     q.__setProducersForTest([
-      producer("probe", { run: async (c) => { sawTitle = c.chart.slide_title; } }),
+      producer("title", { run: async (c) => { sawTitle = c.chart.slide_title; } }),
     ]);
     q.enqueue("s1");
     await q.__drainForTest();
