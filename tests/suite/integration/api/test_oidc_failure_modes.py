@@ -31,7 +31,7 @@ from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
-from tests.suite.integration.api.test_auth_oidc_flow import _id_token
+from suite.integration.api.test_auth_oidc_flow import _id_token
 
 pytestmark = pytest.mark.integration
 

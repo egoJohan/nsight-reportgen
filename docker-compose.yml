@@ -88,6 +88,19 @@ services:
       # building the OAuth redirect_uri. See routes_auth.py's
       # _trust_forwarded_headers.
       NSIGHT_TRUST_FORWARDED_HEADERS: "1"
+      # The report-title writer (src/nsight/agent). Optional: without these the
+      # app runs and every slide keeps whatever title the author typed — the
+      # generated ones simply never arrive. Set them in .env; see .env.example.
+      # A mounted credentials file works too (EGOHIVE_CREDS_PATH), but the
+      # environment wins over it, which is what a container wants.
+      EGOHIVE_BASE_URL: "${EGOHIVE_BASE_URL:-}"
+      EGOHIVE_ENDPOINT_ID: "${EGOHIVE_ENDPOINT_ID:-}"
+      EGOHIVE_ENDPOINT_KEY: "${EGOHIVE_ENDPOINT_KEY:-}"
+      EGOHIVE_AGENT_ID: "${EGOHIVE_AGENT_ID:-}"
+      EGOHIVE_AUTH_SCHEME: "${EGOHIVE_AUTH_SCHEME:-bearer}"
+      EGOHIVE_MODEL: "${EGOHIVE_MODEL:-}"
+      EGOHIVE_EMAIL: "${EGOHIVE_EMAIL:-}"
+      EGOHIVE_PASSWORD: "${EGOHIVE_PASSWORD:-}"
     depends_on:
       - datahive
     expose:

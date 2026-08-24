@@ -136,12 +136,33 @@ def _bootstrap_admins() -> frozenset[str]:
     return frozenset(e.strip().lower() for e in raw.split(",") if e.strip())
 
 
-def _issue_session(response: Response, repo: Repository, auth: AuthContext, user_id: str) -> None:
+def _cookies_are_secure(request: Request) -> bool:
+    """Whether our cookies may be marked Secure — i.e. whether the BROWSER
+    reached us over https.
+
+    Hardcoding it made the app unusable on plain HTTP: the browser accepts the
+    Set-Cookie and then declines to send it back, so signing in appears to work
+    and every subsequent request is anonymous. That is every deployment reached
+    by LAN address or hostname without TLS, which includes the machines a
+    product test runs on.
+
+    Nothing is given up. A Secure cookie on http is not protection, it is a
+    cookie that never arrives; and the scheme here comes from `public_origin`,
+    the same value the OAuth redirect_uri is built from, under the same trust
+    rules (NSIGHT_PUBLIC_URL, then forwarded headers only where they are
+    trusted). Where TLS is in use this is True, exactly as before.
+    """
+    return public_origin(request).startswith("https://")
+
+
+def _issue_session(request: Request, response: Response, repo: Repository,
+                   auth: AuthContext, user_id: str) -> None:
     key = get_or_create_signing_key(repo, auth)
     session_id = session.create(repo, auth, user_id)
     response.set_cookie(
         session.COOKIE_NAME, session.cookie_value(key, session_id),
-        max_age=session.IDLE_TIMEOUT_SECONDS, httponly=True, secure=True,
+        max_age=session.IDLE_TIMEOUT_SECONDS, httponly=True,
+        secure=_cookies_are_secure(request),
         samesite="strict", path="/",
     )
 
@@ -160,7 +181,7 @@ def _user_out(user: User) -> dict:
 
 
 @auth_router.post("/register", status_code=201)
-def register(response: Response, body: dict = Body(...),
+def register(request: Request, response: Response, body: dict = Body(...),
             auth: AuthContext = Depends(get_auth),
             repo: Repository = Depends(get_repository)) -> dict:
     """Self-service, but gated exactly like a first OIDC sign-in (spec §3.1,
@@ -200,12 +221,12 @@ def register(response: Response, body: dict = Body(...),
         raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
 
     repo.set_password(auth, resolved.id, password.hash_password(pw))
-    _issue_session(response, repo, auth, resolved.id)
+    _issue_session(request, response, repo, auth, resolved.id)
     return _user_out(resolved)
 
 
 @auth_router.post("/login/password")
-def login_password(response: Response, body: dict = Body(...),
+def login_password(request: Request, response: Response, body: dict = Body(...),
                    auth: AuthContext = Depends(get_auth),
                    repo: Repository = Depends(get_repository)) -> dict:
     email = (body.get("email") or "").strip().lower()
@@ -217,7 +238,7 @@ def login_password(response: Response, body: dict = Body(...),
     ok = password.verify_password(stored_hash or password.DUMMY_HASH, pw)
     if not user or not stored_hash or not ok:
         raise HTTPException(401, "Incorrect email or password")
-    _issue_session(response, repo, auth, user.id)
+    _issue_session(request, response, repo, auth, user.id)
     return _user_out(user)
 
 
@@ -297,7 +318,8 @@ async def oidc_login(provider: str, request: Request, response: Response,
     payload = _oauth_codec(key).dumps({"state": state, "nonce": nonce, "next": next})
     redirect = Response(status_code=302, headers={"Location": url})
     redirect.set_cookie(_OAUTH_COOKIE, payload, max_age=_OAUTH_MAX_AGE,
-                        httponly=True, secure=True, samesite="lax", path="/auth")
+                        httponly=True, secure=_cookies_are_secure(request),
+                        samesite="lax", path="/auth")
     return redirect
 
 
@@ -385,5 +407,5 @@ async def oidc_callback(provider: str, request: Request,
     next_path = saved.get("next") or "/"
     redirect = Response(status_code=302, headers={"Location": next_path})
     redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
-    _issue_session(redirect, repo, auth, resolved.id)
+    _issue_session(request, redirect, repo, auth, resolved.id)
     return redirect

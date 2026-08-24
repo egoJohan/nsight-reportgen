@@ -94,6 +94,19 @@ services:
       # sets these on its own proxy hop; nginx re-sets them (web/nginx.conf)
       # to what IT received from the browser before forwarding to us.
       NSIGHT_TRUST_FORWARDED_HEADERS: "1"
+      # The report-title writer (src/nsight/agent). Optional: without these the
+      # app runs and every slide keeps whatever title the author typed — the
+      # generated ones simply never arrive. Set them in .env; see .env.example.
+      # A mounted credentials file works too (EGOHIVE_CREDS_PATH), but the
+      # environment wins over it, which is what a container wants.
+      EGOHIVE_BASE_URL: "${EGOHIVE_BASE_URL:-}"
+      EGOHIVE_ENDPOINT_ID: "${EGOHIVE_ENDPOINT_ID:-}"
+      EGOHIVE_ENDPOINT_KEY: "${EGOHIVE_ENDPOINT_KEY:-}"
+      EGOHIVE_AGENT_ID: "${EGOHIVE_AGENT_ID:-}"
+      EGOHIVE_AUTH_SCHEME: "${EGOHIVE_AUTH_SCHEME:-bearer}"
+      EGOHIVE_MODEL: "${EGOHIVE_MODEL:-}"
+      EGOHIVE_EMAIL: "${EGOHIVE_EMAIL:-}"
+      EGOHIVE_PASSWORD: "${EGOHIVE_PASSWORD:-}"
     volumes:
       # egoHive credentials (base_url + endpoint_id). Read-only. The container's
       # default creds path is /app/work/egohive_creds.json. Place the file at
