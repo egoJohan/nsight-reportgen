@@ -248,3 +248,32 @@ def test_a_tab_that_stops_checking_in_stops_holding_it(repo, auth, report):
 
     held = repo._lock_state(auth, cust, case, rid)
     assert set(held["tabs"]) == {"tab-a"}
+
+
+def test_a_locked_report_cannot_be_deleted_by_someone_else(repo, auth, report):
+    """Not a lost edit — a lost report.
+
+    Only the save was guarded at first, which left the more destructive paths
+    open: while somebody had a report open and was working in it, anybody else
+    could delete it out from under them.
+    """
+    from reportbuilder.api.routes_reports import _refuse_if_locked_elsewhere
+    from fastapi import HTTPException
+    from reportbuilder.auth.permissions import User
+
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="a")
+
+    class _Client:
+        def report_lock(self, case_id, report_id):
+            return repo._lock_state(auth, cust, case, report_id)
+
+    other = User(id="u2", email="m@example.com", name="Maija")
+    with pytest.raises(HTTPException) as caught:
+        _refuse_if_locked_elsewhere(_Client(), case, rid, other, "deleted")
+    assert caught.value.status_code == 409
+    assert "Johan" in caught.value.detail
+
+    # The holder is not blocked from their own report.
+    holder = User(id="u1", email="j@example.com", name="Johan")
+    _refuse_if_locked_elsewhere(_Client(), case, rid, holder, "deleted")

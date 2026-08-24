@@ -62,6 +62,27 @@ def create_report(
     return {"report_id": rid}
 
 
+def _refuse_if_locked_elsewhere(client, case_id: str, report_id: str, user: User,
+                                doing: str) -> None:
+    """409 unless this caller holds the report's editing lock.
+
+    Every path that CHANGES a report goes through here. Guarding only the save
+    left the others open, and the worst of them was deletion: while somebody
+    had a report open and was working in it, anybody else could delete it out
+    from under them — which is not a lost edit but a lost report.
+
+    Reads and copies are not guarded: looking at a locked report, or taking a
+    copy of it, harms nobody. Neither is generating its deck — that writes an
+    artefact, not the report.
+    """
+    lock = client.report_lock(case_id, report_id)
+    if lock and lock.get("user_id") != getattr(user, "id", ""):
+        who = lock.get("user_name") or "Someone else"
+        raise HTTPException(
+            status_code=409,
+            detail=f"{who} is editing this report, so it cannot be {doing}.")
+
+
 @reports_router.get("/cases/{case_id}/reports")
 def list_case_reports(
     case_id: str,
@@ -126,12 +147,7 @@ def update_report(
     # everything the first person did, including slides they never opened, and
     # both saves return 200. Demonstrated against the running app before this
     # existed: two users edited different slides and one edit simply vanished.
-    lock = client.report_lock(case_id, report_id)
-    if lock and lock.get("user_id") != getattr(user, "id", ""):
-        raise HTTPException(
-            status_code=409,
-            detail=f"{lock.get('user_name') or 'Someone else'} is editing this "
-                   f"report. Your changes were not saved.")
+    _refuse_if_locked_elsewhere(client, case_id, report_id, user, "saved")
 
     _report, report_json, readable = _canonicalize(body)
     returned_id = client.save_report(case_id, report_id, report_json, readable)
@@ -167,8 +183,13 @@ def delete_report(
     Consent comes back as a 409 carrying the approval envelope, as for a case
     or a dataset — it used to escape as a bare 500, which left the UI with no
     approval link to offer.
+
+    Refused while somebody else has it open. Deleting a report out from under
+    an editor is not a lost edit, it is a lost report.
     """
     from reportbuilder.store.seam import ConsentRequired
+
+    _refuse_if_locked_elsewhere(client, case_id, report_id, user, "deleted")
 
     # Asked here rather than inside the delete: a delete is re-run after
     # datahive grants consent, and by the second pass the objects removed on the

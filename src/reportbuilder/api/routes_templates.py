@@ -279,8 +279,19 @@ def bind_report_template(customer_id: str, case_id: str, report_id: str,
 
     Also clears any pin: choosing a template deliberately is not the same as
     keeping the one a previous render happened to use.
+
+    Refused while somebody else has the report open. This writes into the
+    report's own definition, so it is a change to a document another person is
+    editing — and it restyles every slide they are looking at.
     """
     import json as _json
+
+    held = repo._lock_state(auth, customer_id, case_id, report_id)
+    if held and held.get("user_id") != getattr(user, "id", ""):
+        raise HTTPException(
+            409,
+            f"{held.get('user_name') or 'Someone else'} is editing this report, "
+            f"so its template cannot be changed.")
     try:
         raw = repo.load_report(auth, customer_id, case_id, report_id)
     except NotFound:
