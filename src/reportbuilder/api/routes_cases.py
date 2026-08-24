@@ -61,6 +61,18 @@ def rename_case(
     return {"id": case_id, "name": name}
 
 
+def _locks(client, case_id: str) -> dict[str, dict]:
+    """This case's live editing locks. A store that cannot answer (a legacy
+    client, a test double) reports none rather than blocking a delete."""
+    reader = getattr(client, "report_locks", None)
+    if reader is None:
+        return {}
+    try:
+        return reader(case_id) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 @cases_router.delete("/cases/{case_id}")
 def delete_case(
     case_id: str,
@@ -76,6 +88,23 @@ def delete_case(
     analyst's work.
     """
     from reportbuilder.store.seam import ConsentRequired
+
+    # Deleting the case deletes every report in it, so the guard that protects
+    # one report has to protect all of them. Without this, the single-report
+    # delete refused while somebody was editing — and the case delete took the
+    # same report anyway, along with everything else, from a colleague who was
+    # looking at it. A lost edit is recoverable; this is not.
+    held = {rid: lock for rid, lock in (_locks(client, case_id) or {}).items()
+            if lock.get("user_id") != getattr(user, "id", "")}
+    if held:
+        names = sorted({(lock.get("user_name") or "Someone else")
+                        for lock in held.values()})
+        who = " and ".join(names)
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{who} {'is' if len(names) == 1 else 'are'} editing "
+                    f"{len(held)} of this study's reports, so it cannot be "
+                    "deleted yet."))
 
     try:
         removed = client.delete_case(case_id)

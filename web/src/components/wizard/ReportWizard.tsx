@@ -684,9 +684,15 @@ export default function ReportWizard({
   // A new editing session: throw away the last one's statuses and patches. This
   // must NOT re-run when a callback identity changes, or it would wipe work in
   // progress — hence its own effect, keyed on the report alone.
+  //
+  // The cleanup matters as much as the setup: without it the queue carried on
+  // rendering slides for a report nobody has open, spending model calls and
+  // render time on them, and posting patches into a sink whose component is
+  // gone. Closing the editor ends its work.
   useEffect(() => {
     installProducers();
     previewQueue.reset(reportId);
+    return () => previewQueue.reset("");
   }, [reportId]);
 
   // The seams, re-registered whenever the callbacks they close over change.
@@ -748,9 +754,17 @@ export default function ReportWizard({
   // A template change is NOT in that last category: it changes no chart. The
   // queue handles it in one place (see setRenderContext), which is what this
   // used to do here, badly, across an effect and a debounce.
-  const chartsSignature = (draft?.charts ?? [])
-    .map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
-    .join("\u0000");
+  // Memoised on the charts themselves. It serialises the whole deck, and it was
+  // being rebuilt on every render of this component — sixty specs stringified
+  // per keystroke, per hover, per status tick — to produce the same string it
+  // produced last time. The charts array changes identity exactly when a chart
+  // changes, which is precisely when this should be recomputed.
+  const charts = draft?.charts;
+  const chartsSignature = useMemo(
+    () => (charts ?? []).map((c) => `${c.slide_id ?? ""}=${JSON.stringify(c)}`)
+      .join("\u0000"),
+    [charts]
+  );
   const resolvedCount = questionByRef.size;
   const lastSeen = useRef<Map<string, string>>(new Map());
   useEffect(() => {

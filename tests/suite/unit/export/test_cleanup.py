@@ -18,11 +18,15 @@ def roots(tmp_path, monkeypatch):
     render = tmp_path / "nsight-render"
     preview = tmp_path / "nsight-preview"
     profiles = tmp_path / "nsight-lo-profiles"
-    for d in (render, preview, profiles):
+    templates = tmp_path / "nsight-preview-templates"
+    ground = tmp_path / "nsight-preview-ground"
+    for d in (render, preview, profiles, templates, ground):
         d.mkdir()
     monkeypatch.setattr(cleanup, "RENDER_ROOT", render)
     monkeypatch.setattr(cleanup, "PREVIEW_ROOT", preview)
     monkeypatch.setattr(cleanup, "PROFILE_ROOT", profiles)
+    monkeypatch.setattr(cleanup, "TEMPLATE_ROOT", templates)
+    monkeypatch.setattr(cleanup, "GROUND_ROOT", ground)
     return render, preview, profiles
 
 
@@ -107,6 +111,33 @@ class TestSweepAll:
         result = cleanup.sweep_all(24 * 3600)
         assert (result.render, result.preview, result.profiles) == (1, 1, 1)
         assert result.total == 3
+
+    def test_it_sweeps_the_template_copies_and_the_blank_slides(self, roots,
+                                                                tmp_path):
+        """Neither root was ever swept.
+
+        A copy of every distinct template CONTENT anyone has previewed with, and
+        a LibreOffice-drawn blank slide per template, kept for the life of the
+        host. They had reached 16 MB on this machine — in a /tmp that is a
+        ramfs, so real memory — and nothing took any of them away again. Both
+        are content-keyed caches: removing one costs the next request a rebuild
+        and nothing else.
+        """
+        templates = tmp_path / "nsight-preview-templates"
+        ground = tmp_path / "nsight-preview-ground"
+        stale_tpl = templates / "tpl.abc123.pptx"
+        stale_tpl.write_bytes(b"PK")
+        _age(stale_tpl, 48 * 3600)
+        stale_png = ground / "abc123.png"
+        stale_png.write_bytes(b"\x89PNG")
+        _age(stale_png, 48 * 3600)
+        fresh = templates / "tpl.def456.pptx"
+        fresh.write_bytes(b"PK")
+
+        result = cleanup.sweep_all(24 * 3600)
+        assert (result.templates, result.grounds) == (1, 1)
+        assert not stale_tpl.exists() and not stale_png.exists()
+        assert fresh.exists(), "a template in use today is not swept out from under it"
 
     def test_a_failure_never_propagates(self, roots, monkeypatch):
         # A janitor that stops the app from starting is worse than a full disk.

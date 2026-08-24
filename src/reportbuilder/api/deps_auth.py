@@ -97,6 +97,26 @@ def _customer_guard(write: bool):
     return guard
 
 
+def current_session_id(request: Request,
+                       auth: AuthContext = Depends(get_auth),
+                       repo: Repository = Depends(get_repository)) -> str:
+    """Which sign-in this request belongs to, or "" when there is none.
+
+    An editing lock records it per open editor, so signing out on one device
+    releases that browser's editors and leaves alone the ones on another. Not a
+    guard — it never refuses, because a request that has come this far has
+    already been authorised by one.
+    """
+    raw = request.cookies.get(_session.COOKIE_NAME)
+    if not raw:
+        return ""
+    try:
+        key = get_or_create_signing_key(repo, auth)
+        return _session.session_id_from_cookie(key, raw) or ""
+    except Exception:  # noqa: BLE001 — never fail a request over this
+        return ""
+
+
 def _case_guard(write: bool):
     def guard(case_id: str,
               user: User = Depends(current_user),

@@ -618,7 +618,7 @@ class Repository:
 
     def lock_report(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, user_id: str, user_name: str,
-                    tab_id: str = "") -> tuple[bool, dict]:
+                    tab_id: str = "", session_id: str = "") -> tuple[bool, dict]:
         """Take or renew the lock. Returns (mine, lock).
 
         The same person always succeeds — a second tab, a refresh, a reconnect
@@ -632,6 +632,15 @@ class Repository:
         now = _now()
         tabs = dict(held.get("tabs") or {}) if held else {}
         tabs[tab_id or "_"] = now
+        # Which sign-in each editor belongs to. Signing out on one device must
+        # release THAT browser's editors and nobody else's: the same person
+        # working on a laptop and signing out on a phone used to lose the lock
+        # under the report they were actually typing into. Kept beside `tabs`
+        # rather than inside it so the shape of `tabs` — tab id to timestamp,
+        # which the expiry sweep reads — does not change.
+        sessions = dict(held.get("tab_sessions") or {}) if held else {}
+        if session_id:
+            sessions[tab_id or "_"] = session_id
         lock = {
             "report_id": report_id, "case_id": case_id, "customer_id": customer_id,
             "user_id": user_id, "user_name": user_name,
@@ -639,6 +648,7 @@ class Repository:
             "renewed_at": now,
             # One entry per open editor. The lock lives while any of them does.
             "tabs": tabs,
+            "tab_sessions": {t: sid for t, sid in sessions.items() if t in tabs},
         }
         self._write_json(auth, P.report_lock_path(customer_id, case_id, report_id),
                          lock, [P.LABEL_REPORT_LOCK])
@@ -679,13 +689,26 @@ class Repository:
             [P.LABEL_REPORT_LOCK])
         return True
 
-    def release_user_locks(self, auth: AuthContext, user_id: str) -> int:
-        """Hand back every lock this person holds, anywhere. Returns how many.
+    def release_user_locks(self, auth: AuthContext, user_id: str,
+                           session_id: str = "") -> int:
+        """Hand back the locks this person holds. Returns how many.
 
         Signing out is a deliberate "I am finished", so waiting out the expiry
         would leave reports barred for two minutes for no reason — and the
         person who signs out at the end of the day is exactly the one whose
         colleague wants the report next.
+
+        With a `session_id`, only the editors belonging to THAT sign-in are
+        given up. A person signed in on a laptop and a phone is still one user
+        id, so releasing everything meant signing out on the phone dropped the
+        lock under the report being typed into on the laptop — which then
+        renewed and took it back thirty seconds later, leaving a window in
+        which anyone could have taken the report from someone who never left.
+        A lock whose editors are ALL from this sign-in is released outright;
+        one with editors elsewhere just loses these.
+
+        Without a `session_id` every lock goes, which is what deleting or
+        demoting a user wants: there is no session left to speak for them.
 
         One listing across the whole store, filtered to lock objects. Locks are
         rare (one per report being edited right now), so this is a short list
@@ -699,6 +722,27 @@ class Repository:
                 continue
             if d.get("user_id") != user_id or d.get("released"):
                 continue
+            if session_id:
+                owned = {t for t, sid in (d.get("tab_sessions") or {}).items()
+                         if sid == session_id}
+                tabs = dict(d.get("tabs") or {})
+                remaining = {t: seen for t, seen in tabs.items() if t not in owned}
+                # An editor that never said which sign-in it belongs to (a lock
+                # taken before this existed) is left alone rather than guessed
+                # at: dropping it would be the very failure this prevents.
+                if remaining:
+                    self._write_json(
+                        auth, info.path,
+                        {**d, "tabs": remaining,
+                         "tab_sessions": {t: sid for t, sid
+                                          in (d.get("tab_sessions") or {}).items()
+                                          if t in remaining}},
+                        [P.LABEL_REPORT_LOCK])
+                    if owned:
+                        released += 1
+                    continue
+                if not owned and tabs:
+                    continue    # nothing here belongs to this sign-in
             self._write_json(auth, info.path,
                              {**d, "released": True, "released_at": _now()},
                              [P.LABEL_REPORT_LOCK])
@@ -1742,6 +1786,15 @@ class Repository:
         Host rendering settings count too: a font stand-in changes what the deck
         LOOKS like without changing the report, so a deck stored before the
         change must not be handed back after it.
+
+        And the TEMPLATE, by its content. The report JSON carries only the
+        report's own explicit choice, which is usually empty — the template is
+        normally inherited from the tutkimus, the customer, or the house
+        default. So changing a customer's template, or replacing the default
+        file, left this key exactly where it was, and every report that had
+        already been rendered kept being handed its deck in the OLD template.
+        The download button said the deck was current; it was current for a
+        template nobody uses any more.
         """
         from reportbuilder.render.fonts import rendering_fingerprint
 
@@ -1752,10 +1805,33 @@ class Repository:
                                                  material_id), sort_keys=True),
             material_id,
             rendering_fingerprint(),
+            self.resolved_template_identity(auth, customer_id, case_id, report_id),
         ):
             h.update(part.encode("utf-8"))
             h.update(b"\x00")
         return h.hexdigest()
+
+    def resolved_template_identity(self, auth: AuthContext, customer_id: str,
+                                   case_id: str, report_id: str) -> str:
+        """The template this report renders with, named by its CONTENT.
+
+        By content rather than by id, for one id in particular: the house
+        default is the literal string "default" however many different files
+        pass through it, so keying on the id alone meant replacing the tenant's
+        default changed nothing anybody could see.
+
+        Never raises. A template that cannot be resolved renders in the house
+        style, and a render must not fail over styling — but it does mean the
+        answer stops discriminating while that is true, so the marker says so.
+        """
+        try:
+            blob = self.template_bytes_for_report(auth, customer_id, case_id,
+                                                  report_id)
+            if not blob:
+                return "template:none"
+            return f"template:{hashlib.sha256(blob).hexdigest()[:16]}"
+        except Exception:  # noqa: BLE001 — styling must never break a render
+            return "template:unresolved"
 
     def save_render(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, pptx: bytes, key: str) -> None:

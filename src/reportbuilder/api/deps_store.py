@@ -1,19 +1,22 @@
 """Dependencies for the path-addressed store (design §5).
 
-Auth is per-request and comes from the caller's own `Authorization` header,
-because nSight talks to datahive with its own service credential, which is
-read-write across the tenant. datahive no longer narrows anything per user;
-reportbuilder/auth/permissions.py does. See spec §5.3.
+nSight talks to datahive with its OWN service credential, which is read-write
+across the tenant; datahive narrows nothing per user, reportbuilder/auth/
+permissions.py does. See spec §5.3.
 
-Until login exists there is a dev fallback to `NSIGHT_DATAHIVE_TOKEN`. It is a
-fallback, not a design: the routes are already shaped so that when the OIDC flow
-lands, the header simply starts arriving and nothing above this file changes.
+That credential is the only one used. This file used to prefer an
+`Authorization` header from the caller, from before there was a login: the plan
+was that the OIDC flow would start supplying it. It did not — sign-in is a
+session cookie, no client sends this header, and nothing in the app, the tests
+or the scripts ever did. What was left was a way for a request to choose which
+hive nSight would read and write on its behalf, reachable by anyone who could
+set a header, serving no caller at all.
 """
 from __future__ import annotations
 
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import HTTPException
 
 from reportbuilder.store.datahive_objects import DataHiveObjectStore
 from reportbuilder.store.memory_objects import InMemoryObjectStore
@@ -23,15 +26,15 @@ from reportbuilder.store.seam import AuthContext
 _repository: Repository | None = None
 
 
-def get_auth(authorization: str | None = Header(default=None)) -> AuthContext:
-    """The caller's bearer, or the dev token when running without login."""
-    if authorization and authorization.lower().startswith("bearer "):
-        return AuthContext(token=authorization.split(" ", 1)[1].strip())
+def get_auth() -> AuthContext:
+    """The app's own storage credential. Never the caller's — see the module
+    docstring: who the caller is, and what they may touch, is decided by
+    `current_user` and `auth/permissions.py`, not by which hive they can name."""
     token = os.environ.get("NSIGHT_DATAHIVE_TOKEN")
     if not token:
-        # Fail closed and say why: an unauthenticated request must never quietly
-        # fall through to somebody else's data.
-        raise HTTPException(401, "No bearer token, and NSIGHT_DATAHIVE_TOKEN is unset")
+        # Fail closed and say why. Booting without it used to mean an in-memory
+        # store that lost everything on restart, silently.
+        raise HTTPException(401, "NSIGHT_DATAHIVE_TOKEN is unset")
     return AuthContext(token=token)
 
 

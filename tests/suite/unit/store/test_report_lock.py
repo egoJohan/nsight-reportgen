@@ -277,3 +277,116 @@ def test_a_locked_report_cannot_be_deleted_by_someone_else(repo, auth, report):
     # The holder is not blocked from their own report.
     holder = User(id="u1", email="j@example.com", name="Johan")
     _refuse_if_locked_elsewhere(_Client(), case, rid, holder, "deleted")
+
+
+def test_deleting_the_whole_study_does_not_take_a_report_someone_has_open(repo, auth,
+                                                                         report):
+    """The bigger version of the same failure.
+
+    Guarding the single-report delete left the case delete open, and that one
+    removes every report in the study — so the report being edited went anyway,
+    along with everything beside it. A lost edit is recoverable from the
+    author's screen; this is not recoverable from anywhere.
+    """
+    from fastapi import HTTPException
+
+    from reportbuilder.api.routes_cases import _locks
+    from reportbuilder.auth.permissions import User
+
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="a")
+
+    class _Client:
+        def report_locks(self, case_id):
+            return repo.report_locks(auth, cust, case_id)
+
+    client = _Client()
+    other = User(id="u2", email="m@example.com", name="Maija")
+    held = {r: lk for r, lk in _locks(client, case).items()
+            if lk.get("user_id") != other.id}
+    assert held, "the open report is not visible to the delete guard"
+    assert held[rid]["user_name"] == "Johan"
+
+    # And the holder is not blocked from deleting their own study.
+    holder = User(id="u1", email="j@example.com", name="Johan")
+    mine = {r: lk for r, lk in _locks(client, case).items()
+            if lk.get("user_id") != holder.id}
+    assert mine == {}
+
+
+def test_a_store_that_cannot_answer_does_not_block_the_delete(repo, auth, report):
+    """A legacy client or a test double reports no locks rather than making the
+    study undeletable — the guard must fail open, not brick the app."""
+    from reportbuilder.api.routes_cases import _locks
+
+    class _Mute:
+        pass
+
+    class _Broken:
+        def report_locks(self, case_id):
+            raise RuntimeError("no such thing here")
+
+    _cust, case, _rid = report
+    assert _locks(_Mute(), case) == {}
+    assert _locks(_Broken(), case) == {}
+
+
+# ---------------------------------------------------------------------------
+# Signing out on one device.
+#
+# A person on a laptop and a phone is one user id. Releasing every lock they
+# hold meant signing out on the phone dropped the lock under the report being
+# typed into on the laptop. That tab took it back on its next renewal thirty
+# seconds later — leaving thirty seconds in which anybody could have taken the
+# report from someone who never left, with unsaved work on their screen.
+# ---------------------------------------------------------------------------
+
+def test_signing_out_on_one_device_leaves_the_other_one_editing(repo, auth, report):
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan",
+                     tab_id="laptop", session_id="session-laptop")
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan",
+                     tab_id="phone", session_id="session-phone")
+
+    assert repo.release_user_locks(auth, "u1", session_id="session-phone") == 1
+
+    held = repo._lock_state(auth, cust, case, rid)
+    assert held is not None, "the laptop was still editing"
+    assert set(held["tabs"]) == {"laptop"}
+    mine, _ = repo.lock_report(auth, cust, case, rid, "u2", "Maija")
+    assert mine is False
+
+
+def test_signing_out_of_the_only_session_still_hands_the_report_back(repo, auth,
+                                                                    report):
+    """The behaviour that made the blanket release worth having in the first
+    place: the person who signs out at the end of the day is exactly the one
+    whose colleague wants the report next."""
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan",
+                     tab_id="a", session_id="session-a")
+    assert repo.release_user_locks(auth, "u1", session_id="session-a") == 1
+    mine, _ = repo.lock_report(auth, cust, case, rid, "u2", "Maija")
+    assert mine is True
+
+
+def test_a_lock_taken_before_sessions_were_recorded_is_left_alone(repo, auth, report):
+    """An editor that never said which sign-in it belongs to is not guessed at.
+    Dropping it would be the very failure this prevents."""
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan", tab_id="old")
+
+    assert repo.release_user_locks(auth, "u1", session_id="session-new") == 0
+    assert repo._lock_state(auth, cust, case, rid) is not None
+
+
+def test_without_a_session_every_lock_still_goes(repo, auth, report):
+    """Deleting or demoting a user: there is no session left to speak for
+    them, so everything they hold is handed back."""
+    cust, case, rid = report
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan",
+                     tab_id="a", session_id="session-a")
+    repo.lock_report(auth, cust, case, rid, "u1", "Johan",
+                     tab_id="b", session_id="session-b")
+    assert repo.release_user_locks(auth, "u1") == 1
+    assert repo._lock_state(auth, cust, case, rid) is None

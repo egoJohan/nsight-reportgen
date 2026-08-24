@@ -345,7 +345,10 @@ def logout(request: Request, response: Response,
             try:
                 who = session.resolve(repo, auth, session_id)
                 if who is not None:
-                    repo.release_user_locks(auth, who.id)
+                    # THIS sign-in's editors, not every one this person has
+                    # open. Signing out on a phone used to release the lock
+                    # under the report being typed into on a laptop.
+                    repo.release_user_locks(auth, who.id, session_id=session_id)
             except Exception:  # noqa: BLE001 — signing out must always succeed
                 logging.getLogger(__name__).warning(
                     "could not release editing locks on sign-out", exc_info=True)

@@ -50,6 +50,10 @@ beforeEach(() => {
     if (cur) slides.set(id, { ...cur, ...patch } as ChartSpec);
   });
   q.setRenderContext({ templateRef: "", reportId: "r1", groupingKey: "{}", renderTitle: false });
+  // A report is OPEN. The queue does no work when none is — closing the editor
+  // has to stop it, not put every unfinished slide back on the queue — so a
+  // test that models the queue running has to model that too.
+  q.reset("r1");
 });
 
 describe("the sequential run", () => {
@@ -449,5 +453,61 @@ describe("a producer that fails", () => {
 
     expect(attempts).toBe(2);
     expect(q.failuresOf("s1").map((f) => f.id)).toEqual(["chart"]);
+  });
+});
+
+describe("closing the editor", () => {
+  it("stops rendering a deck nobody has open", async () => {
+    // Without this the queue carried on: model calls and renders spent on a
+    // report that is no longer on screen, and patches posted into a sink whose
+    // component is gone. Worse, work abandoned mid-run put itself straight back
+    // on the queue, so closing a report during a re-render started it again.
+    put("s1");
+    put("s2");
+    const ran: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    q.__setProducersForTest([
+      producer("chart", {
+        run: async (c) => {
+          ran.push(c.slideId);
+          await held;
+        },
+      }),
+    ]);
+    q.__setConcurrencyForTest(1);
+    q.enqueue("s1");
+    q.enqueue("s2");
+    const drained = q.__drainForTest();
+
+    q.reset("");        // the editor closes
+    release();
+    await drained;
+
+    expect(ran).toEqual(["s1"]);
+    const state = q.snapshot();
+    expect(state.queued).toEqual([]);
+    expect(state.running).toEqual([]);
+  });
+
+  it("still redoes work when the context moves and the report is open", async () => {
+    // The other side of the same guard: abandoning for a template switch must
+    // still come back, or a switch mid-render leaves slides unfinished.
+    put("s1");
+    let attempts = 0;
+    q.__setProducersForTest([
+      producer("chart", {
+        run: async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            q.setRenderContext({ templateRef: "other", reportId: "r1",
+                                 groupingKey: "{}", renderTitle: false });
+          }
+        },
+      }),
+    ]);
+    q.enqueue("s1");
+    await q.__drainForTest();
+    expect(attempts).toBeGreaterThan(1);
   });
 });

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
-from reportbuilder.api.deps_auth import require_case, require_case_write
+from reportbuilder.api.deps_auth import (current_session_id, require_case,
+                                          require_case_write)
 from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.model.report import Report, report_from_json, report_to_json
@@ -247,6 +248,7 @@ def lock_report(
     tab: str = "",
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case_write),
+    session_id: str = Depends(current_session_id),
 ) -> dict:
     """Take the editing lock, or renew one already held.
 
@@ -260,7 +262,8 @@ def lock_report(
     them — refusing without saying who leaves the second person nothing to do
     but guess.
     """
-    mine, lock = client.lock_report(case_id, report_id, tab_id=tab)
+    mine, lock = client.lock_report(case_id, report_id, tab_id=tab,
+                                    session_id=session_id)
     if not mine:
         raise HTTPException(
             status_code=409,

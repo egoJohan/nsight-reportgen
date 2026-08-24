@@ -232,6 +232,11 @@ export function failuresOf(slideId: string): Array<{ id: ProducerId; error: unkn
  *  starts; this just does as it is told. */
 export function reset(reportId: string) {
   say("reset", { detail: `report ${currentReportId || "(none)"} -> ${reportId}` });
+  // Anything already running belongs to the session being ended: moving the
+  // generation is how a producer is told its result is no longer wanted, so it
+  // is dropped rather than written into a draft that has been replaced — or,
+  // when the editor is closing, into one that is gone.
+  contextGeneration += 1;
   currentReportId = reportId;
   statuses = new Map();
   overlay = new Map();
@@ -588,6 +593,15 @@ async function producePreview(slideId: string): Promise<void> {
  *  re-check, and queueing it as well would do the work twice.
  */
 function requeueAfterRun(slideId: string, why: string) {
+  // Nothing comes back when there is no report open. Work abandoned because
+  // the CONTEXT moved should be redone under the new one; work abandoned
+  // because the editor closed should simply stop — otherwise closing a report
+  // mid-render put every unfinished slide straight back on the queue, and the
+  // queue went on rendering a deck nobody was looking at.
+  if (!currentReportId) {
+    say("dropped", { slideId, detail: "no report open" });
+    return;
+  }
   requeue.add(slideId);
   say("requeue-after-run", { slideId, detail: why });
 }
