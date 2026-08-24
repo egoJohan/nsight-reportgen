@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import DataTab from "@/components/DataTab";
+import SensitiveTermsPanel from "@/components/SensitiveTermsPanel";
 import ReportsSection from "@/components/ReportsSection";
 import ReportWizard from "@/components/wizard/ReportWizard";
 import {
@@ -260,6 +261,10 @@ export default function CaseDetailPage() {
         <DataTab caseId={id} />
       ) : (
         <div className="space-y-10">
+          {/* Above the reports on purpose: reports cannot be created until
+              these are accepted, so the thing that unblocks the page should
+              not be below the thing it blocks. */}
+          <SensitiveTermsPanel materialId={materialId} canEdit />
           <ReportsSection
             caseId={id}
             materialId={materialId}

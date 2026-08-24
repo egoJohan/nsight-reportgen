@@ -111,3 +111,27 @@ def test_spss_multi_response_markers_are_not_proposed():
     proposed = propose_sensitive_terms(model)
     assert "Checked" not in proposed and "Unchecked" not in proposed
     assert {"Attendo", "Esperi"} <= set(proposed)
+
+
+def test_bare_scale_points_are_not_proposed():
+    """A rating grid makes "Hyvä"/"Huono" battery members like any other, so
+    they arrive capitalised, short and more frequent than any brand — on the
+    real study they led the list, ahead of Attendo."""
+    model = _model(
+        _var("r1", "Hyvä:Millainen mielikuva?"), _var("r2", "Huono:Millainen mielikuva?"),
+        _var("r3", "Attendo:Millainen mielikuva?"),
+        _var("r4", "Hyvä:Entä palvelu?"), _var("r5", "Huono:Entä palvelu?"),
+        _var("r6", "Attendo:Entä palvelu?"),
+    )
+    proposed = propose_sensitive_terms(model)
+    assert "Hyvä" not in proposed and "Huono" not in proposed
+    assert "Attendo" in proposed
+
+
+def test_a_company_that_merely_starts_like_a_scale_point_survives():
+    """"Hyvä" is a scale point; "Hyvinvointi Oy" is a company. Whole-word
+    matching, never a prefix."""
+    model = _model(_var("c1", "Hyvinvointi Oy:Kysymys"),
+                   _var("c2", "Hyvinvointi Oy:Toinen kysymys"),
+                   _var("c3", "Attendo:Kysymys"), _var("c4", "Attendo:Toinen kysymys"))
+    assert "Hyvinvointi Oy" in propose_sensitive_terms(model)

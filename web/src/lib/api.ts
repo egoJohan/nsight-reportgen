@@ -299,6 +299,17 @@ export interface ReportDoc {
 /** Carries the HTTP status alongside the message, so a caller that needs to
  *  tell "not found" apart from "network hiccup" (the no-access customer
  *  page) does not have to parse it back out of the message text. */
+/** The terms a study's own structure suggests are company or brand names, and
+ *  the ones an analyst confirmed. `accepted: null` means nobody has looked —
+ *  which is a different statement from an empty list, and is what the
+ *  report-creation gate refuses on. */
+export interface SensitiveTerms {
+  proposed: string[];
+  accepted: string[] | null;
+  accepted_at?: string;
+  accepted_by?: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -806,6 +817,29 @@ export const api = {
     ),
 
   materials: {
+    /** What must never reach an LLM from this dataset.
+     *
+     *  `proposed` is read from the study's own structure — the members of its
+     *  batteries, the categories of its questions. `accepted` is null until
+     *  somebody reviews them, and a report cannot be created before that. */
+    sensitiveTerms: (materialId: string): Promise<SensitiveTerms> =>
+      fetch(`${API_BASE}/materials/${materialId}/sensitive-terms`).then((r) =>
+        json<SensitiveTerms>(r)
+      ),
+
+    /** Accept the terms. The server registers them with the data store FIRST
+     *  and records the acceptance only if that succeeded — so a 503 here means
+     *  nothing was accepted and nothing would be masked. */
+    acceptSensitiveTerms: (
+      materialId: string,
+      terms: string[]
+    ): Promise<SensitiveTerms> =>
+      fetch(`${API_BASE}/materials/${materialId}/sensitive-terms`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ terms }),
+      }).then((r) => json<SensitiveTerms>(r)),
+
     // How many groups each question would ACTUALLY show if split by this variable.
     // A battery whose members belong to one study arm reports 1, so the Compare
     // groups dialog can disable it instead of generating an unsplit slide.

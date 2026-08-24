@@ -58,6 +58,17 @@ _ARTEFACTS = frozenset({
     "true", "false", "yes", "no",
 })
 
+#: Bare scale points. A rating grid makes these battery members like any other,
+#: so they arrive capitalised, short, and more frequent than any brand — on the
+#: real study "Huono" and "Hyvä" led the proposal list, ahead of Attendo.
+#: Matched WHOLE, never as a prefix: "Hyvä" is a scale point, "Hyvinvointi Oy"
+#: is a company.
+_SCALE_POINTS = frozenset({
+    "hyvä", "huono", "erinomainen", "heikko", "keskinkertainen", "neutraali",
+    "samaa mieltä", "eri mieltä", "kyllä", "ei", "parempi", "huonompi",
+    "good", "bad", "excellent", "poor", "average", "neutral", "agree", "disagree",
+})
+
 
 def _candidate(text: str) -> str | None:
     """The term this string contributes, or None if it cannot be a name."""
@@ -70,7 +81,7 @@ def _candidate(text: str) -> str | None:
         return None
     if t.isdigit():
         return None
-    if t.lower() in _ARTEFACTS:
+    if t.lower() in _ARTEFACTS or t.lower() in _SCALE_POINTS:
         return None
     # Two words is a company ("Julkiset hoivapalvelut", "Esperi Care"); five is
     # a statement being rated.

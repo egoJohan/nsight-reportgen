@@ -706,6 +706,28 @@ export function useCreateReport(caseId: string) {
   });
 }
 
+/** What must never reach an LLM from this dataset. */
+export function useSensitiveTerms(materialId: string | undefined) {
+  return useQuery({
+    queryKey: ["sensitive-terms", materialId],
+    queryFn: () => api.materials.sensitiveTerms(materialId!),
+    enabled: !!materialId,
+  });
+}
+
+export function useAcceptSensitiveTerms(materialId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (terms: string[]) =>
+      api.materials.acceptSensitiveTerms(materialId!, terms),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sensitive-terms", materialId] });
+      // The report list's create button is gated on this, so it has to hear.
+      qc.invalidateQueries({ queryKey: ["case-reports"] });
+    },
+  });
+}
+
 export function useUpdateReport(caseId: string) {
   const qc = useQueryClient();
   return useMutation({
