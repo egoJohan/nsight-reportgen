@@ -15,3 +15,4 @@ tests/rb/e2e/data/sav/
 *.local.env
 .env
 .env.local
+docker-compose.override.yml
