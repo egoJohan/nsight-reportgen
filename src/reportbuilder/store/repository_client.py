@@ -17,6 +17,7 @@ caller and goes. When the file is empty, the migration is done.
 """
 from __future__ import annotations
 
+from reportbuilder.auth.permissions import may_write
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext, NotFound
 
@@ -49,6 +50,20 @@ class RepositoryClient:
         if k is None:
             raise KeyError(case_id)
         return k
+
+    def _may_edit(self, k) -> bool:
+        """Whether this caller builds reports in this case, or only receives
+        them. `user=None` is an internal caller with no request behind it."""
+        return self.user is None or may_write(self.user, f"{k.customer_id}/{k.id}")
+
+    def _finished(self, ref) -> bool:
+        """Whether a report is a deliverable rather than work in progress.
+
+        A render has been stamped on it, which is the definition the rest of the
+        app already uses — the case page's "Generated" badge and the download
+        button both key on this same flag.
+        """
+        return bool(getattr(ref, "rendered", False))
 
     # -- material ---------------------------------------------------------
 
@@ -138,6 +153,16 @@ class RepositoryClient:
 
     def load_report(self, case_id: str, report_doc_id: str) -> str:
         k = self._case(case_id)
+        # A view-only grant is the CLIENT's grant. Handing them the working
+        # state of a deck nobody has finished shows them half-built slides,
+        # wrong numbers mid-edit and titles still being written, and invites
+        # comment on all of it. They see it when it is rendered.
+        if not self._may_edit(k):
+            ref = next((r for r in self.repo.list_reports(
+                self.auth, k.customer_id, k.id, user=self.user)
+                if r.id == report_doc_id), None)
+            if ref is not None and not self._finished(ref):
+                raise NotFound(f"Report '{report_doc_id}' not found")
         return self.repo.load_report(self.auth, k.customer_id, k.id, report_doc_id)
 
     def save_report(self, case_id: str, report_id: str | None, report_json: str,
@@ -156,8 +181,11 @@ class RepositoryClient:
         # useful question and rides along on a read the listing already does.
         locks = self.repo.report_locks(self.auth, k.customer_id, k.id)
         me = getattr(self.user, "id", "")
+        may_edit = self._may_edit(k)
         out = []
         for r in self.repo.list_reports(self.auth, k.customer_id, k.id, user=self.user):
+            if not may_edit and not self._finished(r):
+                continue    # see load_report
             lock = locks.get(r.id)
             out.append({
                 "report_id": r.id, "name": r.name,
