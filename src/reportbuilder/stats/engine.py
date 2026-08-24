@@ -666,6 +666,28 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             for idx, (code, label) in enumerate(labels.items())
         ]
 
+    # Which of those entries are points ON the rating scale, and where each sits.
+    # The row-summary column (top/bottom box, mean) must follow the SCALE, and the
+    # display order above is not always it:
+    #   * a WORD-labelled scale has no leading digit to parse, so `entries` falls
+    #     back to the order the labels happen to occupy in the SAV — and plenty of
+    #     exports write them high→low, which made "top 2" the two most NEGATIVE
+    #     levels. scale_levels() reads the word-only case (contiguous codes ARE the
+    #     points), so use it when the digit parse found nothing.
+    #   * "En osaa sanoa" is an ANSWER, not a scale point. It parked at 1000+idx,
+    #     i.e. past 5, and so was counted into the top box. Anything the scale does
+    #     not contain is left out of the summary entirely.
+    # When no scale can be read at all, nothing here is meaningful, so the display
+    # order stands — as it always did. (review 2026-08-24)
+    if scale_entries is not None:
+        summary_points = {code: pt for code, _lbl, pt in entries}
+    elif is_rating:
+        summary_points = dict(rating)
+    else:
+        summary_points = {code: pt for code, _lbl, pt in scale_levels(var)}
+        if not summary_points:
+            summary_points = {code: pt for code, _lbl, pt in entries}
+
     # Cross-tab percentage DIRECTION (percent_base). Only meaningful with a real
     # classifier: "question" distributes the classifier within each base category
     # (each base-category row sums to 100%); "total" is over the grand total;
@@ -850,12 +872,18 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # charts high→low and carries -point as its ordering key, hence the flip.
         flip = -1.0 if scale_entries is not None else 1.0
         shown = set(categories)
-        levels = sorted((e for e in entries if e[1] in shown), key=lambda e: flip * e[2])
+        scale = sorted(((code, lbl, summary_points[code]) for code, lbl, _ in entries
+                        if lbl in shown and code in summary_points),
+                       key=lambda e: flip * e[2])
+        # "Sum"/"net" name their levels explicitly, so they see every rendered level,
+        # scale point or not: an author who ticks "En osaa sanoa" means it.
+        levels = [(code, lbl) for code, lbl, _ in entries if lbl in shown]
         # Every rendered bar gets a value, the "Total" reference bar included — it is
         # a row like any other. Values are keyed by bar, not positional.
         statements = list(segments)
         row_summaries = _compute_row_summaries(
-            spec, statements, [d for _, d, _ in levels], [c for c, _, _ in levels], cells)
+            spec, statements, [d for _, d in levels], [c for c, _ in levels], cells,
+            scale_levels=[d for _, d, _ in scale], scale_points=[c for c, _, _ in scale])
 
     base_n = {s: denom.get(s, 0) for s in segments}
     base_n.setdefault("Total", denom_total)
@@ -1502,15 +1530,24 @@ def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         cells=cells, base_n=base_n, statistic="pct")
 
 
-def _compute_row_summaries(spec, statements, levels, points, cells):
+def _compute_row_summaries(spec, statements, levels, points, cells,
+                           scale_levels=None, scale_points=None):
     """One summary value per statement (bar) for the right-hand row-summary column,
     or None when the feature is off. `levels` are the stack labels in ascending
     `points` order; `points[i]` is the numeric scale value of `levels[i]`;
     `cells[(level, stmt)].pct` is the % of that level for that statement. Aligned to
-    `statements` (the bars). (spec 2026-07-07-row-summary-column)"""
+    `statements` (the bars). (spec 2026-07-07-row-summary-column)
+
+    `scale_levels`/`scale_points` are the subset that lies on the rating scale, in
+    scale order — which is what "top 2" and the mean are about. They differ from
+    `levels` when a rendered level is not a scale point ("En osaa sanoa") or when
+    the file's order is not the scale's. Defaults to `levels`/`points` for callers
+    whose levels are already exactly the scale. (review 2026-08-24)"""
     fn = getattr(spec, "row_summary_fn", "none")
     if fn == "none" or not levels or not statements:
         return None
+    scale_levels = levels if scale_levels is None else scale_levels
+    scale_points = points if scale_points is None else scale_points
     label_by_point = {p: lbl for p, lbl in zip(points, levels)}
 
     def cell_pct(lvl, stmt):
@@ -1526,7 +1563,8 @@ def _compute_row_summaries(spec, statements, levels, points, cells):
     for stmt in statements:
         if fn in _BOX_ROW_SUMMARIES:
             n_top, _lowest = _BOX_ROW_SUMMARIES[fn]
-            picked_levels = levels[:n_top] if _lowest else levels[-n_top:]
+            picked_levels = (scale_levels[:n_top] if _lowest
+                             else scale_levels[-n_top:])
             val = sum(cell_pct(l, stmt) for l in picked_levels)
         elif fn == "sum":
             val = sum(cell_pct(l, stmt) for l in picked(spec.row_summary_codes))
@@ -1534,8 +1572,9 @@ def _compute_row_summaries(spec, statements, levels, points, cells):
             val = (sum(cell_pct(l, stmt) for l in picked(spec.row_summary_pos_codes))
                    - sum(cell_pct(l, stmt) for l in picked(spec.row_summary_neg_codes)))
         elif fn == "mean":
-            num = sum(p * cell_pct(lbl, stmt) for p, lbl in zip(points, levels))
-            den = sum(cell_pct(lbl, stmt) for lbl in levels)
+            num = sum(p * cell_pct(lbl, stmt)
+                      for p, lbl in zip(scale_points, scale_levels))
+            den = sum(cell_pct(lbl, stmt) for lbl in scale_levels)
             val = (num / den) if den else 0.0
         else:
             val = 0.0
