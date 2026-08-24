@@ -34,6 +34,7 @@ import {
   useCaseTemplate,
   useTemplateActions,
   fetchChartPreviewInto,
+  qk,
 } from "@/lib/queries";
 import * as previewQueue from "@/lib/previewQueue";
 import { installProducers, setProducerEnv } from "@/lib/previewProducers";
@@ -530,6 +531,8 @@ export default function ReportWizard({
   );
   const [lockedBy, setLockedBy] = useState<string | null>(null);
   const [hasLock, setHasLock] = useState(false);
+  //: Somebody else has it — stop asking, and stop letting interactions ask.
+  const lostRef = useRef(false);
   const hasLockRef = useRef(false);
   hasLockRef.current = hasLock;
   const lastActivity = useRef(Date.now());
@@ -551,6 +554,7 @@ export default function ReportWizard({
       } catch (e) {
         if (!alive) return false;
         setHasLock(false);
+        lostRef.current = true;
         setLockedBy(e instanceof Error ? e.message : "Someone else is editing this report.");
         return false;
       }
@@ -576,10 +580,17 @@ export default function ReportWizard({
     // Any interaction is a claim on the report. When we already hold it this
     // only marks the tab as alive; when the lock has lapsed, it takes it back —
     // or discovers that somebody else now has it.
+    let asking = false;
     const seen = () => {
-      const wasIdle = Date.now() - lastActivity.current > INACTIVITY_LIMIT_MS;
       lastActivity.current = Date.now();
-      if (!hasLockRef.current && (wasIdle || lockedBy === null)) void take();
+      // Ask once. Without this every keystroke fires its own request, so
+      // returning to a report somebody took answers with a burst of 409s
+      // instead of one.
+      if (hasLockRef.current || asking || lostRef.current) return;
+      asking = true;
+      void take().finally(() => {
+        asking = false;
+      });
     };
     for (const ev of ["pointerdown", "keydown", "wheel"] as const) {
       window.addEventListener(ev, seen, { passive: true });
@@ -607,6 +618,10 @@ export default function ReportWizard({
   useEffect(() => {
     if (lockedBy && draft) {
       toast.error(lockedBy);
+      // Refresh the case's list on the way out, or it shows the report exactly
+      // as it looked before — no lock, no holder — which contradicts what we
+      // just told her and invites her to click straight back in.
+      qcRef.current.invalidateQueries({ queryKey: qk.caseReports(caseId) });
       onClose();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -619,6 +634,8 @@ export default function ReportWizard({
   // where its patches go; it never reaches into the queue, and the queue never
   // imports React.
   const qc = useQueryClient();
+  const qcRef = useRef(qc);
+  qcRef.current = qc;
   const questionByRefRef = useRef(questionByRef);
   questionByRefRef.current = questionByRef;
 
