@@ -60,6 +60,17 @@ class AccessDenied(StoreError):
     """Authenticated, but not permitted (e.g. a read-only token writing)."""
 
 
+class StaleWrite(StoreError):
+    """The caller is writing over a version it has not seen.
+
+    A report save replaces the whole document, so a save built on a copy
+    somebody else has since replaced is not a merge conflict — it is a total
+    loss of their work. The editing lock normally prevents two people getting
+    that far, but it expires by design (a crashed browser must not strand a
+    report for ever), and that leaves a window.
+    """
+
+
 class ConsentRequired(StoreError):
     """A destructive operation needs explicit approval before it will run.
 

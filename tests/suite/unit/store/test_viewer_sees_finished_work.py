@@ -73,3 +73,33 @@ def test_an_internal_caller_with_no_user_still_sees_everything(world):
     client = RepositoryClient(repo, auth, None)
     assert {r["report_id"] for r in client.list_reports(case)} == {done, wip}
     assert "Kesken" in client.load_report(case, wip)
+
+
+def test_editing_a_delivered_report_does_not_take_it_back_from_the_client(world):
+    """Delivering is not undone by editing.
+
+    A save clears `render_key` on purpose — that is how the app says the stored
+    deck no longer matches the report, and it is what the Generated badge and
+    the download button read. Gating the viewer on that same flag meant a client
+    lost sight of a deck already delivered to them the moment an analyst touched
+    a title. What they see is the deck that exists; that the next version is not
+    ready yet is the analyst's business.
+    """
+    repo, auth, cust, case, done, _wip = world
+    client = _client(repo, auth, cust, case, VIEW)
+    assert [r["report_id"] for r in client.list_reports(case)] == [done]
+
+    repo.save_report(auth, cust, case, '{"name":"Valmis, muokattu","charts":[]}',
+                     report_id=done)
+
+    assert [r["report_id"] for r in client.list_reports(case)] == [done]
+    assert "Valmis" in client.load_report(case, done)
+
+
+def test_a_report_that_was_never_rendered_stays_out_of_sight(world):
+    """The other half — the rule still has to mean something."""
+    repo, auth, cust, case, _done, wip = world
+    repo.save_report(auth, cust, case, '{"name":"Kesken 2","charts":[]}',
+                     report_id=wip)
+    client = _client(repo, auth, cust, case, VIEW)
+    assert wip not in {r["report_id"] for r in client.list_reports(case)}

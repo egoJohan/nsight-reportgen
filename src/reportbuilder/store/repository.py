@@ -29,7 +29,7 @@ from typing import Sequence
 
 from reportbuilder.auth.permissions import Grant, User, may_read
 from reportbuilder.store import paths as P
-from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound, ObjectStore
+from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound, ObjectStore, StaleWrite
 
 _JSON = "application/json"
 _PPTX = ("application/vnd.openxmlformats-officedocument.presentationml.presentation")
@@ -112,6 +112,16 @@ class ReportRef:
     #: When that render happened, ISO 8601. Empty for decks rendered before
     #: this was recorded — treat absence as "unknown", not as "never".
     rendered_at: str = ""
+    #: Bumped by every save. An editor sends back the version it loaded so a
+    #: save built on a document somebody else has since replaced is refused
+    #: rather than performed — see save_report. 0 for reports saved before this
+    #: existed, which is also "no opinion".
+    version: int = 0
+    #: A deck has been produced for this report at some point. `rendered` above
+    #: is the stricter fact — a deck matching the report AS IT IS NOW — and a
+    #: save deliberately clears it. This one survives, because "a deliverable
+    #: exists" is not something editing a title should undo.
+    has_render: bool = False
 
 
 @dataclass(frozen=True)
@@ -561,14 +571,37 @@ class Repository:
 
     def save_report(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_json: str, report_id: str | None = None,
-                    modified_by: str = "") -> ReportRef:
+                    modified_by: str = "",
+                    base_version: int | None = None) -> ReportRef:
         """Create, or replace in place when *report_id* is given.
 
         The JSON is stored verbatim — the serde round-trip
         (report_from_json(report_to_json(r)) == r) is an invariant the report
         model is deliberately normalised to preserve.
+
+        `base_version` is the version the caller last read. When it is given and
+        no longer matches, the write is refused with StaleWrite rather than
+        performed. The editing lock is what normally prevents two people saving
+        the same report, but it is a lock with an expiry — that is what stops a
+        crashed browser stranding a report for ever — so there is a window where
+        one lapses, somebody else edits, and the first tab saves the document it
+        loaded hours ago over the top. A whole-document replace makes that a
+        total loss of the other person's work, not a merge conflict. `None`
+        skips the check, for callers with nothing to compare.
         """
         rid = report_id or _new_id("rep")
+        meta_path = P.report_meta_path(customer_id, case_id, rid)
+        try:
+            previous = self._read_json(auth, meta_path)
+        except (NotFound, ValueError, UnicodeDecodeError):
+            previous = {}
+        stored_version = int(previous.get("version") or 0)
+        if base_version is not None and base_version != stored_version:
+            raise StaleWrite(
+                f"This report was saved by somebody else while you had it open "
+                f"(you started from version {base_version}, it is now "
+                f"{stored_version}).")
+
         self.store.put(auth, P.report_path(customer_id, case_id, rid),
                        report_json.encode("utf-8"), _JSON, labels=[P.LABEL_REPORT])
         name = ""
@@ -579,18 +612,34 @@ class Repository:
         modified_at = _now()
         # The sidecar is what listings read, so a list never has to fetch a
         # 30 KB report body just to learn its name.
-        self._write_json(auth, P.report_meta_path(customer_id, case_id, rid),
+        #
+        # Written from scratch, NOT merged: dropping `render_key` is how a save
+        # says the stored deck no longer matches the report (see
+        # _ref_from_meta). Only `version` is carried across, because it is a
+        # fact about this sidecar rather than about the deck.
+        self._write_json(auth, meta_path,
                          {"id": rid, "case_id": case_id, "customer_id": customer_id,
+                          # A deck was produced for this report at some point.
+                          # NOT the same fact as render_key, which says the
+                          # stored deck matches the report as it is NOW and is
+                          # dropped here on purpose. Viewers are shown finished
+                          # work only, so without this a client lost sight of a
+                          # deck already delivered to them the moment an analyst
+                          # touched a title.
+                          "has_render": bool(previous.get("has_render")
+                                             or previous.get("render_key")),
                           "name": name, "modified_at": modified_at,
                           # Who, as well as when. A list that says "edited by
                           # Johan 2h ago" answers the question a chart count
                           # never did, and costs nothing extra to read: it is
                           # already fetching this sidecar.
-                          "modified_by": modified_by},
+                          "modified_by": modified_by,
+                          "version": stored_version + 1},
                          [P.LABEL_REPORT_META])
         return ReportRef(id=rid, case_id=case_id, customer_id=customer_id,
                          name=name, modified_at=modified_at,
-                         modified_by=modified_by)
+                         modified_by=modified_by,
+                         version=stored_version + 1)
 
     # ── Editing locks ────────────────────────────────────────────────────
     # One person edits a report at a time. Saving is a whole-document replace,
@@ -882,6 +931,9 @@ class Repository:
                          modified_at=d.get("modified_at", ""),
                          modified_by=d.get("modified_by", ""),
                          rendered_at=d.get("rendered_at", ""),
+                         version=int(d.get("version") or 0),
+                         has_render=bool(d.get("has_render")
+                                         or d.get("render_key")),
                          # A render stamps "render_key" onto this same sidecar
                          # (save_render) — its presence means an artefact
                          # exists for the report's CURRENT content, since
@@ -1881,6 +1933,7 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             d = {"id": report_id, "case_id": case_id, "customer_id": customer_id}
         d["render_key"] = key
+        d["has_render"] = True
         # When, not only what from. A finished report's most useful fact to
         # someone who did not build it is the day the deck was generated —
         # "12 charts" is the author's business, "generated 3 March" is the

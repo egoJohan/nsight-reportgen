@@ -6,7 +6,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, reportVersions } from "./api";
 import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
 import type { Substitutions } from "./api";
@@ -715,7 +715,13 @@ export function useUpdateReport(caseId: string) {
     }: {
       reportId: string;
       report: ReportDoc;
-    }) => api.reports.update(caseId, reportId, report),
+    }) =>
+      // The version this editor loaded (or last wrote). The server refuses the
+      // save if the report has changed hands since — the lock normally
+      // prevents that, but it expires by design, and a whole-document replace
+      // built on a stale copy is a total loss of the other person's work.
+      api.reports.update(caseId, reportId, report,
+                         reportVersions.get(`${caseId}/${reportId}`)),
     // Mark the cached document stale, but do NOT pull it back right now.
     //
     // The saver already holds the authoritative version — it is what we just

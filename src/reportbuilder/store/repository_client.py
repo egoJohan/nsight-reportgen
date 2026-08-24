@@ -59,11 +59,15 @@ class RepositoryClient:
     def _finished(self, ref) -> bool:
         """Whether a report is a deliverable rather than work in progress.
 
-        A render has been stamped on it, which is the definition the rest of the
-        app already uses — the case page's "Generated" badge and the download
-        button both key on this same flag.
+        "A deck has been produced for it", not "the stored deck is current".
+        The stricter fact is what the Generated badge and the download button
+        read, and a save clears it on purpose — so gating a viewer on it meant
+        a client lost sight of a deck already delivered to them the moment an
+        analyst touched a title. Editing does not un-deliver what was
+        delivered; it only makes the next version not ready yet.
         """
-        return bool(getattr(ref, "rendered", False))
+        return bool(getattr(ref, "has_render", False)
+                    or getattr(ref, "rendered", False))
 
     # -- material ---------------------------------------------------------
 
@@ -181,12 +185,25 @@ class RepositoryClient:
         return self.repo.load_report(self.auth, k.customer_id, k.id, report_doc_id)
 
     def save_report(self, case_id: str, report_id: str | None, report_json: str,
-                    readable: str = "") -> str:
+                    readable: str = "",
+                    base_version: int | None = None) -> tuple[str, int]:
+        """Returns (report_id, new_version). See Repository.save_report for what
+        `base_version` refuses."""
         k = self._case(case_id)
-        return self.repo.save_report(
+        ref = self.repo.save_report(
             self.auth, k.customer_id, k.id, report_json, report_id=report_id,
-            modified_by=getattr(self.user, "name", "") or getattr(self.user, "email", "")
-        ).id
+            modified_by=getattr(self.user, "name", "") or getattr(self.user, "email", ""),
+            base_version=base_version,
+        )
+        return ref.id, ref.version
+
+    def report_version(self, case_id: str, report_id: str) -> int:
+        """The version a caller is about to edit from, or 0 if unknown."""
+        k = self._case(case_id)
+        ref = next((r for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
+                                                      user=self.user)
+                    if r.id == report_id), None)
+        return ref.version if ref is not None else 0
 
     def list_reports(self, case_id: str) -> list[dict]:
         k = self._case(case_id)

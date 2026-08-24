@@ -4,7 +4,8 @@ from __future__ import annotations
 import dataclasses
 import json
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from reportbuilder.api.deps import get_client
@@ -14,7 +15,7 @@ from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.model.report import Report, report_from_json, report_to_json
 from reportbuilder.store.datahive_client import DataHiveClient
-from reportbuilder.store.seam import NotFound
+from reportbuilder.store.seam import NotFound, StaleWrite
 
 
 reports_router = APIRouter()
@@ -59,8 +60,24 @@ def create_report(
 ) -> dict:
     """Create a new report doc under a case. Returns the new report_id. (REQ-C-08, REQ-C-10, REQ-C-11)"""
     _report, report_json, readable = _canonicalize(body)
-    rid = client.save_report(case_id, None, report_json, readable)
-    return {"report_id": rid}
+    rid, version = client.save_report(case_id, None, report_json, readable)
+    return {"report_id": rid, "version": version}
+
+
+def _base_version(request: Request) -> int | None:
+    """The version an editor says it started from, from `If-Match`.
+
+    A header rather than a field in the body: the report JSON round-trips
+    through the model (report_from_json(report_to_json(r)) == r is an
+    invariant), and threading a version through it would put a value in the
+    document that is not part of the document. None when absent or unreadable —
+    "no opinion", which is what every caller sent before this existed.
+    """
+    raw = (request.headers.get("if-match") or "").strip().strip('"')
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _refuse_if_locked_elsewhere(client, case_id: str, report_id: str, user: User,
@@ -124,6 +141,7 @@ def list_case_reports(
 def update_report(
     case_id: str,
     report_id: str,
+    request: Request,
     body: dict = Body(...),
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case_write),
@@ -151,8 +169,21 @@ def update_report(
     _refuse_if_locked_elsewhere(client, case_id, report_id, user, "saved")
 
     _report, report_json, readable = _canonicalize(body)
-    returned_id = client.save_report(case_id, report_id, report_json, readable)
-    return {"report_id": returned_id}
+    # The version the editor started from, if it said. The lock is what
+    # normally stops two people getting here at once, but it expires by design
+    # — a crashed browser must not strand a report — so there is a window in
+    # which one lapses, somebody else edits, and the first tab writes the
+    # document it loaded hours ago over the top. That is a whole-document
+    # replace: not a conflict to merge, a total loss of the other person's
+    # work. An editor that sends nothing is not held to it, so older clients
+    # and scripts keep working exactly as before.
+    try:
+        returned_id, version = client.save_report(
+            case_id, report_id, report_json, readable,
+            base_version=_base_version(request))
+    except StaleWrite as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"report_id": returned_id, "version": version}
 
 
 @reports_router.get("/cases/{case_id}/reports/{report_id}")
@@ -169,7 +200,18 @@ def get_report(
         raise HTTPException(
             status_code=404, detail=f"Report '{report_id}' not found"
         ) from exc
-    return json.loads(raw)
+    # The version rides in an ETag rather than in the body: the report JSON
+    # round-trips through the model, and a version inside it would be a value
+    # in the document that is not part of the document. The editor sends it
+    # back as If-Match when it saves.
+    version = 0
+    reader = getattr(client, "report_version", None)
+    if reader is not None:
+        try:
+            version = reader(case_id, report_id)
+        except Exception:  # noqa: BLE001 — never fail a read over this
+            version = 0
+    return JSONResponse(json.loads(raw), headers={"ETag": f'"{version}"'})
 
 
 @reports_router.delete("/cases/{case_id}/reports/{report_id}")
@@ -237,7 +279,8 @@ def duplicate_report(
     src = report_from_json(client.load_report(case_id, report_id))
     new_report: Report = dataclasses.replace(src, name=body.name)
     new_json = report_to_json(new_report)
-    new_id = client.save_report(case_id, None, new_json, _readable(new_report))
+    new_id, _version = client.save_report(case_id, None, new_json,
+                                          _readable(new_report))
     return {"report_id": new_id}
 
 

@@ -77,7 +77,9 @@ def test_create_and_load_exact_round_trip(rb_wire) -> None:
     round-trip is exact: report_from_json(GET body) == report_from_json(original). Also asserts
     the chart count survives. (REQ-C-08, REQ-C-10, REQ-C-11)"""
     mock = _make_client()
-    mock.save_report.return_value = "rep-1"
+    # (report_id, version) — the route reads the version back to the editor,
+    # which sends it as If-Match on the next save.
+    mock.save_report.return_value = ("rep-1", 1)
 
     client = rb_wire(client=mock)
 
@@ -118,7 +120,9 @@ def test_duplicate_new_id_null_report_id_new_name_baked_in(rb_wire) -> None:
     mock = _make_client()
     src = _make_report("q1", "q2")
     mock.load_report.return_value = report_to_json(src)
-    mock.save_report.return_value = "rep-2"
+    # (report_id, version) — the route reads the version back to the editor,
+    # which sends it as If-Match on the next save.
+    mock.save_report.return_value = ("rep-2", 1)
 
     client = rb_wire(client=mock)
 
@@ -157,7 +161,9 @@ def test_put_versioned_save_passes_report_id(rb_wire) -> None:
     """PUT /cases/{case_id}/reports/{report_id} calls save_report with the given report_id (not
     None), enabling versioned replace. (REQ-C-08)"""
     mock = _make_client()
-    mock.save_report.return_value = "rep-99"
+    # (report_id, version) — the route reads the version back to the editor,
+    # which sends it as If-Match on the next save.
+    mock.save_report.return_value = ("rep-99", 1)
 
     client = rb_wire(client=mock)
 
