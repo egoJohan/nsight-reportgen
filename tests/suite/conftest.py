@@ -144,3 +144,15 @@ def has_soffice() -> bool:
 def require_soffice(has_soffice):
     if not has_soffice:
         pytest.skip("LibreOffice (soffice) not installed")
+
+
+@pytest.fixture(autouse=True)
+def _forget_sign_in_attempts():
+    """The sign-in failure counters are module-level and the whole suite runs in
+    one process, so a test that exercises a wrong password would otherwise spend
+    the next test's budget — and the failure would land somewhere unrelated."""
+    from reportbuilder.api import routes_auth
+
+    routes_auth._LOGIN_ATTEMPTS.reset()
+    routes_auth._LOGIN_ATTEMPTS_BY_ADDRESS.reset()
+    yield

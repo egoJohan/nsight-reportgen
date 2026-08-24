@@ -18,6 +18,7 @@ from reportbuilder.api.routes_settings import OIDC_KEY
 from reportbuilder.auth import identity, oidc, password, session
 from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.auth.permissions import EDIT, User
+from reportbuilder.auth.ratelimit import RateLimiter
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
@@ -136,6 +137,75 @@ def _bootstrap_admins() -> frozenset[str]:
     return frozenset(e.strip().lower() for e in raw.split(",") if e.strip())
 
 
+#: Sign-in attempt limits. Per (address, email) so one person's fumbling never
+#: bars a colleague, and per address as well so working through a list of emails
+#: from one place is counted as the single campaign it is. Failures only —
+#: getting your own password right is never counted against you.
+_LOGIN_ATTEMPTS = RateLimiter(limit=10, window=15 * 60)
+_LOGIN_ATTEMPTS_BY_ADDRESS = RateLimiter(limit=50, window=15 * 60)
+
+
+def _client_address(request: Request) -> str:
+    """Who is asking, for rate-limiting purposes.
+
+    Behind nginx every request arrives from the proxy, so counting
+    `request.client.host` would count the whole world as one caller and bar
+    everybody the moment anybody guessed. X-Forwarded-For is read only where it
+    is trusted — the same rule the OAuth redirect_uri is built under — because
+    where it is NOT trusted the caller sets it themselves, and a limiter keyed
+    on a value the attacker chooses is not a limiter.
+    """
+    if _trust_forwarded_headers(request):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    client = request.client
+    return client.host if client else "unknown"
+
+
+def _refuse_if_too_many_attempts(request: Request, email: str) -> tuple[str, str]:
+    """Stop here if this caller has been guessing. Returns the two keys to
+    record a failure against."""
+    address = _client_address(request)
+    by_user = f"{address}|{email}"
+    for key, limiter in ((by_user, _LOGIN_ATTEMPTS),
+                         (address, _LOGIN_ATTEMPTS_BY_ADDRESS)):
+        if not limiter.allows(key):
+            wait = limiter.retry_after(key)
+            raise HTTPException(
+                429, "Too many sign-in attempts. Try again in "
+                     f"{max(1, wait // 60)} minutes.",
+                headers={"Retry-After": str(wait)})
+    return by_user, address
+
+
+def _safe_next(value: str | None) -> str:
+    r"""Where to send the browser after a successful sign-in, made safe.
+
+    `next` arrives in the query string, is signed into the state cookie, and
+    was then used verbatim as a Location header. A link to our own sign-in
+    with `?next=https://evil.example/` therefore walked the victim through a
+    genuine Google consent screen and dropped them on the attacker's page,
+    still believing they were inside nSight — the useful half of a phishing
+    flow, hosted on our domain and our TLS certificate.
+
+    Only a path within this app is allowed. `//host` and `/\host` are excluded
+    because browsers read both as protocol-relative, i.e. as another origin;
+    control characters because a Location header is a header. Anything else
+    becomes the app root, which is where the sign-in button sends you anyway.
+
+    Applied both when it is captured AND when it is used: state cookies signed
+    before this existed are still valid for their lifetime.
+    """
+    v = (value or "").strip()
+    if not v.startswith("/") or v.startswith("//") or v.startswith("/\\"):
+        return "/"
+    if any(c in v for c in "\r\n\t\x00"):
+        return "/"
+    return v
+
+
 def _cookies_are_secure(request: Request) -> bool:
     """Whether our cookies may be marked Secure — i.e. whether the BROWSER
     reached us over https.
@@ -194,6 +264,10 @@ def register(request: Request, response: Response, body: dict = Body(...),
         raise HTTPException(422, "Password must be at least 12 characters")
 
     normalized = email.lower()
+    # This route hashes a password (Argon2) and refuses most callers, so it is
+    # both an amplifier and — despite the care taken above to answer refusals
+    # identically — a route worth hammering. Counted the same way sign-in is.
+    by_user, address = _refuse_if_too_many_attempts(request, normalized)
     if repo.find_user_by_email(auth, normalized) is not None:
         # An email that already resolves to an account -- with a password or
         # without one -- can never be claimed here. A passwordless account is
@@ -213,14 +287,19 @@ def register(request: Request, response: Response, body: dict = Body(...),
         # the same way /auth/login/password already takes care not to be.
         log.warning("register: refused an attempt to claim the existing account for '%s'",
                    normalized)
+        _LOGIN_ATTEMPTS.record_failure(by_user)
+        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
         raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
 
     resolved = identity.resolve_signed_in_user(repo, auth, email, _bootstrap_admins())
     if isinstance(resolved, identity.SignInRefused):
         log.info("register refused: %s", resolved.reason)
+        _LOGIN_ATTEMPTS.record_failure(by_user)
+        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
         raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
 
     repo.set_password(auth, resolved.id, password.hash_password(pw))
+    _LOGIN_ATTEMPTS.clear(by_user)
     _issue_session(request, response, repo, auth, resolved.id)
     return _user_out(resolved)
 
@@ -231,13 +310,19 @@ def login_password(request: Request, response: Response, body: dict = Body(...),
                    repo: Repository = Depends(get_repository)) -> dict:
     email = (body.get("email") or "").strip().lower()
     pw = body.get("password") or ""
+    # Before the Argon2 pass, not after: the verification is deliberately
+    # expensive, which is exactly what makes an unlimited endpoint an amplifier.
+    by_user, address = _refuse_if_too_many_attempts(request, email)
     user = repo.find_user_by_email(auth, email)
     stored_hash = repo.get_password_hash(auth, user.id) if user else None
     # Always verify against SOMETHING, so a wrong password and an unknown
     # email cost the same Argon2 pass -- no timing tell for either.
     ok = password.verify_password(stored_hash or password.DUMMY_HASH, pw)
     if not user or not stored_hash or not ok:
+        _LOGIN_ATTEMPTS.record_failure(by_user)
+        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
         raise HTTPException(401, "Incorrect email or password")
+    _LOGIN_ATTEMPTS.clear(by_user)
     _issue_session(request, response, repo, auth, user.id)
     return _user_out(user)
 
@@ -315,7 +400,8 @@ async def oidc_login(provider: str, request: Request, response: Response,
         raise HTTPException(502, f"{provider} is unreachable right now") from exc
 
     key = get_or_create_signing_key(repo, auth)
-    payload = _oauth_codec(key).dumps({"state": state, "nonce": nonce, "next": next})
+    payload = _oauth_codec(key).dumps(
+        {"state": state, "nonce": nonce, "next": _safe_next(next)})
     redirect = Response(status_code=302, headers={"Location": url})
     redirect.set_cookie(_OAUTH_COOKIE, payload, max_age=_OAUTH_MAX_AGE,
                         httponly=True, secure=_cookies_are_secure(request),
@@ -404,7 +490,7 @@ async def oidc_callback(provider: str, request: Request,
         redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
         return redirect
 
-    next_path = saved.get("next") or "/"
+    next_path = _safe_next(saved.get("next"))
     redirect = Response(status_code=302, headers={"Location": next_path})
     redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
     _issue_session(request, redirect, repo, auth, resolved.id)

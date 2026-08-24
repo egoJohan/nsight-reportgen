@@ -3,7 +3,7 @@ IdP (same technique as test_oidc.py) -- proving the HTTP wiring, not the
 crypto (that's Task 11's job).
 """
 import time
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 import pytest
@@ -341,3 +341,50 @@ class TestMicrosoftMultiTenantSignIn:
 
         me = client.get("/auth/me")
         assert me.status_code == 200 and me.json()["email"] == "maija@egoiq.com"
+
+
+# ---------------------------------------------------------------------------
+# Where sign-in sends you afterwards.
+#
+# `next` arrived in the query string and was used verbatim as the Location
+# header at the end of the flow. A link to OUR sign-in carrying somebody else's
+# URL walked the victim through a genuine Google consent screen and dropped
+# them on the attacker's page, still believing they were inside nSight — on our
+# domain, under our certificate, having just signed in for real.
+# ---------------------------------------------------------------------------
+
+def _round_trip(client, monkeypatch, rsa_key, next_param: str) -> str:
+    """Sign in for real with this `next`, and return where it sent the browser."""
+    monkeypatch.setenv("NSIGHT_BOOTSTRAP_ADMINS", "maija@egoiq.com")
+    nonce_box = {"nonce": None}
+    transport = _fake_idp_transport(rsa_key, nonce_box)
+    monkeypatch.setattr(oidc, "_client",
+                        lambda config, redirect_uri, _ignored: oidc.AsyncOAuth2Client(
+                            config.client_id, config.client_secret, scope=oidc._SCOPE,
+                            redirect_uri=redirect_uri, transport=transport))
+
+    login = client.get(f"/auth/login/google?next={quote(next_param, safe='')}",
+                       follow_redirects=False)
+    parsed = urlparse(login.headers["location"])
+    nonce_box["nonce"] = parse_qs(parsed.query)["nonce"][0]
+    state = parse_qs(parsed.query)["state"][0]
+    callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
+                          follow_redirects=False)
+    assert callback.status_code == 302
+    return callback.headers["location"]
+
+
+def test_sign_in_returns_you_to_the_page_you_came_from(client, monkeypatch, rsa_key):
+    assert _round_trip(client, monkeypatch, rsa_key,
+                       "/cases/abc123?step=design") == "/cases/abc123?step=design"
+
+
+@pytest.mark.parametrize("hostile", [
+    "https://evil.example/harvest",
+    "//evil.example/harvest",          # protocol-relative: another origin
+    "/\\evil.example/harvest",         # read as protocol-relative too
+    "javascript:alert(1)",
+])
+def test_it_never_hands_the_browser_to_somebody_else(client, monkeypatch, rsa_key,
+                                                     hostile):
+    assert _round_trip(client, monkeypatch, rsa_key, hostile) == "/"
