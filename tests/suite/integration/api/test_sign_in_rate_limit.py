@@ -89,3 +89,40 @@ def test_registration_is_counted_as_well(client):
     assert client.post("/auth/register",
                        json={"email": "nobody@example.com",
                              "password": GOOD}).status_code == 429
+
+
+class TestTheAddressCannotBeChosenByTheCaller:
+    """nginx sets `X-Forwarded-For $proxy_add_x_forwarded_for`, which PREPENDS
+    whatever the client sent and appends the address it saw. Reading the
+    leftmost entry handed the attacker both halves of the key.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _trusted(self, monkeypatch):
+        monkeypatch.setenv("NSIGHT_TRUST_FORWARDED_HEADERS", "1")
+
+    def _guess(self, client, sent: str, peer: str = "10.1.1.1"):
+        """A request as nginx would forward it: the caller's header, then the
+        address nginx actually saw."""
+        return client.post("/auth/login/password",
+                           json={"email": EMAIL, "password": "wrong"},
+                           headers={"X-Forwarded-For": f"{sent}, {peer}"})
+
+    def test_rotating_the_header_does_not_buy_unlimited_guesses(self, client):
+        """250 attempts against a 50-per-15-minute limit used to give 250 401s,
+        each one a full Argon2 pass — the CPU amplifier the limit exists to
+        stop."""
+        codes = [self._guess(client, f"10.0.{i // 256}.{i % 256}").status_code
+                 for i in range(60)]
+        assert 429 in codes, "every guess was answered"
+
+    def test_a_stranger_cannot_lock_somebody_else_out(self, client):
+        """Ten failures claiming to come from the victim's address used to make
+        the victim's CORRECT password answer 429."""
+        for _ in range(routes_auth._LOGIN_ATTEMPTS.limit + 2):
+            self._guess(client, "203.0.113.9", peer="10.9.9.9")
+
+        victim = client.post("/auth/login/password",
+                             json={"email": EMAIL, "password": GOOD},
+                             headers={"X-Forwarded-For": "203.0.113.9, 10.1.1.1"})
+        assert victim.status_code == 200, victim.text

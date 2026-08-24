@@ -18,7 +18,8 @@ from reportbuilder.api.deps_auth import (
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth import session
 from reportbuilder.auth.permissions import EDIT, Grant, User, may_write
-from reportbuilder.store.repository import Repository, ReportRef
+from reportbuilder.store.repository import ReportRef, Repository
+from reportbuilder.store.repository_client import deliverables_only
 from reportbuilder.store.seam import AuthContext, NotFound
 
 customers_router = APIRouter()
@@ -266,7 +267,10 @@ def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
     """
     cases = repo.list_cases(auth, customer_id, user=user)
     reports_by_case: dict[str, list[ReportRef]] = {}
-    for r in repo.list_reports_for_customer(auth, customer_id, user=user):
+    # The same rule the report list applies, or the card promises reports the
+    # caller then cannot open — "3 drafts", clicked, empty.
+    for r in deliverables_only(user, repo.list_reports_for_customer(
+            auth, customer_id, user=user)):
         reports_by_case.setdefault(r.case_id, []).append(r)
     out = []
     for k in cases:
@@ -309,13 +313,15 @@ def recent_reports(limit: int = Query(default=10, ge=1, le=50),
                    user: User = Depends(current_user)) -> list[dict]:
     """The caller's most recently modified reports, newest first.
 
-    "Accessible to this person" is the store's answer, not a filter applied
-    here: the underlying listing only returns paths this caller may read.
+    "Accessible to this person" is the store's answer for what may be READ; what
+    a view-only caller is SHOWN is narrower, and is `deliverables_only` — the
+    landing page listed work in progress that vanished when they clicked it.
     """
     return [
         {"id": r.id, "case_id": r.case_id, "customer_id": r.customer_id,
          "name": r.name, "modified_at": r.modified_at}
-        for r in repo.recent_reports(auth, limit=limit, user=user)
+        for r in deliverables_only(user, repo.recent_reports(auth, limit=limit,
+                                                             user=user))
     ]
 
 

@@ -237,6 +237,41 @@ _WORDCLOUD_NON_ANSWERS: frozenset[str] = frozenset({
 })
 
 
+def _is_non_answer_level(label: str) -> bool:
+    """Whether a VALUE LABEL names a non-answer rather than a point on the scale.
+
+    "En osaa sanoa" is an answer respondents give, but it is not a rung on the
+    ladder: it belongs in the chart and not in the top box or the mean.
+
+    Guessing this from the label's SHAPE — "it has no leading digit" — was
+    wrong in both directions. A genuine endpoint typed without its number
+    ("Täysin samaa mieltä" beside "1 - …", "2", "3", "4") was dropped from the
+    box AND from both halves of the mean; and a "En osaa sanoa" that happens to
+    be coded 6 on a word-only 1..5 scale was counted as scale point 6. So ask
+    what the label SAYS. The vocabulary is the one the word cloud already uses
+    for the same judgement, with the scale-specific phrasings added.
+    """
+    t = re.sub(r"[^\wäöåÄÖÅ\s]", " ", (label or "").lower())
+    t = re.sub(r"\s+", " ", t).strip()
+    return t in _NON_ANSWER_LEVELS
+
+
+#: Whole labels that name a non-answer. Deliberately exact-match, not
+#: substring: "En osaa sanoa" is one, "En osaa sanoa mitään hyvää" is a real
+#: answer, and a scale point that merely CONTAINS "ei" ("Ei lainkaan tärkeä",
+#: "Ei kumpaakaan") must never be caught by this.
+_NON_ANSWER_LEVELS: frozenset[str] = frozenset({
+    "en osaa sanoa", "ei osaa sanoa", "eos", "e o s", "en tiedä", "en tieda",
+    "ei tietoa", "ei kokemusta", "ei mielipidettä", "ei mielipidetta",
+    "ei vastausta", "ei käsitystä", "ei kasitysta", "en halua sanoa",
+    "ei koske minua", "ei sovellu", "en ole käyttänyt", "en ole kayttanyt",
+    # Punctuation is stripped to spaces before matching, so "don't know"
+    # arrives here as "don t know".
+    "don t know", "dont know", "do not know", "no opinion", "not applicable",
+    "n a", "na", "prefer not to say", "no answer",
+})
+
+
 def _is_non_answer(text: str) -> bool:
     """True when an open-ended answer is a non-response ('en osaa sanoa', '-',
     'en tiedä', …) and should contribute NOTHING to the word cloud."""
@@ -583,11 +618,19 @@ def _top_scale_categories(var: Variable, categories: list[str], n: int,
     shown = overrides or {}
     ranked = [shown.get(label, label)
               for _c, label, _p in sorted(lv, key=lambda t: t[2], reverse=not lowest)]
+    # Count SCALE LEVELS consumed, not distinct labels produced. Two levels
+    # shortened to the same string collapse to one entry here, and counting
+    # entries meant the loop went on to take the level BELOW them — so "Top 2"
+    # became top level plus neutral, and the sort ranked the wrong group first.
     out: list[str] = []
+    taken = 0
     for label in ranked:
-        if label in categories and label not in out:
+        if label not in categories:
+            continue
+        taken += 1
+        if label not in out:
             out.append(label)
-        if len(out) >= n:
+        if taken >= n:
             break
     return out
 
@@ -691,11 +734,25 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if scale_entries is not None:
         summary_points = {code: pt for code, _lbl, pt in entries}
     elif is_rating:
+        # `is_rating` tolerates ONE label the digit parse could not read, and
+        # that label is not always "En osaa sanoa" — it is just as often a real
+        # endpoint typed without its number ("Täysin samaa mieltä" beside
+        # "1 - …", "2", "3", "4"). Treating every unparsed label as a
+        # non-answer dropped that endpoint from the box AND from both halves of
+        # the mean, on a chart that still drew in the right order. So ask what
+        # the label says, and give a real level the point its code implies.
         summary_points = dict(rating)
+        for code, label in labels.items():
+            if code in summary_points or _is_non_answer_level(label):
+                continue
+            summary_points[code] = float(code)
     else:
         summary_points = {code: pt for code, _lbl, pt in scale_levels(var)}
         if not summary_points:
             summary_points = {code: pt for code, _lbl, pt in entries}
+    # Whatever route got us here, a non-answer is never a scale point.
+    summary_points = {code: pt for code, pt in summary_points.items()
+                      if not _is_non_answer_level(labels.get(code, ""))}
 
     # Cross-tab percentage DIRECTION (percent_base). Only meaningful with a real
     # classifier: "question" distributes the classifier within each base category
@@ -893,7 +950,12 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         statements = list(segments)
         row_summaries = _compute_row_summaries(
             spec, statements, [d for _, d in levels], [c for c, _ in levels], cells,
-            scale_levels=[d for _, d, _ in scale], scale_points=[c for c, _, _ in scale])
+            scale_levels=[d for _, d, _ in scale],
+            # The SCALE POINT, not the SAV code. `points` above stays on codes
+            # because that is what an author's picked row_summary_codes name,
+            # but a mean weighted by code prints 1.0 for a reverse-coded file
+            # where everyone answered "5", and 13.0 for one coded 11..15.
+            scale_points=[pt for _c, _d, pt in scale])
 
     base_n = {s: denom.get(s, 0) for s in segments}
     base_n.setdefault("Total", denom_total)
@@ -1271,7 +1333,8 @@ def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
     scale. Returns ``[]`` when it isn't. (REQ-C-24d)
     """
     pairs = [(vl.value, vl.label or "") for vl in var.value_labels
-             if vl.value not in var.missing_values]
+             if vl.value not in var.missing_values
+             and not _is_non_answer_level(vl.label or "")]
     if len(pairs) < 3:
         return []
     # Leading-digit labels → the parsed points (keeps out-of-order SAV codes correct).

@@ -5,6 +5,7 @@ spec §4). Every route here is either in PUBLIC_ROUTES or guarded by
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 
 import httpx
@@ -145,21 +146,41 @@ _LOGIN_ATTEMPTS = RateLimiter(limit=10, window=15 * 60)
 _LOGIN_ATTEMPTS_BY_ADDRESS = RateLimiter(limit=50, window=15 * 60)
 
 
+#: How many proxies append to X-Forwarded-For between the browser and us. nginx
+#: is one (`$proxy_add_x_forwarded_for`); staging puts Caddy in front, making
+#: two. Counting from the WRONG end is not a detail — see _client_address.
+_TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("NSIGHT_TRUSTED_PROXY_HOPS") or 1))
+
+
 def _client_address(request: Request) -> str:
     """Who is asking, for rate-limiting purposes.
 
     Behind nginx every request arrives from the proxy, so counting
     `request.client.host` would count the whole world as one caller and bar
-    everybody the moment anybody guessed. X-Forwarded-For is read only where it
-    is trusted — the same rule the OAuth redirect_uri is built under — because
-    where it is NOT trusted the caller sets it themselves, and a limiter keyed
-    on a value the attacker chooses is not a limiter.
+    everybody the moment anybody guessed. So X-Forwarded-For it is — but read
+    from the RIGHT end.
+
+    nginx sets `X-Forwarded-For $proxy_add_x_forwarded_for`, which PREPENDS
+    whatever the client sent and appends the address it saw. The leftmost entry
+    is therefore whatever the caller typed. Reading it gave an attacker both
+    halves of the key: rotating it made brute force unlimited (250 attempts, no
+    429, every one an Argon2 pass), and setting it to somebody else's address
+    locked that person out of their own account.
+
+    Each trusted proxy appends exactly one entry, so the caller's real address
+    is `_TRUSTED_PROXY_HOPS` from the right. Anything to the left of that is
+    caller-supplied and is ignored.
     """
     if _trust_forwarded_headers(request):
-        forwarded = request.headers.get("x-forwarded-for", "")
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        parts = [p.strip() for p in
+                 (request.headers.get("x-forwarded-for") or "").split(",")
+                 if p.strip()]
+        if len(parts) >= _TRUSTED_PROXY_HOPS:
+            return parts[-_TRUSTED_PROXY_HOPS]
+        if parts:
+            # Fewer hops than configured: the header did not come the way we
+            # were told it would, so trust only what we saw ourselves.
+            pass
     client = request.client
     return client.host if client else "unknown"
 
@@ -168,7 +189,10 @@ def _refuse_if_too_many_attempts(request: Request, email: str) -> tuple[str, str
     """Stop here if this caller has been guessing. Returns the two keys to
     record a failure against."""
     address = _client_address(request)
-    by_user = f"{address}|{email}"
+    # The email is caller-supplied and unbounded — nginx accepts a 50 MB body,
+    # and a retained key held a 200 000-character address verbatim. Hash it: the
+    # key only ever needs to be stable and distinct, never readable.
+    by_user = f"{address}|{hashlib.sha256(email.encode('utf-8')).hexdigest()[:32]}"
     for key, limiter in ((by_user, _LOGIN_ATTEMPTS),
                          (address, _LOGIN_ATTEMPTS_BY_ADDRESS)):
         if not limiter.allows(key):

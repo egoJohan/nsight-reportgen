@@ -75,3 +75,27 @@ def test_it_does_not_grow_without_bound(clock):
     # counted — evicting the newest would make the bound the way through it.
     assert "key-499" in limiter._hits
     assert "key-0" not in limiter._hits
+
+
+def test_merely_asking_does_not_create_an_entry(clock):
+    """Reading used to insert, while only recording evicted.
+
+    So once an address was blocked, every further request added a permanent key
+    and returned 429 without ever reaching the eviction path — the bound was
+    never consulted, and the map grew for as long as an attacker cared to send
+    requests. Cheap to drive: a refusal costs them no password hash.
+    """
+    limiter = RateLimiter(limit=3, window=60.0, clock=clock)
+    for i in range(500):
+        limiter.allows(f"never-seen-{i}")
+        limiter.retry_after(f"never-seen-{i}")
+    assert limiter._hits == {}
+
+
+def test_a_key_whose_window_has_passed_stops_being_tracked(clock):
+    limiter = RateLimiter(limit=3, window=60.0, clock=clock)
+    limiter.record_failure("a")
+    assert "a" in limiter._hits
+    clock.t += 61
+    assert limiter.allows("a")
+    assert "a" not in limiter._hits

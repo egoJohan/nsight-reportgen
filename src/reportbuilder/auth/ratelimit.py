@@ -42,14 +42,29 @@ class RateLimiter:
         self._clock = clock
         self._hits: OrderedDict[str, deque[float]] = OrderedDict()
 
-    def _live(self, key: str) -> deque[float]:
+    def _live(self, key: str, *, create: bool = False) -> deque[float]:
+        """This key's failures inside the window.
+
+        `create=False` — every read — must NOT insert. Reading used to, while
+        only `record_failure` evicted, so once an address was blocked every
+        further request added a permanent key and returned 429 without ever
+        reaching the eviction path: the bound was never consulted and the map
+        grew for as long as an attacker cared to send requests.
+        """
         now = self._clock()
         hits = self._hits.get(key)
         if hits is None:
+            if not create:
+                return deque()
             hits = deque()
             self._hits[key] = hits
         while hits and now - hits[0] > self.window:
             hits.popleft()
+        if not hits and not create:
+            # Nothing left in the window: stop tracking it rather than keeping
+            # an empty deque alive for every key ever asked about.
+            self._hits.pop(key, None)
+            return deque()
         self._hits.move_to_end(key)
         return hits
 
@@ -58,7 +73,10 @@ class RateLimiter:
         return len(self._live(key)) < self.limit
 
     def record_failure(self, key: str) -> None:
-        self._live(key).append(self._clock())
+        self._live(key, create=True).append(self._clock())
+        self._evict()
+
+    def _evict(self) -> None:
         while len(self._hits) > self.MAX_KEYS:
             self._hits.popitem(last=False)
 

@@ -148,3 +148,73 @@ def test_the_printed_top_box_does_not_depend_on_the_file_order():
         return img.crop((int(w * 0.9), 0, w, int(h * 0.85))).tobytes()
 
     assert strip(ascending=True) == strip(ascending=False)
+
+
+# ── What the label SAYS decides, not whether it parsed a digit ─────────────
+def test_a_real_endpoint_typed_without_its_number_still_counts():
+    """The regression this file's own fix introduced.
+
+    `is_rating` tolerates one label the digit parse cannot read, and that label
+    is as often a genuine endpoint typed without its number as it is "En osaa
+    sanoa". Treating every unparsed label as a non-answer dropped a real scale
+    point from the box AND from both halves of the mean — on a chart that still
+    drew in the right order, so nothing looked wrong.
+    """
+    labels = ["1 - Täysin eri mieltä", "2", "3", "4", "Täysin samaa mieltä"]
+    var = Variable(name="q", label="Väite", measurement="categorical",
+                   value_labels=tuple(ValueLabel(float(i + 1), t)
+                                      for i, t in enumerate(labels)),
+                   missing_values=frozenset())
+    data = [1.0] * 10 + [2.0] * 10 + [3.0] * 20 + [4.0] * 30 + [5.0] * 30
+    assert _run(var, data, row_summary_fn="top2_sum").row_summaries == (60.0,)
+    assert _run(var, data, row_summary_fn="mean").row_summaries == (3.6,)
+
+
+def test_the_mean_weights_by_the_scale_point_not_the_sav_code():
+    """A reverse-coded file: the label says 5, the code says 1.
+
+    Weighting by code printed 1.0 where everyone had answered "Täysin samaa
+    mieltä" — and the same data charted as a battery printed 5.0, so the two
+    paths disagreed about the same respondents.
+    """
+    labels = [(1.0, "5 - Täysin samaa mieltä"), (2.0, "4"), (3.0, "3"),
+              (4.0, "2"), (5.0, "1 - Täysin eri mieltä")]
+    var = Variable(name="q", label="Väite", measurement="categorical",
+                   value_labels=tuple(ValueLabel(v, t) for v, t in labels),
+                   missing_values=frozenset())
+    assert _run(var, [1.0] * 50, row_summary_fn="mean").row_summaries == (5.0,)
+
+
+def test_a_dont_know_coded_inside_the_run_is_still_not_a_scale_point():
+    """Word-only 1..5 with "En osaa sanoa" coded 6 — contiguous, so the codes
+    looked like a six-point scale and EOS became the top of it."""
+    words = ["Erittäin tyytymätön", "Tyytymätön", "Ei kumpaakaan",
+             "Tyytyväinen", "Erittäin tyytyväinen", "En osaa sanoa"]
+    var = Variable(name="q", label="Tyytyväisyys", measurement="categorical",
+                   value_labels=tuple(ValueLabel(float(i + 1), t)
+                                      for i, t in enumerate(words)),
+                   missing_values=frozenset())
+    # 25 % at the top level, 15 % at the one below, 10 % "En osaa sanoa".
+    data = ([1.0] * 20 + [2.0] * 20 + [3.0] * 10 + [4.0] * 15 + [5.0] * 25
+            + [6.0] * 10)
+    assert _run(var, data, row_summary_fn="top2_sum").row_summaries == (40.0,)
+
+
+def test_two_levels_shortened_to_one_label_do_not_pull_in_the_level_below():
+    """"Top 2" became top level + neutral once the author shortened both agree
+    levels to the same words."""
+    from reportbuilder.stats.engine import _top_scale_categories
+
+    labels = ["1 - Täysin eri mieltä", "2", "3 - Ei kumpaakaan",
+              "4 - Melko samaa mieltä", "5 - Täysin samaa mieltä"]
+    var = Variable(name="q", label="Väite", measurement="categorical",
+                   value_labels=tuple(ValueLabel(float(i + 1), t)
+                                      for i, t in enumerate(labels)),
+                   missing_values=frozenset())
+    overrides = {"4 - Melko samaa mieltä": "Samaa mieltä",
+                 "5 - Täysin samaa mieltä": "Samaa mieltä"}
+    shown = ["1 - Täysin eri mieltä", "2", "3 - Ei kumpaakaan", "Samaa mieltä"]
+
+    top = _top_scale_categories(var, shown, 2, overrides=overrides)
+    assert "3 - Ei kumpaakaan" not in top, "the neutral level is not agreement"
+    assert top == ["Samaa mieltä"]

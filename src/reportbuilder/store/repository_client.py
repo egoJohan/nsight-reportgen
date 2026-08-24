@@ -26,6 +26,37 @@ class MaterialNotFound(KeyError):
     """A flat material id that resolves to nothing this caller may read."""
 
 
+def is_deliverable(ref) -> bool:
+    """Whether a report is something finished rather than work in progress.
+
+    "A deck has been produced for it", not "the stored deck is current". The
+    stricter fact is what the Generated badge and the download button read, and
+    a save clears it on purpose — so gating a viewer on it would mean a client
+    lost sight of a deck already delivered to them the moment an analyst touched
+    a title. Editing does not un-deliver what was delivered.
+    """
+    return bool(getattr(ref, "has_render", False)
+                or getattr(ref, "rendered", False))
+
+
+def deliverables_only(user, refs):
+    """The reports `user` may be SHOWN, from refs they may READ.
+
+    A view-only grant is the client's grant: they see finished work, not the
+    half-built state of it. `user=None` is an internal caller — render, export,
+    backup, the AI passes — with no request behind it, and sees everything.
+
+    One rule in one place, because it was three: the report list applied it, and
+    the study card's "3 drafts" counter, the recent-reports landing page and the
+    material's usage list did not — so a client was told about work they then
+    could not open, by name and by count.
+    """
+    if user is None:
+        return list(refs)
+    return [r for r in refs
+            if may_write(user, f"{r.customer_id}/{r.case_id}") or is_deliverable(r)]
+
+
 class RepositoryClient:
     """Flat-id façade over the hierarchy. One per request — it carries the
     caller's auth AND their grants, so it must never be shared between
@@ -57,17 +88,7 @@ class RepositoryClient:
         return self.user is None or may_write(self.user, f"{k.customer_id}/{k.id}")
 
     def _finished(self, ref) -> bool:
-        """Whether a report is a deliverable rather than work in progress.
-
-        "A deck has been produced for it", not "the stored deck is current".
-        The stricter fact is what the Generated badge and the download button
-        read, and a save clears it on purpose — so gating a viewer on it meant
-        a client lost sight of a deck already delivered to them the moment an
-        analyst touched a title. Editing does not un-deliver what was
-        delivered; it only makes the next version not ready yet.
-        """
-        return bool(getattr(ref, "has_render", False)
-                    or getattr(ref, "rendered", False))
+        return is_deliverable(ref)
 
     # -- material ---------------------------------------------------------
 
@@ -276,8 +297,8 @@ class RepositoryClient:
     def reports_using_material(self, case_id: str, material_id: str) -> list[dict]:
         k = self._case(case_id)
         return [{"report_id": r.id, "name": r.name}
-                for r in self.repo.reports_using_material(
-                    self.auth, k.customer_id, k.id, material_id)]
+                for r in deliverables_only(self.user, self.repo.reports_using_material(
+                    self.auth, k.customer_id, k.id, material_id))]
 
     def delete_material(self, case_id: str, material_id: str) -> int:
         """Delete a dataset. ConsentRequired propagates, as for a case."""

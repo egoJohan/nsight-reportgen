@@ -299,16 +299,6 @@ export interface ReportDoc {
 /** Carries the HTTP status alongside the message, so a caller that needs to
  *  tell "not found" apart from "network hiccup" (the no-access customer
  *  page) does not have to parse it back out of the message text. */
-/** The version each open report was last seen at, by `<caseId>/<reportId>`.
- *
- *  Kept here rather than in the document because the report JSON round-trips
- *  through the model on both sides, and a version inside it would be a value in
- *  the document that is not part of the document. Set when a report is loaded
- *  and after every successful save; read when saving, so a save built on a copy
- *  somebody else has since replaced is refused instead of silently replacing
- *  their work. */
-export const reportVersions = new Map<string, number>();
-
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -1146,39 +1136,37 @@ export const api = {
         { method: "DELETE", keepalive: true }
       ).then(() => undefined),
 
-    /** Save a report. `baseVersion` is what this editor loaded — the server
-     *  refuses (409) if the report has been saved by somebody else since, and
-     *  is not held to it when nothing is sent. See reportVersions. */
+    /** Save a report.
+     *
+     *  Deliberately sends no If-Match. The server supports one — it records a
+     *  version and refuses a save built on a copy somebody else has replaced —
+     *  and this editor sending it caused far more harm than the window it
+     *  closed. Binding a template writes the report doc, so the version moved
+     *  under the open editor and its next autosave was refused; so did a second
+     *  tab of the SAME person (which the lock deliberately allows), a save whose
+     *  response was lost, and two autosaves overlapping on a slow deck. Every
+     *  one of those ended with the editor closing and discarding unsaved work —
+     *  the exact harm the check was added to prevent, made much likelier.
+     *
+     *  What guards concurrent editing is the LOCK. If this is revisited, the
+     *  editor needs a single in-flight save, a version refreshed by every write
+     *  path (template binding included), and a 409 that can be told apart from
+     *  the lock's before any of it is worth switching on. */
     update: (
       caseId: string,
       reportId: string,
-      report: ReportDoc,
-      baseVersion?: number
+      report: ReportDoc
     ): Promise<{ report_id: string; version?: number }> =>
       fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...(baseVersion === undefined ? {} : { "If-Match": String(baseVersion) }),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(report),
-      }).then(async (r) => {
-        const out = await json<{ report_id: string; version?: number }>(r);
-        if (typeof out.version === "number") {
-          reportVersions.set(`${caseId}/${reportId}`, out.version);
-        }
-        return out;
-      }),
+      }).then((r) => json<{ report_id: string; version?: number }>(r)),
 
-    get: async (caseId: string, reportId: string): Promise<ReportDoc> => {
-      const res = await fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}`);
-      // The version rides in an ETag rather than in the document, which
-      // round-trips through the model and must not gain fields of its own.
-      const tag = Number((res.headers.get("ETag") ?? "").replace(/"/g, ""));
-      const doc = await json<ReportDoc>(res);
-      if (Number.isFinite(tag)) reportVersions.set(`${caseId}/${reportId}`, tag);
-      return doc;
-    },
+    get: (caseId: string, reportId: string): Promise<ReportDoc> =>
+      fetch(`${API_BASE}/cases/${caseId}/reports/${reportId}`).then((r) =>
+        json<ReportDoc>(r)
+      ),
 
     // "Raportti voidaan kopioida uudeksi" — the copy lands under the SAME case
     // and carries every setting; only the name and the id differ. The backend

@@ -35,6 +35,37 @@ _JSON = "application/json"
 _PPTX = ("application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
 
+def _render_digest(parts: list[str]) -> str:
+    h = hashlib.sha256()
+    for part in parts:
+        h.update(part.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def _render_keys_match(stored: str, wanted: str) -> bool:
+    """Whether a stored render key describes the deck `wanted` asks for.
+
+    A key is "<current> legacy=<previous-shape>". They match when their current
+    halves agree — or, for a deck stamped by a release that had no legacy half
+    at all, when the stored key equals the wanted key's legacy half.
+
+    That second arm is a one-time compatibility path. Adding a component to the
+    key (the template, in this release) changes every key ever stamped, and
+    `load_render` answers None on a mismatch — so without it the first download
+    of EVERY report rendered before this release 404s, while the report still
+    shows its Generated badge and its Download button. The next render of that
+    report writes a current-shape key and this stops being consulted.
+    """
+    if not stored:
+        return False
+    stored_now = stored.split(" legacy=")[0]
+    wanted_now, _, wanted_legacy = wanted.partition(" legacy=")
+    if stored_now == wanted_now:
+        return True
+    return bool(wanted_legacy) and stored == wanted_legacy
+
+
 @dataclass(frozen=True)
 class Customer:
     id: str
@@ -1887,18 +1918,18 @@ class Repository:
         """
         from reportbuilder.render.fonts import rendering_fingerprint
 
-        h = hashlib.sha256()
-        for part in (
+        parts = [
             self.load_report(auth, customer_id, case_id, report_id),
             json.dumps(self.load_material_config(auth, customer_id, case_id,
                                                  material_id), sort_keys=True),
             material_id,
             rendering_fingerprint(),
-            self.resolved_template_identity(auth, customer_id, case_id, report_id),
-        ):
-            h.update(part.encode("utf-8"))
-            h.update(b"\x00")
-        return h.hexdigest()
+        ]
+        # The current key, and the shape this key had before the template joined
+        # it, so a deck stamped by the previous release is still recognised as
+        # its own. See _render_keys_match.
+        return (f"{_render_digest([*parts, self.resolved_template_identity(auth, customer_id, case_id, report_id)])}"
+                f" legacy={_render_digest(parts)}")
 
     def resolved_template_identity(self, auth: AuthContext, customer_id: str,
                                    case_id: str, report_id: str) -> str:
@@ -1953,7 +1984,7 @@ class Repository:
             d = self._read_json(auth, P.report_meta_path(customer_id, case_id, report_id))
         except (NotFound, ValueError, UnicodeDecodeError):
             return None
-        if d.get("render_key") != key:
+        if not _render_keys_match(d.get("render_key") or "", key):
             return None
         try:
             return self.store.get(
