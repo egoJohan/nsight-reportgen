@@ -43,7 +43,7 @@ import {
   FolderOpenIcon,
   Building2Icon,
   ChevronRightIcon,
-  ClockIcon,
+  HouseIcon,
   LockIcon,
   SettingsIcon,
   XIcon,
@@ -526,7 +526,7 @@ export default function AppShell() {
               <SidebarMenu>
                 <SidebarMenuItem>
                   <SidebarMenuButton render={<NavLink to="/" end />} tooltip="Home">
-                    <ClockIcon className="size-4" />
+                    <HouseIcon className="size-4" />
                     <span>Home</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
