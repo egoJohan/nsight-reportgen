@@ -1493,6 +1493,37 @@ export const api = {
   /** The "Request access"/"Request permissions" buttons on the customer
    *  page, and the admin-or-owner queue that acts on them (Settings >
    *  Permission requests, its own tab — see routes_access_requests.py). */
+  /** Somebody a provider has vouched for who has no account here yet.
+   *
+   *  Reached with a signup TICKET rather than a session — see
+   *  routes_signup_requests.py. `me` answers the whole page state in one call
+   *  so the request page never has to infer it from the shape of an error. */
+  signup: {
+    me: (): Promise<SignupTicket> =>
+      fetch(`${API_BASE}/signup/me`).then((r) => json<SignupTicket>(r)),
+
+    request: (): Promise<SignupRequest> =>
+      fetch(`${API_BASE}/signup-requests`, { method: "POST" }).then((r) =>
+        detailedJson<SignupRequest>(r)
+      ),
+
+    /** Waiting askers, newest first — admin-only. Approved ones have become
+     *  accounts and appear on the Users screen; refused ones are gone. */
+    pending: (): Promise<SignupRequest[]> =>
+      fetch(`${API_BASE}/signup-requests`).then((r) => json<SignupRequest[]>(r)),
+
+    approve: (requestId: string, grants: UserGrantInput[]): Promise<SignupApproval> =>
+      fetch(`${API_BASE}/signup-requests/${requestId}/approve`,
+            jsonPost({ grants })).then((r) => detailedJson<SignupApproval>(r)),
+
+    refuse: (requestId: string): Promise<void> =>
+      fetch(`${API_BASE}/signup-requests/${requestId}`, { method: "DELETE" }).then(
+        (r) => {
+          if (!r.ok) throw new ApiError(r.status, "Could not remove the request");
+        }
+      ),
+  },
+
   accessRequests: {
     create: (customerId: string, mode: AccessMode): Promise<AccessRequest> =>
       fetch(`${API_BASE}/access-requests`,
@@ -1652,6 +1683,38 @@ export type AccessMode = "view" | "edit";
 /** A signed-in user's ask for access to a customer they cannot see — the
  *  record behind the no-access page's "Request access" button (backend:
  *  reportbuilder.store.repository.AccessRequest). */
+/** What the signup ticket asserts, plus the two facts that decide what the
+ *  request page says. Answered in one call so the page never infers a state
+ *  from an error code. */
+export interface SignupTicket {
+  email: string;
+  provider: string;
+  name: string;
+  /** They were invited while holding this ticket — the answer is "sign in". */
+  has_account: boolean;
+  /** They already asked; nobody has decided yet. */
+  pending: boolean;
+}
+
+export interface SignupRequest {
+  id: string;
+  email: string;
+  provider: string;
+  name: string;
+  requested_at: string;
+  state: "pending" | "approved" | "refused";
+  decided_by: string | null;
+  decided_at: string | null;
+}
+
+/** Approval reports whether the invitation mail actually went out: the asker
+ *  was told to expect one, so an admin without SMTP has to know they must say
+ *  so themselves. */
+export interface SignupApproval extends SignupRequest {
+  emailed: boolean;
+  link: string;
+}
+
 export interface AccessRequest {
   id: string;
   user_id: string;

@@ -11,6 +11,7 @@ import {
   MailIcon,
   CopyIcon,
   PlusIcon,
+  UserPlusIcon,
   UsersIcon,
   ShieldCheckIcon,
   TypeIcon,
@@ -35,6 +36,9 @@ import {
 import { useSession } from "@/lib/session";
 import BackupTab from "@/components/settings/BackupTab";
 import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
+import PendingUsersTab from "@/components/settings/PendingUsersTab";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import type { InstalledFont, MissingFont, StudioUser, Invite, AccessRequest } from "@/lib/api";
 
 function bytes(n: number): string {
@@ -570,6 +574,15 @@ export default function SettingsPage() {
   // whose result (always []) would just be discarded.
   const { data: permissionRequests } = useAccessRequests(canSeePermissionRequests);
   const pendingCount = permissionRequests?.length ?? 0;
+  // Same reason as above: the count belongs on the tab, so somebody waiting to
+  // be let in is visible without a click. Admin-only, so not fetched for
+  // anyone who cannot act on it.
+  const { data: pendingUsers } = useQuery({
+    queryKey: ["signup-requests"],
+    queryFn: api.signup.pending,
+    enabled: !!me?.is_admin,
+  });
+  const pendingUserCount = pendingUsers?.length ?? 0;
 
   // People first, fonts are set once and forgotten: Users, then Permission
   // requests, then Fonts. Users and Permission requests are each gated;
@@ -605,6 +618,16 @@ export default function SettingsPage() {
                 <UsersIcon className="size-4" />Users
               </TabsTrigger>
             )}
+            {/* Right after Users: both are "who is in this hive", and a
+                person waiting to get in is the more urgent of the two. */}
+            {me.is_admin && (
+              <TabsTrigger value="pending-users">
+                <UserPlusIcon className="size-4" />Pending users
+                {pendingUserCount > 0 && (
+                  <Badge variant="secondary" className="font-normal">{pendingUserCount}</Badge>
+                )}
+              </TabsTrigger>
+            )}
             {canSeePermissionRequests && (
               <TabsTrigger value="permission-requests">
                 <ShieldCheckIcon className="size-4" />Permission requests
@@ -634,6 +657,11 @@ export default function SettingsPage() {
               </TabsTrigger>
             )}
           </TabsList>
+          {me.is_admin && (
+            <TabsContent value="pending-users" className="mt-4">
+              <PendingUsersTab />
+            </TabsContent>
+          )}
           {me.is_admin && (
             <TabsContent value="users" className="mt-4">
               <UsersTab />

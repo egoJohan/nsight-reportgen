@@ -146,9 +146,6 @@ export default function LoginPage() {
             <h1 className="text-lg font-semibold tracking-tight">
               Sign in to nSight Studio
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Use the work account your invitation was sent to.
-            </p>
           </div>
 
           {ssoError && (
@@ -195,8 +192,8 @@ export default function LoginPage() {
           )}
 
           <p className="text-center text-xs text-muted-foreground">
-            Access is by invitation. If you don&rsquo;t have one, ask an
-            administrator to invite your work address.
+            No account yet? Sign in anyway &mdash; you can request access from
+            there.
           </p>
         </div>
       </div>
