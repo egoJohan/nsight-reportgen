@@ -61,13 +61,26 @@ def create_invitation(repo: Repository, auth: AuthContext, *, email: str,
     invited person is identified only by the verified email they sign in
     with, matched at consumption time (see identity.py).
 
-    Whether *email* already belongs to an account is deliberately not
-    checked here -- see identity.py's consumption branch for why: an
-    existing account always wins over a pending invite, so recording one
-    for an already-registered address cannot escalate anyone's access.
+    The ACCOUNT is created here, with its grants, not when the invited
+    person first signs in. An invitation invites somebody to SIGN IN; it is
+    not a promise to create an account later. Deferring it left a window in
+    which an address was spoken for but unclaimed, and anyone who knew the
+    address could claim it: sign-in mints the account from whatever email it
+    is handed, so the first caller to present that address got the grants.
+    With the account present from the start, every path that resolves an
+    email finds an existing user and returns it, which is the branch that was
+    always meant to win.
+
+    The invited person has no password and never gets one -- they authenticate
+    with Google or Microsoft, and identity.resolve_signed_in_user simply finds
+    the account waiting for them.
     """
+    user = repo.save_user(auth, User(id="", email=email.strip().lower(),
+                                     name=email.split("@", 1)[0],
+                                     is_admin=False, grants=grants))
     invite = repo.create_invite(auth, email, grants, invited_by.id,
-                                lifetime_seconds=DEFAULT_LIFETIME_SECONDS)
+                                lifetime_seconds=DEFAULT_LIFETIME_SECONDS,
+                                user_id=user.id)
     config = mailer.config_from_settings(repo.get_setting(auth, mailer.EMAIL_KEY))
     emailed = (config is not None
               and sender(config, invite.email, _SUBJECT, _body(invited_by.email, login_url)))
@@ -88,8 +101,18 @@ def revoke_invitation(repo: Repository, auth: AuthContext,
     invite = repo.get_invite(auth, invite_id)
     if invite is None:
         return None
-    if invite.accepted_user_id:
-        refused = users.remove_user(repo, auth, invite.accepted_user_id)
+    # The account exists from the moment the invitation is created, so a
+    # PENDING invite has one too and revoking must take it away. Deleting only
+    # the invite record would leave the account behind holding the grants the
+    # admin has just decided to withdraw — which reads as "revoked" on the
+    # invites screen and is not.
+    # `user_id` is the account this invitation created; `accepted_user_id` is
+    # whoever later signed in. Either identifies the account to take away, and
+    # neither is a guess from the address — an account that merely shares the
+    # email is somebody else, and revoking an invitation must not delete them.
+    user_id = invite.accepted_user_id or invite.user_id
+    if user_id:
+        refused = users.remove_user(repo, auth, user_id)
         if refused is not None:
             return refused
     repo.delete_invite(auth, invite_id)

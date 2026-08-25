@@ -158,6 +158,30 @@ class TestRemoveUser:
 
 
 class TestInvite:
+    def test_inviting_creates_the_account_there_and_then(self, admin_client, repo, auth):
+        """An invitation invites someone to SIGN IN, not to create an account.
+
+        The account and its grants exist from the moment the admin invites, so
+        there is never a window where an address is spoken for but unclaimed.
+        That window was the bug: `/auth/register` refuses any email that
+        already resolves to an account precisely so nobody can claim a
+        colleague's access by knowing their address — and the guard could not
+        fire while the account did not exist yet.
+        """
+        admin_client.post("/users/invite",
+                          json={"email": "new@egoiq.com",
+                                "grants": [{"scope": "attendo", "mode": "view"}]})
+        u = repo.find_user_by_email(auth, "new@egoiq.com")
+        assert u is not None, "the invited account must exist immediately"
+        assert [(g.scope, g.mode) for g in u.grants] == [("attendo", "view")]
+        assert u.is_admin is False
+
+    def test_the_invited_account_has_no_password_to_guess(self, admin_client, repo, auth):
+        """Nothing sets one. Sign-in is Google or Microsoft."""
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        u = repo.find_user_by_email(auth, "new@egoiq.com")
+        assert repo.get_password_hash(auth, u.id) is None
+
     def test_invites_a_new_email(self, admin_client):
         r = admin_client.post("/users/invite",
                               json={"email": "new@egoiq.com",
@@ -185,21 +209,33 @@ class TestInvite:
 
 
 class TestInviteConsumption:
-    def test_accepting_an_invite_over_password_registration_gets_its_grants(self, admin_client):
-        """The other half of the flow: /auth/register (already built) ends
-        at identity.resolve_signed_in_user, which now consumes a pending
-        invite (Task 5) -- proven here over the real HTTP surface."""
+    def test_an_invited_address_cannot_be_claimed_by_a_stranger(self, admin_client):
+        """The guard that could not fire before.
+
+        `/auth/register` refuses any email that already resolves to an account,
+        so that nobody can take a colleague's access by knowing their address.
+        While the account was only created at first sign-in, there was nothing
+        for it to refuse: whoever presented the address first was handed the
+        invitation's grants and a working session.
+        """
         admin_client.post("/users/invite",
                           json={"email": "invited@egoiq.com",
                                "grants": [{"scope": "attendo", "mode": "edit"}]})
         r = admin_client.post("/auth/register",
                               json={"email": "invited@egoiq.com",
                                    "password": "correct horse battery staple"})
-        assert r.status_code == 201, r.text
-        [row] = [u for u in admin_client.get("/users").json() if u["email"] == "invited@egoiq.com"]
+        assert r.status_code == 403, r.text
+
+    def test_the_grants_are_on_the_account_from_the_start(self, admin_client):
+        admin_client.post("/users/invite",
+                          json={"email": "invited@egoiq.com",
+                               "grants": [{"scope": "attendo", "mode": "edit"}]})
+        [row] = [u for u in admin_client.get("/users").json()
+                 if u["email"] == "invited@egoiq.com"]
         assert row["grants"][0]["scope"] == "attendo"
-        [inv] = [i for i in admin_client.get("/invites").json() if i["email"] == "invited@egoiq.com"]
-        assert inv["status"] == "accepted"
+        [inv] = [i for i in admin_client.get("/invites").json()
+                 if i["email"] == "invited@egoiq.com"]
+        assert inv["status"] == "pending", "pending until they actually sign in"
 
 
 class TestRevokeInvite:
@@ -219,3 +255,22 @@ class TestRevokeInvite:
         r = _delete_approving_consent(admin_client, repo, f"/invites/{invite_id}")
         assert r.status_code == 204
         assert repo.get_user(auth, row["id"]) is None
+
+
+class TestRevokeCreatesNoOrphan:
+    def test_revoking_a_pending_invite_removes_the_account_too(
+        self, admin_client, repo, auth
+    ):
+        """The account exists from the moment of invitation, so revoking has to
+        take it away. Deleting only the invite record would leave the account
+        holding exactly the grants the admin just decided to withdraw — and it
+        would read as "revoked" on the invites screen."""
+        admin_client.post("/users/invite",
+                          json={"email": "gone@egoiq.com",
+                                "grants": [{"scope": "attendo", "mode": "edit"}]})
+        assert repo.find_user_by_email(auth, "gone@egoiq.com") is not None
+        [inv] = [i for i in admin_client.get("/invites").json()
+                 if i["email"] == "gone@egoiq.com"]
+        d = _delete_approving_consent(admin_client, repo, f"/invites/{inv['id']}")
+        assert d.status_code == 204, d.text
+        assert repo.find_user_by_email(auth, "gone@egoiq.com") is None

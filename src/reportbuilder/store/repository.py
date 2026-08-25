@@ -183,6 +183,13 @@ class Invite:
     expires: str
     accepted_user_id: str | None = None
     accepted_at: str | None = None
+    #: The account this invitation CREATED, when it created one. Distinct from
+    #: `accepted_user_id`, which records who later signed in: the account now
+    #: exists from the moment of invitation, so revoking a still-pending invite
+    #: has to find it, and first sign-in must only be treated as accepting the
+    #: invitation when it is that same account turning up. An account that
+    #: merely shares the address is somebody else.
+    user_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1374,7 +1381,8 @@ class Repository:
     # see `P.invite_path` -- so a lookup needs only the id, not the email.
 
     def create_invite(self, auth: AuthContext, email: str, grants,
-                      invited_by: str, lifetime_seconds: int) -> Invite:
+                      invited_by: str, lifetime_seconds: int,
+                      user_id: str | None = None) -> Invite:
         iid = _new_invite_id()
         # Microsecond precision, unlike the shared `_now()`: `list_invites`
         # sorts newest-first by this field, and two invites sent by an
@@ -1390,10 +1398,12 @@ class Repository:
                          {"id": iid, "email": normalized,
                           "grants": [{"scope": g.scope, "mode": g.mode} for g in grant_tuple],
                           "invited_by": invited_by, "invited_at": now, "expires": expires,
-                          "accepted_user_id": None, "accepted_at": None},
+                          "accepted_user_id": None, "accepted_at": None,
+                          "user_id": user_id},
                          [P.LABEL_INVITE])
         return Invite(id=iid, email=normalized, grants=grant_tuple,
-                      invited_by=invited_by, invited_at=now, expires=expires)
+                      invited_by=invited_by, invited_at=now, expires=expires,
+                      user_id=user_id)
 
     def _invite_from(self, d: dict) -> Invite:
         grants = []
@@ -1411,7 +1421,8 @@ class Repository:
                       invited_by=d.get("invited_by", ""), invited_at=d.get("invited_at", ""),
                       expires=d.get("expires", ""),
                       accepted_user_id=d.get("accepted_user_id"),
-                      accepted_at=d.get("accepted_at"))
+                      accepted_at=d.get("accepted_at"),
+                      user_id=d.get("user_id"))
 
     def get_invite(self, auth: AuthContext, invite_id: str) -> "Invite | None":
         """The record for *invite_id*, or None if it does not exist or is

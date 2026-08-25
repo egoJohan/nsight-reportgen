@@ -77,6 +77,21 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
         return SignInRefused(f"'{email}' is not an email address")
 
     existing = repo.find_user_by_email(auth, normalized)
+    if existing is not None:
+        # The account was created when the invitation was, so the invite is
+        # still "pending" on the admin's screen until its owner actually turns
+        # up. This is that moment. Marking it here — rather than at account
+        # creation — keeps "pending" meaning "invited but never signed in",
+        # which is the only reading an admin can act on.
+        pending_for_existing = repo.find_pending_invite_by_email(auth, normalized)
+        # ONLY when this is the account the invitation created. An account that
+        # merely shares the address is a different person, and letting their
+        # sign-in accept the invitation would both hide it from the admin's
+        # pending list and aim a later revoke at them.
+        if pending_for_existing is not None and pending_for_existing.user_id == existing.id:
+            repo.mark_invite_accepted(auth, pending_for_existing.id, existing.id)
+            log.info("sign-in: '%s' first sign-in fulfils invitation %s",
+                     normalized, pending_for_existing.id)
     if existing is not None and existing.is_admin:
         # Already an admin: nothing for break-glass to do, ordinary sign-in.
         return existing
