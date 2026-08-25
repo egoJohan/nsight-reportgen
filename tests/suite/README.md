@@ -55,7 +55,7 @@ Real client SAVs for the `demo` group are read only from the gitignored
 ## Conventions
 
 - **Deterministic by default.** No wall-clock/random dependence; matplotlib runs Agg (headless).
-- **Seams:** DataHive is injected via `create_app(client=Mock(spec=DataHiveClient) | InMemoryDataHiveClient)`; the LLM boundary is mocked by monkeypatching `reportbuilder.api.routes_ai.egohive_chat` or passing a fake `chat=`; the egoHive client's only network call (`urllib.request.urlopen`) is mocked for client-internals tests.
+- **Seams:** DataHive is injected via `create_app(client=Mock(spec=DataHiveClient) | InMemoryDataHiveClient)`; the LLM boundary is mocked by monkeypatching `reportbuilder.api.routes_ai.datahive_chat` or passing a fake `chat=`; the egoHive client's only network call (`urllib.request.urlopen`) is mocked for client-internals tests.
 - **The product is the source of truth.** Tests assert *actual* behaviour discovered by running the code — they never drive a change to `src/`.
 
 ## Fixing a defect: manifest-first, then fix, then re-test (loop until fixed)

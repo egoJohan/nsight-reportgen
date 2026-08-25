@@ -11,13 +11,22 @@ results in ``ChartSpec.slide_title`` / ``ChartSpec.category_label_overrides``.
   AI-shorten in a single batched egoHive call (max ~24 chars, no ellipsis).
 
 Every function takes an injectable ``chat`` callable (default
-:func:`egohive_chat`) so the logic is unit-testable offline with a fake.
+:func:`~reportbuilder.ai.masked_chat.datahive_chat`) so the logic is
+unit-testable offline with a fake.
+
+That default is load-bearing, not a convenience. It routes every prompt through
+datahive, which pseudonymises the study's company names before a vendor model
+sees them and restores them in the reply. Calling a model directly from here
+would send a confidential brand tracker — client and competitors, named — to a
+third party. If you add a function to this module, take `chat` the same way and
+let it default the same way.
 """
 from __future__ import annotations
 
 import re
 
-from nsight.agent.egohive_client import EgoHiveError, _clean, egohive_chat
+from nsight.agent.egohive_client import EgoHiveError, _clean
+from reportbuilder.ai.masked_chat import datahive_chat
 
 from reportbuilder.ai.reference import ReferenceLabels
 
@@ -72,7 +81,7 @@ def generate_slide_title(
     question_text: str,
     findings: list[tuple[str, float]],
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> str:
     """Generate a short descriptive Finnish slide title.
 
@@ -104,7 +113,7 @@ def _group_subtitle_prompt(member_labels: list[str]) -> str:
     )
 
 
-def generate_group_subtitle(member_labels, *, chat=egohive_chat) -> str:
+def generate_group_subtitle(member_labels, *, chat=datahive_chat) -> str:
     """A short neutral Finnish description of what a battery/multi covers, from its
     member labels. Empty string on an empty reply (caller falls back)."""
     labels = [str(m).strip() for m in member_labels if str(m).strip()]
@@ -181,7 +190,7 @@ def shorten_labels(
     full_labels: list[str],
     *,
     reference: ReferenceLabels,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[tuple[str, str]]:
     """Return ``(full, short)`` pairs for labels that need shortening.
 
@@ -305,7 +314,7 @@ def generate_data_chat(
     messages: list[dict],
     total_n: int | None = None,
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> str:
     """Answer the user's question about the survey DATA, grounded in the per-question
     findings. ``messages`` is the conversation so far ([{role, content}, …]); only
@@ -346,7 +355,7 @@ def generate_overview_bullets(
     question_texts: list[str],
     total_n: int | None,
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[str]:
     """Generate Finnish background/overview bullets describing the research."""
     topics = "\n".join(f"- {t}" for t in question_texts[:30]) or "- (ei kysymyksiä)"
@@ -370,7 +379,7 @@ def generate_conclusion_bullets(
     study_label: str,
     findings_by_question: list[tuple[str, list[tuple[str, float]]]],
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[str]:
     """Generate Finnish conclusion bullets summarising the major findings."""
     prompt = (
@@ -398,7 +407,7 @@ def generate_open_themes(
     word_freqs: list[tuple[str, float]],
     sample_answers: list[str],
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[str]:
     """Summarise an open-ended question's answers into a few key themes.
 
@@ -429,7 +438,7 @@ def generate_open_themes(
 def pick_demographic_questions(
     candidates: list[tuple[str, str]],
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[str]:
     """Return the qids the LLM judges to be demographic/background variables.
 
@@ -460,7 +469,7 @@ def generate_demographics_bullets(
     study_label: str,
     findings_by_question: list[tuple[str, list[tuple[str, float]]]],
     *,
-    chat=egohive_chat,
+    chat=datahive_chat,
 ) -> list[str]:
     """Generate Finnish 'facts about the respondents' bullets from demographics."""
     prompt = (

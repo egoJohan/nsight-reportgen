@@ -1,7 +1,7 @@
 """Deterministic tests for the AI routes (``reportbuilder.api.routes_ai``).
 
 The LLM boundary is always monkeypatched — no real network. We patch the
-call-time-looked-up ``reportbuilder.api.routes_ai.egohive_chat`` seam (and, for
+call-time-looked-up ``reportbuilder.api.routes_ai.datahive_chat`` seam (and, for
 short-labels, ``_reference_labels`` so the pptx corpus is never read). Data is
 served by ``client_mock`` (a Mock DataHiveClient → synthetic SAV), so any
 material_id resolves. Synthetic qids: ``q1`` (single), ``m`` (multi), ``age``.
@@ -25,7 +25,7 @@ from suite._helpers import RecordingChat
 def _patch_chat(monkeypatch, reply):
     """Install a RecordingChat as the routes' egoHive seam; return it."""
     chat = reply if isinstance(reply, RecordingChat) else RecordingChat(reply)
-    monkeypatch.setattr(R, "egohive_chat", chat)
+    monkeypatch.setattr(R, "datahive_chat", chat)
     return chat
 
 
@@ -33,14 +33,14 @@ def _no_call(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("egohive_chat must not be called")
 
-    monkeypatch.setattr(R, "egohive_chat", boom)
+    monkeypatch.setattr(R, "datahive_chat", boom)
 
 
 def _raise_egohive(monkeypatch):
     def boom(*a, **k):
         raise EgoHiveError("egohive down")
 
-    monkeypatch.setattr(R, "egohive_chat", boom)
+    monkeypatch.setattr(R, "datahive_chat", boom)
 
 
 def _empty_reference(monkeypatch):

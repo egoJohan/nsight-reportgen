@@ -76,7 +76,7 @@ def test_live_route_slide_title_smoke(client_mock, monkeypatch):
     import reportbuilder.api.routes_ai as R
 
     # Ensure any earlier monkeypatch in the process didn't leave a fake in place.
-    monkeypatch.setattr(R, "egohive_chat", egohive_chat)
+    monkeypatch.setattr(R, "datahive_chat", egohive_chat)
     resp = client_mock.post(f"/materials/{client_mock.material_id}/ai/slide-title", json={"question_ref": "q1"})
     if resp.status_code == 503:
         pytest.skip("egoHive unreachable (route returned 503)")

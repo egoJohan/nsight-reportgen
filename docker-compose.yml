@@ -64,6 +64,15 @@ services:
       # (healthz, the CLI over HTTP). The backend does not use this — it goes
       # over the compose network. Staging publishes nothing at all.
       - "127.0.0.1:7891:7891"
+    networks:
+      # The hive's own network, plus egoHive's. The hive reaches a model
+      # through egoHive, and egoHive publishes only on the HOST's loopback —
+      # which a container cannot dial, not even via the host gateway. Joining
+      # its network is what makes `http://egohive-api:8000` resolvable, and it
+      # is the only way the pseudonymisation boundary has a model to sit in
+      # front of. External so this file never creates or owns it.
+      - default
+      - egohive
     restart: unless-stopped
 
   backend:
@@ -130,6 +139,11 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+networks:
+  egohive:
+    external: true
+    name: egohive_app
 
 volumes:
   nsight-datahive:

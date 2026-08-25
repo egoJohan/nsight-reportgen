@@ -19,7 +19,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from nsight.agent.egohive_client import EgoHiveError, egohive_chat
+from nsight.agent.egohive_client import EgoHiveError
 
 from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import (
@@ -33,6 +33,7 @@ from reportbuilder.ai.text import (
     shorten_labels,
 )
 from reportbuilder.api.deps import get_client
+from reportbuilder.ai.masked_chat import datahive_chat
 from reportbuilder.api.deps_auth import require_material
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.auth.permissions import User
@@ -257,7 +258,7 @@ def ai_slide_title(
         if not findings:
             return {"title": question.text}
         asked = time.monotonic()
-        title = generate_slide_title(question.text, findings, chat=egohive_chat)
+        title = generate_slide_title(question.text, findings, chat=datahive_chat)
         log.info("ai title %s %s: %.1fs (data %.1fs, stats %.1fs, llm %.1fs)",
                  material_id, body.question_ref, time.monotonic() - started,
                  loaded - started, asked - loaded, time.monotonic() - asked)
@@ -321,7 +322,7 @@ def ai_short_labels(
     # 2. Build the reference corpus (tolerant load) and shorten.
     try:
         reference = _reference_labels()
-        overrides = shorten_labels(labels, reference=reference, chat=egohive_chat)
+        overrides = shorten_labels(labels, reference=reference, chat=datahive_chat)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except HTTPException:
@@ -378,7 +379,7 @@ def ai_themes(
         if not word_freqs and not answers:
             return {"bullets": []}
         bullets = generate_open_themes(
-            question.text, word_freqs, answers, chat=egohive_chat
+            question.text, word_freqs, answers, chat=datahive_chat
         )
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
@@ -416,7 +417,7 @@ def ai_overview(
 
     texts = _question_texts(body.question_refs, model) or [q.text for q in model.questions]
     try:
-        bullets = generate_overview_bullets(label, texts, len(df), chat=egohive_chat)
+        bullets = generate_overview_bullets(label, texts, len(df), chat=datahive_chat)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -444,7 +445,7 @@ def ai_conclusion(
     if not findings:
         return {"bullets": []}  # nothing computable to conclude from
     try:
-        bullets = generate_conclusion_bullets(label, findings, chat=egohive_chat)
+        bullets = generate_conclusion_bullets(label, findings, chat=datahive_chat)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -473,9 +474,9 @@ def ai_demographics(
 
     try:
         candidates = [(q.qid, q.text) for q in model.questions]
-        picked = pick_demographic_questions(candidates, chat=egohive_chat)
+        picked = pick_demographic_questions(candidates, chat=datahive_chat)
         findings = _findings_for_refs(picked, df, model)
-        bullets = generate_demographics_bullets(label, findings, chat=egohive_chat) if findings else []
+        bullets = generate_demographics_bullets(label, findings, chat=datahive_chat) if findings else []
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -534,7 +535,7 @@ def ai_chat(
     try:
         reply = generate_data_chat(
             label, findings, [m.model_dump() for m in body.messages],
-            total_n=int(len(df)), chat=egohive_chat,
+            total_n=int(len(df)), chat=datahive_chat,
         )
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
