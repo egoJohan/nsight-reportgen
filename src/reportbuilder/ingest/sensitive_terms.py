@@ -153,3 +153,69 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     # the analyst reads the likeliest candidates before the marginal ones.
     proposed.sort(key=lambda t: (-counts[t], t.lower()))
     return proposed
+
+
+# ---------------------------------------------------------------------------
+# Matching the forms Finnish actually writes
+# ---------------------------------------------------------------------------
+
+#: Below this, a stem matches too much of the language to be worth registering.
+#: "Nen" would mask every word containing it; masking everything is not privacy,
+#: it is a broken report.
+MIN_STEM_CHARS = 4
+
+
+def expand_term_stems(term: str) -> list[str]:
+    """*term* plus any inflectional stem a substring match would otherwise miss.
+
+    datahive matches deny-list terms as case-insensitive substrings, which
+    already covers most Finnish inflection for free: `Attendo` catches
+    `Attendosta`, `Attendon` and `Attendolla`, because the stem does not move.
+
+    The hole is nominals whose stem DOES move, and the big class is `-nen`:
+    every one of them takes `-se-` when inflected, so `Mehiläinen` appears as
+    `Mehiläisen`, `Mehiläisestä`, `Mehiläiselle`. Measured against the live
+    hive, none of those was detected — a real name reaching the model.
+
+    Only that one rule, deliberately. Finnish consonant gradation
+    (`Helsinki` → `Helsingin`) is irregular for proper nouns and loanwords, and
+    guessing at it would generate stems that are wrong rather than merely
+    generous. `-nen` is exceptionless, which is what makes it safe to apply
+    without a morphological analyser.
+
+    Finnish inflects only the LAST element of a multi-word name, so that is the
+    only part rewritten; "Esperi Care Oy" needs nothing, "Suomen
+    Hoivapalveluinen" becomes "Suomen Hoivapalveluise".
+
+    Over-generating is the safe direction: an extra stem masks a little more
+    than it must, a missing one leaks.
+    """
+    t = (term or "").strip()
+    if not t:
+        return []
+    out = [t]
+    head, _, last = t.rpartition(" ")
+    if last.lower().endswith("nen") and len(last) > len("nen"):
+        # `-s`, not `-se`. A `-nen` word has two inflectional stems — `-se-`
+        # in most cases (Mehiläisen, Mehiläisestä) and bare `-s-` in the
+        # partitive (Mehiläistä). The shorter one is a prefix of the longer,
+        # so registering it alone covers both.
+        stem = last[: -len("nen")] + "s"
+        candidate = f"{head} {stem}".strip() if head else stem
+        if len(stem) >= MIN_STEM_CHARS and candidate not in out:
+            out.append(candidate)
+    return out
+
+
+def expand_terms(terms: list[str]) -> list[str]:
+    """Every accepted term with its stems, longest first.
+
+    Longest first because a substitution walks the list in order: "Esperi Care
+    Oy" has to be replaced before "Esperi", or the shorter match fires and
+    leaves " Care Oy" stranded beside a surrogate.
+    """
+    seen: dict[str, None] = {}
+    for term in terms:
+        for form in expand_term_stems(term):
+            seen.setdefault(form, None)
+    return sorted(seen, key=lambda t: (-len(t), t.lower()))

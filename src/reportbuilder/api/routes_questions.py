@@ -1779,11 +1779,18 @@ def _register_with_datahive(auth: AuthContext, terms: list[str]) -> None:
     url = os.environ.get("NSIGHT_DATAHIVE_URL")
     if not url:
         return
+    from reportbuilder.ingest.sensitive_terms import expand_terms
     from reportbuilder.store.datahive_pii import (
         RegistrationFailed, register_sensitive_terms,
     )
+    # What is REGISTERED is the accepted terms plus the inflectional stems a
+    # substring match would otherwise miss. datahive matches case-insensitive
+    # substrings, so `Attendo` already covers `Attendosta` — but a Finnish
+    # `-nen` name changes stem, and `Mehiläinen` did not match `Mehiläisestä`
+    # at all. What the ANALYST sees and accepts stays the plain names; the
+    # stems are an implementation detail of matching, not a decision to make.
     try:
-        register_sensitive_terms(url, auth.token, terms)
+        register_sensitive_terms(url, auth.token, expand_terms(terms))
     except RegistrationFailed as exc:
         log.warning("pii: refusing to accept terms that did not register: %s", exc)
         raise HTTPException(
