@@ -30,7 +30,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EMPTY, PAGE, PAGE_TITLE, PANEL_PADDED, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions, useChartFont, useSetChartFont,
-  useUsers, useInvites, useUserActions,
+  useUsers, useUserActions,
   useAccessRequests, useAccessRequestActions,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
@@ -39,7 +39,8 @@ import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
 import PendingUsersTab from "@/components/settings/PendingUsersTab";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import type { InstalledFont, MissingFont, StudioUser, Invite, AccessRequest } from "@/lib/api";
+import { formatReportDate } from "@/lib/utils";
+import type { InstalledFont, MissingFont, StudioUser, AccessRequest } from "@/lib/api";
 
 function bytes(n: number): string {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
@@ -374,6 +375,14 @@ function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{user.email}</p>
+          {/* "Never" is not a gap in the data — it is somebody who has been
+              invited and has not turned up yet, which is exactly what the
+              separate Invitations list used to say. */}
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {user.last_login_at
+              ? `Last signed in ${formatReportDate(user.last_login_at)}`
+              : "Never signed in"}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -413,40 +422,6 @@ function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
 /** A pending, accepted or expired invitation. Revoking a pending one simply
  *  withdraws it; revoking an already-accepted one removes the user it made —
  *  the button's title says which is about to happen. */
-function InviteRow({ invite }: { invite: Invite }) {
-  const actions = useUserActions();
-  return (
-    <div className={`${ROW} gap-3`}>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{invite.email}</p>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-          Invited {new Date(invite.invited_at).toLocaleDateString()}
-          <Badge
-            variant={
-              invite.status === "pending" ? "secondary" : invite.status === "accepted" ? "outline" : "destructive"
-            }
-          >
-            {invite.status}
-          </Badge>
-        </p>
-      </div>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        disabled={actions.revokeInvite.isPending}
-        title={invite.status === "accepted" ? "Revoke and remove this user" : "Revoke invitation"}
-        onClick={() =>
-          actions.revokeInvite.mutate(invite.id, {
-            onError: (e) => toast.error(e.message),
-          })
-        }
-      >
-        <Trash2Icon className="size-4" />
-      </Button>
-    </div>
-  );
-}
-
 /** One PENDING permission request -- who asked, for which customer, at what
  *  mode, and when. The queue this feeds (`useAccessRequests`) is already
  *  filtered server-side to "pending", so approve/refuse are always live
@@ -527,7 +502,6 @@ function PermissionRequestsTab() {
 function UsersTab() {
   const { data: me } = useSession();
   const { data: users, isLoading } = useUsers();
-  const { data: invites } = useInvites();
   const [inviting, setInviting] = useState(false);
 
   return (
@@ -545,15 +519,6 @@ function UsersTab() {
         )}
         {users?.map((u) => <UserRow key={u.id} user={u} isSelf={u.id === me?.id} />)}
       </div>
-
-      {invites && invites.length > 0 && (
-        <div>
-          <h3 className={PANEL_TITLE}>Invitations</h3>
-          <div className="mt-2 space-y-2">
-            {invites.map((i) => <InviteRow key={i.id} invite={i} />)}
-          </div>
-        </div>
-      )}
 
       <InviteDialog open={inviting} onOpenChange={setInviting} />
     </div>

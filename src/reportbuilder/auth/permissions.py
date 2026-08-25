@@ -78,6 +78,13 @@ class User:
     name: str = ""
     is_admin: bool = False
     grants: tuple[Grant, ...] = field(default_factory=tuple)
+    #: When this account last minted a session, ISO-8601, or None for never.
+    #: Written in one place — `Repository.record_sign_in`, called where a
+    #: session is issued — and never by an ordinary save, so an admin toggling
+    #: a flag cannot silently reset it. None is meaningful rather than missing:
+    #: an invited person who has not turned up yet reads as "Never", which is
+    #: what a separate list of pending invitations used to be for.
+    last_login_at: str | None = None
 
 
 def _depth(scope: str) -> int:

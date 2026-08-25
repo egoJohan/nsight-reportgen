@@ -280,3 +280,38 @@ class TestRevokeCreatesNoOrphan:
         d = _delete_approving_consent(admin_client, repo, f"/invites/{inv['id']}")
         assert d.status_code == 204, d.text
         assert repo.find_user_by_email(auth, "gone@egoiq.com") is None
+
+
+class TestLastSignIn:
+    def test_a_user_who_never_signed_in_reads_as_never(self, admin_client, repo, auth):
+        """Which is what the invitations list used to say. An invited account
+        exists from the moment it is invited, so "never signed in" is the same
+        fact — on the row that already names the person."""
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        [row] = [u for u in admin_client.get("/users").json()
+                 if u["email"] == "new@egoiq.com"]
+        assert row["last_login_at"] is None
+
+    def test_signing_in_stamps_the_account(self, admin_client, repo, auth):
+        from reportbuilder.api import routes_auth
+
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        u = repo.find_user_by_email(auth, "new@egoiq.com")
+        repo.record_sign_in(auth, u.id)
+        [row] = [x for x in admin_client.get("/users").json()
+                 if x["email"] == "new@egoiq.com"]
+        assert row["last_login_at"] is not None
+        assert routes_auth is not None   # the caller that stamps it
+
+    def test_changing_a_grant_does_not_reset_it(self, admin_client, repo, auth):
+        """Every admin action here rebuilds the user record. Losing the stamp
+        on an unrelated edit would make the column quietly wrong."""
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        u = repo.find_user_by_email(auth, "new@egoiq.com")
+        repo.record_sign_in(auth, u.id)
+        before = repo.get_user(auth, u.id).last_login_at
+
+        admin_client.put(f"/users/{u.id}/grants",
+                         json={"grants": [{"scope": "attendo", "mode": "view"}]})
+        admin_client.patch(f"/users/{u.id}", json={"is_admin": True})
+        assert repo.get_user(auth, u.id).last_login_at == before

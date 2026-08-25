@@ -241,6 +241,10 @@ def _issue_session(request: Request, response: Response, repo: Repository,
                    auth: AuthContext, user_id: str) -> None:
     key = get_or_create_signing_key(repo, auth)
     session_id = session.create(repo, auth, user_id)
+    # The one moment that means "this person turned up". Stamped here rather
+    # than on each request: /auth/me fires constantly and would turn a "last
+    # signed in" column into "last had a tab open".
+    repo.record_sign_in(auth, user_id)
     response.set_cookie(
         session.COOKIE_NAME, session.cookie_value(key, session_id),
         max_age=session.IDLE_TIMEOUT_SECONDS, httponly=True,

@@ -71,6 +71,7 @@ def _grant_out(repo: Repository, auth: AuthContext, g: Grant) -> dict:
 
 def _user_row(repo: Repository, auth: AuthContext, u: User) -> dict:
     return {"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin,
+           "last_login_at": u.last_login_at,
            "grants": [_grant_out(repo, auth, g) for g in u.grants]}
 
 

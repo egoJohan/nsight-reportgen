@@ -1177,14 +1177,45 @@ class Repository:
     # with it (spec §2). nSight keeps no user list of its own.
 
     def save_user(self, auth: AuthContext, user: "User") -> "User":
-        """Create or replace. An empty id means create."""
+        """Create or replace. An empty id means create.
+
+        `last_login_at` is PRESERVED when the incoming user does not carry one.
+        Almost every caller here builds a User to change one thing — a grant, an
+        admin flag — from a value that never had the timestamp, and writing the
+        whole record would quietly reset it. It is written by `record_sign_in`
+        and nothing else.
+        """
         uid = user.id or _new_id("usr")
+        last_login = user.last_login_at
+        if last_login is None and user.id:
+            existing = self.get_user(auth, uid)
+            last_login = existing.last_login_at if existing is not None else None
         self._write_json(auth, P.user_path(uid),
                          {"id": uid, "email": user.email.strip(),
-                          "name": user.name, "is_admin": bool(user.is_admin)},
+                          "name": user.name, "is_admin": bool(user.is_admin),
+                          "last_login_at": last_login},
                          [P.LABEL_USER])
         self.set_grants(auth, uid, user.grants)
-        return replace(user, id=uid)
+        return replace(user, id=uid, last_login_at=last_login)
+
+    def record_sign_in(self, auth: AuthContext, user_id: str) -> None:
+        """Stamp the account as having just signed in.
+
+        Called where a session is minted, which is the only moment that means
+        "this person turned up". Best-effort: a hive that cannot write this must
+        not refuse somebody a session over a timestamp.
+        """
+        user = self.get_user(auth, user_id)
+        if user is None:
+            return
+        try:
+            self._write_json(auth, P.user_path(user_id),
+                             {"id": user.id, "email": user.email, "name": user.name,
+                              "is_admin": bool(user.is_admin),
+                              "last_login_at": _now()},
+                             [P.LABEL_USER])
+        except Exception:  # noqa: BLE001, S110 — a timestamp is never worth
+            pass                # refusing somebody a session over
 
     def set_grants(self, auth: AuthContext, user_id: str, grants) -> None:
         self._write_json(auth, P.user_grants_path(user_id),
@@ -1217,7 +1248,8 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             return None
         return User(id=d["id"], email=d.get("email", ""), name=d.get("name", ""),
-                    is_admin=bool(d.get("is_admin")), grants=self._grants(auth, d["id"]))
+                    is_admin=bool(d.get("is_admin")), grants=self._grants(auth, d["id"]),
+                    last_login_at=d.get("last_login_at"))
 
     def list_users(self, auth: AuthContext) -> list:
         out = []

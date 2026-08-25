@@ -803,10 +803,6 @@ export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: api.users.list });
 }
 
-export function useInvites() {
-  return useQuery({ queryKey: ["invites"], queryFn: api.users.listInvites });
-}
-
 /** The grant picker's customer list -- admin-only and NOT grant-filtered
  *  (see api.users.listGrantableCustomers). Only the Users screen's
  *  GrantPicker should use this; everywhere else that lists customers wants

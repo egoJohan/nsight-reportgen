@@ -1656,6 +1656,9 @@ export interface UserGrant extends UserGrantInput {
 }
 
 export interface StudioUser {
+  /** ISO-8601, or null for never — which is what a pending invitation looks
+   *  like now that inviting creates the account. */
+  last_login_at?: string | null;
   id: string;
   email: string;
   name: string;
