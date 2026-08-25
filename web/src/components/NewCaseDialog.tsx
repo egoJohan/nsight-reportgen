@@ -13,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import { qk } from "@/lib/queries";
 import type { WorkspaceCaseState } from "@/lib/workspace";
+import { studyNameFrom } from "@/lib/studyName";
 
 /**
  * New case = upload. Picking a SAV creates the case (named from the SAV study
@@ -22,9 +23,15 @@ import type { WorkspaceCaseState } from "@/lib/workspace";
 export default function NewCaseDialog({
   open,
   onOpenChange,
+  customerId,
+  customerName,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Create the study under this customer. Omitted from the global "New
+   *  study" action, which creates an unattached case. */
+  customerId?: string;
+  customerName?: string;
 }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -39,9 +46,16 @@ export default function NewCaseDialog({
     }
     setError(null);
     setBusy(true);
-    const base = file.name.replace(/\.(sav|zsav)$/i, "");
+    // Named from the file up front so the case is never nameless, then
+    // corrected below once the upload reveals the SAV's own study label —
+    // which only exists after the file has been read.
+    const base = studyNameFrom(file.name, null);
     try {
-      const { case_id } = await api.cases.create(base);
+      // A customer-scoped create returns the case itself; the unattached one
+      // returns just an id. Normalise to the id.
+      const case_id = customerId
+        ? (await api.customers.createCase(customerId, base)).id
+        : (await api.cases.create(base)).case_id;
       const res = await api.materials.upload(case_id, file);
       qc.setQueryData<Record<string, WorkspaceCaseState>>(
         ["settings", "workspace"],
@@ -51,12 +65,17 @@ export default function NewCaseDialog({
         materialId: res.material_id,
         reports: [],
       });
-      // Prefer the SAV's embedded study title for the case name.
-      const label = (res.file_label ?? "").trim();
-      if (label && label !== base) {
-        await api.cases.rename(case_id, label).catch(() => {});
+      // The SAV's own study label is the better name when it carries one.
+      const finalName = studyNameFrom(file.name, res.file_label);
+      if (finalName !== base) {
+        await api.cases.rename(case_id, finalName).catch(() => {});
       }
       await qc.invalidateQueries({ queryKey: qk.cases() });
+      if (customerId) {
+        await qc.invalidateQueries({
+          queryKey: ["customer", customerId, "cases"],
+        });
+      }
       toast.success(`Imported — ${res.question_count} questions curated`);
       onOpenChange(false);
       navigate(`/cases/${case_id}`);
@@ -81,8 +100,9 @@ export default function NewCaseDialog({
         <DialogHeader>
           <DialogTitle>New study</DialogTitle>
           <DialogDescription>
-            Upload an SPSS file — it becomes a new case, named from the survey's
-            title. You can rename it later.
+            {customerName
+              ? `Upload an SPSS file — it becomes a new study for ${customerName}, named from the survey's title. You can rename it later.`
+              : "Upload an SPSS file — it becomes a new study, named from the survey's title. You can rename it later."}
           </DialogDescription>
         </DialogHeader>
 

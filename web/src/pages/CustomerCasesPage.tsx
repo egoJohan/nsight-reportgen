@@ -1,22 +1,17 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog";
 import {
   useCustomer,
   useCustomerCases,
-  useCreateCustomerCase,
   useTemplateActions,
   useTemplates,
   statusOf,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
+import NewCaseDialog from "@/components/NewCaseDialog";
 import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
 import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
@@ -31,13 +26,11 @@ export default function CustomerCasesPage() {
   const navigate = useNavigate();
   const { data: customer, isError: customerIsError, error: customerError } = useCustomer(customerId);
   const { data: cases, isLoading, isError } = useCustomerCases(customerId);
-  const createCase = useCreateCustomerCase(customerId);
   const templates = useTemplateActions(customerId);
   // Read before the upload lands, so "was this the first?" is answerable.
   const { data: existingTemplates } = useTemplates(customerId);
   const { data: me } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [name, setName] = useState("");
   const [managingAccess, setManagingAccess] = useState(false);
   const [requestingPermissions, setRequestingPermissions] = useState(false);
 
@@ -98,19 +91,6 @@ export default function CustomerCasesPage() {
       },
       { replace: true }
     );
-  }
-
-  async function submit() {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    try {
-      const created = await createCase.mutateAsync(trimmed);
-      setOpen(false);
-      setName("");
-      navigate(`/cases/${created.id}`);
-    } catch {
-      toast.error("Could not create the study");
-    }
   }
 
   return (
@@ -231,27 +211,18 @@ export default function CustomerCasesPage() {
         })}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New study</DialogTitle>
-            <DialogDescription>
-              Tutkimus kuuluu asiakkaaseen {customer?.name}.
-            </DialogDescription>
-          </DialogHeader>
-          <Input
-            autoFocus
-            value={name}
-            placeholder="Study name"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={!name.trim() || createCase.isPending}>Create</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* A study starts with a file, not with a title: the upload IS the
+          create, and the name comes from the SAV's study label (or the file
+          name). Asking for a name first made you invent one before you had
+          seen the data, and then the real title arrived in the file anyway. */}
+      {customerId && (
+        <NewCaseDialog
+          open={open}
+          onOpenChange={setOpen}
+          customerId={customerId}
+          customerName={customer?.name}
+        />
+      )}
 
       {me?.is_admin && customerId && (
         <ManagePermissionsDialog
