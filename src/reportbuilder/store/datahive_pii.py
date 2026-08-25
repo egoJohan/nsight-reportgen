@@ -16,6 +16,10 @@ case-insensitive substrings, so `Attendo` also covers `Attendosta`, `Attendon`
 and `Attendolla` — which is what makes this work in Finnish, where the shipped
 NER model finds about 15 % of brand mentions and every inflected form is a form
 it did not see.
+
+Names whose stem MOVES (`Mehiläinen` → `Mehiläisestä`) need a morphology rule,
+and that rule lives in datahive, keyed by the language we declare here. It is
+declared rather than guessed: see `TERM_LANGUAGE`.
 """
 from __future__ import annotations
 
@@ -47,8 +51,18 @@ class RegistrationFailed(RuntimeError):
     """
 
 
+#: The language our terms are written in, declared to datahive rather than left
+#: to its language router. The router reads a language off the text in front of
+#: it, and our text is survey labels and chart titles — three words with no
+#: function word to go on. Guessing there sends Finnish terms down the English
+#: path, where the `-nen` stem rule never fires and `Mehiläisestä` stops
+#: matching `Mehiläinen`, with nothing in the output to say so.
+TERM_LANGUAGE = "fi"
+
+
 def register_sensitive_terms(base_url: str, token: str, terms: list[str],
                              *, workspace_id: str | None = None,
+                             language: str = TERM_LANGUAGE,
                              timeout: float = 30.0) -> dict:
     """Store *terms* as datahive's deny list, replacing what is there.
 
@@ -64,6 +78,7 @@ def register_sensitive_terms(base_url: str, token: str, terms: list[str],
         "workspace_id": workspace_id,
         "policy": {
             "enabled_types": list(ENABLED_TYPES),
+            "term_language": language,
             "deny_terms": {ENTITY_TYPE: list(terms)},
         },
     }
