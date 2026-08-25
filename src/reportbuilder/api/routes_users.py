@@ -24,12 +24,34 @@ users_router = APIRouter(tags=["users"])
 
 
 def _parse_grants(raw) -> tuple[Grant, ...]:
+    """The grants in a request body, validated.
+
+    Refuses the same scope twice with different modes. `_best` now resolves
+    such a pair deterministically rather than by list order, so this is no
+    longer a correctness problem — but a body naming one scope as both view
+    and edit says the caller does not know what it is asking for, and guessing
+    for them (either way) hides the mistake behind a permission decision
+    nobody will look at again.
+    """
     if not isinstance(raw, list):
         raise HTTPException(422, "grants must be a list")
     try:
-        return tuple(Grant(g["scope"], g.get("mode", "view")) for g in raw if g.get("scope"))
+        grants = tuple(
+            Grant(g["scope"], g.get("mode", "view")) for g in raw if g.get("scope")
+        )
     except (ValueError, KeyError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    modes: dict[str, str] = {}
+    for g in grants:
+        if modes.setdefault(g.scope, g.mode) != g.mode:
+            raise HTTPException(
+                422,
+                f"scope {g.scope!r} is listed twice with different modes "
+                f"({modes[g.scope]!r} and {g.mode!r}) — send it once",
+            )
+    # An exact duplicate is harmless, but storing it twice makes the grants
+    # screen show one grant as two rows.
+    return tuple({(g.scope, g.mode): g for g in grants}.values())
 
 
 def _grant_out(repo: Repository, auth: AuthContext, g: Grant) -> dict:

@@ -252,3 +252,41 @@ def test_your_own_pair_still_works(client_memory, as_attendo_editor):
         f"/customers/{mine['cid']}/cases/{mine['kid']}/materials").status_code == 200
     assert client_memory.get(
         f"/customers/{mine['cid']}/cases/{mine['kid']}").status_code == 200
+
+
+def test_a_scope_listed_twice_with_different_modes_is_refused(
+    client_memory, two_customers, monkeypatch
+):
+    """A body naming one scope as both view and edit does not know what it is
+    asking for. Guessing for the caller hides the mistake inside a permission
+    decision nobody looks at again.
+
+    `_best` now resolves such a pair deterministically, so this is belt and
+    braces — but the pair used to make the answer depend on which order the
+    admin's client happened to send them in.
+    """
+    sign_in(client_memory, monkeypatch, "admin@egoiq.com", admin=True)
+    cid = two_customers["Attendo"]["cid"]
+    target = client_memory.get("/users").json()[0]["id"]
+    r = client_memory.put(f"/users/{target}/grants", json={"grants": [
+        {"scope": cid, "mode": "view"},
+        {"scope": cid, "mode": "edit"},
+    ]})
+    assert r.status_code == 422, r.text
+    assert "twice" in r.text
+
+
+def test_the_same_grant_sent_twice_is_stored_once(
+    client_memory, two_customers, monkeypatch
+):
+    """An exact duplicate is harmless to permissions but would show one grant
+    as two rows on the admin screen."""
+    sign_in(client_memory, monkeypatch, "admin@egoiq.com", admin=True)
+    cid = two_customers["Attendo"]["cid"]
+    target = client_memory.get("/users").json()[0]["id"]
+    r = client_memory.put(f"/users/{target}/grants", json={"grants": [
+        {"scope": cid, "mode": "edit"},
+        {"scope": cid, "mode": "edit"},
+    ]})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["grants"]) == 1

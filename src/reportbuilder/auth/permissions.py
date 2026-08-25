@@ -80,16 +80,32 @@ class User:
     grants: tuple[Grant, ...] = field(default_factory=tuple)
 
 
+def _depth(scope: str) -> int:
+    return len([s for s in scope.split("/") if s])
+
+
 def _best(user: User, path: str) -> Grant | None:
     """The most specific grant covering *path*, or None.
 
     Most specific wins, so a view grant on a customer and an edit grant on one
     of its cases mean what they look like they mean.
+
+    Ties are broken towards EDIT, and that matters: two grants on the SAME
+    scope are the same depth, so `max` alone returned whichever happened to be
+    first in the list, and the answer to "may this person write?" depended on
+    the order the grants were stored in. Same user, same grants, different
+    answer. `PUT /users/{id}/grants` accepts such a list, so it was reachable
+    even though the admin screen merges by scope before sending.
+
+    EDIT wins rather than VIEW because a grant is a capability: holding two on
+    one scope means holding both, and the union is what they add up to. The
+    security question is settled one level up — nothing here decides WHETHER
+    somebody may hold a grant, only what the grants they hold mean together.
     """
     covering = [g for g in user.grants if g.covers(path)]
     if not covering:
         return None
-    return max(covering, key=lambda g: len([s for s in g.scope.split("/") if s]))
+    return max(covering, key=lambda g: (_depth(g.scope), g.mode == EDIT))
 
 
 def _reserved(path: str) -> bool:

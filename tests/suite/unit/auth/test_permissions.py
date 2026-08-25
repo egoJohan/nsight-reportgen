@@ -169,3 +169,45 @@ class TestMalformedPaths:
         """Defence in depth: a path with .. segments is not covered."""
         g = Grant("attendo", "edit")
         assert not g.covers("attendo/case-9b32/../case-0000/report")
+
+
+# --------------------------------------------------------------------------- #
+# Two grants on the SAME scope
+# --------------------------------------------------------------------------- #
+# `_best` picks the most specific covering grant by segment count. Two grants
+# on the same scope tie, `max` returns whichever came first, and the answer to
+# "may this person write?" then depends on the order the list happened to be
+# stored in. `PUT /users/{id}/grants` accepts such a list, so this is reachable
+# from the API even though the admin UI merges by scope before sending.
+
+
+def test_duplicate_scopes_do_not_make_permission_depend_on_order():
+    """The same two grants in either order must answer the same way.
+
+    Reproduced before the fix: view-then-edit denied the write, edit-then-view
+    allowed it — same user, same grants, same path.
+    """
+    view_first = User(id="u", email="e@x",
+                      grants=(Grant("attendo", "view"), Grant("attendo", "edit")))
+    edit_first = User(id="u", email="e@x",
+                      grants=(Grant("attendo", "edit"), Grant("attendo", "view")))
+    assert may_write(view_first, "attendo/case-9") == may_write(edit_first, "attendo/case-9")
+
+
+def test_the_more_permissive_of_two_equal_scopes_wins():
+    """A grant is a capability. Holding two on one scope means holding both, so
+    the union is what they add up to — and it is the reading that does not
+    depend on which was written last."""
+    u = User(id="u", email="e@x",
+             grants=(Grant("attendo", "view"), Grant("attendo", "edit")))
+    assert may_write(u, "attendo") is True
+
+
+def test_a_more_specific_view_still_narrows_a_broad_edit():
+    """Unchanged by the tie-break: specificity is decided BEFORE mode, so a
+    view on one case still carves a read-only hole out of edit on its
+    customer."""
+    u = User(id="u", email="e@x",
+             grants=(Grant("attendo", "edit"), Grant("attendo/case-9", "view")))
+    assert may_write(u, "attendo/case-9/report-1") is False
+    assert may_write(u, "attendo/case-7") is True
