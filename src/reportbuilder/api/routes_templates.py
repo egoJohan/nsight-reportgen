@@ -60,12 +60,22 @@ def _live_font_status(stored: list[dict], families: list[str]) -> list[dict]:
     licence ("not an open-licence font, cannot be installed"), while a
     network-free re-check can only say it is absent. Cheap enough for a list —
     no network, and fontconfig's family list is cached in-process.
+
+    Re-checks every family we RECORDED as well as the ones the caller knows
+    about. Callers pass the theme's heading/body pair, but the upload check
+    reads every family the FILE names — a slide master routinely sets fonts the
+    theme never mentions. Driving the result from the caller's list alone
+    dropped those: the upload warned that "Barlow Condensed" could not be
+    installed and the template's own row then did not list it, leaving an admin
+    a warning about a font the product denied needing.
     """
     from reportbuilder.render.fonts import check_template_fonts
 
     by_family = {f.get("family"): f for f in stored if isinstance(f, dict)}
+    wanted = list(families)
+    wanted += [f for f in by_family if f and f not in wanted]
     try:
-        live = check_template_fonts(families, allow_network=False)
+        live = check_template_fonts(wanted, allow_network=False)
     except Exception:  # noqa: BLE001 — fall back to what we recorded
         return stored
     out = []
