@@ -57,6 +57,12 @@ export default defineConfig({
       '/users': { target: backend, xfwd: true },
       '/invites': { target: backend, xfwd: true },
       '/access-requests': { target: backend, xfwd: true },
+      // Reached with a signup ticket and no account. `/signup-requests` is
+      // listed separately from `/signup` rather than relying on one being a
+      // string prefix of the other — the two are different resources and a
+      // reader should not have to work that out.
+      '/signup': { target: backend, xfwd: true },
+      '/signup-requests': { target: backend, xfwd: true },
       // Settings > Backup. No bypass: /admin is not an SPA route, and the
       // backup response is a zip, not a page.
       '/admin': { target: backend, xfwd: true },

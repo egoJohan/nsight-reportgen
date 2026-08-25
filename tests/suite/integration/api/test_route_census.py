@@ -5,6 +5,10 @@ Whoever adds one either declares a guard or writes themselves into
 PUBLIC_ROUTES, in a diff a reviewer can see. There is no runtime symptom when
 a route forgets — it just serves the whole tenant.
 """
+import pathlib
+
+import pytest
+
 from reportbuilder.api.app import create_app
 from reportbuilder.api.deps_auth import GUARD_NAMES, PUBLIC_ROUTES
 
@@ -35,3 +39,42 @@ def test_public_routes_are_few_and_named():
         "/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc",
         "/auth/logout", "/signup/me", "/signup-requests",
         "/auth/login/{provider}", "/auth/callback/{provider}", "/auth/providers"})
+
+
+# --------------------------------------------------------------------------- #
+# The two proxies in front of the API
+# --------------------------------------------------------------------------- #
+# The browser never talks to the backend directly: vite proxies in dev, nginx
+# in the image, and each has its own hand-maintained list of path prefixes. A
+# prefix missing from either does not fail loudly — the SPA's catch-all answers
+# instead, so `fetch("/signup/me")` gets index.html and the page decides the
+# call failed. That is how a working feature reached a browser and did nothing.
+
+_DOC_ROUTES = {"/health", "/openapi.json", "/docs", "/redoc"}
+
+
+def _api_prefixes() -> set[str]:
+    """The first path segment of every real API route."""
+    out = set()
+    for route in create_app().routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/") or not hasattr(route, "dependant"):
+            continue
+        if path in _DOC_ROUTES or path.startswith("/docs"):
+            continue
+        head = path.split("/")[1]
+        if head and not head.startswith("{"):
+            out.add("/" + head)
+    return out
+
+
+@pytest.mark.parametrize("proxy", ["web/vite.config.ts", "web/nginx.conf"])
+def test_every_api_prefix_is_proxied(proxy):
+    """Both proxy lists must name every prefix the API serves."""
+    root = pathlib.Path(__file__).resolve().parents[4]
+    text = (root / proxy).read_text(encoding="utf-8")
+    missing = sorted(p for p in _api_prefixes() if f"'{p}'" not in text
+                     and f" {p} " not in text and f"{p} " not in text)
+    assert missing == [], (
+        f"{proxy} does not proxy {missing}. The SPA catch-all will answer "
+        f"these with index.html and the caller will read HTML as JSON.")
