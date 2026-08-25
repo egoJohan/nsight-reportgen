@@ -131,10 +131,19 @@ export default function LoginPage() {
           chart, so it can carry real weight. */}
       <TiledBackdrop opacity={0.3} />
 
-      <div className="w-full max-w-sm">
+      {/* `relative`, and the logo below is taken OUT of the flow: the flex
+          parent centres its child, so with the logo in normal flow the
+          centred unit was logo-plus-card and the card itself sat half a logo
+          lower than the middle of the page. Absolute keeps the CARD on the
+          middle of the page and hangs the mark above it.
+
+          No compensating padding on the parent: top padding would push the
+          centred child back down by half of it, which is the very offset
+          this removes. */}
+      <div className="relative w-full max-w-sm">
         {/* The mark is white, so it sits on a dark brand band — same
             treatment as the sidebar header, the one other place it appears. */}
-        <div className="mx-auto mb-6 flex w-fit items-center justify-center rounded-xl bg-primary px-6 py-4">
+        <div className="absolute bottom-full left-1/2 mb-6 flex -translate-x-1/2 items-center justify-center rounded-xl bg-primary px-6 py-4">
           <img src="/nsight-logo.svg" alt="nSight" className="h-10 w-auto" />
         </div>
 
