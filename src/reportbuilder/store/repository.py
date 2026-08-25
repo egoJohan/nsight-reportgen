@@ -1190,13 +1190,26 @@ class Repository:
         if last_login is None and user.id:
             existing = self.get_user(auth, uid)
             last_login = existing.last_login_at if existing is not None else None
+        from reportbuilder.auth.permissions import display_name  # noqa: PLC0415
+
         self._write_json(auth, P.user_path(uid),
                          {"id": uid, "email": user.email.strip(),
-                          "name": user.name, "is_admin": bool(user.is_admin),
+                          "first_name": user.first_name, "last_name": user.last_name,
+                          # Stored derived rather than computed on read, so
+                          # anything reading the raw record — a backup, an
+                          # export — sees the same name the app does.
+                          "name": display_name(user.first_name, user.last_name,
+                                               user.email, user.name),
+                          "is_admin": bool(user.is_admin),
                           "last_login_at": last_login},
                          [P.LABEL_USER])
         self.set_grants(auth, uid, user.grants)
-        return replace(user, id=uid, last_login_at=last_login)
+        # The DERIVED name, not the one that came in: what was written is what
+        # the caller should hold, or a rename returns the old name and the
+        # header keeps showing it until something else refetches.
+        return replace(user, id=uid, last_login_at=last_login,
+                       name=display_name(user.first_name, user.last_name,
+                                         user.email, user.name))
 
     def record_sign_in(self, auth: AuthContext, user_id: str) -> None:
         """Stamp the account as having just signed in.
@@ -1211,6 +1224,8 @@ class Repository:
         try:
             self._write_json(auth, P.user_path(user_id),
                              {"id": user.id, "email": user.email, "name": user.name,
+                              "first_name": user.first_name,
+                              "last_name": user.last_name,
                               "is_admin": bool(user.is_admin),
                               "last_login_at": _now()},
                              [P.LABEL_USER])
@@ -1248,6 +1263,7 @@ class Repository:
         except (NotFound, ValueError, UnicodeDecodeError):
             return None
         return User(id=d["id"], email=d.get("email", ""), name=d.get("name", ""),
+                    first_name=d.get("first_name", ""), last_name=d.get("last_name", ""),
                     is_admin=bool(d.get("is_admin")), grants=self._grants(auth, d["id"]),
                     last_login_at=d.get("last_login_at"))
 

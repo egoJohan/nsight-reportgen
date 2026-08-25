@@ -9,6 +9,8 @@ export interface Me {
   id: string;
   email: string;
   name: string;
+  first_name?: string;
+  last_name?: string;
   is_admin: boolean;
   /** Holds `edit` on at least one customer -- this model's only notion of
    *  "owns a customer" (see auth/permissions.py). The one fact

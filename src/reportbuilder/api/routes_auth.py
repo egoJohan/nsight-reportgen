@@ -4,6 +4,8 @@ spec §4). Every route here is either in PUBLIC_ROUTES or guarded by
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import logging
 import hashlib
 from urllib.parse import quote
@@ -262,6 +264,7 @@ def _user_out(user: User) -> dict:
     routes_access_requests.py's `list_access_requests` for the matching
     server-side rule)."""
     return {"id": user.id, "email": user.email, "name": user.name,
+           "first_name": user.first_name, "last_name": user.last_name,
            "is_admin": user.is_admin,
            "is_owner": any(g.mode == EDIT for g in user.grants)}
 
@@ -299,6 +302,39 @@ def logout(request: Request, response: Response,
 @auth_router.get("/me")
 def me(user: User = Depends(current_user)) -> dict:
     return _user_out(user)
+
+
+@auth_router.patch("/me")
+def update_me(body: dict = Body(...),
+              auth: AuthContext = Depends(get_auth),
+              repo: Repository = Depends(get_repository),
+              user: User = Depends(current_user)) -> dict:
+    """Change your own name. Nobody else's.
+
+    There is no user id in the path or the body — the record written is
+    `current_user`'s, taken from the session. That is what keeps this a profile
+    route rather than a second, unguarded way to edit an account: no shape of
+    request here names somebody else.
+
+    Only the two name fields are read. Anything else in the body is ignored
+    rather than refused, so a future field on the client does not 422 against
+    an older server; nothing here can set `is_admin` or a grant, which are
+    admin decisions and live on their own admin-gated routes.
+    """
+    first = str(body.get("first_name") or "").strip()
+    last = str(body.get("last_name") or "").strip()
+    if len(first) > 100 or len(last) > 100:
+        raise HTTPException(422, "A name that long is not a name.")
+    # `name=""` on purpose: this route is the one place a person is
+    # authoritative about their own name, so clearing both fields means "use
+    # the default", not "keep whatever was derived last time". Everywhere else
+    # an existing name survives a save that does not mention it.
+    updated = repo.save_user(
+        auth, replace(user, first_name=first, last_name=last, name=""))
+    # The identity cache holds the OLD name for up to its TTL, so without this
+    # somebody renames themselves and the header keeps showing the old one.
+    session.forget_user(user.id)
+    return _user_out(updated)
 
 
 @auth_router.get("/providers")

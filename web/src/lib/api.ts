@@ -1,3 +1,4 @@
+import type { Me } from "@/lib/session";
 // Relative by default (spec §5.4): same-origin is what makes the
 // SameSite=Strict session cookie work at all, in prod (nginx) and in dev
 // (the Vite proxy in vite.config.ts) alike.
@@ -1498,6 +1499,18 @@ export const api = {
    *  Reached with a signup TICKET rather than a session — see
    *  routes_signup_requests.py. `me` answers the whole page state in one call
    *  so the request page never has to infer it from the shape of an error. */
+  /** Your own account. No id anywhere — the server writes `current_user`'s
+   *  record, which is what keeps this a profile route rather than a second
+   *  way to edit an account. */
+  profile: {
+    update: (firstName: string, lastName: string): Promise<Me> =>
+      fetch(`${API_BASE}/auth/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ first_name: firstName, last_name: lastName }),
+      }).then((r) => detailedJson<Me>(r)),
+  },
+
   signup: {
     me: (): Promise<SignupTicket> =>
       fetch(`${API_BASE}/signup/me`).then((r) => json<SignupTicket>(r)),

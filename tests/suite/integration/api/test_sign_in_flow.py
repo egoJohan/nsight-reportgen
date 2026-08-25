@@ -314,10 +314,12 @@ def test_me_shape_carries_no_grants_or_password_fields(client, repo, auth):
     # least one customer) -- it is what let this survive the "no grants"
     # rule: the raw grants list still never leaves this route, only the one
     # bit SettingsPage.tsx needs (see routes_auth._user_out).
-    assert set(body) == {"id", "email", "name", "is_admin", "is_owner"}
+    assert set(body) == {"id", "email", "name", "first_name", "last_name",
+                         "is_admin", "is_owner"}
 
     me = client.get("/auth/me").json()
-    assert set(me) == {"id", "email", "name", "is_admin", "is_owner"}
+    assert set(me) == {"id", "email", "name", "first_name", "last_name",
+                       "is_admin", "is_owner"}
     assert me == body
 
 

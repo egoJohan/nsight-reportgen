@@ -75,7 +75,12 @@ class Grant:
 class User:
     id: str
     email: str
+    #: What the app shows. DERIVED from first/last where those are set — see
+    #: `display_name` — so there is one thing to render and one thing to edit,
+    #: not two that can disagree.
     name: str = ""
+    first_name: str = ""
+    last_name: str = ""
     is_admin: bool = False
     grants: tuple[Grant, ...] = field(default_factory=tuple)
     #: When this account last minted a session, ISO-8601, or None for never.
@@ -89,6 +94,25 @@ class User:
 
 def _depth(scope: str) -> int:
     return len([s for s in scope.split("/") if s])
+
+
+def display_name(first: str, last: str, email: str, current: str = "") -> str:
+    """What to call somebody, from the best information available.
+
+    A person's own first and last name wins — they typed it, about themselves.
+    Failing that, whatever name the account already carries, which is how a
+    name that arrived from somewhere else (an identity provider's claim, or the
+    email local part `identity.resolve_signed_in_user` gives a new account)
+    survives a save that does not mention it.
+
+    Failing both, EMPTY — deliberately, rather than falling back to the email
+    here. Several screens already render `name or email`, and inventing a name
+    at this level would pre-empt that: an owner with no name started showing as
+    "dev" where the product had always shown "dev@localhost".
+    """
+    del email  # kept in the signature: callers read as "name for this account"
+    full = " ".join(p for p in ((first or "").strip(), (last or "").strip()) if p)
+    return full or (current or "").strip()
 
 
 def _best(user: User, path: str) -> Grant | None:

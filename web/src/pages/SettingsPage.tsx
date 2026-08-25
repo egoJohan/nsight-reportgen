@@ -11,6 +11,7 @@ import {
   MailIcon,
   CopyIcon,
   PlusIcon,
+  UserIcon,
   UserPlusIcon,
   UsersIcon,
   ShieldCheckIcon,
@@ -37,6 +38,7 @@ import { useSession } from "@/lib/session";
 import BackupTab from "@/components/settings/BackupTab";
 import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
 import PendingUsersTab from "@/components/settings/PendingUsersTab";
+import ProfileTab from "@/components/settings/ProfileTab";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatReportDate } from "@/lib/utils";
@@ -558,7 +560,9 @@ export default function SettingsPage() {
   // (is_admin/is_owner are both on it), so the strip waits for it rather
   // than guessing and re-defaulting once it arrives.
   const [searchParams] = useSearchParams();
-  const fallbackTab = !me ? undefined : me.is_admin ? "users" : canSeePermissionRequests ? "permission-requests" : "fonts";
+  // A plain user lands on their own tab, not on Fonts — it is first in the
+  // strip and it is the one thing here that belongs to them.
+  const fallbackTab = !me ? undefined : me.is_admin ? "users" : canSeePermissionRequests ? "permission-requests" : "profile";
   // ?tab=permission-requests is the landing spot the access-request email
   // links to (routes_access_requests.py's create_access_request) -- honour
   // it ONLY when this caller can actually see that tab, so a stale or
@@ -566,8 +570,10 @@ export default function SettingsPage() {
   // than silently no-oping on a tab that was never rendered.
   const requestedTab = searchParams.get("tab");
   const visible = new Set(
-    [me?.is_admin && "users", canSeePermissionRequests && "permission-requests",
-     me && "fonts", me?.is_admin && "backup"].filter(Boolean)
+    [me && "profile", me?.is_admin && "users", me?.is_admin && "pending-users",
+     canSeePermissionRequests && "permission-requests",
+     me && "fonts", me?.is_admin && "default-template",
+     me?.is_admin && "backup"].filter(Boolean)
   );
   const defaultTab = requestedTab && visible.has(requestedTab) ? requestedTab : fallbackTab;
 
@@ -578,6 +584,11 @@ export default function SettingsPage() {
       {me && (
         <Tabs defaultValue={defaultTab} className="mt-6">
           <TabsList>
+            {/* First, and open to everyone: the only tab here that is about
+                you rather than about administering something. */}
+            <TabsTrigger value="profile">
+              <UserIcon className="size-4" />Personal information
+            </TabsTrigger>
             {me.is_admin && (
               <TabsTrigger value="users">
                 <UsersIcon className="size-4" />Users
@@ -622,6 +633,9 @@ export default function SettingsPage() {
               </TabsTrigger>
             )}
           </TabsList>
+          <TabsContent value="profile" className="mt-4">
+            <ProfileTab />
+          </TabsContent>
           {me.is_admin && (
             <TabsContent value="pending-users" className="mt-4">
               <PendingUsersTab />
