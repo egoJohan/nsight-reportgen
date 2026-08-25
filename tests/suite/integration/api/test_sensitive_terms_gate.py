@@ -185,3 +185,43 @@ class TestTheTermsMustActuallyReachDatahive:
         assert client.put(f"/materials/{mid}/sensitive-terms",
                           json={"terms": ["Attendo"]}).status_code == 200
         assert _new_report(client, kid).status_code == 200
+
+
+def test_duplicating_a_report_is_gated_too(case_with_data):
+    """Duplicate mints a report, so it is a second way past the gate.
+
+    Seeded through the store rather than the API because the API is exactly
+    what refuses — which is the situation this covers: a report that exists
+    while nobody has reviewed the terms. That is not hypothetical, it is every
+    report created before this feature shipped, and duplicating one would mint
+    a fresh report — the thing that goes on to generate headlines and themes —
+    with nobody having said which names must not reach a model.
+    """
+    from reportbuilder.api.deps_auth import current_user
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.store.repository_client import RepositoryClient
+
+    client, kid, _mid = case_with_data
+    overrides = client.app.dependency_overrides
+    store = RepositoryClient(overrides[get_repository](), overrides[get_auth](),
+                             overrides[current_user]())
+    import json
+
+    rid, _v = store.save_report(
+        kid, None,
+        json.dumps({"name": "Legacy", "render_mode": "image",
+                    "template_ref": "", "charts": []}),
+        "Legacy")
+
+    r = client.post(f"/cases/{kid}/reports/{rid}/duplicate", json={"name": "Copy"})
+    assert r.status_code == 409, r.text
+    assert "company names" in r.json()["detail"].lower()
+
+
+def test_duplicating_is_allowed_once_the_terms_are_accepted(case_with_data):
+    """The gate opens for duplicate on the same condition as for create."""
+    client, kid, mid = case_with_data
+    client.put(f"/materials/{mid}/sensitive-terms", json={"terms": ["Attendo"]})
+    rid = _new_report(client, kid).json()["report_id"]
+    r = client.post(f"/cases/{kid}/reports/{rid}/duplicate", json={"name": "Copy"})
+    assert r.status_code == 200, r.text

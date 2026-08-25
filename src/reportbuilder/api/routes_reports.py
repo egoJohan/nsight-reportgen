@@ -347,7 +347,15 @@ def duplicate_report(
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case_write),
 ) -> dict:
-    """Duplicate a report under a new name; returns the new report_id. (REQ-C-09)"""
+    """Duplicate a report under a new name; returns the new report_id. (REQ-C-09)
+
+    Gated like creation, because it IS creation: the new report is what goes on
+    to generate headlines and themes. Reports that predate the gate exist — in
+    any store that was in use before it shipped — and duplicating one would
+    have minted a fresh report with nobody having said which names must not
+    reach a model.
+    """
+    _refuse_until_sensitive_terms_accepted(client, case_id)
     src = report_from_json(client.load_report(case_id, report_id))
     new_report: Report = dataclasses.replace(src, name=body.name)
     new_json = report_to_json(new_report)
