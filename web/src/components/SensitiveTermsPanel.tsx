@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useAcceptSensitiveTerms, useSensitiveTerms } from "@/lib/queries";
 import { ApiError } from "@/lib/api";
+import { mergeTerms } from "@/lib/sensitiveTerms";
 import { formatReportDate } from "@/lib/utils";
 import { PANEL_PADDED, PANEL_TITLE } from "@/lib/surfaces";
 import { cn } from "@/lib/utils";
@@ -38,20 +39,16 @@ export default function SensitiveTermsPanel({
   const [chosen, setChosen] = useState<Set<string> | null>(null);
   const [adding, setAdding] = useState("");
 
-  // Every proposed term, plus anything already accepted that is no longer
-  // proposed — a term somebody typed in by hand must not vanish from the list
-  // the moment the study is re-read.
-  const allTerms = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const t of [...(data?.proposed ?? []), ...(data?.accepted ?? [])]) {
-      if (!seen.has(t)) {
-        seen.add(t);
-        out.push(t);
-      }
-    }
-    return out;
-  }, [data?.proposed, data?.accepted]);
+  // Terms typed in this session. Held separately from `chosen` because the two
+  // answer different questions: `chosen` is what will be SAVED, this is what is
+  // VISIBLE. Merging them was the bug — a typed term went into `chosen` alone
+  // and so never rendered, which looked exactly like the add silently failing.
+  const [added, setAdded] = useState<string[]>([]);
+
+  const allTerms = useMemo(
+    () => mergeTerms(data?.proposed, data?.accepted, added),
+    [data?.proposed, data?.accepted, added]
+  );
 
   // Start from what was accepted before; first time round, nothing is ticked —
   // pre-ticking every proposal would turn "confirm these" into "click OK",
@@ -90,7 +87,11 @@ export default function SensitiveTermsPanel({
   function addTerm() {
     const t = adding.trim();
     if (!t) return;
-    setChosen((prev) => new Set(prev).add(t));
+    // Tick it AND show it. A term that is only ticked is invisible, and one
+    // that is only shown would be dropped on save.
+    const already = allTerms.find((x) => x.toLowerCase() === t.toLowerCase());
+    setChosen((prev) => new Set(prev).add(already ?? t));
+    if (!already) setAdded((prev) => [...prev, t]);
     setAdding("");
   }
 
@@ -175,7 +176,7 @@ export default function SensitiveTermsPanel({
             value={adding}
             onChange={(e) => setAdding(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTerm())}
-            placeholder="Add a name the list missed"
+            placeholder="Add term"
             className="h-9 min-w-56 flex-1 rounded-md border bg-surface px-3 text-sm"
           />
           <Button type="button" variant="outline" onClick={addTerm} disabled={!adding.trim()}>
