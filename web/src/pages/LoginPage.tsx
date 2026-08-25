@@ -192,8 +192,7 @@ export default function LoginPage() {
           )}
 
           <p className="text-center text-xs text-muted-foreground">
-            No account yet? Sign in anyway &mdash; you can request access from
-            there.
+            No account yet? Sign in anyway to request it.
           </p>
         </div>
       </div>
