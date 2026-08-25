@@ -23,6 +23,7 @@ Path carries HIERARCHY, labels carry TYPE (design
     settings/session/{session_id}                    nsight:session
     settings/invite/{invite_id}                      nsight:invite
     settings/access_request/{request_id}             nsight:access-request
+    settings/signup_request/{request_id}             nsight:signup-request
 
 Why both axes: prefix listing scopes to a subtree server-side, and a label
 answers "what is this" across subtrees. Keeping type OUT of the path matters
@@ -60,6 +61,7 @@ LABEL_PASSWORD = "nsight:password"
 LABEL_INVITE = "nsight:invite"
 LABEL_WORKSPACE = "nsight:workspace"
 LABEL_ACCESS_REQUEST = "nsight:access-request"
+LABEL_SIGNUP_REQUEST = "nsight:signup-request"
 
 SETTINGS_ROOT = "settings"
 
@@ -266,6 +268,18 @@ def invite_path(invite_id: str) -> str:
     `find_user_by_email` scans `list_users`.
     """
     return f"{SETTINGS_ROOT}/invite/{_seg(invite_id, 'invite_id')}"
+
+
+def signup_request_path(request_id: str) -> str:
+    """Somebody who authenticated with a provider but has no account here.
+
+    Distinct from `access_request_path`: that is a KNOWN user asking for one
+    more customer, and it is answered with a grant. This is a stranger with a
+    provider-verified email asking to exist at all, and it is answered with an
+    invitation. Different lifecycle, different decision, different reader — so
+    a different record rather than a nullable column on the other one.
+    """
+    return f"{SETTINGS_ROOT}/signup_request/{_seg(request_id, 'request_id')}"
 
 
 def access_request_path(request_id: str) -> str:

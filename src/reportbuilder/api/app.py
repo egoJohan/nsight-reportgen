@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_access_requests import access_requests_router
+from reportbuilder.api.routes_signup_requests import signup_requests_router
 from reportbuilder.api.routes_backup import backup_router
 from reportbuilder.api.routes_ai import ai_router
 from reportbuilder.api.routes_auth import auth_router
@@ -191,6 +192,7 @@ def create_app(client=None) -> FastAPI:
     app.include_router(ai_router)
     app.include_router(users_router)
     app.include_router(access_requests_router)
+    app.include_router(signup_requests_router)
     app.include_router(backup_router)
 
     # Inject the client if provided

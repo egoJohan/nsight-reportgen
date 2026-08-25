@@ -20,6 +20,13 @@ from reportbuilder.store.seam import AuthContext
 PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
                            "/docs/oauth2-redirect", "/redoc",
                            "/auth/logout",
+                           # Reachable with a signup TICKET and no account —
+                           # they exist for somebody a provider has vouched for
+                           # who nSight does not know yet. They read only what
+                           # the caller's own cookie already contains and write
+                           # only a row in an admin's queue; neither grants
+                           # anything. See routes_signup_requests.py.
+                           "/signup/me", "/signup-requests",
                            # Necessarily public: these ARE how a user becomes
                            # known to nSight in the first place -- nothing
                            # is served here but a redirect to the provider,

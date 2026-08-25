@@ -33,5 +33,5 @@ def test_public_routes_are_few_and_named():
     """A growing public list is the failure this test exists to make visible."""
     assert PUBLIC_ROUTES == frozenset({
         "/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc",
-        "/auth/logout",
+        "/auth/logout", "/signup/me", "/signup-requests",
         "/auth/login/{provider}", "/auth/callback/{provider}", "/auth/providers"})

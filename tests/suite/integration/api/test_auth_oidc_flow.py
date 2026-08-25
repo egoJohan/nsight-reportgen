@@ -157,8 +157,12 @@ def test_a_verified_email_that_matches_nothing_is_refused_not_signed_in(client, 
     callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
                           follow_redirects=False)
     assert callback.status_code == 302
-    assert "/login" in callback.headers["location"]
+    # Not signed in, and sent somewhere they can ask rather than to a dead end.
+    # The distinction that matters is the cookie: a signup ticket says a
+    # provider vouched for this address, NOT that nSight has an account for it.
+    assert callback.headers["location"] == "/request-access"
     assert not client.cookies.get("nsight_session")
+    assert client.cookies.get("nsight_signup")
 
 
 def _capture_redirect_uri(monkeypatch):

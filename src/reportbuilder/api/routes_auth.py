@@ -17,7 +17,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.api.routes_settings import OIDC_KEY
-from reportbuilder.auth import identity, oidc, session
+from reportbuilder.auth import identity, oidc, session, signup_ticket
 from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.auth.permissions import EDIT, User
 from reportbuilder.store.repository import Repository
@@ -424,7 +424,31 @@ async def oidc_callback(provider: str, request: Request,
         # the user lands somewhere that explains it, not a stack trace or a
         # blank page.
         log.info("oidc sign-in refused for %s: %s", provider, resolved.reason)
-        redirect = Response(status_code=302, headers={"Location": "/login?error=not_allowed"})
+        # We know exactly who this is and owe them nothing: the provider has
+        # vouched for the address, and nSight has no account for it. That is
+        # the moment they are best placed to ASK for one, so they leave with a
+        # ticket that authorises exactly that and nothing else (see
+        # auth/signup_ticket.py -- it is not a session and cannot become one).
+        #
+        # Only for an address whose domain ownership is PROVEN. Microsoft's
+        # multi-tenant discovery can hand us a genuine signature over an email
+        # claim an attacker set to anyone's address (oidc.py, `xms_edov`);
+        # letting that file a request would put a forged identity in front of
+        # an admin as though a provider had confirmed it.
+        if not verified.email_domain_proven:
+            redirect = Response(status_code=302,
+                                headers={"Location": "/login?error=not_allowed"})
+            redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
+            return redirect
+        key = get_or_create_signing_key(repo, auth)
+        ticket = signup_ticket.issue(key, email=verified.email, provider=provider,
+                                     name=getattr(verified, "name", "") or "")
+        redirect = Response(status_code=302, headers={"Location": "/request-access"})
+        redirect.set_cookie(
+            signup_ticket.COOKIE_NAME, ticket,
+            max_age=signup_ticket.LIFETIME_SECONDS, httponly=True,
+            secure=_cookies_are_secure(request), samesite="lax", path="/",
+        )
         redirect.delete_cookie(_OAUTH_COOKIE, path="/auth")
         return redirect
 

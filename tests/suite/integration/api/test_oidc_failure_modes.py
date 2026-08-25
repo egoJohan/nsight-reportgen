@@ -252,7 +252,7 @@ def test_a_refused_sign_in_mints_no_session_and_sets_no_session_cookie(
     callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
                           follow_redirects=False)
     assert callback.status_code == 302
-    assert "/login?error=not_allowed" in callback.headers["location"]
+    assert "/request-access" in callback.headers["location"]
 
     set_cookie_headers = callback.headers.get_list("set-cookie")
     assert not any(h.startswith(f"{session.COOKIE_NAME}=") for h in set_cookie_headers)
@@ -280,7 +280,7 @@ def test_a_refused_sign_in_drops_the_next_destination(client, repo, auth, monkey
     callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
                           follow_redirects=False)
     assert callback.status_code == 302
-    assert callback.headers["location"] == "/login?error=not_allowed"
+    assert callback.headers["location"] == "/request-access"
     assert "reports" not in callback.headers["location"]
 
 
