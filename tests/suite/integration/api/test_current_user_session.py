@@ -71,25 +71,39 @@ def test_a_validly_signed_cookie_for_a_nonexistent_session_is_401(client, repo, 
     assert client.get("/customers").status_code == 401
 
 
-def test_a_registered_users_cookie_reaches_me(client):
-    client.post("/auth/register", json={"email": "admin@egoiq.com",
-                                        "password": "correct horse battery staple"})
+def _sign_in(client, repo, auth, email="admin@egoiq.com"):
+    """A live session cookie, without a sign-in route.
+
+    Accounts come from an invitation and people authenticate with Google or
+    Microsoft, so the only route that mints a cookie is the OIDC callback. What
+    these tests are about is what the cookie DOES afterwards.
+    """
+    from reportbuilder.auth.permissions import User
+
+    user = repo.find_user_by_email(auth, email) or repo.save_user(
+        auth, User(id="", email=email, name=email.split("@", 1)[0], is_admin=True))
+    key = get_or_create_signing_key(repo, auth)
+    sid = _session.create(repo, auth, user.id)
+    client.cookies.set(_session.COOKIE_NAME, _session.cookie_value(key, sid))
+    return user
+
+
+def test_a_signed_in_users_cookie_reaches_me(client, repo, auth):
+    _sign_in(client, repo, auth)
     r = client.get("/auth/me")
     assert r.status_code == 200 and r.json()["email"] == "admin@egoiq.com"
 
 
-def test_after_logout_the_cookie_no_longer_works(client):
-    client.post("/auth/register", json={"email": "admin@egoiq.com",
-                                        "password": "correct horse battery staple"})
+def test_after_logout_the_cookie_no_longer_works(client, repo, auth):
+    _sign_in(client, repo, auth)
     client.post("/auth/logout")
     assert client.get("/auth/me").status_code == 401
 
 
-def test_nsight_dev_user_no_longer_does_anything(client, monkeypatch):
+def test_nsight_dev_user_no_longer_does_anything(client, repo, auth, monkeypatch):
     """The env var is gone as a concept, not merely unset by default —
     setting it must not resurrect the old bypass."""
     monkeypatch.setenv("NSIGHT_DEV_USER", "admin@egoiq.com")
-    client.post("/auth/register", json={"email": "admin@egoiq.com",
-                                        "password": "correct horse battery staple"})
+    _sign_in(client, repo, auth)
     client.cookies.clear()
     assert client.get("/customers").status_code == 401

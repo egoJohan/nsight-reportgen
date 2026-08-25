@@ -177,10 +177,16 @@ class TestInvite:
         assert u.is_admin is False
 
     def test_the_invited_account_has_no_password_to_guess(self, admin_client, repo, auth):
-        """Nothing sets one. Sign-in is Google or Microsoft."""
+        """Nothing anywhere sets one: there is no password route and no
+        accessor. Asserted against the store, because an API that could answer
+        "does this account have a password" is itself the thing we removed."""
+        from reportbuilder.store import paths as P
+        from reportbuilder.store.seam import NotFound
+
         admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
         u = repo.find_user_by_email(auth, "new@egoiq.com")
-        assert repo.get_password_hash(auth, u.id) is None
+        with pytest.raises(NotFound):
+            repo.store.get(auth, P.user_password_path(u.id))
 
     def test_invites_a_new_email(self, admin_client):
         r = admin_client.post("/users/invite",
@@ -209,22 +215,22 @@ class TestInvite:
 
 
 class TestInviteConsumption:
-    def test_an_invited_address_cannot_be_claimed_by_a_stranger(self, admin_client):
-        """The guard that could not fire before.
+    def test_there_is_no_route_that_claims_an_address(self, admin_client):
+        """The attack this closes, now closed structurally.
 
-        `/auth/register` refuses any email that already resolves to an account,
-        so that nobody can take a colleague's access by knowing their address.
-        While the account was only created at first sign-in, there was nothing
-        for it to refuse: whoever presented the address first was handed the
-        invitation's grants and a working session.
+        An invited address could once be claimed by anyone who knew it: POST
+        the email to /auth/register with a password of your choosing and you
+        received the invitation's grants and a session. The account now exists
+        from the moment of invitation — and the route is gone entirely, so
+        there is nothing left to present an address to.
         """
         admin_client.post("/users/invite",
                           json={"email": "invited@egoiq.com",
-                               "grants": [{"scope": "attendo", "mode": "edit"}]})
+                                "grants": [{"scope": "attendo", "mode": "edit"}]})
         r = admin_client.post("/auth/register",
                               json={"email": "invited@egoiq.com",
-                                   "password": "correct horse battery staple"})
-        assert r.status_code == 403, r.text
+                                    "password": "correct horse battery staple"})
+        assert r.status_code == 404, r.text
 
     def test_the_grants_are_on_the_account_from_the_start(self, admin_client):
         admin_client.post("/users/invite",

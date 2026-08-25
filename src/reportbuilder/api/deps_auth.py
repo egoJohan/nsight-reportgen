@@ -19,7 +19,7 @@ from reportbuilder.store.seam import AuthContext
 #: tests/suite/integration/api/test_route_census.py.
 PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
                            "/docs/oauth2-redirect", "/redoc",
-                           "/auth/register", "/auth/login/password", "/auth/logout",
+                           "/auth/logout",
                            # Necessarily public: these ARE how a user becomes
                            # known to nSight in the first place -- nothing
                            # is served here but a redirect to the provider,

@@ -17,10 +17,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from reportbuilder.api.deps_auth import current_user
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.api.routes_settings import OIDC_KEY
-from reportbuilder.auth import identity, oidc, password, session
+from reportbuilder.auth import identity, oidc, session
 from reportbuilder.auth.keys import get_or_create_signing_key
 from reportbuilder.auth.permissions import EDIT, User
-from reportbuilder.auth.ratelimit import RateLimiter
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
@@ -143,8 +142,6 @@ def _bootstrap_admins() -> frozenset[str]:
 #: bars a colleague, and per address as well so working through a list of emails
 #: from one place is counted as the single campaign it is. Failures only —
 #: getting your own password right is never counted against you.
-_LOGIN_ATTEMPTS = RateLimiter(limit=10, window=15 * 60)
-_LOGIN_ATTEMPTS_BY_ADDRESS = RateLimiter(limit=50, window=15 * 60)
 
 
 #: How many proxies append to X-Forwarded-For between the browser and us. nginx
@@ -184,25 +181,6 @@ def _client_address(request: Request) -> str:
             pass
     client = request.client
     return client.host if client else "unknown"
-
-
-def _refuse_if_too_many_attempts(request: Request, email: str) -> tuple[str, str]:
-    """Stop here if this caller has been guessing. Returns the two keys to
-    record a failure against."""
-    address = _client_address(request)
-    # The email is caller-supplied and unbounded — nginx accepts a 50 MB body,
-    # and a retained key held a 200 000-character address verbatim. Hash it: the
-    # key only ever needs to be stable and distinct, never readable.
-    by_user = f"{address}|{hashlib.sha256(email.encode('utf-8')).hexdigest()[:32]}"
-    for key, limiter in ((by_user, _LOGIN_ATTEMPTS),
-                         (address, _LOGIN_ATTEMPTS_BY_ADDRESS)):
-        if not limiter.allows(key):
-            wait = limiter.retry_after(key)
-            raise HTTPException(
-                429, "Too many sign-in attempts. Try again in "
-                     f"{max(1, wait // 60)} minutes.",
-                headers={"Retry-After": str(wait)})
-    return by_user, address
 
 
 def _safe_next(value: str | None) -> str:
@@ -282,83 +260,6 @@ def _user_out(user: User) -> dict:
     return {"id": user.id, "email": user.email, "name": user.name,
            "is_admin": user.is_admin,
            "is_owner": any(g.mode == EDIT for g in user.grants)}
-
-
-@auth_router.post("/register", status_code=201)
-def register(request: Request, response: Response, body: dict = Body(...),
-            auth: AuthContext = Depends(get_auth),
-            repo: Repository = Depends(get_repository)) -> dict:
-    """Self-service, but gated exactly like a first OIDC sign-in (spec §3.1,
-    §5 domain auto-join, Task 4): only creates an account nSight would have
-    created for this email anyway. A password is not a bypass of that gate.
-    """
-    email = (body.get("email") or "").strip()
-    pw = body.get("password") or ""
-    if len(pw) < 12:
-        raise HTTPException(422, "Password must be at least 12 characters")
-
-    normalized = email.lower()
-    # This route hashes a password (Argon2) and refuses most callers, so it is
-    # both an amplifier and — despite the care taken above to answer refusals
-    # identically — a route worth hammering. Counted the same way sign-in is.
-    by_user, address = _refuse_if_too_many_attempts(request, normalized)
-    if repo.find_user_by_email(auth, normalized) is not None:
-        # An email that already resolves to an account -- with a password or
-        # without one -- can never be claimed here. A passwordless account is
-        # not an edge case: it's what domain auto-join creates today, and
-        # what every Google/O365 sign-in will create once Part B lands.
-        # Attaching a password to it from this anonymous, unauthenticated
-        # endpoint would let anyone who knows a colleague's email address
-        # sign in as them and inherit their grants. The only legitimate way
-        # for a passwordless account to get a password is a route that
-        # proves ownership -- an invitation (Plan 3) or an OIDC sign-in
-        # (Part B) -- never a claim made through /auth/register. Do not
-        # re-add a branch that sets a password here.
-        #
-        # The response below is deliberately identical, in status and body,
-        # to the "never existed" refusal a few lines down: this route must
-        # not become an oracle for "does this person have an account here",
-        # the same way /auth/login/password already takes care not to be.
-        log.warning("register: refused an attempt to claim the existing account for '%s'",
-                   normalized)
-        _LOGIN_ATTEMPTS.record_failure(by_user)
-        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
-        raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
-
-    resolved = identity.resolve_signed_in_user(repo, auth, email, _bootstrap_admins())
-    if isinstance(resolved, identity.SignInRefused):
-        log.info("register refused: %s", resolved.reason)
-        _LOGIN_ATTEMPTS.record_failure(by_user)
-        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
-        raise HTTPException(403, _REGISTER_REFUSED_MESSAGE)
-
-    repo.set_password(auth, resolved.id, password.hash_password(pw))
-    _LOGIN_ATTEMPTS.clear(by_user)
-    _issue_session(request, response, repo, auth, resolved.id)
-    return _user_out(resolved)
-
-
-@auth_router.post("/login/password")
-def login_password(request: Request, response: Response, body: dict = Body(...),
-                   auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository)) -> dict:
-    email = (body.get("email") or "").strip().lower()
-    pw = body.get("password") or ""
-    # Before the Argon2 pass, not after: the verification is deliberately
-    # expensive, which is exactly what makes an unlimited endpoint an amplifier.
-    by_user, address = _refuse_if_too_many_attempts(request, email)
-    user = repo.find_user_by_email(auth, email)
-    stored_hash = repo.get_password_hash(auth, user.id) if user else None
-    # Always verify against SOMETHING, so a wrong password and an unknown
-    # email cost the same Argon2 pass -- no timing tell for either.
-    ok = password.verify_password(stored_hash or password.DUMMY_HASH, pw)
-    if not user or not stored_hash or not ok:
-        _LOGIN_ATTEMPTS.record_failure(by_user)
-        _LOGIN_ATTEMPTS_BY_ADDRESS.record_failure(address)
-        raise HTTPException(401, "Incorrect email or password")
-    _LOGIN_ATTEMPTS.clear(by_user)
-    _issue_session(request, response, repo, auth, user.id)
-    return _user_out(user)
 
 
 @auth_router.post("/logout")

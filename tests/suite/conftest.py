@@ -147,18 +147,6 @@ def require_soffice(has_soffice):
 
 
 @pytest.fixture(autouse=True)
-def _forget_sign_in_attempts():
-    """The sign-in failure counters are module-level and the whole suite runs in
-    one process, so a test that exercises a wrong password would otherwise spend
-    the next test's budget — and the failure would land somewhere unrelated."""
-    from reportbuilder.api import routes_auth
-
-    routes_auth._LOGIN_ATTEMPTS.reset()
-    routes_auth._LOGIN_ATTEMPTS_BY_ADDRESS.reset()
-    yield
-
-
-@pytest.fixture(autouse=True)
 def _forget_parsed_savs():
     """Parsed SAVs are cached for the life of the process, keyed by content. Two
     tests that build the same synthetic file would otherwise share a parse, and a

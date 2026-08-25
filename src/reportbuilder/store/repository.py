@@ -1242,6 +1242,10 @@ class Repository:
         clean up. Deleting `user_path` last keeps the user "found" for
         every retry until every sibling path has actually been removed.
         """
+        # The password path is still swept even though nothing writes one any
+        # more: sign-in is Google or Microsoft, and `set_password` is gone. A
+        # store that predates that change can still hold a hash, and deleting
+        # the account it belonged to is exactly when it should go.
         for path in (P.user_grants_path(user_id), P.user_password_path(user_id),
                     P.user_path(user_id)):
             try:
@@ -1253,26 +1257,6 @@ class Repository:
     #
     # A sibling of the user record, like grants (spec: this plan's Task 3).
     # Absent for a user who only ever signed in with Google or Microsoft.
-
-    def set_password(self, auth: AuthContext, user_id: str, password_hash: str) -> None:
-        self._write_json(auth, P.user_password_path(user_id),
-                         {"hash": password_hash}, [P.LABEL_PASSWORD])
-
-    def get_password_hash(self, auth: AuthContext, user_id: str) -> str | None:
-        try:
-            d = self._read_json(auth, P.user_password_path(user_id))
-        except (NotFound, ValueError, UnicodeDecodeError):
-            return None
-        return d.get("hash") or None
-
-    # --- per-user workspace state --------------------------------------------
-    #
-    # spec §8: the material pointer and report timestamps that used to live
-    # in web/src/lib/workspace.ts's localStorage. Moved here so attaching a
-    # different hive brings a user's UI state with it (spec §2: nSight
-    # keeps nothing of its own it cannot rebuild). One JSON object per
-    # user, keyed by case inside it -- small, per-user, read/written whole
-    # every time a case is opened.
 
     def get_workspace(self, auth: AuthContext, user_id: str) -> dict:
         try:

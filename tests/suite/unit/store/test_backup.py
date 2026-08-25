@@ -14,6 +14,33 @@ from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
 
+def _stored_password_hash(repo, auth, user_id: str):
+    """Read a legacy hash straight from the store — there is no accessor left."""
+    from reportbuilder.store import paths as P
+    from reportbuilder.store.seam import NotFound
+
+    try:
+        return repo._read_json(auth, P.user_password_path(user_id)).get("hash")
+    except (NotFound, ValueError):
+        return None
+
+
+def _legacy_password_hash(repo, auth, user_id: str, value: str = "$argon2id$legacy") -> None:
+    """Write a password hash the way a pre-SSO store holds one.
+
+    `set_password` is gone — accounts come from an invitation and people sign
+    in with Google or Microsoft — but a store written before that change can
+    still hold a hash, and the code that sweeps one on delete (and the backup
+    that carries it) has to keep working. Written through the store directly
+    because there is deliberately no API left that creates one.
+    """
+    from reportbuilder.store import paths as P
+
+    repo._write_json(auth, P.user_password_path(user_id), {"hash": value},
+                     [P.LABEL_PASSWORD])
+
+
+
 @pytest.fixture
 def auth():
     return AuthContext(token="user-1")
@@ -37,7 +64,7 @@ def _populated(repo, auth):
     repo.upload_template(auth, c.id, "Brand.pptx", b"TEMPLATE BYTES")
     repo.save_user(auth, User(id="usr-1", email="a@example.com", name="A",
                               is_admin=True, grants=(Grant(c.id, "edit"),)))
-    repo.set_password(auth, "usr-1", "$argon2id$fake")
+    _legacy_password_hash(repo, auth, "usr-1")
     repo.set_setting(auth, "access.json", {"allowed_domains": ["egoiq.com"]})
     return c, k, r
 
@@ -134,7 +161,7 @@ class TestRestore:
         assert [x.name for x in fresh.list_customers(auth)] == ["Attendo"]
         assert [x.name for x in fresh.list_cases(auth, c.id)] == ["Bränditutkimus"]
         assert [x.email for x in fresh.list_users(auth)] == ["a@example.com"]
-        assert fresh.get_password_hash(auth, "usr-1") == "$argon2id$fake"
+        assert _stored_password_hash(fresh, auth, "usr-1") == "$argon2id$legacy"
         assert fresh.get_setting(auth, "access.json") == {
             "allowed_domains": ["egoiq.com"]}
 

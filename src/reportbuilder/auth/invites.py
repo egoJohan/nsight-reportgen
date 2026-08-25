@@ -28,9 +28,9 @@ def _body(invited_by_email: str, link: str) -> str:
     return (
         f"{invited_by_email} has invited you to nSight Studio.\n\n"
         f"Sign in here: {link}\n\n"
-        "This link is not a password -- sign in with your own Google or "
-        "Microsoft account, or a password you set for this address, and "
-        "your access is ready.\n"
+        "Sign in with your own Google or Microsoft account using this "
+        "email address -- there is no password to set, and your access is "
+        "already waiting.\n"
     )
 
 

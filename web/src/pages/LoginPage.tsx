@@ -1,28 +1,19 @@
-import { type ReactNode, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
-import type { Me } from "@/lib/session";
 
 // Relative by default (spec §5.4), matching api.ts / session.ts: same-origin
 // is what makes the SameSite=Strict session cookie work at all.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
-// Both /auth/login/password and /auth/register are deliberately
-// non-revealing on the server (a wrong password and an unknown email get the
-// same 401; "already exists" and "domain not allowed" get the same 403) so
-// neither can be used to discover whether an account exists. Repeating that
-// distinction in the UI — "no account with that email" vs "wrong password" —
-// would rebuild the oracle the server went out of its way to remove, so both
-// copy strings below say only what the server's status code actually proves.
-const LOGIN_FAILED = "Those details did not match.";
-const REGISTER_REFUSED = "Registration is not available for that email.";
-const UNREACHABLE = "Could not reach the server. Try again.";
-
-type Mode = "signin" | "register";
+// There is no password and no self-service account. An admin invites you,
+// which creates your account and its access there and then; signing in proves
+// you are the person that address belongs to, and only Google and Microsoft
+// can prove that. The page therefore offers exactly two buttons and no form —
+// an email box with nothing behind it would invite people to try, and the only
+// honest answer to most of them would be a refusal.
 
 /** Where an SSO click actually goes. A plain `<a href>`, not `onClick` +
  *  `location.assign`: this has to be a real top-level browser navigation so
@@ -71,7 +62,7 @@ function useProviderAvailability() {
  */
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   not_allowed: "That email isn't set up for nSight Studio. Ask an admin to add it, then try again.",
-  sign_in_failed: "That sign-in didn't go through. Try again, or use your password below.",
+  sign_in_failed: "That sign-in didn't go through. Try again.",
   sign_in_cancelled: "Sign-in was cancelled. Try again when you're ready.",
 };
 
@@ -122,8 +113,6 @@ function ProviderButton({ label, mark, href }: { label: string; mark: ReactNode;
 }
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const next = params.get("next") || "/";
   const ssoErrorCode = params.get("error");
@@ -133,58 +122,7 @@ export default function LoginPage() {
   const { data: providers, isPending: providersPending } = useProviderAvailability();
   const showGoogle = providers?.google ?? false;
   const showMicrosoft = providers?.microsoft ?? false;
-
-  const [mode, setMode] = useState<Mode>("signin");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  function switchMode(m: Mode) {
-    setMode(m);
-    setError(null);
-    // A password typed for one mode has no business surviving into the
-    // other — clear it along with the error rather than carry it across.
-    setPassword("");
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    const path = mode === "signin" ? "/auth/login/password" : "/auth/register";
-    try {
-      const res = await fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        setError(mode === "signin" ? LOGIN_FAILED : REGISTER_REFUSED);
-        // The failed password never needs to be typed again for the same
-        // email — and it should not go on sitting in state while the person
-        // reads the error and decides what to do next.
-        setPassword("");
-        return;
-      }
-      // useSession's ["auth","me"] query is still cached from whatever got
-      // us onto this page (often a 401 -> null, from AppShell's own guard).
-      // Without this, that stale `null` outlives the new cookie for up to
-      // staleTime, and AppShell reads it before its next refetch — bouncing
-      // straight back to /login the instant we navigate to `next`. Seeding
-      // the cache with the response body — which is the same {id, email,
-      // name, is_admin} shape /auth/me returns — makes the new session
-      // visible immediately instead of on a timer.
-      const me: Me = await res.json();
-      queryClient.setQueryData(["auth", "me"], me);
-      navigate(next, { replace: true });
-    } catch {
-      setError(UNREACHABLE);
-      setPassword("");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const noneConfigured = !providersPending && !showGoogle && !showMicrosoft;
 
   return (
     <div className="relative isolate flex min-h-screen items-center justify-center bg-background px-4">
@@ -206,12 +144,10 @@ export default function LoginPage() {
       <div className="space-y-4 rounded-xl border bg-surface p-6 shadow-xl shadow-black/10 dark:shadow-black/40">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">
-              {mode === "signin" ? "Sign in to nSight Studio" : "Create an account"}
+              Sign in to nSight Studio
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {mode === "signin"
-                ? "Use your work email to continue."
-                : "Available for allowed organisation domains."}
+              Use the work account your invitation was sent to.
             </p>
           </div>
 
@@ -222,119 +158,46 @@ export default function LoginPage() {
           )}
 
           {/* Only offer a provider GET /auth/providers reports configured —
-              see useProviderAvailability. Hidden entirely, divider included,
-              when neither is.
+              see useProviderAvailability.
 
-              While the check is in flight we render the block INVISIBLE rather
-              than absent: it still occupies its full height, so the card does
-              not grow under the cursor when the answer arrives. Omitting it
-              made the login screen visibly resize a moment after paint. */}
-          {(showGoogle || showMicrosoft || providersPending) && (
-            <div className={providersPending ? "invisible" : undefined} aria-hidden={providersPending}>
-              <div className="space-y-3">
-                {(showGoogle || providersPending) && (
-                  <ProviderButton
-                    label="Continue with Google"
-                    mark={<GoogleMark />}
-                    href={providerLoginUrl("google", next)}
-                  />
-                )}
-                {(showMicrosoft || providersPending) && (
-                  <ProviderButton
-                    label="Continue with Microsoft"
-                    mark={<MicrosoftMark />}
-                    href={providerLoginUrl("microsoft", next)}
-                  />
-                )}
-              </div>
-
-              <div className="relative mt-4">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-surface px-2 text-xs text-muted-foreground">or</span>
-                </div>
-              </div>
+              While the check is in flight the block is INVISIBLE rather than
+              absent: it still occupies its full height, so the card does not
+              grow under the cursor when the answer arrives. Omitting it made
+              the login screen visibly resize a moment after paint. */}
+          <div className={providersPending ? "invisible" : undefined} aria-hidden={providersPending}>
+            <div className="space-y-3">
+              {(showGoogle || providersPending) && (
+                <ProviderButton
+                  label="Continue with Google"
+                  mark={<GoogleMark />}
+                  href={providerLoginUrl("google", next)}
+                />
+              )}
+              {(showMicrosoft || providersPending) && (
+                <ProviderButton
+                  label="Continue with Microsoft"
+                  mark={<MicrosoftMark />}
+                  href={providerLoginUrl("microsoft", next)}
+                />
+              )}
             </div>
+          </div>
+
+          {/* Neither provider configured means nobody can sign in at all. Say
+              so plainly: without this the card is an empty box, which reads as
+              a page that failed to load rather than a hive that needs
+              setting up. */}
+          {noneConfigured && (
+            <p className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+              No sign-in provider is configured yet. An administrator needs to
+              set up Google or Microsoft sign-in before anyone can get in.
+            </p>
           )}
 
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                required
-                autoFocus
-                autoComplete="username"
-                value={email}
-                placeholder="you@company.com"
-                disabled={busy}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                required
-                minLength={mode === "register" ? 12 : undefined}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                value={password}
-                placeholder="Password"
-                disabled={busy}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              {mode === "register" && (
-                <p className="text-xs text-muted-foreground">At least 12 characters.</p>
-              )}
-            </div>
-
-            {error && (
-              <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                {error}
-              </p>
-            )}
-
-            <Button type="submit" disabled={busy} className="w-full">
-              {busy
-                ? mode === "signin"
-                  ? "Signing in…"
-                  : "Creating account…"
-                : mode === "signin"
-                  ? "Sign in"
-                  : "Create account"}
-            </Button>
-
-            <p className="text-center text-sm text-muted-foreground">
-              {mode === "signin" ? (
-                <>
-                  New here?{" "}
-                  <button
-                    type="button"
-                    onClick={() => switchMode("register")}
-                    className="text-primary underline-offset-4 hover:underline"
-                  >
-                    Create an account
-                  </button>
-                </>
-              ) : (
-                <>
-                  Already have an account?{" "}
-                  <button
-                    type="button"
-                    onClick={() => switchMode("signin")}
-                    className="text-primary underline-offset-4 hover:underline"
-                  >
-                    Sign in
-                  </button>
-                </>
-              )}
-            </p>
-          </form>
+          <p className="text-center text-xs text-muted-foreground">
+            Access is by invitation. If you don&rsquo;t have one, ask an
+            administrator to invite your work address.
+          </p>
         </div>
       </div>
     </div>

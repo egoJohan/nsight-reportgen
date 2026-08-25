@@ -19,16 +19,51 @@ from reportbuilder.store.seam import AuthContext
 
 pytestmark = pytest.mark.integration
 
-CREDS = {"email": "admin@egoiq.com", "password": "correct horse battery staple"}
+EMAIL = "admin@egoiq.com"
+
+
+def _issue(client, repo, auth):
+    """Mint a session through the production code that sets the cookie.
+
+    There is no sign-in ROUTE left that sets one directly — accounts come from
+    an invitation and people authenticate with Google or Microsoft, so the only
+    route that issues a cookie is the OIDC callback, at the end of a provider
+    round trip. `_issue_session` is the part under test here; driving the
+    handshake to reach it would be testing the handshake instead.
+    """
+    from fastapi import Response
+    from starlette.requests import Request
+
+    from reportbuilder.api import routes_auth
+    from reportbuilder.auth.permissions import User
+
+    user = repo.find_user_by_email(auth, EMAIL) or repo.save_user(
+        auth, User(id="", email=EMAIL, name="admin", is_admin=True))
+    request = Request({"type": "http", "method": "GET", "path": "/",
+                       "headers": [], "query_string": b"", "scheme": "http",
+                       "server": ("testserver", 80), "client": ("test", 1),
+                       "app": client.app})
+    response = Response()
+    routes_auth._issue_session(request, response, repo, auth, user.id)
+    return next(v.decode() for k, v in response.raw_headers
+                if k.decode().lower() == "set-cookie")
 
 
 @pytest.fixture
-def client(monkeypatch):
+def repo():
+    return Repository(InMemoryObjectStore())
+
+
+@pytest.fixture
+def auth():
+    return AuthContext(token="test")
+
+
+@pytest.fixture
+def client(monkeypatch, repo, auth):
     monkeypatch.setenv("NSIGHT_BOOTSTRAP_ADMINS", "admin@egoiq.com")
     monkeypatch.delenv("NSIGHT_PUBLIC_URL", raising=False)
     app = create_app()
-    repo = Repository(InMemoryObjectStore())
-    auth = AuthContext(token="test")
     app.dependency_overrides[get_repository] = lambda: repo
     app.dependency_overrides[get_auth] = lambda: auth
     # Deliberately NOT overriding current_user: the real cookie round-trip is
@@ -44,22 +79,24 @@ def _session_cookie(response) -> str:
     return header.decode()
 
 
-def test_over_plain_http_the_cookie_is_one_the_browser_will_send_back(client):
-    cookie = _session_cookie(client.post("/auth/register", json=CREDS))
+def test_over_plain_http_the_cookie_is_one_the_browser_will_send_back(client, repo, auth):
+    cookie = _issue(client, repo, auth)
     assert "Secure" not in cookie
     # The protections that DO work over http are not relaxed with it.
     assert "HttpOnly" in cookie
     assert "SameSite=strict" in cookie
 
 
-def test_under_tls_it_is_still_secure(client, monkeypatch):
+def test_under_tls_it_is_still_secure(client, repo, auth, monkeypatch):
     monkeypatch.setenv("NSIGHT_PUBLIC_URL", "https://nsight.example.com")
-    assert "Secure" in _session_cookie(client.post("/auth/register", json=CREDS))
+    assert "Secure" in _issue(client, repo, auth)
 
 
-def test_the_signed_in_session_actually_works_over_plain_http(client):
+def test_the_signed_in_session_actually_works_over_plain_http(client, repo, auth):
     """The point of the whole thing: a second request is still signed in."""
-    assert client.post("/auth/register", json=CREDS).status_code == 201
+    cookie = _issue(client, repo, auth)
+    client.cookies.set("nsight_session",
+                       cookie.split("nsight_session=", 1)[1].split(";", 1)[0])
     me = client.get("/auth/me")
     assert me.status_code == 200, me.text
     assert me.json()["email"] == "admin@egoiq.com"
