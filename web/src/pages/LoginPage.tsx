@@ -141,12 +141,15 @@ export default function LoginPage() {
         {/* shadow-xl, not the shadow-sm a panel gets on a working page: this card
           sits over a deliberately strong tiled backdrop, and a faint shadow
           reads as a flat patch rather than something lifted off it. */}
-      <div className="space-y-4 rounded-xl border bg-surface p-6 shadow-xl shadow-black/10 dark:shadow-black/40">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">
-              Sign in to nSight Studio
-            </h1>
-          </div>
+        {/* Centred throughout: the logo, the heading and the two provider
+            buttons are one vertical stack, and a left-aligned heading over
+            centred buttons read as two different layouts sharing a card.
+            Matches RequestAccessPage, which is the same card at the next
+            step. */}
+        <div className="space-y-4 rounded-xl border bg-surface p-6 text-center shadow-xl shadow-black/10 dark:shadow-black/40">
+          <h1 className="text-lg font-semibold tracking-tight">
+            Sign in to nSight Studio
+          </h1>
 
           {ssoError && (
             <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
@@ -191,7 +194,7 @@ export default function LoginPage() {
             </p>
           )}
 
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             No account yet? Sign in anyway to request it.
           </p>
         </div>
