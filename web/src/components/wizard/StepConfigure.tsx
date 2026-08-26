@@ -1758,17 +1758,19 @@ function SlideWarning({
   materialId,
   chart,
   grouping,
+  className,
 }: {
   materialId: string;
   chart: ChartSpec;
   grouping: GroupingOverride;
+  className?: string;
 }) {
   const { data: panels } = usePanelSelection(materialId, chart, grouping);
   const problems = [...slideProblems(chart, panels), ...producerProblems(chart)];
   if (!problems.length) return null;
   return (
     <AlertTriangleIcon
-      className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500"
+      className={cn("size-3.5 shrink-0 text-amber-600 dark:text-amber-500", className)}
       aria-label={problems[0].title}
     >
       <title>{problems[0].title}</title>
@@ -1981,20 +1983,24 @@ function StepConfigureInner({
                       {i + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="line-clamp-1 text-sm">
-                          {slideTitle(c, questionMap)}
-                        </span>
-                        <SlideWarning
-                          materialId={materialId}
-                          chart={c}
-                          grouping={grouping}
-                        />
+                      <span className="line-clamp-1 text-sm">
+                        {slideTitle(c, questionMap)}
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {slideSubtitle(c, questionMap)}
                       </span>
                     </span>
+                    {/* Top right, and `self-start` is what puts it there: the
+                        row centres its children, so without it the triangle
+                        would float beside the middle of a two-line title. Out
+                        of the title's own line so a long question keeps the
+                        full width to clamp into. */}
+                    <SlideWarning
+                      materialId={materialId}
+                      chart={c}
+                      grouping={grouping}
+                      className="mt-0.5 self-start"
+                    />
                   </button>
                 </div>
               );
