@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
-import { PAGE, PAGE_HEADER, PAGE_TITLE } from "@/lib/surfaces";
+import { EDIT_AFFORDANCE, PAGE, PAGE_HEADER, PAGE_TITLE } from "@/lib/surfaces";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -97,7 +97,7 @@ function CaseHeading({
         <Button
           size="icon-sm"
           variant="ghost"
-          className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          className={EDIT_AFFORDANCE}
           onClick={() => {
             setDraft(name);
             setEditing(true);

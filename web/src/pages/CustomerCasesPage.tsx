@@ -1,10 +1,16 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon } from "lucide-react";
+import {
+  PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon,
+  PencilIcon, CheckIcon, XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import {
   useCustomer,
+  useRenameCustomer,
   useCustomerCases,
   useTemplateActions,
   useTemplates,
@@ -18,9 +24,88 @@ import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
 import NoAccessCustomer from "@/components/NoAccessCustomer";
 import { RequestAccessDialog } from "@/components/RequestAccessDialog";
 import type { AccessMode } from "@/lib/api";
-import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
+import { EDIT_AFFORDANCE, EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW, SECTION_HEADER, SECTION_TITLE } from "@/lib/surfaces";
 
 /** One customer's cases. */
+/** The customer's name, renamed in place — the same affordance the study and
+ *  the report headings carry, so the three levels of the hierarchy behave
+ *  alike rather than one of them being read-only for no reason a user can
+ *  see. */
+function CustomerTitle({
+  customerId,
+  name,
+  canEdit,
+}: {
+  customerId: string;
+  name: string;
+  canEdit: boolean;
+}) {
+  const rename = useRenameCustomer();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+
+  function save() {
+    const next = draft.trim();
+    if (!next || next === name) {
+      setEditing(false);
+      return;
+    }
+    rename.mutate(
+      { customerId, name: next },
+      {
+        onSuccess: () => setEditing(false),
+        onError: (e) => toast.error(`Rename failed: ${e.message}`),
+      }
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <Input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="max-w-md text-lg font-semibold"
+        />
+        <Button variant="outline" size="icon" onClick={save} disabled={rename.isPending}>
+          <CheckIcon className="size-4" />
+        </Button>
+        <Button size="icon" variant="ghost" onClick={() => setEditing(false)}>
+          <XIcon className="size-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex min-w-0 items-center gap-2">
+      <h1 className={`${PAGE_TITLE} truncate`}>{name}</h1>
+      {/* Renaming is a write. A viewer gets no affordance for it — the route
+          would 403 anyway, and offering a control that only ever fails is
+          worse than not offering it. */}
+      {canEdit && (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className={EDIT_AFFORDANCE}
+          onClick={() => {
+            setDraft(name);
+            setEditing(true);
+          }}
+          title="Rename customer"
+        >
+          <PencilIcon className="size-4" />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export default function CustomerCasesPage() {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
@@ -98,7 +183,15 @@ export default function CustomerCasesPage() {
       {/* No back-link here: the shell's breadcrumb already carries the way
           back, and two of them side by side is one too many. */}
       <div className={PAGE_HEADER}>
-        <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
+        {customerId && customer ? (
+          <CustomerTitle
+            customerId={customerId}
+            name={customer.name}
+            canEdit={canEdit}
+          />
+        ) : (
+          <h1 className={PAGE_TITLE}>{customer?.name ?? "…"}</h1>
+        )}
         <div className="flex items-center gap-2">
           {/* Same top-right slot regardless of who's looking. Missing edit
               (the only gap left once this page renders at all) gets this;

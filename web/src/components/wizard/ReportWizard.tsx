@@ -54,7 +54,7 @@ import {
 import StepSelect from "./StepSelect";
 import StepConfigure from "./StepConfigure";
 import StepDownload from "./StepDownload";
-import { PAGE_TITLE, PANEL_TITLE } from "@/lib/surfaces";
+import { EDIT_AFFORDANCE, PAGE_TITLE, PANEL_TITLE } from "@/lib/surfaces";
 
 /** Move an item within an array, returning a new array. */
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -1260,7 +1260,7 @@ export default function ReportWizard({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                className={EDIT_AFFORDANCE}
                 onClick={() => {
                   setNameDraft(draft.name);
                   setEditingName(true);

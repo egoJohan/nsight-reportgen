@@ -76,6 +76,24 @@ export function useRenameCustomerCase(customerId: string | undefined) {
   });
 }
 
+/** Rename a customer. Its name is shown in the sidebar tree, the breadcrumb,
+ *  the customer list and on every grant row, so the invalidation is broad on
+ *  purpose — a rename that left the old name in three other places would read
+ *  as a rename that failed. */
+export function useRenameCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ customerId, name }: { customerId: string; name: string }) =>
+      api.customers.rename(customerId, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      // The grants screen shows a customer BY NAME beside each grant.
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+}
+
 export function useResolvedCase(caseId: string | undefined) {
   return useQuery({
     queryKey: ["case", caseId, "resolve"],

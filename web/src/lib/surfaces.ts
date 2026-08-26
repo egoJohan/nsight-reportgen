@@ -50,6 +50,20 @@ export const OVERLINE =
  *  Matches the tutkimus page, which is the layout the others are aligned to. */
 export const PAGE_HEADER = "mb-8 flex items-start justify-between gap-4";
 
+/** The pencil beside a heading you can rename.
+ *
+ *  FADED, not hidden. It used to be `opacity-0` until the heading was hovered,
+ *  which meant the only way to discover that a name could be changed was to
+ *  happen to put the pointer on it — and on the customer page, where no such
+ *  control existed at all, people concluded the name was fixed. Showing it
+ *  faintly says the affordance is there; hover just brings it forward.
+ *
+ *  Shared so the three levels of the hierarchy — customer, study, report —
+ *  cannot drift into three different behaviours. */
+export const EDIT_AFFORDANCE =
+  "text-muted-foreground opacity-40 transition-opacity hover:opacity-100 " +
+  "group-hover:opacity-80 focus-visible:opacity-100";
+
 /** A bordered container holding a divided list (reports, questions).
  *
  *  Deliberately UNPADDED: the rows inside supply their own padding, and a pad
