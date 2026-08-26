@@ -25,6 +25,7 @@ import {
   useCreateReport,
   useDeleteReport,
   useQuestions,
+  useSensitiveTerms,
   useCaseReports,
   useDuplicateReport,
   qk,
@@ -322,6 +323,14 @@ export default function ReportsSection({
   const createReport = useCreateReport(caseId);
   const deleteReport = useDeleteReport(caseId);
   const { data: questions } = useQuestions(materialId);
+  // The same condition the server gates on (routes_reports.py's
+  // `_refuse_until_sensitive_terms_accepted`): terms to review, nobody has
+  // reviewed them. Without this the panel above says reports cannot be created
+  // while the button below cheerfully creates one — and the refusal, when it
+  // finally came, arrived as an error on a click that looked legitimate.
+  const { data: terms } = useSensitiveTerms(materialId ?? undefined);
+  const termsPending =
+    !!terms && terms.accepted === null && (terms.proposed?.length ?? 0) > 0;
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // Reports come from the SERVER (visible to any user/device), newest first.
@@ -449,7 +458,12 @@ export default function ReportsSection({
             <button
               type="button"
               onClick={handleCreate}
-              disabled={createReport.isPending || !questions}
+              disabled={createReport.isPending || !questions || termsPending}
+              title={
+                termsPending
+                  ? "Accept the sensitive terms above first — they are what gets hidden from the AI."
+                  : undefined
+              }
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 disabled:opacity-60"
             >
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -462,7 +476,9 @@ export default function ReportsSection({
               <div className="min-w-0">
                 <p className="text-sm font-medium">New report</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Pick questions and build charts
+                  {termsPending
+                    ? "Accept the sensitive terms first"
+                    : "Pick questions and build charts"}
                 </p>
               </div>
             </button>

@@ -114,11 +114,15 @@ def _refuse_until_sensitive_terms_accepted(client, case_id: str) -> None:
             # companies ONLY in free-text answers proposes nothing, so no gate
             # fires and nothing is registered. Structured studies — every one
             # seen so far — are covered; verbatims are not.
-            from reportbuilder.api.model_loader import model_for_material
+            from reportbuilder.api.model_loader import raw_model_for_material
             from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
             try:
+                # Same source as the panel, deliberately: a gate that counted
+                # different terms from the screen it points at would refuse
+                # things the analyst had already dealt with — or, as here, let
+                # everything through while the screen said it would not.
                 proposed = propose_sensitive_terms(
-                    model_for_material(mid, client))
+                    raw_model_for_material(mid, client))
             except Exception:  # noqa: BLE001 — unreadable file proposes nothing
                 proposed = []
             if proposed:

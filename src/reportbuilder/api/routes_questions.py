@@ -1828,11 +1828,14 @@ def get_sensitive_terms(
     `accepted` is null until somebody reviews them. A report cannot be created
     before that (see routes_reports.create_report).
     """
-    from reportbuilder.api.model_loader import model_for_material
+    from reportbuilder.api.model_loader import raw_model_for_material
     from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
 
     try:
-        model = model_for_material(material_id, client)
+        # The RAW model: grouping dissolves the "<member>:<question>" labels
+        # this reads, and grouping is a per-report choice while these terms are
+        # registered per material. See raw_model_for_material.
+        model = raw_model_for_material(material_id, client)
     except Exception:  # noqa: BLE001 — an unreadable file proposes nothing
         proposed: list[str] = []
     else:

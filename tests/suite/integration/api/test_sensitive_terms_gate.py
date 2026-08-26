@@ -225,3 +225,41 @@ def test_duplicating_is_allowed_once_the_terms_are_accepted(case_with_data):
     rid = _new_report(client, kid).json()["report_id"]
     r = client.post(f"/cases/{kid}/reports/{rid}/duplicate", json={"name": "Copy"})
     assert r.status_code == 200, r.text
+
+
+def test_the_gate_reads_the_file_not_the_grouped_model(client_memory, brand_study_bytes):
+    """The defect this covers: no proposals, so no gate, so no masking.
+
+    `model_for_material` finalises the model, and the battery grouper relabels
+    each member to its category — so "<member>:<shared question>" becomes just
+    "<member>" and the proposal, which reads exactly that shape, found nothing.
+    On the Holiday Club file that took 192 colon labels down to 77 and the
+    proposal from 34 terms to zero: the case page said reports could not be
+    created, and every report was created.
+    """
+    cid = client_memory.post("/customers", json={"name": "A"}).json()["id"]
+    kid = client_memory.post(f"/customers/{cid}/cases",
+                             json={"name": "K"}).json()["id"]
+    mid = client_memory.post(
+        f"/cases/{kid}/materials",
+        files={"file": ("s.sav", brand_study_bytes, "application/octet-stream")},
+    ).json()["material_id"]
+
+    from reportbuilder.api.deps_auth import current_user
+    from reportbuilder.api.deps_store import get_auth, get_repository
+    from reportbuilder.api.model_loader import (
+        model_for_material, raw_model_for_material,
+    )
+    from reportbuilder.ingest.sensitive_terms import propose_sensitive_terms
+    from reportbuilder.store.repository_client import RepositoryClient
+
+    o = client_memory.app.dependency_overrides
+    store = RepositoryClient(o[get_repository](), o[get_auth](), o[current_user]())
+
+    assert propose_sensitive_terms(raw_model_for_material(mid, store)), (
+        "the raw model must still carry the labels the proposal reads")
+    # The route and the gate must both see them.
+    assert client_memory.get(f"/materials/{mid}/sensitive-terms").json()["proposed"]
+    assert _new_report(client_memory, kid).status_code == 409
+    # Named so the contrast is on the record rather than implied.
+    assert model_for_material(mid, store) is not None

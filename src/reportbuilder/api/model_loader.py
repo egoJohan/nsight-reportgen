@@ -164,6 +164,25 @@ def _finalize(model, material_id: str, client, override: dict | None, df=None):
     return model
 
 
+def raw_model_for_material(material_id: str, client):
+    """The file's own model, before any grouping or curation is applied.
+
+    `model_for_material` finalises: the battery grouper relabels each member
+    variable to its category, so `"<member>:<shared question>"` becomes just
+    `"<member>"`. That is right for charting and wrong for reading a study's
+    NAMES out of it — on the Holiday Club file the finalised model kept 77 of
+    the file's 192 colon labels, and the sensitive-term proposal, which reads
+    exactly that shape, found nothing at all. No proposals meant no gate and no
+    registered terms: the masking silently had nothing to mask.
+
+    Which names a dataset contains is a property of the FILE, not of how one
+    report happens to group it — and grouping is per-report, so a finalised
+    model cannot be the source for something registered per material.
+    """
+    _df, model, _label = _read(material_id, client)
+    return model
+
+
 def model_for_material(material_id: str, client, override: dict | None = None):
     df, model, _label = _read(material_id, client)
     return _finalize(model, material_id, client, override, df=df)
