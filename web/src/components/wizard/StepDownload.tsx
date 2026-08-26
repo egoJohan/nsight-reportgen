@@ -25,6 +25,7 @@ export default function StepDownload({
   reportId,
   materialId,
   draft,
+  templateRef,
   active,
   setActive,
   onGoToDesign,
@@ -34,6 +35,11 @@ export default function StepDownload({
   reportId: string;
   materialId: string;
   draft: ReportDoc;
+  /** The template these slides are actually drawn on — RESOLVED, not
+   *  `draft.template_ref`, which is "" whenever the report inherits. Passed in
+   *  rather than read off the draft so this grid and the queue agree on which
+   *  image they are naming. */
+  templateRef: string;
   // The Preview grid highlights the current slide and, on click, selects it and
   // jumps back to Design to edit it (state owned by ReportWizard).
   active: string | null;
@@ -254,7 +260,7 @@ export default function StepDownload({
             charts={deckCharts}
             materialId={materialId}
             reportId={reportId}
-            templateRef={draft.template_ref}
+            templateRef={templateRef}
             grouping={grouping}
             questionMap={questionMap}
             activeRef={active}

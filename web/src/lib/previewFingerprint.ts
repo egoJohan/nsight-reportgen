@@ -23,7 +23,14 @@ export const IMAGE_FINGERPRINT_IGNORED = [
 
 /** The parts of "which image is this?" that do not live on the chart itself. */
 export interface RenderContext {
-  /** The report's own template choice; "" when it inherits one. */
+  /** The template the slide will actually be drawn on — RESOLVED, not the
+   *  report's own choice.
+   *
+   *  It used to be the report's own `template_ref`, which is "" whenever the
+   *  report inherits. That busts the cache when somebody picks a template on
+   *  the report, and not otherwise — so a customer who had no template, and
+   *  then got one, kept every preview it had already drawn on the default. The
+   *  report's setting had not changed; what "" MEANT had. */
   templateRef: string;
   /** Which report — the backend resolves a template through it. */
   reportId: string;

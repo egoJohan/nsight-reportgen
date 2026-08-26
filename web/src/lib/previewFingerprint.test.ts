@@ -125,3 +125,28 @@ describe("titleDataKey stays blind to presentation", () => {
     expect(titleDataKey(chart(), { text: "A different question", variables: ["v1"] })).not.toBe(base);
   });
 });
+
+describe("the template a slide is drawn on", () => {
+  it("changes the fingerprint when the resolved template changes", () => {
+    // The bug: a customer with no template, a report inheriting it, previews
+    // drawn on the default. Uploading a template to the customer changed what
+    // every inheriting report resolves to — and the report's OWN template_ref
+    // was "" before and "" after, so nothing busted and the old pictures
+    // stayed. The context now carries the RESOLVED id, so this differs.
+    const before = imageFingerprint(chart(), { ...CTX, templateRef: "" });
+    const after = imageFingerprint(chart(), { ...CTX, templateRef: "tpl-holiday" });
+    expect(before).not.toEqual(after);
+  });
+
+  it("is stable when nothing about the template changed", () => {
+    expect(imageFingerprint(chart(), { ...CTX, templateRef: "tpl-a" })).toEqual(
+      imageFingerprint(chart(), { ...CTX, templateRef: "tpl-a" })
+    );
+  });
+
+  it("tells two templates apart", () => {
+    expect(imageFingerprint(chart(), { ...CTX, templateRef: "tpl-a" })).not.toEqual(
+      imageFingerprint(chart(), { ...CTX, templateRef: "tpl-b" })
+    );
+  });
+});

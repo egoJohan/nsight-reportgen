@@ -716,9 +716,20 @@ export default function ReportWizard({
   // The render context and the producers' environment change with the template
   // and the grouping, so they are refreshed rather than registered once.
   const groupingKey = JSON.stringify(draft?.grouping ?? {});
+  // The template a slide is actually drawn on. The report's own `template_ref`
+  // is "" whenever it inherits, so hashing THAT means a customer gaining a
+  // template changes every inheriting preview and busts none of them — the
+  // report's setting did not change, what "" resolves to did. Falls back to
+  // the report's own choice while the resolution is in flight.
+  const effectiveTemplateRef =
+    draft?.template_ref || caseTemplate?.template_id || "";
   useEffect(() => {
     const ctx = {
-      templateRef: draft?.template_ref ?? "",
+      // The RESOLVED template, falling back to the report's own choice while
+      // the resolution is in flight. Inheriting reports carry "" forever, so
+      // hashing the report's own setting means a customer gaining a template
+      // changes every inheriting preview and busts none of them.
+      templateRef: effectiveTemplateRef,
       reportId,
       groupingKey,
       renderTitle: false,
@@ -744,7 +755,7 @@ export default function ReportWizard({
           templateRef: runCtx.templateRef,
         }),
     });
-  }, [materialId, reportId, draft?.template_ref, groupingKey, qc]);
+  }, [materialId, reportId, effectiveTemplateRef, groupingKey, qc]);
 
   // Warm the whole deck, and pick up slides added later. `enqueue` dedupes and
   // each producer decides for itself whether it is needed, so re-enqueueing a
@@ -1375,7 +1386,7 @@ export default function ReportWizard({
           <StepConfigure
             materialId={materialId}
             reportId={reportId}
-            templateRef={draft.template_ref}
+            templateRef={effectiveTemplateRef}
             charts={includedCharts}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             aiPending={aiPending}
@@ -1394,6 +1405,7 @@ export default function ReportWizard({
             reportId={reportId}
             materialId={materialId}
             draft={draft}
+            templateRef={effectiveTemplateRef}
             active={active}
             setActive={setActive}
             onGoToDesign={() => setStep(CONFIGURE_STEP)}
