@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, MoreVerticalIcon, InfoIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, InfoIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,22 +133,11 @@ export default function StepSelect({
   // the user reviews the selection and groups it themselves ([] = open on current grouping).
   const [dialogSelection, setDialogSelection] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  // Per-row "⋮" menu: which row's menu is open, and which question's details dialog to show.
-  const [menuQid, setMenuQid] = useState<string | null>(null);
+  // Which question's details dialog to show. There is no row menu any more —
+  // each row's one action is its own button.
   const [detailQid, setDetailQid] = useState<string | null>(null);
   const [specialInfoChart, setSpecialInfoChart] = useState<ChartSpec | null>(null);
   const [addSpecialOpen, setAddSpecialOpen] = useState(false);
-
-  // Close the open row menu on any click outside a menu (the trigger + menu carry
-  // data-rowmenu, so clicking the trigger just toggles — no close-then-reopen flicker).
-  useEffect(() => {
-    if (!menuQid) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target as Element).closest("[data-rowmenu]")) setMenuQid(null);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuQid]);
 
   // Every slide showing each question, with its index in the FULL chart list —
   // a question may hold a total-level slide AND the same result split by another
@@ -481,43 +470,18 @@ export default function StepSelect({
                     Special
                   </Badge>
                 </button>
+                {/* Same as a question row: info, not a menu. Unticking leaves
+                    the slide out of the deck and keeps its bullets, which is
+                    what somebody who wrote them almost always means. */}
                 <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                   <button
                     type="button"
-                    title="Add…"
-                    onClick={() =>
-                      setMenuQid(menuQid === c.question_ref ? null : c.question_ref)
-                    }
+                    title="View details"
+                    onClick={() => setSpecialInfoChart(c)}
                     className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
-                    <MoreVerticalIcon className="size-4" />
+                    <InfoIcon className="size-4" />
                   </button>
-                  {menuQid === c.question_ref && (
-                    <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSpecialInfoChart(c);
-                          setMenuQid(null);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                      >
-                        <InfoIcon className="size-4 text-muted-foreground" /> View details
-                      </button>
-                      {/* Unticking only leaves a special slide out of the deck; this
-                          throws it away, bullets and all. */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onRemoveChart(i);
-                          setMenuQid(null);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
-                      >
-                        <XIcon className="size-4" /> Delete slide
-                      </button>
-                    </div>
-                  )}
                 </div>
               </div>
             ) : null
@@ -588,51 +552,26 @@ export default function StepSelect({
                   </Badge>
                 )}
               </button>
-              {/* ⋮ row menu — sits outside the toggle button so it never toggles the row */}
+              {/* Info, not a menu. The menu held two items and one of them —
+                  "Delete slide" — was the checkbox again: on a question with a
+                  single slide it deleted that slide, which unticked the
+                  question. Two controls for one act, one of them red. The
+                  checkbox includes or excludes a QUESTION; this shows what is
+                  in it. Outside the toggle button so it never toggles the row. */}
               <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                 <button
                   type="button"
-                  title="Add…"
-                  onClick={() => setMenuQid(menuQid === q.qid ? null : q.qid)}
+                  title="View details"
+                  onClick={() => setDetailQid(q.qid)}
                   className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
-                  <MoreVerticalIcon className="size-4" />
+                  <InfoIcon className="size-4" />
                 </button>
-                {menuQid === q.qid && (
-                  <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDetailQid(q.qid);
-                        setMenuQid(null);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
-                    >
-                      <InfoIcon className="size-4 text-muted-foreground" /> View details
-                    </button>
-                    {/* This row is the question's FIRST slide; the extra-slide rows
-                        below delete their own. When it is the only one, deleting it
-                        unticks the question (nothing is left showing it). */}
-                    {isAdded && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = (slidesByRef.get(q.qid) ?? [])[0];
-                          if (first) onRemoveChart(first.index);
-                          setMenuQid(null);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
-                      >
-                        <XIcon className="size-4" /> Delete slide
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
 
               {/* One row per EXTRA slide showing this question — the same result
-                  split by another variable. Unticking the question still removes
-                  them all; Delete slide removes just this one. */}
+                  split by another variable. Unticking the question removes them
+                  all; the × on the row removes just that one. */}
               {(slidesByRef.get(q.qid) ?? []).slice(1).map(({ chart, index }) => {
                 const rowKey = chart.slide_id ?? `${q.qid}-${index}`;
                 return (
@@ -653,29 +592,20 @@ export default function StepSelect({
                         Extra slide
                       </Badge>
                     </div>
+                    {/* The one place removing a single slide is not the
+                        checkbox: unticking the question takes ALL its slides,
+                        and this row exists because somebody wanted the same
+                        question split a second way. A direct button, because a
+                        menu holding one item is a menu for no reason. */}
                     <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 -translate-y-1/2">
                       <button
                         type="button"
-                        title="Add…"
-                        onClick={() => setMenuQid(menuQid === rowKey ? null : rowKey)}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title="Remove this extra slide"
+                        onClick={() => onRemoveChart(index)}
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
                       >
-                        <MoreVerticalIcon className="size-4" />
+                        <XIcon className="size-4" />
                       </button>
-                      {menuQid === rowKey && (
-                        <div className="absolute top-full right-0 z-30 mt-1 min-w-[168px] overflow-hidden rounded-lg border bg-popover py-1 shadow-lg">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onRemoveChart(index);
-                              setMenuQid(null);
-                            }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-destructive hover:bg-accent"
-                          >
-                            <XIcon className="size-4" /> Delete slide
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
