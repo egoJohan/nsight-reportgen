@@ -138,6 +138,24 @@ def note_field(text: str) -> ConfigField:
     return ConfigField("note", "note", "", help=text)
 
 
+def scatter_xy_field() -> ConfigField:
+    """Which two segments become the X and Y axes.
+
+    A scatter positions each CATEGORY as a point — attribute by attribute,
+    brand by brand — using its value in two segments. So it needs a classifying
+    variable with at least two groups, and a choice of which two: wave 1 against
+    wave 2, our brand against the competitor. The options are not listed here
+    because only the data knows them; the widget asks
+    `/questions/{qid}/segments`.
+    """
+    return ConfigField(
+        "scatter_xy", "scatter_xy", "Axes",
+        help="Pick the two groups to plot against each other. Every category "
+             "becomes a point: its value in the first group is the X position, "
+             "its value in the second the Y.",
+    )
+
+
 def combo_secondary_field() -> ConfigField:
     return ConfigField(
         "combo_secondary", "numeric_variable", "Secondary variable (line)",

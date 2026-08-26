@@ -45,6 +45,11 @@ def build_image_scatter(ctx) -> None:
     ax.scatter(xs, ys, color=TEAL, s=70, edgecolors=bg, linewidths=0.8, zorder=3)
 
     if ctx.spec.elements.data_labels:
+        # Room for the labels. They are drawn in offset POINTS, so matplotlib's
+        # autoscaling never sees them and a point near the right edge — which is
+        # the interesting one, the attribute scoring highest — has its own name
+        # cut off by the frame.
+        ax.margins(x=0.16, y=0.10)
         for cat, x, y in zip(cats, xs, ys):
             ax.annotate(
                 cat,

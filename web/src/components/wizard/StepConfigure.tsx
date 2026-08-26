@@ -760,6 +760,80 @@ function NumericVarWidget({ field, chart, variables, onChange }: WidgetProps) {
   );
 }
 
+/** Which two segments a scatter plots against each other.
+ *
+ *  Every category becomes a point: its value in the X group against its value
+ *  in the Y group — how each attribute moved between two waves, or how it
+ *  stands for us against a competitor. So the choice is two of the groups the
+ *  classifier produced, and only the data knows what those are called.
+ *
+ *  Says what is missing rather than rendering two empty selects: without a
+ *  classifier there are no groups, and with one group there is nothing to plot
+ *  against. An empty picker with no explanation is the thing that generates
+ *  support questions.
+ */
+function ScatterXyWidget({ chart, materialId, onChange }: WidgetProps) {
+  const grouping = useContext(GroupingCtx);
+  const clf = chart.classifying_var;
+  const { data, isPending } = useQuery({
+    queryKey: ["segments", materialId, chart.question_ref, clf],
+    queryFn: () => api.segments(materialId, chart.question_ref, clf!, grouping),
+    enabled: !!materialId && !!clf,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const segments = data?.segments ?? [];
+  const [x, y] = chart.scatter_xy ?? [undefined, undefined];
+
+  if (!clf) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Choose a classifying variable first — its groups are what a scatter
+        plots against each other.
+      </p>
+    );
+  }
+  if (isPending) {
+    return <p className="text-xs text-muted-foreground">Reading the groups…</p>;
+  }
+  if (segments.length < 2) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        This variable has only one group with answers in it, so there is nothing
+        to plot it against. Pick a classifying variable with at least two.
+      </p>
+    );
+  }
+
+  // Both must be set together: `scatter_xy` is a pair, and the renderer refuses
+  // a half-configured one rather than guessing an axis.
+  const set = (nx: string | undefined, ny: string | undefined) =>
+    onChange({ scatter_xy: nx && ny ? [nx, ny] : null });
+
+  return (
+    <div className="flex gap-2">
+      {([["X", x, (v: string | null) => set(v ?? undefined, y)],
+         ["Y", y, (v: string | null) => set(x, v ?? undefined)]] as const).map(
+        ([axis, value, pick]) => (
+        <label key={axis} className="min-w-0 flex-1">
+          <span className="mb-1 block text-xs text-muted-foreground">{axis} axis</span>
+          <Select value={value ?? ""} onValueChange={pick}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Choose a group" />
+            </SelectTrigger>
+            <SelectContent>
+              {segments.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        )
+      )}
+    </div>
+  );
+}
+
 // Dispatch a schema field to its widget. Unknown widget types are skipped so an
 // older UI degrades gracefully against a newer schema.
 function FieldWidget(props: WidgetProps) {
@@ -780,6 +854,8 @@ function FieldWidget(props: WidgetProps) {
       return <SortWidget {...props} />;
     case "number_format":
       return <NumberFormatWidget {...props} />;
+    case "scatter_xy":
+      return <ScatterXyWidget {...props} />;
     case "note":
       return <NoteWidget {...props} />;
     case "text":

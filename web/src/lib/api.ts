@@ -1511,6 +1511,18 @@ export const api = {
       }).then((r) => detailedJson<Me>(r)),
   },
 
+  /** The segment labels this question splits into under a classifier — the two
+   *  a scatter plots against each other. From the computed series, not the
+   *  variable's value labels, so a group nobody falls into is never offered. */
+  segments: (materialId: string, qid: string, classifyingVar: string,
+             grouping?: GroupingOverride): Promise<{ segments: string[] }> => {
+    const q = new URLSearchParams({ classifying_var: classifyingVar });
+    if (grouping && Object.keys(grouping).length) q.set("grouping", JSON.stringify(grouping));
+    return fetch(
+      `${API_BASE}/materials/${materialId}/questions/${encodeURIComponent(qid)}/segments?${q}`
+    ).then((r) => json<{ segments: string[] }>(r));
+  },
+
   /** Which classifier groups a one-panel-per-group chart would actually draw.
    *  Answered by the server because the choice depends on each group's base —
    *  and because `render/panels.py` is the one place that decides it, so the

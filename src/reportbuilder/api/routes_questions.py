@@ -1139,6 +1139,47 @@ class WordMergesBody(BaseModel):
     merges: list[WordMergeGroup] = []
 
 
+@questions_router.get("/materials/{material_id}/questions/{qid}/segments")
+def question_segments(
+    material_id: str,
+    qid: str,
+    classifying_var: str,
+    grouping: str | None = None,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
+) -> dict:
+    """The segment labels this question splits into under *classifying_var*.
+
+    A scatter positions each CATEGORY by its value in two of these — wave 1
+    against wave 2, this brand against that one — so configuring one means
+    naming two segments, and only the data knows what they are called. The
+    labels come from the computed series rather than from the variable's value
+    labels, so what the picker offers is what the chart will actually have:
+    a group nobody falls into never appears.
+
+    Degrades to an empty list rather than a 500 — a picker that cannot be
+    filled must not stop somebody configuring the rest of the slide.
+    """
+    df, model = _load_df_model(material_id, client)
+    if grouping:
+        try:
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
+        except (ValueError, TypeError):
+            pass
+    try:
+        q = model.question(qid)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Question '{qid}' not found") from exc
+    try:
+        spec = replace(_summary_spec(q.qid), classifying_var=classifying_var)
+        series = compute(q, spec, df, model)
+    except Exception:  # noqa: BLE001 — see the docstring
+        return {"segments": []}
+    # "Total" is every respondent, not a group — plotting it against one of its
+    # own parts compares a thing with itself.
+    return {"segments": [s for s in series.segments if s != "Total"]}
+
+
 @questions_router.get("/materials/{material_id}/questions/{qid}/panels")
 def question_panels(
     material_id: str,

@@ -87,7 +87,14 @@ def test_select_fields_carry_their_options(rb_wire):
     assert "pct" in values and "mean" in values
 
 
-def test_scatter_and_wordcloud_are_note_only(rb_wire):
-    cat = _catalog(rb_wire)
-    assert _keys(cat["scatter"]) == ["note"]
-    assert _keys(cat["wordcloud"]) == ["note"]
+def test_wordcloud_is_note_only(rb_wire):
+    assert _keys(_catalog(rb_wire)["wordcloud"]) == ["note"]
+
+
+def test_scatter_is_configurable(rb_wire):
+    """It used to be note-only — "Scatter configuration coming soon." — which
+    made a required chart type unreachable: the renderer refuses without
+    `scatter_xy` and nothing could set one."""
+    keys = _keys(_catalog(rb_wire)["scatter"])
+    assert "scatter_xy" in keys
+    assert "classifying_var" in keys, "the axes are two of a classifier's groups"
