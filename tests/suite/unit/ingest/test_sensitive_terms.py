@@ -135,3 +135,41 @@ def test_a_company_that_merely_starts_like_a_scale_point_survives():
                    _var("c2", "Hyvinvointi Oy:Toinen kysymys"),
                    _var("c3", "Attendo:Kysymys"), _var("c4", "Attendo:Toinen kysymys"))
     assert "Hyvinvointi Oy" in propose_sensitive_terms(model)
+
+
+# --------------------------------------------------------------------------- #
+# Scale points and export artefacts are not company names
+# --------------------------------------------------------------------------- #
+# Found on the Holiday Club study, which proposed "EMPTY", "Harvemmin", "Kerran
+# vuodessa", "Muutaman vuoden välein" and "Pari kertaa vuodessa" — four points
+# of a frequency scale and one exporter placeholder. The quality and agreement
+# scales were already filtered; a frequency scale is the same kind of thing.
+
+
+def test_a_frequency_scale_point_is_not_a_name():
+    from reportbuilder.ingest.sensitive_terms import _candidate
+
+    for point in ("Kerran vuodessa", "Pari kertaa vuodessa",
+                  "Muutaman vuoden välein", "Harvemmin", "Vuosittain",
+                  "Never", "Once a year"):
+        assert _candidate(point) is None, point
+
+
+def test_an_export_placeholder_is_not_a_name():
+    """On the real file "EMPTY" is the third value label of a TRUE/FALSE flag,
+    so it repeated across every such flag and outranked most brands."""
+    from reportbuilder.ingest.sensitive_terms import _candidate
+
+    for junk in ("EMPTY", "NULL", "Missing", "N/A", "SYSMIS"):
+        assert _candidate(junk) is None, junk
+
+
+def test_a_company_is_not_caught_by_sharing_a_word_with_a_scale():
+    """The filters are whole-word or counting-word, never a substring: a
+    frequency filter that swallowed "Vuosilomat Oy" would be worse than the
+    problem it solves."""
+    from reportbuilder.ingest.sensitive_terms import _candidate
+
+    for name in ("Vuosilomat Oy", "Aina Group", "Usein Oy", "Viking Line Club",
+                 "Lapland Hotels Club", "Scandic Friends", "Finnair Plus"):
+        assert _candidate(name) == name, name

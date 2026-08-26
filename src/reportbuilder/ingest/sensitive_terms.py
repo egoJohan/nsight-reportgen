@@ -56,7 +56,35 @@ _NOT_A_NAME = re.compile(
 _ARTEFACTS = frozenset({
     "checked", "unchecked", "selected", "not selected", "valittu", "ei valittu",
     "true", "false", "yes", "no",
+    # Export placeholders. On the Holiday Club file "EMPTY" is the third value
+    # label of a TRUE/FALSE flag, so it repeats across every such flag and beat
+    # most brands on frequency — a word from the exporter, proposed as a company.
+    "empty", "null", "none", "n/a", "na", "missing", "sysmis", "#null!",
 })
+
+#: A frequency or interval, which is a point on a scale rather than an entity.
+#: The quality and agreement scales were already covered by `_SCALE_POINTS`; a
+#: FREQUENCY scale is the same thing and was not — "Kerran vuodessa", "Pari
+#: kertaa vuodessa", "Muutaman vuoden välein" and "Harvemmin" all reached the
+#: analyst as candidate company names on a real study.
+#:
+#: Two shapes, because a frequency takes two. A bare adverb is matched WHOLE, so
+#: a company is never caught by sharing a word. A counted interval is matched on
+#: its counting word — "kerran", "kertaa", "välein" — which no company name
+#: uses, and which is what makes "Kerran vuodessa" a frequency rather than a
+#: name whatever noun follows it.
+_FREQUENCY_WORDS = frozenset({
+    "harvemmin", "useammin", "usein", "harvoin", "päivittäin", "viikoittain",
+    "kuukausittain", "vuosittain", "satunnaisesti", "säännöllisesti",
+    "aina", "ei koskaan", "en koskaan", "jatkuvasti",
+    "always", "never", "rarely", "often", "sometimes", "seldom",
+    "daily", "weekly", "monthly", "yearly", "annually", "occasionally",
+})
+_COUNTED_INTERVAL = re.compile(
+    r"\b(kerran|kertaa|välein|kertaa\s+vuodessa|times a|per year|per month|"
+    r"per week|a year|a month|a week)\b",
+    re.IGNORECASE,
+)
 
 #: Bare scale points. A rating grid makes these battery members like any other,
 #: so they arrive capitalised, short, and more frequent than any brand — on the
@@ -81,7 +109,10 @@ def _candidate(text: str) -> str | None:
         return None
     if t.isdigit():
         return None
-    if t.lower() in _ARTEFACTS or t.lower() in _SCALE_POINTS:
+    low = t.lower()
+    if low in _ARTEFACTS or low in _SCALE_POINTS or low in _FREQUENCY_WORDS:
+        return None
+    if _COUNTED_INTERVAL.search(t):
         return None
     # Two words is a company ("Julkiset hoivapalvelut", "Esperi Care"); five is
     # a statement being rated.
