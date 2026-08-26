@@ -15,6 +15,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from reportbuilder.api.app import create_app
 
 
+def _configure_logging() -> None:
+    """Make the application's own log lines visible, however it was started.
+
+    uvicorn configures its OWN loggers and leaves the root one bare, so nothing
+    this application logs is ever printed. That used to be fixed in `main()` —
+    but `main()` only runs for `python -m reportbuilder.api.server`, and the dev
+    stack (and any `uvicorn reportbuilder.api.server:app`) imports this module
+    instead. So in dev, where the logs are actually read, every application log
+    line has always been invisible: the warning that a customer's template could
+    not be harvested, the line that says where a slow render spent its time, and
+    the one that says whether a slide title was written by the model or fell
+    back to the question text.
+
+    `basicConfig` is a no-op once the root logger has handlers, so a caller that
+    has already configured logging keeps its own setup.
+    """
+    import logging
+
+    logging.basicConfig(
+        level=os.environ.get("NSIGHT_LOG_LEVEL", "INFO").upper(),
+        format="%(levelname)s:%(name)s: %(message)s",
+    )
+
+
+_configure_logging()
+
+
 def _require_datahive() -> None:
     """Refuse to start a SERVER without a hive to store anything in.
 
@@ -85,17 +112,10 @@ def __getattr__(name: str):
 
 
 def main():
-    import logging
     import uvicorn
 
-    # uvicorn configures its OWN loggers and leaves the root one bare, so
-    # nothing the application logs is ever printed — including the warning that
-    # says a customer's template could not be harvested, and the line that says
-    # where a slow render spent its time. NSIGHT_LOG_LEVEL raises or lowers it.
-    logging.basicConfig(
-        level=os.environ.get("NSIGHT_LOG_LEVEL", "INFO").upper(),
-        format="%(levelname)s:%(name)s: %(message)s",
-    )
+    # Logging is configured at import (see _configure_logging), so it applies
+    # however this app is started — not only through this entrypoint.
 
     # Dev hot-reload: NSIGHT_RELOAD=1 restarts the server when backend source
     # changes (watches src/reportbuilder only, so frontend edits don't churn it).

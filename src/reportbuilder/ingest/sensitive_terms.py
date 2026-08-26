@@ -121,6 +121,30 @@ def _candidate(text: str) -> str | None:
     return t
 
 
+def propose_from_models(grouped: QuestionModel, raw: QuestionModel) -> list[str]:
+    """Candidates, preferring what the GROUPED model says.
+
+    The two models answer differently and neither is right on its own.
+
+    Grouping decides which side of `"<a>:<b>"` is the member — a judgement this
+    module cannot make, which is why it considers both sides and so drags a
+    brand-image grid's ATTRIBUTES in beside its brands. Where the grouper has
+    applied, it is simply better informed: on the Attendo study the grouped
+    model proposes the eight brands and the two provider categories, and the
+    raw one adds twelve attributes ("Luotettava", "Rehellinen", "Ammattitaitoinen").
+
+    But grouping can also dissolve the shape entirely. On the Holiday Club study
+    it took the file's 192 colon labels to 77 and the proposal to ZERO — and
+    nothing proposed means nothing accepted, no gate, and no registered terms.
+    An over-long list costs an analyst some unticking; an empty one costs the
+    masking everything it was for.
+
+    So: the grouped answer when there is one, the raw answer when there is not.
+    Never the union — that is the long list again, for every study.
+    """
+    return propose_sensitive_terms(grouped) or propose_sensitive_terms(raw)
+
+
 def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     """Candidate company/brand names in *model*, most frequent first.
 

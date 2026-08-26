@@ -173,3 +173,58 @@ def test_a_company_is_not_caught_by_sharing_a_word_with_a_scale():
     for name in ("Vuosilomat Oy", "Aina Group", "Usein Oy", "Viking Line Club",
                  "Lapland Hotels Club", "Scandic Friends", "Finnair Plus"):
         assert _candidate(name) == name, name
+
+
+# --------------------------------------------------------------------------- #
+# Which model the proposal reads
+# --------------------------------------------------------------------------- #
+# Neither model is right alone. Grouping decides which side of "<a>:<b>" is the
+# member — a judgement this module cannot make, so it reads both sides and a
+# brand-image grid contributes its ATTRIBUTES beside its brands. But grouping
+# can also dissolve the shape entirely, and then it proposes nothing, which
+# means no gate and no registered terms.
+
+
+def _labelled(labels: dict[str, str]):
+    """A model built from variable LABELS alone — the only thing these read."""
+    from reportbuilder.model.question import QuestionModel, Variable
+
+    return QuestionModel(
+        variables={n: Variable(name=n, label=l, measurement="nominal",
+                               value_labels=(), missing_values=frozenset())
+                   for n, l in labels.items()},
+        questions=[])
+
+
+def test_the_grouped_answer_wins_when_there_is_one():
+    """The Attendo shape: grouped proposes the brands, raw adds the attributes
+    they were rated on."""
+    from reportbuilder.ingest.sensitive_terms import propose_from_models
+
+    grouped = _labelled({"a": "Attendo:Mielikuva", "b": "Esperi:Mielikuva"})
+    raw = _labelled({"a": "Luotettava:Attendo", "b": "Rehellinen:Attendo",
+                  "c": "Luotettava:Esperi", "d": "Rehellinen:Esperi"})
+    got = propose_from_models(grouped, raw)
+    assert "Attendo" in got and "Esperi" in got
+    assert "Luotettava" not in got and "Rehellinen" not in got
+
+
+def test_the_raw_answer_is_used_when_grouping_found_nothing():
+    """The Holiday Club shape: grouping dissolved every label the proposal
+    reads, and an empty list means the gate never fires."""
+    from reportbuilder.ingest.sensitive_terms import propose_from_models
+
+    grouped = _labelled({"a": "Kysymys ilman kaksoispistettä"})
+    raw = _labelled({"a": "Scandic Friends:Ohjelmat", "b": "Hilton Honors:Ohjelmat"})
+    got = propose_from_models(grouped, raw)
+    assert "Scandic Friends" in got and "Hilton Honors" in got
+
+
+def test_it_is_never_the_union():
+    """The union is the long list again, for every study."""
+    from reportbuilder.ingest.sensitive_terms import propose_from_models
+
+    grouped = _labelled({"a": "Attendo:Mielikuva", "b": "Esperi:Mielikuva"})
+    raw = _labelled({"a": "Luotettava:Attendo", "b": "Rehellinen:Attendo",
+                  "c": "Luotettava:Esperi", "d": "Rehellinen:Esperi"})
+    assert len(propose_from_models(grouped, raw)) == 2
