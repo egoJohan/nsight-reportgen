@@ -1511,6 +1511,19 @@ export const api = {
       }).then((r) => detailedJson<Me>(r)),
   },
 
+  /** Which classifier groups a one-panel-per-group chart would actually draw.
+   *  Answered by the server because the choice depends on each group's base —
+   *  and because `render/panels.py` is the one place that decides it, so the
+   *  warning and the slide cannot disagree about what was dropped. */
+  panels: (materialId: string, qid: string, classifyingVar: string,
+           grouping?: GroupingOverride): Promise<PanelSelection> => {
+    const q = new URLSearchParams({ classifying_var: classifyingVar });
+    if (grouping && Object.keys(grouping).length) q.set("grouping", JSON.stringify(grouping));
+    return fetch(
+      `${API_BASE}/materials/${materialId}/questions/${encodeURIComponent(qid)}/panels?${q}`
+    ).then((r) => json<PanelSelection>(r));
+  },
+
   signup: {
     me: (): Promise<SignupTicket> =>
       fetch(`${API_BASE}/signup/me`).then((r) => json<SignupTicket>(r)),
@@ -1702,6 +1715,20 @@ export type AccessMode = "view" | "edit";
 /** What the signup ticket asserts, plus the two facts that decide what the
  *  request page says. Answered in one call so the page never infers a state
  *  from an error code. */
+/** What a pie/doughnut/funnel would actually draw, and what it would leave out.
+ *  `thin` and `capped` are separate because they mean different things to a
+ *  reader: a thin group could not be reported at all, a capped one fits the data
+ *  but not the page. */
+export interface PanelSelection {
+  drawn: string[];
+  thin: string[];
+  capped: string[];
+  degraded: boolean;
+  /** False when the chart is not split into panels at all — one ordinary pie. */
+  split: boolean;
+  max_panels: number;
+}
+
 export interface SignupTicket {
   email: string;
   provider: string;

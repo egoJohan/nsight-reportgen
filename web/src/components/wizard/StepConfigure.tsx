@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   AlertTriangleIcon,
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import type { ChartSpec, ConfigField, Question, Variable, GroupingOverride } from "@/lib/api";
+import type { ChartSpec, ConfigField, PanelSelection, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
 import { usePreviewStatus } from "@/lib/usePreviewStatus";
 import * as previewQueue from "@/lib/previewQueue";
@@ -1622,12 +1622,11 @@ function SpecialSlideControls({
 // render gate's. The wizard enqueues the whole deck on the ONE queue instead,
 // and scrolling or selecting a slide promotes it.
 
-/** Chart types that draw ONE panel per classifier group, and the most a 4:3
- *  slide holds. Kept next to the rule that reads them; the renderer's own copy
- *  is `render/panels.py` (MAX_PANELS), and the two are deliberately independent
- *  — this one only decides whether to WARN. */
+/** Chart types that draw ONE panel per classifier group — enough to know
+ *  whether to ASK the server what it would draw. How many fit, and which
+ *  groups are dropped, come back in the answer: `render/panels.py` decides
+ *  that, and a second copy of the rule here could disagree with the slide. */
 const PANEL_CHART_TYPES = ["pie", "doughnut", "funnel"];
-const MAX_PANELS = 3;
 
 type SlideProblem = { id: string; title: string; detail: string };
 
@@ -1637,19 +1636,13 @@ type SlideProblem = { id: string; title: string; detail: string };
  *  ABOUT — "Ei mahtunut sivulle" and friends — are the DECK's, printed on the
  *  slide for the client who reads it. Two audiences, two languages; do not
  *  follow the footer's lead here.
- *
- *  A list because the preview's warning button is the obvious home for the next
- *  such check — but no machinery beyond that: one function, one array.
- *
- *  The group count here is the VARIABLE's own declared value count. The renderer
- *  counts what survives (groups under ten respondents drop out first), so the two
- *  can legitimately differ and this stays advisory. The slide's own footer is the
- *  authoritative record of what was omitted. (spec 2026-08-22)
  */
-/** What the preview queue could not produce for this slide, in the author's
- *  terms. A failed generation is not a crash and does not stop the slide being
- *  drawn — the headline falls back to the question text — but the author should
- *  be able to find out why their slide says something blander than usual. */
+/** The panel selection for one chart, or undefined while it is unknown.
+ *
+ *  Keyed by the three things that change the answer. Disabled unless the chart
+ *  actually draws panels, so an ordinary bar chart costs no request — this runs
+ *  once per slide in the list, and the list can be long.
+ */
 function producerProblems(chart: ChartSpec | undefined): SlideProblem[] {
   const failures = previewQueue.failuresOf(chart?.slide_id ?? "");
   const say: Record<string, { title: string; detail: string }> = {
@@ -1685,27 +1678,102 @@ function producerProblems(chart: ChartSpec | undefined): SlideProblem[] {
   });
 }
 
+function usePanelSelection(
+  materialId: string,
+  chart: ChartSpec | undefined,
+  grouping: GroupingOverride
+) {
+  const applies =
+    !!chart && PANEL_CHART_TYPES.includes(chart.chart_type) && !!chart.classifying_var;
+  return useQuery({
+    queryKey: ["panels", materialId, chart?.question_ref, chart?.classifying_var],
+    queryFn: () =>
+      api.panels(materialId, chart!.question_ref, chart!.classifying_var!, grouping),
+    enabled: applies && !!materialId,
+    // The answer changes only when the data or the classifier does, and a
+    // warning is not worth re-fetching on every focus.
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+}
+
 function slideProblems(
   chart: ChartSpec | undefined,
-  variables: Variable[] | undefined
+  panels: PanelSelection | undefined
 ): SlideProblem[] {
   if (!chart || !PANEL_CHART_TYPES.includes(chart.chart_type)) return [];
-  const clf = chart.classifying_var;
-  if (!clf) return [];
-  const v = (variables ?? []).find((x) => x.name === clf);
-  const n = v?.n_values ?? 0;
-  if (n <= MAX_PANELS) return [];
-  return [
-    {
+  if (!chart.classifying_var || !panels || !panels.split) return [];
+
+  const out: SlideProblem[] = [];
+  // Two reasons, two entries. Merging them would tell an author that four
+  // groups "did not fit" when some of them could not have been charted at any
+  // size — which is a different problem with a different answer.
+  if (panels.capped.length) {
+    out.push({
       id: "too-many-groups",
-      title: `Only ${MAX_PANELS} groups fit on a slide`,
+      title: `${panels.capped.length} group${panels.capped.length === 1 ? "" : "s"} left off this slide`,
       detail:
-        `"${v?.label ?? clf}" has ${n} groups, and a slide holds ${MAX_PANELS}. ` +
-        `The three largest will be drawn and the rest left out. The slide's own ` +
-        `footer names the ones it omitted — that footnote is the only record of ` +
-        `the omission that travels with the deck.`,
-    },
-  ];
+        `A slide holds ${panels.max_panels} charts. Drawn: ${panels.drawn.join(", ")}. ` +
+        `Left out: ${panels.capped.join(", ")} — the largest groups are kept. ` +
+        `The slide's footer names them too, so the omission travels with the deck.`,
+    });
+  }
+  if (panels.thin.length) {
+    out.push({
+      id: "thin-groups",
+      title: `${panels.thin.length} group${panels.thin.length === 1 ? "" : "s"} too small to report`,
+      detail:
+        `Too few respondents to chart: ${panels.thin.join(", ")}. ` +
+        `Their percentages would be noise, so they are left out whatever else ` +
+        `fits. The slide's footer names them separately from anything that ` +
+        `merely ran out of room.`,
+    });
+  }
+  if (panels.degraded) {
+    out.push({
+      id: "grouping-dropped",
+      title: "The split could not be drawn",
+      detail:
+        `Every group is too small to report, so the slide falls back to one ` +
+        `chart of the whole sample rather than a blank space. Split by a ` +
+        `variable with fewer, larger groups.`,
+    });
+  }
+  return out;
+}
+
+/** The warning triangle on a row in the slide list.
+ *
+ *  Its own component so each row can ask about its own slide: the answer
+ *  depends on the chart's classifier and the data, and only the server can give
+ *  it. Renders nothing at all when there is nothing wrong, so the list stays
+ *  quiet — a marker on every row would be no marker.
+ *
+ *  Matches the marker on the active slide's preview, deliberately: an author
+ *  scrolling the list should be able to tell WHICH slides need attention
+ *  without opening each one, which was the gap — the warning existed but only
+ *  on the slide you were already looking at.
+ */
+function SlideWarning({
+  materialId,
+  chart,
+  grouping,
+}: {
+  materialId: string;
+  chart: ChartSpec;
+  grouping: GroupingOverride;
+}) {
+  const { data: panels } = usePanelSelection(materialId, chart, grouping);
+  const problems = [...slideProblems(chart, panels), ...producerProblems(chart)];
+  if (!problems.length) return null;
+  return (
+    <AlertTriangleIcon
+      className="size-3.5 shrink-0 text-amber-600 dark:text-amber-500"
+      aria-label={problems[0].title}
+    >
+      <title>{problems[0].title}</title>
+    </AlertTriangleIcon>
+  );
 }
 
 function StepConfigureInner({
@@ -1743,7 +1811,6 @@ function StepConfigureInner({
   templateRef?: string;
 }) {
   const { data: questions, isError } = useRegroupedQuestions(materialId, grouping);
-  const { data: panelVariables } = useVariables(materialId);
   const [editQid, setEditQid] = useState<string | null>(null);
   const [problemsOpen, setProblemsOpen] = useState(false);
   const activeRowRef = useRef<HTMLDivElement>(null);
@@ -1839,8 +1906,9 @@ function StepConfigureInner({
   // lights the button then — not on the next unrelated re-render.
   const activeStatus = usePreviewStatus(activeChart?.slide_id ?? "");
   void activeStatus;
+  const { data: activePanels } = usePanelSelection(materialId, activeChart, grouping);
   const activeProblems = [
-    ...slideProblems(activeChart, panelVariables),
+    ...slideProblems(activeChart, activePanels),
     ...producerProblems(activeChart),
   ];
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
@@ -1913,7 +1981,16 @@ function StepConfigureInner({
                       {i + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="line-clamp-1 text-sm">{slideTitle(c, questionMap)}</span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="line-clamp-1 text-sm">
+                          {slideTitle(c, questionMap)}
+                        </span>
+                        <SlideWarning
+                          materialId={materialId}
+                          chart={c}
+                          grouping={grouping}
+                        />
+                      </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         {slideSubtitle(c, questionMap)}
                       </span>

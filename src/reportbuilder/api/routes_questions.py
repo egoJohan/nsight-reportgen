@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 import dataclasses
 import json
+from dataclasses import replace
 
 from pydantic import BaseModel
 
@@ -1136,6 +1137,61 @@ class WordMergeGroup(BaseModel):
 
 class WordMergesBody(BaseModel):
     merges: list[WordMergeGroup] = []
+
+
+@questions_router.get("/materials/{material_id}/questions/{qid}/panels")
+def question_panels(
+    material_id: str,
+    qid: str,
+    classifying_var: str,
+    grouping: str | None = None,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
+) -> dict:
+    """Which classifier groups a one-panel-per-group chart would actually draw.
+
+    Pie, doughnut and funnel draw one panel per group and cap at three, so an
+    author splitting by a seven-group variable needs to know WHICH four are
+    left out — and for which of the two reasons, because they mean different
+    things: a group under the reporting base could not be charted at all, while
+    a capped group fits the data but not the page.
+
+    Answered here rather than worked out in the editor because the choice
+    depends on each group's base, which the editor does not have, and because
+    `render/panels.py` is deliberately the one place that decides it — the
+    warning and the slide must not be able to disagree about what was dropped.
+
+    Degrades to an empty selection rather than a 500: a warning that cannot be
+    computed must not stop somebody configuring a slide.
+    """
+    from reportbuilder.render.panels import panel_segments
+
+    df, model = _load_df_model(material_id, client)
+    if grouping:
+        try:
+            model = apply_grouping_override(model, json.loads(grouping), df=df)
+        except (ValueError, TypeError):
+            pass
+    try:
+        q = model.question(qid)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Question '{qid}' not found") from exc
+
+    empty = {"drawn": [], "thin": [], "capped": [], "degraded": False,
+             "split": False, "max_panels": 0}
+    try:
+        spec = replace(_summary_spec(q.qid), classifying_var=classifying_var)
+        sel = panel_segments(compute(q, spec, df, model))
+    except Exception:  # noqa: BLE001 — see the docstring
+        return empty
+    from reportbuilder.render.panels import MAX_PANELS
+
+    # `split` is what says panels APPLY at all. A classifier the data does not
+    # resolve — a stale name on a chart whose material was replaced — yields the
+    # whole-sample segment, which is one ordinary pie and nothing to warn about.
+    return {"drawn": list(sel.labels), "thin": list(sel.thin),
+            "capped": list(sel.capped), "degraded": sel.degraded,
+            "split": sel.split, "max_panels": MAX_PANELS}
 
 
 @questions_router.get("/materials/{material_id}/questions/{qid}/words")
