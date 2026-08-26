@@ -162,6 +162,42 @@ def _separate_masks(spec, data: pd.DataFrame, model: QuestionModel):
     return (masks, primary) if masks else None
 
 
+def _crossed_masks(spec, data: pd.DataFrame, model: QuestionModel):
+    """One mask per (group1 x group2) combo for TWO classifiers, or None.
+
+    The batteries segment by hand — statement x level x segment is three
+    dimensions and a SeriesResult holds two — so they need masks rather than the
+    `_combo_segmentation` key series the single/multi paths use. Same idea, same
+    ordering: primary-major, so the first classifier clusters (Male·Young,
+    Male·Old, then Female·…) and a reader's eye groups by the variable they
+    named first.
+
+    Empty combos are dropped here rather than left for the caller. A cross-tab
+    multiplies groups — three age bands by two genders is six — and the cells
+    nobody falls into are not a finding, they are an artefact of crossing.
+
+    Returns None when only one classifier is set, which leaves every caller on
+    the single-classifier path it had before.
+    """
+    cv1 = getattr(spec, "classifying_var", None)
+    cv2 = getattr(spec, "classifying_var_2", None)
+    if not (cv1 and cv2):
+        return None
+    g1 = _classifier_masks(spec, data, model, cv1)
+    g2 = _classifier_masks(spec, data, model, cv2)
+    if not g1 or not g2:
+        # One of them resolved to nothing — a stale variable, or a column the
+        # material no longer has. Fall back rather than lose the split entirely.
+        return None
+    out: dict[str, pd.Series] = {}
+    for l1, m1 in g1.items():
+        for l2, m2 in g2.items():
+            both = m1 & m2
+            if bool(both.any()):
+                out[f"{l1} · {l2}"] = both
+    return out or None
+
+
 def _numeric_like(values: pd.Series) -> bool:
     """True when the values are really numbers held as strings — those keep the
     existing numeric segmentation path so their value labels still resolve."""
@@ -1418,8 +1454,10 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     (spec 2026-08-02 §2.4)"""
     vars_ = [model.variable(n) for n in question.variables]
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    # Two classifiers cross into combo segments; one keeps the plain split.
     seg_masks = _drop_empty_segments(
-        _classifier_masks(spec, data, model), vars_, data)
+        _crossed_masks(spec, data, model) or _classifier_masks(spec, data, model),
+        vars_, data)
     # Always compute the Total column; resolve_show_total decides whether it's drawn.
     all_mask = pd.Series(True, index=data.index)
     segs: dict[str, pd.Series] = dict(seg_masks or {})
@@ -1697,7 +1735,8 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # them by statement, putting the paths adjacent — the comparison a concept test
     # exists to make. (spec 2026-08-02 §2.4)
     seg_masks = _drop_empty_segments(
-        _classifier_masks(spec, data, model), vars_, data)
+        _crossed_masks(spec, data, model) or _classifier_masks(spec, data, model),
+        vars_, data)
     all_mask = pd.Series(True, index=data.index)
     seg_items = list((seg_masks or {}).items()) or [(None, all_mask)]
 

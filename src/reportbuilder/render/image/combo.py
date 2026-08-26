@@ -25,6 +25,34 @@ from reportbuilder.render.image._mpl import (
 from reportbuilder.render.house_style import TEAL, TEAL_LT
 
 
+def line_label_anchor(
+    v: float, bar_v: float | None,
+    bar_lim: tuple[float, float], line_lim: tuple[float, float],
+    clearance_frac: float = 0.09,
+) -> tuple[float, bool]:
+    """Where a line point's own label goes: ``(y_on_line_axis, above)``.
+
+    A combo chart's two series sit on different scales but share one pixel box,
+    so a bar's height converts to the line's axis by proportion — no display
+    round trip, and it holds whatever either axis is scaled to.
+
+    The rule exists because a fixed side collides wherever the line crosses a
+    bar, which is exactly where a reader is comparing them. Clearly above the
+    bar's own label → above the marker. Otherwise below the BAR TOP, not merely
+    below the marker: just over a bar, "under the marker" is precisely where
+    that bar's label sits, which swaps one collision for another.
+    """
+    a_lo, a_hi = bar_lim
+    b_lo, b_hi = line_lim
+    if bar_v is None or a_hi == a_lo:
+        return v, True
+    top_here = b_lo + (bar_v - a_lo) / (a_hi - a_lo) * (b_hi - b_lo)
+    clearance = (b_hi - b_lo) * clearance_frac
+    if v > top_here + clearance:
+        return v, True
+    return min(v, top_here - clearance), False
+
+
 def build_image_combo(ctx) -> None:
     """Combo chart: TEAL bars (primary y) + TEAL_LT line (secondary y via twinx).
 
@@ -79,6 +107,45 @@ def build_image_combo(ctx) -> None:
         ax2.plot(x, data[segs[1]], color=TEAL_LT, marker="o",
                  linewidth=2.2, markersize=5, label=segs[1],
                  markeredgecolor=bg, markeredgewidth=1.0, zorder=4)
+
+        # The line's own values. Without them the bars are labelled and the line
+        # is not, so the only way to read it is off the right-hand axis — on the
+        # one chart type whose whole point is that the two series are on
+        # DIFFERENT scales. The spec asks for the numeric values of the classes.
+        line_vals = [v for v in data[segs[1]] if v is not None]
+        if line_vals:
+            # Headroom for a label at either extreme. They are drawn in offset
+            # POINTS, so matplotlib's autoscaling never sees them and a peak at
+            # the end of the series puts its own value outside the figure.
+            lo, hi = min(line_vals), max(line_vals)
+            span = (hi - lo) or (abs(hi) or 1.0)
+            ax2.set_ylim(lo - span * 0.16, hi + span * 0.16)
+
+        # Which side of the marker the label goes. The line crosses the bars, so
+        # a fixed side collides with the bar's own label wherever the two meet —
+        # which is exactly where a reader is trying to compare them.
+        #
+        # Both axes share one pixel box, so a bar's height converts to the line
+        # axis by proportion. No display-coordinate round trip, and it holds
+        # whatever either axis is scaled to.
+        bar_lim, line_lim = ax.get_ylim(), ax2.get_ylim()
+        for xi, v, bar_v in zip(x, data[segs[1]], data[segs[0]]):
+            if v is None:
+                continue
+            y, above = line_label_anchor(v, bar_v, bar_lim, line_lim)
+            ax2.annotate(
+                format_value(v, ctx.series.statistic, ctx.spec.number_format,
+                             line_vals),
+                xy=(xi, y), xytext=(0, 9 if above else -9),
+                textcoords="offset points",
+                ha="center", va="bottom" if above else "top",
+                fontsize=9.5, fontweight="bold", color=ink, zorder=6,
+                # The line crosses the bars; a bare number over a dark bar is
+                # unreadable.
+                bbox={"boxstyle": "round,pad=0.18", "facecolor": bg,
+                      "edgecolor": "none", "alpha": 0.85},
+            )
+
         for spine in ax2.spines.values():
             spine.set_visible(False)
         ax2.spines["right"].set_visible(True)
@@ -93,7 +160,13 @@ def build_image_combo(ctx) -> None:
             # legend from the bar axis and lose the line.
             lines2, labels2 = ax2.get_legend_handles_labels()
             if labels2:
-                leg = ax.legend(lines2, labels2, fontsize=9.5, frameon=True, loc="best")
+                # BELOW the axes, like radar and the grouped bars. "best" put it
+                # inside the plot, where on a rising line it landed on top of the
+                # last marker and its value — matplotlib picks the emptiest
+                # corner, and on this chart the emptiest corner is still data.
+                leg = ax.legend(lines2, labels2, fontsize=9.5, frameon=True,
+                                loc="upper center", bbox_to_anchor=(0.5, -0.08),
+                                ncol=1, borderaxespad=0.0)
                 leg.get_frame().set_facecolor(bg)
                 leg.get_frame().set_edgecolor(grid)
                 leg.get_frame().set_linewidth(0.8)
