@@ -48,6 +48,11 @@ services:
   # succeeds, so a pending migration stops the container instead of leaving a
   # half-migrated instance answering 500s behind a healthy-looking proxy.
   datahive:
+    # Opt-in: `--profile local-hive`. When NSIGHT_DATAHIVE_URL names a
+    # hosted hive this container would be a second, unused instance
+    # competing for RAM on a 4GB box — and a confusing place to look for
+    # data that is not in it.
+    profiles: ["local-hive"]
     image: datahive:local
     environment:
       NAME: nsight-staging
@@ -74,7 +79,10 @@ services:
     environment:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
-      NSIGHT_DATAHIVE_URL: "http://datahive:7891"
+      # The hive this instance stores into. Defaults to the in-container
+      # hive below; set it in .env to point at a hosted hive instead, in
+      # which case do NOT start the `datahive` service (see its profile).
+      NSIGHT_DATAHIVE_URL: "${NSIGHT_DATAHIVE_URL:-http://datahive:7891}"
       # From .env on the server. Empty is allowed HERE only so that step 1 of a
       # first deploy can start the hive alone — compose interpolates the whole
       # file even when you name one service. The backend itself refuses to boot
@@ -119,8 +127,9 @@ services:
       # default creds path is /app/work/egohive_creds.json. Place the file at
       # ./work/egohive_creds.json on the server before `up`.
       - ./work/egohive_creds.json:/app/work/egohive_creds.json:ro
-    depends_on:
-      - datahive
+    # No depends_on: `datahive` is profiled, and compose refuses a
+    # dependency on a service outside the active profiles. With the local
+    # hive, start it first (step 1 of the header's first-deploy recipe).
     expose:
       - "8200"
     restart: always
