@@ -3,12 +3,18 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 # Rendering toolchain + fonts (deterministic label metrics).
+#
+# fonts-inter is the shipped default template's typeface. The .pptx
+# embeds it as .fntdata, which LibreOffice does not read, so without the
+# system font every deck on the house template renders in a substitute
+# and looks nothing like the design.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libreoffice-impress \
         poppler-utils \
         fonts-dejavu \
         fonts-liberation \
+        fonts-inter \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

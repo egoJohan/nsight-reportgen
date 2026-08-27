@@ -86,6 +86,12 @@ services:
       # per user itself (reportbuilder/auth/permissions.py, spec §5.3).
       NSIGHT_DATAHIVE_URL: "http://datahive:7891"
       NSIGHT_DATAHIVE_TOKEN: "${NSIGHT_DATAHIVE_TOKEN:-}"
+      # One-shot: replace the STORED default template with the shipped one.
+      # Unset by default and must stay that way — it also overwrites a
+      # default the tenant uploaded themselves (see app.py). Set it in
+      # .env for a single restart after changing the shipped asset, then
+      # remove it and restart again.
+      NSIGHT_RESEED_DEFAULT_TEMPLATE: "${NSIGHT_RESEED_DEFAULT_TEMPLATE:-}"
       # Whoever signs in first with one of these verified emails becomes admin,
       # on an EMPTY hive only (spec §3.1). Without it a fresh instance has no
       # way in at all, because every route is grant-gated.

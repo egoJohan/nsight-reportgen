@@ -93,6 +93,12 @@ services:
       # Who becomes admin on first sign-in to an EMPTY hive (spec §3.1). A fresh
       # staging instance is unusable without it: every route is grant-gated.
       NSIGHT_BOOTSTRAP_ADMINS: "${NSIGHT_BOOTSTRAP_ADMINS:-}"
+      # One-shot: replace the STORED default template with the shipped one.
+      # Unset by default and must stay that way — it also overwrites a
+      # default the tenant uploaded themselves (see app.py). Set it in
+      # .env for a single restart after changing the shipped asset, then
+      # remove it and restart again.
+      NSIGHT_RESEED_DEFAULT_TEMPLATE: "${NSIGHT_RESEED_DEFAULT_TEMPLATE:-}"
       # Safe here specifically because the backend `expose`s 8200 to the
       # compose network only and publishes no port of its own -- the
       # frontend/nginx container is structurally the only thing that can

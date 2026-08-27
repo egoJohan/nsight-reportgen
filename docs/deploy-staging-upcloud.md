@@ -22,12 +22,20 @@ Redeploy (from the local machine):
 rsync -az --delete \
   --exclude='.git' --exclude='.venv' --exclude='node_modules' --exclude='__pycache__' \
   --exclude='*.pyc' --exclude='/web/dist' --exclude='/work' --exclude='/input' \
+  --include='/src/reportbuilder/render/assets/nsight_default.pptx' \
   --exclude='/ui' --exclude='/chart_lab' --exclude='*.sav' --exclude='*.pptx' \
   --exclude='/.env' \
   -e 'ssh -i ~/.ssh/egohive-staging' ./ root@94.237.12.104:/opt/nsight/
 ssh -i ~/.ssh/egohive-staging root@94.237.12.104 \
   'cd /opt/nsight && docker compose -f docker-compose.staging.yml up -d --build'
 ```
+The `--include` for `nsight_default.pptx` MUST come before `--exclude='*.pptx'`
+(rsync takes the first matching rule). Without it the shipped house template
+never reaches the server, `default_template_bytes()` falls through to the
+runtime-built fallback, and every hive seeded from that deploy gets a 27KB
+blank deck instead of the 601KB designed one — silently, since seeding a
+template that exists is a no-op forever after.
+
 ALWAYS exclude `/.env`: the server's `.env` holds the hosted-hive URL and its
 service token, and a local `.env` rsync'd over it points staging at a laptop.
 
