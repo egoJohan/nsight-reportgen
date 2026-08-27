@@ -39,6 +39,12 @@ log = logging.getLogger(__name__)
 #: through it the model, so an operator can move this workload without nSight
 #: changing. Deliberately one of datahive's generic purposes rather than a word
 #: like "title": the endpoint serves every caller, not this product.
+#:
+#: The fallback for a caller that has not said. Every real call site says —
+#: see the purpose-bound helpers below — and `synthesise` stays the default
+#: because it is the most capable binding: a job mislabelled DOWN gets a
+#: cheaper model than it needed and quietly worse prose, which nobody sees
+#: until a customer reads it.
 PURPOSE = "synthesise"
 
 #: Generous — a frontier completion behind a relay can take a while, and the
@@ -133,3 +139,56 @@ def _why(resp: httpx.Response) -> str:
     if isinstance(detail, dict):
         return str(detail.get("why") or detail.get("message") or detail)
     return str(detail or resp.text[:200])
+
+
+# --- the purposes nSight actually asks for -------------------------------
+#
+# A purpose says what the work DOES to the text, and datahive picks the model
+# from it. Naming it at the call site is free — `shorten_labels` knows it is
+# shortening labels — and the alternative is paying a model to infer what the
+# caller already knew.
+#
+# These exist so the choice is made ONCE, next to the function whose prompt it
+# describes. An earlier shape had every route pass `chat=datahive_chat`
+# explicitly, which meant the purpose would have had to be repeated at each
+# call site and could drift from the prompt it belongs to.
+
+
+def _bound(purpose: str):
+    """`datahive_chat` with *purpose* fixed, keeping the `chat(prompt)` shape
+    every caller and every test fake already uses."""
+    def chat(prompt: str, **kwargs) -> str:
+        kwargs.setdefault("purpose", purpose)
+        return datahive_chat(prompt, **kwargs)
+    chat.__name__ = f"chat_{purpose}"
+    chat.__doc__ = f"One completion for {purpose!r} work. See datahive_chat."
+    # Marks this as a MASKED entry point, and says which purpose it carries.
+    # `tests/test_ai_masked_chat.py` reads both: the first is the guard that no
+    # prose function reaches a model outside datahive, the second catches a
+    # function whose purpose has drifted from what its prompt actually asks.
+    chat.masked = True
+    chat.purpose = purpose
+    return chat
+
+
+#: Reword, compress or translate supplied text; adds nothing that was not in
+#: it. nSight's only user is label shortening.
+rewrite = _bound("rewrite")
+
+#: Choose among options the caller supplied — the answer is one of the inputs.
+classify = _bound("classify")
+
+#: Condense supplied material faithfully: says less than the input, and nothing
+#: the input did not say. Background, demographics, open-answer themes.
+summarise = _bound("summarise")
+
+#: Draw a conclusion ACROSS material — allowed to state what no single input
+#: line stated. Slide titles ("avainviesti") and report conclusions, both of
+#: which are explicitly asked to INTERPRET rather than report.
+synthesise = _bound("synthesise")
+
+#: Answer a person's question, with that person waiting on the reply.
+converse = _bound("converse")
+
+__all__ = ["datahive_chat", "rewrite", "classify", "summarise", "synthesise",
+           "converse", "PURPOSE", "REGULATORY_CLASS", "DEFAULT_TIMEOUT"]

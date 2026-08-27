@@ -30,10 +30,9 @@ from reportbuilder.ai.text import (
     generate_overview_bullets,
     generate_slide_title,
     pick_demographic_questions,
-    shorten_labels,
+    shorten_labels
 )
 from reportbuilder.api.deps import get_client
-from reportbuilder.ai.masked_chat import datahive_chat
 from reportbuilder.api.deps_auth import require_material
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.auth.permissions import User
@@ -42,13 +41,13 @@ from reportbuilder.ingest.grouping_override import apply_grouping_override
 log = logging.getLogger(__name__)
 from reportbuilder.api.model_loader import (
     df_model_for_material,
-    df_model_label_for_material,
+    df_model_label_for_material
 )
 from reportbuilder.model.report import (
     ChartSpec,
     ElementToggles,
     NumberFormat,
-    SortSpec,
+    SortSpec
 )
 from reportbuilder.stats.engine import compute
 from reportbuilder.stats.series import SeriesResult
@@ -108,7 +107,7 @@ def _kind_spec(question, model) -> ChartSpec:
         number_format=NumberFormat(),
         sort=SortSpec(basis="data_order"),
         template_slot="ai",
-        elements=ElementToggles(),
+        elements=ElementToggles()
     )
 
 
@@ -193,7 +192,7 @@ def _spec_from_title_body(body: SlideTitleBody) -> ChartSpec:
             tuple(float(c) for c in body.not_answered_codes)
             if body.not_answered_codes is not None
             else None
-        ),
+        )
     )
 
 
@@ -205,7 +204,7 @@ def ai_slide_title(
     material_id: str,
     body: SlideTitleBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Generate a descriptive slide title for a chart. Returns {"title": "..."}.
 
@@ -258,7 +257,7 @@ def ai_slide_title(
         if not findings:
             return {"title": question.text}
         asked = time.monotonic()
-        title = generate_slide_title(question.text, findings, chat=datahive_chat)
+        title = generate_slide_title(question.text, findings)
         log.info("ai title %s %s: %.1fs (data %.1fs, stats %.1fs, llm %.1fs)",
                  material_id, body.question_ref, time.monotonic() - started,
                  loaded - started, asked - loaded, time.monotonic() - asked)
@@ -280,7 +279,7 @@ def ai_short_labels(
     material_id: str,
     body: ShortLabelsBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Shorten category labels. Returns {"overrides": [["full","short"], ...]}.
 
@@ -316,13 +315,13 @@ def ai_short_labels(
     else:
         raise HTTPException(
             status_code=422,
-            detail="Provide either 'categories' or 'question_ref'.",
+            detail="Provide either 'categories' or 'question_ref'."
         )
 
     # 2. Build the reference corpus (tolerant load) and shorten.
     try:
         reference = _reference_labels()
-        overrides = shorten_labels(labels, reference=reference, chat=datahive_chat)
+        overrides = shorten_labels(labels, reference=reference)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except HTTPException:
@@ -354,7 +353,7 @@ def ai_themes(
     material_id: str,
     body: ThemesBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Summarise an open-ended question's answers into key themes (bullets)."""
     try:
@@ -379,7 +378,7 @@ def ai_themes(
         if not word_freqs and not answers:
             return {"bullets": []}
         bullets = generate_open_themes(
-            question.text, word_freqs, answers, chat=datahive_chat
+            question.text, word_freqs, answers
         )
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
@@ -405,7 +404,7 @@ def ai_overview(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Background/overview bullets about the research. Returns {"bullets": [...]}."""
     try:
@@ -417,7 +416,7 @@ def ai_overview(
 
     texts = _question_texts(body.question_refs, model) or [q.text for q in model.questions]
     try:
-        bullets = generate_overview_bullets(label, texts, len(df), chat=datahive_chat)
+        bullets = generate_overview_bullets(label, texts, len(df))
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -430,7 +429,7 @@ def ai_conclusion(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Conclusion bullets summarising findings across the report's questions."""
     try:
@@ -445,7 +444,7 @@ def ai_conclusion(
     if not findings:
         return {"bullets": []}  # nothing computable to conclude from
     try:
-        bullets = generate_conclusion_bullets(label, findings, chat=datahive_chat)
+        bullets = generate_conclusion_bullets(label, findings)
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -458,7 +457,7 @@ def ai_demographics(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Pick demographic questions and write 'about the respondents' bullets.
 
@@ -474,9 +473,9 @@ def ai_demographics(
 
     try:
         candidates = [(q.qid, q.text) for q in model.questions]
-        picked = pick_demographic_questions(candidates, chat=datahive_chat)
+        picked = pick_demographic_questions(candidates)
         findings = _findings_for_refs(picked, df, model)
-        bullets = generate_demographics_bullets(label, findings, chat=datahive_chat) if findings else []
+        bullets = generate_demographics_bullets(label, findings) if findings else []
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
     except Exception as exc:
@@ -516,7 +515,7 @@ def ai_chat(
     material_id: str,
     body: ChatBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material),
+    user: User = Depends(require_material)
 ) -> dict:
     """Answer a question about the material's survey DATA, grounded in the
     per-question findings (a data-aware assistant). Returns {"reply": "..."}.
@@ -535,7 +534,7 @@ def ai_chat(
     try:
         reply = generate_data_chat(
             label, findings, [m.model_dump() for m in body.messages],
-            total_n=int(len(df)), chat=datahive_chat,
+            total_n=int(len(df))
         )
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import inspect
 
+from reportbuilder.ai import masked_chat
+
 import httpx
 import pytest
 
@@ -65,20 +67,77 @@ def test_no_hive_configured_means_no_model_at_all(monkeypatch):
         datahive_chat("kirjoita otsikko")
 
 
-def test_every_prose_function_defaults_to_the_masked_route():
-    """The guard. A new function here that calls a model directly would send a
-    confidential tracker to a vendor, and nothing else in the suite would say so.
-    """
-    offenders = []
+def _prose_functions():
+    """Every function here that takes an injectable `chat`."""
     for name, fn in vars(ai_text).items():
         if name.startswith("_") or not inspect.isfunction(fn):
             continue
         if fn.__module__ != ai_text.__name__:
             continue
         params = inspect.signature(fn).parameters
-        if "chat" not in params:
-            continue
-        if params["chat"].default is not datahive_chat:
-            offenders.append(name)
+        if "chat" in params:
+            yield name, params["chat"].default
+
+
+def test_every_prose_function_defaults_to_the_masked_route():
+    """The guard. A new function here that calls a model directly would send a
+    confidential tracker to a vendor, and nothing else in the suite would say so.
+
+    The defaults are purpose-bound wrappers now, not `datahive_chat` itself, so
+    identity is the wrong test — it would have to be relaxed for every new
+    purpose, and relaxing a guard is how one stops guarding. `masked` is set by
+    `_bound` and nothing else, and every wrapper it makes calls `datahive_chat`.
+    """
+    offenders = [name for name, default in _prose_functions()
+                 if default is not datahive_chat
+                 and not getattr(default, "masked", False)]
     assert not offenders, (
         f"these take `chat` but do not default to the masked route: {offenders}")
+
+
+def test_each_prose_function_asks_for_the_purpose_its_prompt_describes():
+    """datahive picks the model from `purpose`, so a wrong one here is answered
+    by the wrong size of model — silently, and with plausible-looking output.
+
+    These are read off each prompt, not guessed from the function name:
+    `generate_slide_title` says "Otsikon tulee TULKITA tuloksia" (interpret,
+    do not restate) so it synthesises, while `generate_group_subtitle` says
+    "EI avainviesti, EI johtopäätös" (explicitly not a conclusion) so it only
+    summarises. Change one of these ONLY together with the prompt it describes.
+    """
+    expected = {
+        "generate_slide_title": "synthesise",
+        "generate_group_subtitle": "summarise",
+        "shorten_labels": "rewrite",
+        "generate_data_chat": "converse",
+        "generate_overview_bullets": "summarise",
+        "generate_conclusion_bullets": "synthesise",
+        "generate_open_themes": "summarise",
+        "pick_demographic_questions": "classify",
+        "generate_demographics_bullets": "summarise",
+    }
+    actual = {name: getattr(default, "purpose", None)
+              for name, default in _prose_functions()}
+    assert actual == expected
+
+
+def test_a_purpose_bound_wrapper_still_goes_through_datahive(monkeypatch):
+    """`masked` is only trustworthy if the wrapper really routes through the
+    masked path — the guard above rests on it."""
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen["url"] = url
+        seen["purpose"] = kwargs["json"]["purpose"]
+        # An error the module WRAPS, so the wrapper is exercised end to end
+        # rather than escaping through it.
+        raise httpx.ConnectError("stop here — the request shape is the assertion")
+
+    monkeypatch.setenv("NSIGHT_DATAHIVE_URL", "https://hive.example")
+    monkeypatch.setenv("NSIGHT_DATAHIVE_TOKEN", "t")
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.httpx.post", fake_post)
+
+    with pytest.raises(EgoHiveError):
+        masked_chat.rewrite("lyhennä tämä")
+    assert seen["url"].endswith("/api/v1/llm/ask")
+    assert seen["purpose"] == "rewrite"

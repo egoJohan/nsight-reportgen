@@ -1,8 +1,11 @@
 """Deterministic tests for the AI routes (``reportbuilder.api.routes_ai``).
 
-The LLM boundary is always monkeypatched — no real network. We patch the
-call-time-looked-up ``reportbuilder.api.routes_ai.datahive_chat`` seam (and, for
-short-labels, ``_reference_labels`` so the pptx corpus is never read). Data is
+The LLM boundary is always monkeypatched — no real network. We patch
+``reportbuilder.ai.masked_chat.datahive_chat``, which the purpose-bound
+wrappers look up at CALL time, so one seam catches every route regardless of
+which purpose it asks for (and, for short-labels, ``_reference_labels`` so the
+pptx corpus is never read). `RecordingChat.purposes` records what each route
+asked for. Data is
 served by ``client_mock`` (a Mock DataHiveClient → synthetic SAV), so any
 material_id resolves. Synthetic qids: ``q1`` (single), ``m`` (multi), ``age``.
 """
@@ -12,6 +15,7 @@ import numpy as np
 import pytest
 
 import reportbuilder.api.routes_ai as R
+from reportbuilder.ai import masked_chat
 from reportbuilder.ai.reference import ReferenceLabels
 from nsight.agent.egohive_client import EgoHiveError
 
@@ -25,7 +29,7 @@ from suite._helpers import RecordingChat
 def _patch_chat(monkeypatch, reply):
     """Install a RecordingChat as the routes' egoHive seam; return it."""
     chat = reply if isinstance(reply, RecordingChat) else RecordingChat(reply)
-    monkeypatch.setattr(R, "datahive_chat", chat)
+    monkeypatch.setattr(masked_chat, "datahive_chat", chat)
     return chat
 
 
@@ -33,14 +37,14 @@ def _no_call(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("egohive_chat must not be called")
 
-    monkeypatch.setattr(R, "datahive_chat", boom)
+    monkeypatch.setattr(masked_chat, "datahive_chat", boom)
 
 
 def _raise_egohive(monkeypatch):
     def boom(*a, **k):
         raise EgoHiveError("egohive down")
 
-    monkeypatch.setattr(R, "datahive_chat", boom)
+    monkeypatch.setattr(masked_chat, "datahive_chat", boom)
 
 
 def _empty_reference(monkeypatch):
@@ -310,3 +314,41 @@ def test_chat_empty_reply_uses_a_fallback(client_mock, monkeypatch):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"reply": "I cannot answer that from the available data."}
+
+
+# --------------------------------------------------------------------------- #
+# purpose reaches the wire
+# --------------------------------------------------------------------------- #
+def test_each_route_asks_datahive_for_the_purpose_its_work_needs(
+        client_mock, monkeypatch):
+    """End to end, not just at the default.
+
+    `text.py` binds a purpose per function, but a route that passes its own
+    `chat=` would silently override it — which is exactly what every route here
+    used to do. datahive chooses the model from this value, so getting it wrong
+    costs either quality or money and looks completely normal either way.
+    """
+    _empty_reference(monkeypatch)
+    mid = client_mock.material_id
+
+    cases = [
+        # (path, body, expected purpose, why)
+        ("ai/slide-title", {"question_ref": "q1"}, "synthesise",
+         "the prompt demands the title INTERPRET the results"),
+        ("ai/short-labels", {"categories": ["Erittäin tyytyväinen"]}, "rewrite",
+         "shortening a supplied label adds nothing to it"),
+        ("ai/overview", {"question_refs": ["q1"]}, "summarise",
+         "describes the study's own background"),
+        ("ai/conclusion", {"question_refs": ["q1"]}, "synthesise",
+         "asked to interpret the data as a whole"),
+        ("ai/themes", {"question_ref": "q1"}, "summarise",
+         "condenses open answers into themes"),
+    ]
+
+    for path, body, expected, why in cases:
+        chat = _patch_chat(monkeypatch, "- **Teema** – jotain")
+        resp = client_mock.post(f"/materials/{mid}/{path}", json=body)
+        assert resp.status_code == 200, f"{path}: {resp.text}"
+        assert chat.calls >= 1, f"{path} never reached the model"
+        assert set(chat.purposes) == {expected}, (
+            f"{path} asked for {set(chat.purposes)}, expected {expected!r} — {why}")

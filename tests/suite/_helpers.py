@@ -94,9 +94,14 @@ class RecordingChat:
     def __init__(self, reply="Canned reply"):
         self.reply = reply
         self.prompts: list[str] = []
+        #: The `purpose` each call carried, in call order. datahive picks the
+        #: model from it, so a route sending the wrong one is a real defect
+        #: that produces entirely plausible output.
+        self.purposes: list[str] = []
         self.calls = 0
 
-    def __call__(self, prompt: str, **_kw) -> str:
+    def __call__(self, prompt: str, **kw) -> str:
         self.calls += 1
         self.prompts.append(prompt)
+        self.purposes.append(kw.get("purpose"))
         return self.reply(prompt) if callable(self.reply) else self.reply
