@@ -8,12 +8,14 @@ Status: **LIVE — https://nsight.egohive.ai** (Let's Encrypt TLS, http→https)
 |---|---|
 | URL | **https://nsight.egohive.ai** |
 | Server | `nsight-staging` UUID `00f2cb37-f49c-4f4f-8bc1-bf22ac4e9976`, **fi-hel2**, 2xCPU-4GB, Ubuntu 24.04 |
-| Public IP | `85.9.223.140` (main); **floating `94.237.12.104`** (DNS target, on eth0 via `/etc/netplan/99-floating-ip.yaml`) |
+| Public IP | **`94.237.12.104`** — the floating IP, and the ONLY one that answers. It is the DNS target and the SSH address. The main IP `85.9.223.140` refuses port 22; do not use it (the host was rebuilt — `hostname` is now `nsight-v2`). |
 | Utility IP | `10.6.17.230` (fi-hel2 — same zone as the egoHive/datahive fleet) |
-| Code | rsync'd from the local working tree to `/opt/nsight` (GitHub master is behind — never pushed; deploy from local) |
+| Code | rsync'd from the local working tree to `/opt/nsight`. Master IS pushed to GitHub now, but the deploy still copies the working tree — the server never pulls. |
 | Run | `cd /opt/nsight && docker compose -f docker-compose.staging.yml up -d --build` |
-| TLS | Caddy (host) `/etc/caddy/Caddyfile` (= `deploy/Caddyfile`) → loopback `:8090` |
-| egoHive/AI | **pending** — creds point to `localhost:8000`; egoHive runs on the egoHive boxes, not nsight. AI/chat degrade to 503 until egoHive is reachable (see below). |
+| TLS | Caddy in a **container** (`caddy:2`, `--network host`, restart `unless-stopped`), mounting `/etc/caddy/Caddyfile` read-only (= `deploy/Caddyfile`) → loopback `:8090`. It is NOT a systemd unit and there is no `caddy` binary on the host, so reload with `docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`. |
+| Store | **Hosted hive** `https://fw5v74sp.hives.egohive.ai` (handle `fw5v74sp`), set via `NSIGHT_DATAHIVE_URL` in `/opt/nsight/.env`. The compose file's own `datahive` service is behind the `local-hive` profile and is NOT started. |
+| AI | **Working** — every prompt goes through the hive's `/api/v1/llm/ask` (`gemini-2.5-flash`), which pseudonymises company names before the vendor sees them. `EGOHIVE_*` creds are not needed: `ai/text.py` routes through `datahive_chat`, and only borrows an exception type from the legacy client. |
+| Sign-in | Google **and** Microsoft OIDC, both configured in the hive at `settings/oidc.json`. There are no passwords. `NSIGHT_BOOTSTRAP_ADMINS=johan@egoiq.com` promotes the first admin on first sign-in. |
 
 Redeploy (from the local machine):
 ```bash
@@ -21,12 +23,46 @@ rsync -az --delete \
   --exclude='.git' --exclude='.venv' --exclude='node_modules' --exclude='__pycache__' \
   --exclude='*.pyc' --exclude='/web/dist' --exclude='/work' --exclude='/input' \
   --exclude='/ui' --exclude='/chart_lab' --exclude='*.sav' --exclude='*.pptx' \
-  -e 'ssh -i ~/.ssh/egohive-staging' ./ root@85.9.223.140:/opt/nsight/
-ssh -i ~/.ssh/egohive-staging root@85.9.223.140 \
+  --exclude='/.env' \
+  -e 'ssh -i ~/.ssh/egohive-staging' ./ root@94.237.12.104:/opt/nsight/
+ssh -i ~/.ssh/egohive-staging root@94.237.12.104 \
   'cd /opt/nsight && docker compose -f docker-compose.staging.yml up -d --build'
 ```
+ALWAYS exclude `/.env`: the server's `.env` holds the hosted-hive URL and its
+service token, and a local `.env` rsync'd over it points staging at a laptop.
+
 NOTE on rsync excludes: anchor host-only dirs with a leading slash (`/ui`, `/input`)
 — an un-anchored `ui` also matches `web/src/components/ui/` and breaks the build.
+
+### Sign-in, and the one trap in it
+
+The shared Caddy basic-auth password is **gone** (2026-08-27). It predated the
+app having any auth of its own; now every route answers 401 without a session,
+so a second shared secret bought nothing and had to be handed to everyone who
+was invited — the opposite of invitation-based access.
+
+**Bootstrap the first admin with Google, not Microsoft.** `identity.py` refuses
+to MINT a new account for an email whose domain ownership is unproven, and that
+check runs *before* the `NSIGHT_BOOTSTRAP_ADMINS` break-glass. Google always
+proves it (`email_verified` is required outright). Microsoft only proves it via
+the optional `xms_edov` claim, which this app registration does not send — so a
+Microsoft-first sign-in to an empty hive is refused, and looks like a broken
+deployment. Once the account exists, Microsoft signs into it fine.
+
+Both providers' credentials live in the hive at `settings/oidc.json`, not in the
+environment. To seed or change them without a signed-in admin (the chicken-and-egg
+on a fresh hive, since `PUT /settings/oidc` needs `require_admin`):
+
+```bash
+ssh -i ~/.ssh/egohive-staging root@94.237.12.104 \
+  "docker exec -i nsight-backend-1 /app/.venv/bin/python -c '
+import sys, json
+from reportbuilder.api.deps_store import build_repository, get_auth
+from reportbuilder.api.routes_settings import OIDC_KEY
+repo, auth = build_repository(), get_auth()
+repo.set_setting(auth, OIDC_KEY, json.load(sys.stdin))
+'" < oidc.json
+```
 
 ---
 
