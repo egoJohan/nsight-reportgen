@@ -1472,11 +1472,51 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
     )
 
 
-# Per-process cache salt: the in-memory store resets material ids (mat-1, mat-2…)
-# on restart, so a cache keyed only on (material_id, spec) would serve images
-# rendered by a PREVIOUS process — i.e. stale, pre-code-change renders. Salting
-# the key per process makes every server start use a fresh preview namespace.
-_PREVIEW_CACHE_SALT = uuid.uuid4().hex[:8]
+def _render_code_identity() -> str:
+    """A digest of the code that draws a preview.
+
+    The salt below has to change when a render would come out DIFFERENT, and
+    at no other time. What actually changes a picture is the drawing code, so
+    that is what this hashes: every source file under render/ and export/, by
+    size and mtime — the same "identity, not content" trick `template_cache`
+    uses on a template file, and just as cheap.
+
+    In a container these are baked at build time, so this is constant for the
+    life of an image and changes the moment a new one is built. That is the
+    invalidation anyone actually wanted.
+    """
+    import reportbuilder
+    root = pathlib.Path(reportbuilder.__file__).parent
+    parts = []
+    for sub in ("render", "export"):
+        for f in sorted((root / sub).rglob("*.py")):
+            try:
+                st = f.stat()
+            except OSError:      # a file racing a redeploy: skip, not crash
+                continue
+            parts.append(f"{f.relative_to(root)}:{st.st_size}:{st.st_mtime_ns}")
+    return hashlib.md5("|".join(parts).encode()).hexdigest()[:8]
+
+
+# What makes one preview namespace different from another.
+#
+# This was `uuid4()` — a fresh namespace on every PROCESS. That is far broader
+# than the problem it was written for: restarting the server threw away every
+# rendered preview, so the first page load after any restart re-rendered the
+# whole report, one LibreOffice run at a time. On a single-core box that is
+# minutes of the author's time, spent redrawing pictures that had not changed.
+#
+# The original reason survives, but only for the in-memory store: it hands out
+# `mat-1`, `mat-2`… from zero on every boot, so the SAME id means a DIFFERENT
+# material after a restart and a stable salt would serve one material's picture
+# for another. That store is selected by the absence of NSIGHT_DATAHIVE_URL
+# (deps_store.build_repository), so the same condition decides this: durable
+# ids get a code-identity salt that survives restarts, reused ids keep the
+# per-process one.
+_PREVIEW_CACHE_SALT = (
+    _render_code_identity() if os.environ.get("NSIGHT_DATAHIVE_URL")
+    else uuid.uuid4().hex[:8]
+)
 
 
 def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
