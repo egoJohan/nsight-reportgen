@@ -133,6 +133,19 @@ services:
       # default creds path is /app/work/egohive_creds.json. Place the file at
       # ./work/egohive_creds.json on the server before `up`.
       - ./work/egohive_creds.json:/app/work/egohive_creds.json:ro
+      # Rendered previews, and the per-template "ground" each one is composited
+      # onto. These live under the container's /tmp, which a rebuild throws
+      # away — so every deploy used to be followed by a full re-render of every
+      # slide in every open report, at roughly a second each on one core.
+      #
+      # Safe to keep across deploys because nothing here is keyed by time: a
+      # preview's key carries a digest of the render code (see
+      # routes_questions._render_code_identity), the ground carries the host's
+      # font fingerprint, and a cached template is named by its content hash.
+      # New code therefore reads new keys and the janitor sweeps the old ones.
+      - nsight-preview-cache:/tmp/nsight-preview
+      - nsight-ground-cache:/tmp/nsight-preview-ground
+      - nsight-template-cache:/tmp/nsight-preview-templates
     # No depends_on: `datahive` is profiled, and compose refuses a
     # dependency on a service outside the active profiles. With the local
     # hive, start it first (step 1 of the header's first-deploy recipe).
@@ -151,3 +164,7 @@ services:
 
 volumes:
   nsight-datahive:
+  # Render caches. Losing these costs time, never data — they rebuild on demand.
+  nsight-preview-cache:
+  nsight-ground-cache:
+  nsight-template-cache:
