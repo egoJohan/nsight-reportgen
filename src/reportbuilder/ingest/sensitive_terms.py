@@ -98,6 +98,45 @@ _SCALE_POINTS = frozenset({
 })
 
 
+#: Finnish case endings a NAME does not carry in an answer list.
+#:
+#: A company stands in the nominative — `Attendo`, `Synsam`, `Mainio-kodit`. An
+#: option is inflected, because it is a phrase the question puts the respondent
+#: inside: `Muualla` (adessive), `Omassa rauhassa` (inessive), `Verkkokaupasta`
+#: (elative). Both of the first two were proposed as companies on a live study.
+#:
+#: Deliberately only the DOUBLED-consonant locatives and the plural obliques.
+#: Single `-la`, `-na`, `-ta` are ordinary endings of ordinary names — a rule
+#: that read them as inflection would start dropping companies, and dropping a
+#: company is the one failure this module may not have.
+_CASE_ENDING = re.compile(
+    r"(ss[aä]|st[aä]|ll[aä]|lt[aä]|lle|ks[ei]|tt[aä]|[aä]{2}n|hin|seen|"
+    r"ien|iden|itten)$",
+    re.IGNORECASE,
+)
+
+#: Words a DESCRIPTION opens with and a company name does not.
+#:
+#: The same kind of list as `_SCALE_POINTS` above and chosen the same way: an
+#: evaluation, a quantifier, a possessive or a first-person verb begins a
+#: statement being rated, never a name. "Hyvä asiakaspalvelu", "Liian kalliit
+#: hinnat", "Käytän silmälaseja päivittäin".
+#:
+#: Kept GENERIC on purpose. An earlier draft included words lifted from two
+#: files — `vaikuttajien`, `lemmikki`, `optikkoliikkeiden` — which tunes the
+#: proposal to the studies it was measured on and to nothing else.
+_DESCRIPTION_OPENERS = frozenset({
+    "hyvä", "hyvät", "hyviä", "heikko", "heikot", "heikkoa", "huono", "huonot",
+    "paras", "parempi", "edullinen", "edulliset", "kallis", "kalliit",
+    "liian", "erittäin", "melko", "tietty", "tietyt",
+    "oma", "omat", "kaikki", "kaikkien", "muu", "muut", "jokin", "jotkin",
+    "joustava", "joustavat", "laaja", "laajat", "nopea", "nopeat",
+    "helppo", "helpot", "mahdollisuus", "mahdollisuudet", "saatavilla",
+    "saan", "käytän", "asioin", "suosittelen", "haluan", "koen", "pidän",
+    "ostan",
+})
+
+
 def _candidate(text: str) -> str | None:
     """The term this string contributes, or None if it cannot be a name."""
     t = (text or "").strip().strip(":").strip()
@@ -113,6 +152,9 @@ def _candidate(text: str) -> str | None:
     if low in _ARTEFACTS or low in _SCALE_POINTS or low in _FREQUENCY_WORDS:
         return None
     if _COUNTED_INTERVAL.search(t):
+        return None
+    first = t.split()[0].strip("-,")
+    if _CASE_ENDING.search(first) or first.lower() in _DESCRIPTION_OPENERS:
         return None
     # Two words is a company ("Julkiset hoivapalvelut", "Esperi Care"); five is
     # a statement being rated.

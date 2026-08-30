@@ -228,3 +228,60 @@ def test_it_is_never_the_union():
     raw = _labelled({"a": "Luotettava:Attendo", "b": "Rehellinen:Attendo",
                   "c": "Luotettava:Esperi", "d": "Rehellinen:Esperi"})
     assert len(propose_from_models(grouped, raw)) == 2
+
+
+# ── An answer option is not a company (2026-08-30) ──────────────────────────
+# Reported from staging: the proposal offered "Muualla" (elsewhere) and "Omassa
+# rauhassa" (in one's own peace) as company names.
+#
+# Repetition is this module's whole signal, and answer OPTIONS repeat too — the
+# same option list is offered by every question in a family. They are
+# capitalised in the SPSS labels and short, so nothing already here stopped
+# them.
+#
+# Two shapes separate a description from a name, and both are facts about
+# Finnish rather than about any study:
+#
+#   A name stands in the NOMINATIVE. An option is inflected — `Muualla` carries
+#   the adessive, `Omassa rauhassa` and `Verkkokaupasta` the inessive and
+#   elative. A company in an answer list does not decline.
+#
+#   A description OPENS with an evaluation, a quantifier or a first-person
+#   verb: "Hyvä asiakaspalvelu", "Liian kalliit hinnat", "Käytän silmälaseja".
+#   A company name opens with itself.
+#
+# Both were chosen against the requirement, which is not symmetric: EVERY
+# company must survive, and some noise is tolerable. A term dropped here is
+# never proposed, never accepted, never registered as a deny term, and reaches
+# the vendor in clear. Measured across three real studies -- Attendo, Holiday
+# Club, Synsam -- these remove 26% of the proposal and lose NONE of the 24
+# companies in them. The rules that cut more all cost a company: sentence-case
+# alone would drop "Sokos hotels (S-kortti)".
+
+def test_an_inflected_option_is_not_proposed():
+    m = _model(
+        _var("q1", values=("Kotona", "Muualla", "Omassa rauhassa")),
+        _var("q2", values=("Kotona", "Muualla", "Omassa rauhassa")),
+    )
+    proposed = propose_sensitive_terms(m)
+    assert "Muualla" not in proposed
+    assert "Omassa rauhassa" not in proposed
+
+
+def test_a_description_opening_with_an_evaluation_is_not_proposed():
+    m = _model(
+        _var("q1", values=("Hyvä asiakaspalvelu", "Liian kalliit hinnat")),
+        _var("q2", values=("Hyvä asiakaspalvelu", "Liian kalliit hinnat")),
+    )
+    proposed = propose_sensitive_terms(m)
+    assert proposed == []
+
+
+def test_the_company_names_beside_them_still_are():
+    """The rules must not touch what the module exists to find."""
+    brands = ("Synsam", "Instrumentarium", "Specsavers", "Sokos hotels (S-kortti)",
+              "Lapland Hotels Club", "Mainio-kodit", "Attendo")
+    m = _model(_var("q1", values=brands), _var("q2", values=brands))
+    proposed = propose_sensitive_terms(m)
+    for b in brands:
+        assert b in proposed, f"{b!r} was dropped"
