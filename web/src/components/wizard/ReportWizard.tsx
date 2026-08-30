@@ -32,12 +32,17 @@ import {
   useUpdateReport,
   useRegroupedQuestions,
   useResolvedCase,
+  useRenderCapacity,
   useCaseTemplate,
   useTemplateActions,
   fetchChartPreviewInto,
   qk,
 } from "@/lib/queries";
 import * as previewQueue from "@/lib/previewQueue";
+import {
+  cacheClearedGeneration,
+  subscribeCacheCleared,
+} from "@/lib/previewCacheSignal";
 import { installProducers, setProducerEnv } from "@/lib/previewProducers";
 import { useWorkspace } from "@/lib/workspace";
 import {
@@ -91,6 +96,26 @@ function replaceSpecialGroup(
   return inserted ? out : null;
 }
 
+/** How long an edit has to stop moving before its slide is queued to render.
+ *
+ *  A render is a CPU-bound pipeline — LibreOffice, PDF, raster — and staging
+ *  gives it one core. So this is not sized to coalesce KEYSTROKES, which
+ *  anything over ~50ms does; it is sized to coalesce the PAUSES a person
+ *  leaves inside a sentence. Typing a headline is bursts of words with
+ *  300-900ms gaps and a second or two of thinking somewhere in the middle, and
+ *  every gap longer than this window renders a half-written sentence that
+ *  nobody asked to see. At 350ms, one seven-word headline cost SEVEN renders;
+ *  at this value it costs one.
+ *
+ *  The cost of raising it is paid by the discrete controls — a chart type, a
+ *  toggle — where nothing follows the change and the author simply waits the
+ *  window out before anything moves. Measured at 1.0s to first picture at
+ *  350ms against 2.6s here. That is the trade, and it is worth it: the slow
+ *  case is one click, and the fast case was spending six renders of a
+ *  one-core machine on sentences that were never finished.
+ */
+const EDIT_SETTLE_MS = 2000;
+
 const STEPS = [
   { id: "select", label: "Select" },
   { id: "configure", label: "Design" },
@@ -99,6 +124,15 @@ const STEPS = [
 
 // Index of the Design step — the Preview grid jumps here when a slide is clicked.
 const CONFIGURE_STEP = STEPS.findIndex((s) => s.id === "configure");
+
+/** The steps that put rendered pictures in front of the author.
+ *
+ *  Clearing the cache re-renders on these and only these. On Select there is
+ *  nothing to look at, and starting a deck-wide render there would spend
+ *  minutes of a one-core machine on pictures nobody has asked to see — and
+ *  would still be running when the author arrived at Design, which is when
+ *  they WOULD have asked. */
+const STEPS_SHOWING_PICTURES = new Set(["configure", "download"]);
 
 function Stepper({
   current,
@@ -174,6 +208,9 @@ export default function ReportWizard({
   const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
   // Which pohja this report renders with, and what it would inherit without a
   // choice of its own — so the dropdown names the one actually in use.
+  // How many slides this backend can usefully draw at once. The queue starts at
+  // one and is raised when the answer arrives — see useRenderCapacity.
+  useRenderCapacity();
   const { data: resolvedCase } = useResolvedCase(caseId);
   const { data: caseTemplate } = useCaseTemplate(resolvedCase?.customer_id, caseId);
   const bindReport = useTemplateActions(resolvedCase?.customer_id).bindReport;
@@ -794,7 +831,7 @@ export default function ReportWizard({
     // nothing to write about and are recorded as needing nothing. That is how
     // the first four slides of a sixty-slide report came out untitled.
     if (!resolvedCount) return;
-    // Debounced, so holding a key down does not queue a render per keystroke.
+    // Debounced, so a burst of edits queues one render rather than one each.
     const h = setTimeout(() => {
       const charts = draftRef.current?.charts ?? [];
       previewQueue.setDeck(charts.map((c) => c.slide_id ?? ""));
@@ -806,9 +843,28 @@ export default function ReportWizard({
         if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
       }
       lastSeen.current = next;
-    }, 350);
+    }, EDIT_SETTLE_MS);
     return () => clearTimeout(h);
   }, [chartsSignature, resolvedCount]);
+
+  // The Clear cache button threw the rendered previews away. Draw them again if
+  // the author is somewhere they would see them — which is this component's
+  // call to make, because the step is only known here.
+  //
+  // Keyed on the generation rather than on an event, so a clear that lands
+  // while the author is on Select is not lost: it is noticed on arrival at
+  // Design, when the pictures are wanted.
+  const clearedGeneration = useSyncExternalStore(
+    subscribeCacheCleared,
+    cacheClearedGeneration
+  );
+  const redrawnFor = useRef(0);
+  useEffect(() => {
+    if (!clearedGeneration || clearedGeneration === redrawnFor.current) return;
+    if (!STEPS_SHOWING_PICTURES.has(STEPS[step]?.id ?? "")) return;
+    redrawnFor.current = clearedGeneration;
+    previewQueue.restartDeck("the author cleared the preview cache");
+  }, [clearedGeneration, step]);
 
   // "Is the queue doing anything?" — the one signal the save rule needs.
   const queueBusy = useSyncExternalStore(previewQueue.subscribe, previewQueue.isBusy);

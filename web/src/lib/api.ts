@@ -658,6 +658,18 @@ const jsonPatch = (body: unknown) => ({
 });
 
 export const api = {
+  /** What this backend can do, and how much of it at once.
+   *
+   *  `render_concurrency` is the number of slides worth asking it to draw in
+   *  parallel. Drawing is CPU-bound, so the server derives it from the cores
+   *  it is actually scheduled on — the client cannot see that, and guessing
+   *  high is the expensive mistake: it does not finish the deck any sooner and
+   *  it multiplies the wait for the one slide the author is looking at. */
+  health: (): Promise<{ status: string; render_concurrency?: number }> =>
+    fetch(`${API_BASE}/health`).then((r) =>
+      json<{ status: string; render_concurrency?: number }>(r)
+    ),
+
   /** Asiakas -> Case. The server filters these lists to what the caller may
    *  see, so the UI must never widen them by filtering a broader response. */
   customers: {
@@ -818,6 +830,18 @@ export const api = {
     ),
 
   materials: {
+    /** Throw away every rendered preview for this dataset.
+     *
+     *  The pictures are a cache and are normally invisible: the same chart,
+     *  template and curation give the same PNG. This is for when they are not
+     *  — a template edited in place, a font installed on the host, a slide
+     *  that came out wrong for a reason nobody has found. Scoped to the
+     *  material, so one study refreshing does not cost every other study its
+     *  pictures. Returns how many entries went. */
+    clearPreviewCache: (materialId: string): Promise<{ cleared: number }> =>
+      fetch(`${API_BASE}/materials/${materialId}/preview-cache/clear`,
+            { method: "POST" }).then((r) => json<{ cleared: number }>(r)),
+
     /** What must never reach an LLM from this dataset.
      *
      *  `proposed` is read from the study's own structure — the members of its

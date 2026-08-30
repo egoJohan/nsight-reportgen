@@ -1535,6 +1535,15 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
     ).hexdigest()[:16]
     d = pathlib.Path(tempfile.gettempdir()) / "nsight-preview" / key
     d.mkdir(parents=True, exist_ok=True)
+    # Who this entry belongs to. The key is a hash, so without this the cache
+    # can only be cleared entirely — which on a shared host throws away every
+    # other study's pictures to refresh one. Written every time rather than
+    # once: it is two syscalls against a render measured in seconds, and an
+    # entry whose marker went missing would quietly stop being clearable.
+    try:
+        (d / "material").write_text(material_id, encoding="utf-8")
+    except OSError:  # a cache that cannot be labelled still works as a cache
+        pass
     return d
 
 
@@ -1842,6 +1851,51 @@ def preview_chart(
              material_id, body.chart_type, time.monotonic() - started,
              built - started, converted - built, rastered - converted)
     return Response(content=png_bytes, media_type="image/png")
+
+
+@questions_router.post("/materials/{material_id}/preview-cache/clear")
+def clear_preview_cache(
+    material_id: str,
+    user: User = Depends(require_material_write),
+) -> dict:
+    """Throw away every rendered preview for this material.
+
+    The pictures are a cache: the same chart, template and curation always
+    produce the same PNG, so the cache is normally invisible and correct. It is
+    the abnormal case this exists for — a template edited in place, a font
+    installed on the host, a render that came out wrong for a reason nobody has
+    found yet. Without a way to drop them, the only remedy was to change
+    something about every slide so its key moved, which is worse than useless
+    because it also changes the deck.
+
+    Scoped to the MATERIAL, by the marker `_preview_out_dir` leaves. Deleting
+    the whole directory would be simpler and is what "clear the cache" sounds
+    like, but on a shared host it discards every other study's pictures to
+    refresh one, and those cost seconds of CPU each to make again.
+
+    Entries with no marker are left alone. They predate the marker, they belong
+    to a material this call cannot identify, and deleting what you cannot name
+    is how a clear-cache button becomes the thing that made the morning slow.
+    """
+    del user
+    root = pathlib.Path(tempfile.gettempdir()) / "nsight-preview"
+    if not root.is_dir():
+        return {"cleared": 0}
+    cleared = 0
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        marker = entry / "material"
+        try:
+            owner = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue                      # unmarked, or vanished under us
+        if owner != material_id:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        cleared += 1
+    log.info("preview cache: cleared %d entries for %s", cleared, material_id)
+    return {"cleared": cleared}
 
 
 class AcceptTermsBody(BaseModel):

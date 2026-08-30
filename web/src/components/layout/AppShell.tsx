@@ -35,6 +35,7 @@ import {
   useCaseReports,
   useDuplicateReport,
   qk,
+  useClearPreviewCache,
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
 import ChatPanel from "@/components/ChatPanel";
@@ -49,6 +50,7 @@ import {
   XIcon,
   CopyIcon,
   Loader2Icon,
+  RefreshCwIcon,
   MessageSquareTextIcon,
   LogOutIcon,
 } from "lucide-react";
@@ -407,6 +409,66 @@ function CopyReportButton() {
   );
 }
 
+/** Throw away this study's rendered previews, and draw them again.
+ *
+ *  Beside "Copy as new" because it belongs to the report you have open, and
+ *  because this is where somebody goes when the picture on screen is wrong: a
+ *  template edited in place, a font installed on the host, a slide that came
+ *  out strange for a reason nobody has found. Until now the only remedy was to
+ *  change something about every slide so its cache key moved, which also
+ *  changes the deck — a worse deck to fix a stale picture.
+ *
+ *  Re-rendering is NOT started here. Whether it should be depends on which step
+ *  the author is on, and that is the wizard's to know; this clears and
+ *  announces, and the wizard redraws if the author is somewhere the pictures
+ *  are visible.
+ */
+function ClearCacheButton() {
+  const { id: caseId } = useParams();
+  const [searchParams] = useSearchParams();
+  const reportId = searchParams.get("report");
+  const { workspace } = useWorkspace(caseId ?? "");
+  // The same rule the case page uses to decide which dataset the wizard opens
+  // with: the local pointer, or the case's own material when there is none —
+  // which is the ordinary state for a case somebody else (or another device)
+  // created. Reading only the pointer left the button invisible on exactly the
+  // reports most likely to need it.
+  const { data: caseMaterials } = useCaseMaterials(caseId ?? null);
+  const materialId =
+    workspace.materialId ?? caseMaterials?.materials?.[0]?.material_id ?? undefined;
+  const clear = useClearPreviewCache(materialId);
+
+  if (!caseId || !reportId || !materialId) return null;
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-muted-foreground"
+      title="Discard the rendered previews and draw them again"
+      disabled={clear.isPending}
+      onClick={() =>
+        clear.mutate(undefined, {
+          onSuccess: ({ cleared }) =>
+            toast.success(
+              cleared
+                ? `Cleared ${cleared} rendered preview${cleared === 1 ? "" : "s"}`
+                : "Nothing was cached"
+            ),
+          onError: (e) => toast.error(`Could not clear the cache: ${e.message}`),
+        })
+      }
+    >
+      {clear.isPending ? (
+        <Loader2Icon className="size-4 animate-spin" />
+      ) : (
+        <RefreshCwIcon className="size-4" />
+      )}
+      Clear cache
+    </Button>
+  );
+}
+
 function CloseReportButton() {
   const [searchParams, setSearchParams] = useSearchParams();
   if (!searchParams.get("report")) return null;
@@ -560,6 +622,7 @@ export default function AppShell() {
           {/* Right side: Copy / Close report, then Chat (always rightmost). */}
           <div className="ml-auto flex items-center gap-2">
             <CopyReportButton />
+            <ClearCacheButton />
             <CloseReportButton />
             <ChatLauncher />
           </div>
