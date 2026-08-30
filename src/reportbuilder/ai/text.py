@@ -28,6 +28,7 @@ let it default the same way.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from nsight.agent.egohive_client import EgoHiveError, _clean
@@ -35,12 +36,33 @@ from reportbuilder.ai import masked_chat as M
 
 from reportbuilder.ai.reference import ReferenceLabels
 
+log = logging.getLogger(__name__)
+
 # Max length for an AI-shortened category label (C.2).
 MAX_LABEL_LEN = 24
 
 # Soft cap on a slide title length. A title is an analytical key message
 # ("avainviesti"), so it needs room for a short conclusion — not a 3-word slogan.
 MAX_TITLE_LEN = 110
+
+#: What the model writes at the very end of a finished headline, so that a
+#: headline which never got to its end can be told from one that did.
+#:
+#: The relay's output budget is spent on the model's own reasoning before the
+#: visible answer is written, and a headline is exactly the reasoning-heavy,
+#: hundred-character job that runs out: measured against the local hive, a
+#: mechanical 629-character reply came back whole while every analytical
+#: headline stopped between 80 and 110 characters, mid-word. Six of one
+#: customer's thirty slides carried the wreckage — "…työnantajana selvästi yks"
+#: — and a generated title is tagged with the data it was written about, so
+#: nothing ever reconsidered it.
+#:
+#: A mark at the END is what makes this detectable at all. Anything cut short
+#: loses its last characters first, and the mark is the last of them; if it
+#: survived, nothing after it was lost. Guessing from the text instead —
+#: "does this end mid-word?" — means teaching this module Finnish morphology,
+#: which it would get wrong in both directions.
+TITLE_END_MARK = "¶"
 
 # Style exemplars: real analytical key-message headlines from nSight decks.
 # They state the SUBJECT of the question and the KEY CONCLUSION from the data —
@@ -78,7 +100,9 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         "Otsikon tulee TULKITA tuloksia (mitä data kertoo), ei vain todeta yksittäistä "
         "lukua tai toistaa kysymystä. Vältä iskulausetta; kirjoita kuten esimerkeissä. "
         f"Enintään noin {MAX_TITLE_LEN} merkkiä, yksi rivi, ei lainausmerkkejä, ei "
-        "loppupistettä."
+        "loppupistettä. "
+        f"Kirjoita aivan loppuun merkki {TITLE_END_MARK}, jotta tiedämme "
+        "vastauksen valmistuneen."
     )
 
 
@@ -86,7 +110,23 @@ def generate_slide_title(
     question_text: str,
     findings: list[tuple[str, float]],
     *,
-    chat=M.synthesise,
+    # `summarise`, not `synthesise`. A headline CONDENSES what the findings
+    # already say; it does not reach past them. The distinction is the hive's:
+    # synthesise is for output allowed to state something no input sentence
+    # stated, and it is bound to `generous` deliberation because that is the one
+    # place deliberation pays. A title is not that place, and the measurement
+    # said so before the taxonomy did — deliberating took 6.8-7.4s and returned
+    # the only headline with no number in it, a hedge where the job was to
+    # report.
+    #
+    # Measured over all 30 questions of a real study, not a short sample: at
+    # `summarise` (thinking=low) a headline costs a MEDIAN of ~10s and as much
+    # as 41s, because these questions are long and the deliberation scales with
+    # them. The same 30 prompts at thinking=floor cost 1.43s median, 1.65s at
+    # worst, with headlines a reader cannot tell apart — and rather more of them
+    # carrying an actual number. The remaining cost is the hive's to remove:
+    # `summarise` is bound to `low` there, and this work wants `floor`.
+    chat=M.summarise,
 ) -> str:
     """Generate a short descriptive Finnish slide title.
 
@@ -97,9 +137,19 @@ def generate_slide_title(
     prompt = _slide_title_prompt(question_text, findings)
     reply = chat(prompt)
     title = _clean(reply)
+    fallback = (question_text or "").strip()
     if not title:
-        return (question_text or "").strip()
-    return title
+        return fallback
+    # Only a headline that reached its end is a headline. Without the mark the
+    # answer was cut off somewhere we cannot see, and half a sentence printed on
+    # a slide is worse than the question it was meant to improve on — which is
+    # exactly what the question text is: what the deck showed before there were
+    # generated headlines at all.
+    if TITLE_END_MARK not in title:
+        log.warning("ai: slide title arrived without its end mark, so it was cut "
+                    "short; falling back to the question text (%r)", title[-40:])
+        return fallback
+    return title.split(TITLE_END_MARK, 1)[0].strip() or fallback
 
 
 def _group_subtitle_prompt(member_labels: list[str]) -> str:

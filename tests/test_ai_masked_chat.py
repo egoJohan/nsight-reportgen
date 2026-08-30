@@ -100,13 +100,23 @@ def test_each_prose_function_asks_for_the_purpose_its_prompt_describes():
     by the wrong size of model — silently, and with plausible-looking output.
 
     These are read off each prompt, not guessed from the function name:
-    `generate_slide_title` says "Otsikon tulee TULKITA tuloksia" (interpret,
-    do not restate) so it synthesises, while `generate_group_subtitle` says
-    "EI avainviesti, EI johtopäätös" (explicitly not a conclusion) so it only
-    summarises. Change one of these ONLY together with the prompt it describes.
+    `generate_group_subtitle` says "EI avainviesti, EI johtopäätös" (explicitly
+    not a conclusion) so it only summarises, while `generate_conclusion_bullets`
+    reads the whole report and may state what no single slide states, which is
+    what `synthesise` means. Change one of these ONLY together with the prompt
+    it describes.
+
+    `generate_slide_title` SUMMARISES, and the reason is worth keeping because
+    the prompt reads the other way at a glance. It does say "Otsikon tulee
+    TULKITA tuloksia" — but interpreting "kyllä 62" as "selvä enemmistö" is
+    condensation, not invention: it says less than the input and nothing the
+    input did not say, which is the hive's own line between the two purposes.
+    Measurement settled it. `synthesise` is bound to `generous` deliberation,
+    and on this task deliberation cost 8.1s against 4.8s and returned the only
+    headline with no quantity in it — a hedge, where the job was to report.
     """
     expected = {
-        "generate_slide_title": "synthesise",
+        "generate_slide_title": "summarise",
         "generate_group_subtitle": "summarise",
         "shorten_labels": "rewrite",
         "generate_data_chat": "converse",

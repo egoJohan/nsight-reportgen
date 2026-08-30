@@ -27,7 +27,7 @@ def test_slide_title_prompt_contains_question_and_findings():
 
 def test_slide_title_strips_markdown_and_wrapping_quotes():
     # Single-line reply: markdown emphasis + wrapping quotes are stripped.
-    chat = RecordingChat('"**Attendo johtaa selvästi**"')
+    chat = RecordingChat(f'"**Attendo johtaa selvästi {T.TITLE_END_MARK}**"')
     title = T.generate_slide_title("Q", [("A", 1.0)], chat=chat)
     assert title == "Attendo johtaa selvästi"
 
@@ -37,9 +37,9 @@ def test_slide_title_keeps_only_first_line():
     # multi-line) string BEFORE the newline split, so a leading quote is only
     # removed when the WHOLE string is quote-wrapped. Here the second line means
     # the wrapping quotes survive onto the first line.
-    chat = RecordingChat('"Ensimmäinen rivi"\nroskarivi')
+    chat = RecordingChat(f'"Ensimmäinen rivi {T.TITLE_END_MARK}"\nroskarivi')
     title = T.generate_slide_title("Q", [("A", 1.0)], chat=chat)
-    assert title == '"Ensimmäinen rivi"'
+    assert title == '"Ensimmäinen rivi'
 
 
 def test_slide_title_blank_reply_falls_back_to_question_text():
@@ -53,9 +53,35 @@ def test_slide_title_is_not_truncated_to_max_title_len():
     # only appears as guidance inside the prompt text. The cleaned reply is
     # returned verbatim even if longer than MAX_TITLE_LEN.
     long_reply = "Z" * (T.MAX_TITLE_LEN + 50)
-    title = T.generate_slide_title("Q", [("A", 1.0)], chat=RecordingChat(long_reply))
+    title = T.generate_slide_title(
+        "Q", [("A", 1.0)], chat=RecordingChat(f"{long_reply} {T.TITLE_END_MARK}"))
     assert title == long_reply
     assert len(title) > T.MAX_TITLE_LEN
+
+
+def test_slide_title_asks_the_model_to_mark_where_it_stopped():
+    chat = RecordingChat(f"Attendo johtaa selvästi {T.TITLE_END_MARK}")
+    T.generate_slide_title("Q", [("A", 1.0)], chat=chat)
+    assert T.TITLE_END_MARK in chat.prompts[0]
+
+
+def test_slide_title_keeps_a_complete_answer_and_drops_the_mark():
+    chat = RecordingChat(f"Attendo johtaa selvästi {T.TITLE_END_MARK}")
+    assert T.generate_slide_title("Q", [("A", 1.0)], chat=chat) == "Attendo johtaa selvästi"
+
+
+def test_slide_title_cut_off_by_the_relay_falls_back_to_the_question():
+    # What the customer saw: the relay's output budget is spent on the model's
+    # own reasoning, and the visible answer stops mid-word around 90 characters.
+    # "hoiva-alallan työntekijät suosittelevat julkisia hoivapalveluita
+    # työnantajana selvästi yks" was written onto a slide and, because a
+    # generated title is tagged with the data it was written about, never
+    # reconsidered. A headline that never reached its end is not a headline.
+    cut = ("hoiva-alallan työntekijät suosittelevat julkisia hoivapalveluita "
+           "työnantajana selvästi yks")
+    title = T.generate_slide_title("Suosittelisitko hoiva-alaa?", [("kyllä", 62.0)],
+                                   chat=RecordingChat(cut))
+    assert title == "Suosittelisitko hoiva-alaa?"
 
 
 def test_slide_title_propagates_egohive_error():
