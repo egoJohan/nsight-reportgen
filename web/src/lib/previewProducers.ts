@@ -144,6 +144,12 @@ const chart: Producer = {
     });
   },
 
+  // This is the render host's CPU — LibreOffice, PDF, raster — so the queue
+  // holds it to the number of cores that host reports. The title and bullets
+  // producers above are the opposite: a round trip to a model, spent waiting,
+  // costing that host nothing, and free to overlap across slides.
+  cpuBound: true,
+
   // Nothing downstream should pretend an image exists.
   onFailure: "abort",
 };

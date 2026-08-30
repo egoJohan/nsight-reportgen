@@ -46,6 +46,16 @@ export interface Producer {
    *  the result away. A model round trip is seconds long, and a person editing
    *  the same field in that window must win — they are looking at it. */
   supersededBy?(before: ChartSpec, after: ChartSpec): boolean;
+  /** This producer's work happens on the RENDER HOST's CPU, so no more of it
+   *  may run at once than that host has cores.
+   *
+   *  The distinction exists because the other producers are the opposite kind
+   *  of work: writing a headline is a round trip to a model, seconds long,
+   *  spent waiting, costing the render host nothing. Holding both to the core
+   *  count made a cold open pay its headlines strictly one after another —
+   *  141s of the 162s a thirty-slide deck took, against 26s of actual drawing.
+   *  Left false, a producer is assumed to be waiting on somebody else. */
+  cpuBound?: boolean;
   onFailure: "continue" | "abort";
 }
 
@@ -177,8 +187,83 @@ let requeue = new Set<string>();
  *  is cleared with the rest of the session state. */
 let retried = new Set<string>();
 let active = 0;
-let concurrency = 4;
+/** How many slides to draw at once.
+ *
+ *  Sized to what the SERVER can actually draw in parallel, which it reports
+ *  from its own core count — see `setConcurrency`. One, until it says
+ *  otherwise: rendering is CPU-bound (LibreOffice -> PDF -> raster), so asking
+ *  for more than the renderer has cores buys no throughput at all and
+ *  multiplies what the author waits for. Measured on a 30-slide deck on one
+ *  core: the whole deck took 47-49s at EVERY setting from 1 to 8, while the
+ *  median wait for one slide went 2.9s -> 4.1s -> 6.4s -> 7.7s -> 11.0s ->
+ *  14.8s. Four was costing 7.7s per slide to finish the deck no sooner.
+ *
+ *  Defaulting LOW is deliberate: the error is asymmetric. Too low on a big
+ *  machine costs some throughput on a background warm; too high on a small one
+ *  costs the author seconds on every single slide they look at. */
+/** Slide passes in flight.
+ *
+ *  ONE, and the reason is the whole of this queue's history in one number.
+ *
+ *  A pass looks like it is spent waiting — a model writes a headline, a host
+ *  draws a picture — so running several at once looks free. It is not. Both
+ *  ends of that wait are served by ONE machine with ONE core: the backend
+ *  prepares every headline request before the relay ever sees it, and draws
+ *  every picture, and it is the same core doing both. Fan-out does not add
+ *  capacity there; it divides it, and hands the author a longer wait for the
+ *  one slide they are looking at.
+ *
+ *  Measured on a cold 30-slide deck, clicking a slide part-way through:
+ *
+ *      passes   click -> picture   deck warmed in
+ *        1           5.8s              162s
+ *        4          11.5s               76s
+ *        8          20.0s               ~60s
+ *
+ *  The relay itself is blameless — eight concurrent calls to it each still
+ *  returned in 4.5-4.8s. It is the single core in front of it: at four passes
+ *  a headline call that costs 4.6s alone took 9.1s.
+ *
+ *  So the deck warms more slowly and every slide the author actually opens is
+ *  twice as fast, which is the trade this product wants. The slide being
+ *  looked at is exempt anyway — see `pump`, which gives it a slot of its own.
+ */
+let concurrency = 1;
+/** Pictures being drawn at once. Reported by the server from the cores it is
+ *  actually scheduled on (see `setRenderConcurrency`), because drawing is
+ *  CPU-bound and asking for more than there are cores buys no throughput while
+ *  multiplying what the author waits for: measured on one core, a 30-slide
+ *  deck took 47-49s at every setting from 1 to 8 while the median wait for a
+ *  single slide went 2.9s -> 7.7s -> 14.8s. */
+let renderConcurrency = 1;
+let rendersActive = 0;
+let renderWaiters: Array<() => void> = [];
+
+/** Run one piece of CPU-bound work, waiting for a turn on the render host. */
+async function withRenderSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (rendersActive >= renderConcurrency) {
+    await new Promise<void>((resolve) => renderWaiters.push(resolve));
+  }
+  rendersActive += 1;
+  try {
+    return await fn();
+  } finally {
+    rendersActive -= 1;
+    renderWaiters.shift()?.();
+  }
+}
 let currentReportId = "";
+/** The slide the author is looking at.
+ *
+ *  Held here rather than being told to the queue as a one-off promotion,
+ *  because a promotion only orders the queue AS IT IS. The author selects a
+ *  slide, it goes to the head and draws; then they type a headline into it,
+ *  the wizard queues it again — and nothing says "this is still the slide they
+ *  are looking at", so it went on the END, behind every slide they are not.
+ *  Measured on a cold twenty-four slide deck: their own headline appeared 36.6s
+ *  after they stopped typing, against 1.0s with nothing else queued. That is
+ *  the whole of "the preview got slow when editing titles". */
+let focused = "";
 const listeners = new Set<() => void>();
 let idleWaiters: Array<() => void> = [];
 
@@ -257,6 +342,8 @@ export function reset(reportId: string) {
   // closed report's renders.
   running = new Set();
   active = 0;
+  // Whichever slide the last session was on is not this one's.
+  focused = "";
   notify();
 }
 
@@ -370,11 +457,19 @@ export function snapshot() {
     if (e?.fingerprint) renderedFor[slideId] = short(e.fingerprint);
   }
   return {
-    queued: [...queued],
+    // The QUEUE, in the order it will be worked through — not the `queued` set,
+    // which is a membership test that happens to iterate in insertion order.
+    // The two agreed while everything joined at the back; the focused slide
+    // joins at the front, and then the set says the wrong thing about the one
+    // question this snapshot exists to answer: what runs next.
+    queued: [...queue],
     running: [...running],
+    focused,
     requeue: [...requeue],
     active,
     concurrency,
+    renderConcurrency,
+    rendersActive,
     generation: contextGeneration,
     context: renderContext,
     unfinished: pending,
@@ -493,7 +588,9 @@ async function producePreview(slideId: string): Promise<void> {
     say("run", { slideId, producer: p.id, detail: `fp=${short(c.fingerprint)}` });
     setStatus(slideId, p.id, "running", c.fingerprint);
     try {
-      const patch = await p.run(c);
+      const patch = p.cpuBound
+        ? await withRenderSlot(() => p.run(c))
+        : await p.run(c);
       if (abandoned()) {
         say("abandon", {
           slideId,
@@ -632,9 +729,35 @@ export function enqueue(slideId: string) {
   // unmounted component.
   if (!currentReportId) return;
   if (!slideId || queued.has(slideId) || running.has(slideId)) return;
+  // Nothing to do? Then do not join the queue, and above all do not say you
+  // are working.
+  //
+  // The wizard offers a slide back whenever its content changes, and the
+  // commonest such change is this queue's OWN generated headline arriving in
+  // the draft a moment after it was written. That slide is finished. Queueing
+  // it anyway was cheap in work — the pass skips every producer — but it is
+  // not cheap in what the author SEES: `enqueue` marked all three producers
+  // pending, the Design pane reads pending as "Updating…", and with one render
+  // at a time on a deck still drawing, that badge sat over a finished slide
+  // until its turn came round to discover it had nothing to do.
+  //
+  // Asked as one question — is ANY producer needed — rather than per producer.
+  // The producers run in order and feed each other: a slide with no headline
+  // yet has an image fingerprint that will MOVE once the headline is written,
+  // so "the image is up to date" is only true here if nothing before it is
+  // going to run. Any needed, all pending; none needed, no queue at all.
+  const chart = readSlide(slideId);
+  if (chart && PRODUCERS.length
+      && !PRODUCERS.some((p) => needed(p, { slideId, chart, ctx: renderContext }))) {
+    say("nothing-to-do", { slideId });
+    return;
+  }
   queued.add(slideId);
-  queue.push(slideId);
-  say("enqueue", { slideId });
+  // The slide being looked at goes first, however it came to be queued — an
+  // edit, a retry, a deck-wide restart. Everything else joins the back.
+  if (slideId === focused) queue.unshift(slideId);
+  else queue.push(slideId);
+  say("enqueue", { slideId, detail: slideId === focused ? "focused; to the head" : undefined });
   // Mark it pending NOW. A slide waiting its turn behind fifty others is not
   // finished, and showing it as finished is why changing the template looked
   // like nothing had happened: the work was queued, the screen just never said
@@ -650,6 +773,42 @@ export function enqueue(slideId: string) {
   pump();
 }
 
+/** How many slides the renderer can usefully draw at once.
+ *
+ *  Told by the server, which knows its own core count; see `/health`. Raising
+ *  it starts more work immediately, so a late answer costs nothing.
+ */
+/** How many pictures the render host can usefully draw at once.
+ *
+ *  Told by the server, which knows its own core count; see `/health`. It bounds
+ *  the DRAWING only — slide passes go on overlapping, so thirty headlines are
+ *  still written in parallel while one picture at a time is drawn. Raising it
+ *  lets waiting work start immediately, so a late answer costs nothing.
+ */
+export function setRenderConcurrency(n: number) {
+  const next = Math.max(1, Math.floor(n) || 1);
+  if (next === renderConcurrency) return;
+  say("render-concurrency", { detail: `${renderConcurrency} -> ${next}` });
+  renderConcurrency = next;
+  // Anything already waiting for a slot may now have one.
+  for (let i = rendersActive; i < renderConcurrency; i += 1) renderWaiters.shift()?.();
+  pump();
+}
+
+/** The author is looking at this slide.
+ *
+ *  Remembered, so that everything queued for it from now on goes to the head —
+ *  not just the work outstanding at the moment they selected it. `promote` is
+ *  the weaker signal underneath ("this one, now"), and is still what a
+ *  thumbnail scrolling into view uses.
+ */
+export function setFocused(slideId: string) {
+  if (focused === slideId) return;
+  focused = slideId;
+  say("focus", { slideId });
+  promote(slideId);
+}
+
 /** The slide the author just selected renders next. */
 export function promote(slideId: string) {
   const i = queue.indexOf(slideId);
@@ -662,7 +821,22 @@ export function promote(slideId: string) {
 }
 
 function pump() {
-  while (active < concurrency && queue.length) {
+  while (queue.length) {
+    // The slide the author is looking at gets a slot of its own, over and above
+    // the background fan-out.
+    //
+    // Promoting it to the head was not enough. The head still had to wait for
+    // one of the background passes to end, and a pass is mostly a model writing
+    // a headline — seconds — so the wait grew with the fan-out that was meant to
+    // make things faster: measured on a cold 30-slide deck, clicking a slide
+    // cost 6.0s with one pass, 9.8s with four, 19.8s with eight. Faster deck,
+    // slower slide, and the slide is the part anybody notices.
+    //
+    // Bounded to one extra by the running set: once it has started, the slide is
+    // running, so the next turn of this loop grants nothing.
+    const first = queue[0];
+    const jumpsTheQueue = first === focused && !running.has(first);
+    if (active >= concurrency && !jumpsTheQueue) break;
     const slideId = queue.shift()!;
     queued.delete(slideId);
     running.add(slideId);
@@ -706,6 +880,7 @@ export function __setProducersForTest(ps: Producer[]) {
 export function __setConcurrencyForTest(n: number) {
   concurrency = n;
 }
+
 export function __drainForTest(): Promise<void> {
   return whenIdle();
 }
@@ -725,9 +900,13 @@ export function __resetForTest() {
   requeue = new Set();
   retried = new Set();
   active = 0;
+  focused = "";
   contextGeneration = 0;
   trace = [];
-  concurrency = 4;
+  concurrency = 1;
+  renderConcurrency = 1;
+  rendersActive = 0;
+  renderWaiters = [];
   PRODUCERS = [];
 }
 
@@ -744,6 +923,8 @@ declare global {
       trace: () => TraceEvent[];
       table: () => void;
       clear: () => void;
+      passes: (n: number) => string;
+      renders: (n: number) => string;
       debug: (on?: boolean) => string;
     };
   }
@@ -767,6 +948,18 @@ if (typeof window !== "undefined") {
       );
     },
     clear: clearTrace,
+    // The two limits, settable live. Diagnosing "the first open is slow" means
+    // comparing settings on the SAME cold deck, and rebuilding the app between
+    // each one changes more than the setting.
+    passes: (n: number) => {
+      concurrency = Math.max(1, Math.floor(n) || 1);
+      pump();
+      return `slide passes: ${concurrency}`;
+    },
+    renders: (n: number) => {
+      setRenderConcurrency(n);
+      return `render slots: ${renderConcurrency}`;
+    },
     debug: (on = true) => {
       try {
         localStorage.setItem("previewQueueDebug", on ? "1" : "0");

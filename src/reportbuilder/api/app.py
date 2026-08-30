@@ -22,6 +22,7 @@ from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
 from reportbuilder.api.routes_users import users_router
+from reportbuilder.export._cpu import workers_for
 from reportbuilder.export.cleanup import sweep_all
 from reportbuilder.store.datahive_client import DataHiveError
 
@@ -176,8 +177,21 @@ def create_app(client=None) -> FastAPI:
     # Register the health check endpoint
     @app.get("/health")
     def health() -> dict:
-        """Health check endpoint."""
-        return {"status": "ok"}
+        """Health check, and how much drawing this machine can usefully do.
+
+        `render_concurrency` is here because the client cannot guess it and got
+        it wrong in the only direction that hurts. Drawing a slide is CPU-bound
+        — LibreOffice, PDF, raster — so asking for more at once than there are
+        cores buys no throughput and multiplies the wait for each one. Measured
+        on a 30-slide deck on one core: the deck took 47-49s at every setting
+        from one to eight, while the median wait for a single slide went from
+        2.9s at one to 7.7s at four and 14.8s at eight.
+
+        `workers_for` is the same rule the export pipeline sizes itself by —
+        one per usable core less one for the server, affinity-aware, so a
+        `taskset`-pinned process or a one-core container answers 1.
+        """
+        return {"status": "ok", "render_concurrency": workers_for(4)}
 
     # Include routers
     app.include_router(auth_router)

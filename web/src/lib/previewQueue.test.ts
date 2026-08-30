@@ -211,6 +211,160 @@ describe("the queue", () => {
     expect(done[1]).toBe("c");
   });
 
+  it("re-queues the slide the author is looking at at the head, not behind the deck", async () => {
+    const order: string[] = [];
+    for (let i = 1; i <= 5; i++) put(`s${i}`);
+    q.__setProducersForTest([
+      producer("chart", {
+        // Every pass needs to run, so the order below is the render order.
+        fingerprint: (c) => `${c.slideId}:${c.chart.slide_title ?? ""}`,
+        run: async (c) => {
+          order.push(c.slideId);
+        },
+      }),
+    ]);
+    q.__setConcurrencyForTest(1);
+    // The author selects s4 and it renders.
+    q.setFocused("s4");
+    q.enqueue("s4");
+    await q.__drainForTest();
+    // The rest of the deck is still to draw — a report that has just been
+    // opened, or a template that has just changed.
+    for (const id of ["s1", "s2", "s3", "s5"]) q.enqueue(id);
+    // Now they type a headline into s4. Selecting it is what said they are
+    // looking at it; typing into it does not say it again, so the queue has to
+    // remember rather than be told twice.
+    slides.set("s4", { ...(slides.get("s4") as ChartSpec), slide_title: "Typed" });
+    q.enqueue("s4");
+    // Not merely first in line — started. The author is looking at it, so it
+    // gets a slot of its own rather than waiting for one to free.
+    expect(q.snapshot().running).toContain("s4");
+    expect(q.snapshot().queued).not.toContain("s4");
+    await q.__drainForTest();
+    // s1 was already running when the edit landed; the author's own slide is
+    // next, rather than last behind every slide they are not looking at.
+    expect(order).toEqual(["s4", "s1", "s4", "s2", "s3", "s5"]);
+  });
+
+  it("keeps the author's slide first when the whole deck is re-queued", async () => {
+    // Switching template or font restarts the deck from the top. The slide
+    // being looked at should not go back to its position in the deck.
+    for (let i = 1; i <= 5; i++) put(`s${i}`);
+    q.__setProducersForTest([producer("chart", { run: async () => {} })]);
+    q.__setConcurrencyForTest(1);
+    q.setDeck(["s1", "s2", "s3", "s4", "s5"]);
+    q.setFocused("s4");
+    q.restartDeck("the template changed");
+    expect(q.snapshot().running).toContain("s4");
+  });
+
+  it("draws no more at once than the renderer can, while headlines overlap freely",
+     async () => {
+    // Two kinds of work with nothing in common but the slide they belong to.
+    // Writing a headline is a round trip to a model: seconds long, spent
+    // waiting, and costing the render host nothing. Drawing the picture is
+    // that host's CPU. Binding both to the core count made a cold sixty-slide
+    // report pay its headlines one at a time — measured at 141s of the 162s a
+    // thirty-slide deck took to open.
+    let titlesInFlight = 0, titlePeak = 0;
+    let chartsInFlight = 0, chartPeak = 0;
+    const release: Array<() => void> = [];
+    let gateOpen = false;
+    // Once opened it stays open, so the passes that only START after the first
+    // four finish are not left holding a promise nobody resolves.
+    const hold = () =>
+      gateOpen ? Promise.resolve() : new Promise<void>((r) => release.push(r));
+
+    for (let i = 1; i <= 6; i++) put(`s${i}`);
+    q.__setProducersForTest([
+      producer("title", {
+        fingerprint: (c) => c.slideId,
+        run: async () => {
+          titlesInFlight += 1;
+          titlePeak = Math.max(titlePeak, titlesInFlight);
+          await hold();
+          titlesInFlight -= 1;
+        },
+      }),
+      producer("chart", {
+        fingerprint: (c) => c.slideId,
+        cpuBound: true,
+        run: async () => {
+          chartsInFlight += 1;
+          chartPeak = Math.max(chartPeak, chartsInFlight);
+          await Promise.resolve();
+          chartsInFlight -= 1;
+        },
+      }),
+    ]);
+    q.setRenderConcurrency(1);      // one core answering
+    q.__setConcurrencyForTest(4);   // four slide passes may be in flight
+    for (let i = 1; i <= 6; i++) q.enqueue(`s${i}`);
+    // Let the four passes reach their title calls before any of them returns.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(titlePeak).toBe(4);
+    gateOpen = true;
+    while (release.length) release.shift()!();
+    await q.__drainForTest();
+    expect(chartPeak).toBe(1);
+  });
+
+  it("does not queue, or claim to be working on, a slide with nothing to do", async () => {
+    put("s1");
+    const run = vi.fn(async () => {});
+    q.__setProducersForTest([
+      // Already satisfied: stored matches what this pass would produce.
+      producer("chart", { fingerprint: () => "same", storedFingerprint: () => "same", run }),
+    ]);
+    q.enqueue("s1");
+    // Not "pending". The wizard re-enqueues a slide whenever its content
+    // changes, and the biggest such change is the queue's OWN generated
+    // headline landing in the draft — so a settled slide is routinely offered
+    // back to the queue. Marking it pending there put "Updating…" over a
+    // finished slide for as long as it took to reach the head of the queue,
+    // which on a deck still drawing is a minute of a badge for no work at all.
+    expect(q.statusOf("s1").chart).not.toBe("pending");
+    expect(q.isBusy()).toBe(false);
+    await q.__drainForTest();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("starts the author's slide at once, even with every background slot taken",
+     async () => {
+    const started: string[] = [];
+    for (let i = 1; i <= 6; i++) put(`s${i}`);
+    const release: Array<() => void> = [];
+    let open = false;
+    const hold = () => (open ? Promise.resolve() : new Promise<void>((r) => release.push(r)));
+    q.__setProducersForTest([
+      producer("chart", {
+        fingerprint: (c) => c.slideId,
+        run: async (c) => {
+          started.push(c.slideId);
+          await hold();
+        },
+      }),
+    ]);
+    q.__setConcurrencyForTest(2);
+    for (let i = 1; i <= 6; i++) q.enqueue(`s${i}`);
+    // Both background slots are taken and nothing has finished.
+    expect(started).toEqual(["s1", "s2"]);
+    // The author clicks s6. Waiting for one of the two to finish is the whole
+    // of "clicking a slide takes ten seconds": measured on a cold deck, the
+    // wait grew with the background fan-out — 6.0s at one pass, 9.8s at four,
+    // 19.8s at eight — because the slide being LOOKED AT queued behind slides
+    // nobody was looking at. It gets a slot of its own instead.
+    q.setFocused("s6");
+    expect(started).toEqual(["s1", "s2", "s6"]);
+    // Exactly one extra, not a free-for-all: s3 still waits its turn.
+    expect(started).not.toContain("s3");
+    open = true;
+    while (release.length) release.shift()!();
+    await q.__drainForTest();
+    expect(new Set(started).size).toBe(6);
+  });
+
   it("does not queue the same slide twice", async () => {
     put("s1");
     const run = vi.fn(async () => {});
@@ -564,5 +718,88 @@ describe("a producer that fails soft", () => {
 
     expect(ran.filter((r) => r === "chart").length).toBeGreaterThan(0);
     expect(ran.indexOf("chart")).toBeLessThan(3);
+  });
+});
+
+describe("several edits before the render finishes", () => {
+  /** Renders whatever the slide says now, and remembers that it did — so a
+   *  second render of the SAME state shows up as a repeat, and a render of a
+   *  new state does not. */
+  function chartProducer(log: string[], hold?: () => Promise<void>): Producer {
+    const rendered = new Set<string>();
+    return producer("chart", {
+      fingerprint: (c) => `${c.slideId}|${c.chart.slide_title ?? ""}`,
+      storedFingerprint: (c) => (rendered.has(c.fingerprint) ? c.fingerprint : null),
+      run: async (c) => {
+        if (hold) await hold();
+        rendered.add(c.fingerprint);
+        log.push(`${c.slideId}:${c.chart.slide_title ?? "-"}`);
+      },
+      onFailure: "abort",
+    });
+  }
+
+  function edit(id: string, over: Partial<ChartSpec>) {
+    slides.set(id, { ...(slides.get(id) as ChartSpec), ...over } as ChartSpec);
+  }
+
+  it("carries every field changed before its turn came in ONE render", async () => {
+    const log: string[] = [];
+    put("s1");
+    put("s2");
+    q.__setProducersForTest([chartProducer(log)]);
+    q.__setConcurrencyForTest(1);
+    q.enqueue("s1");
+    // s2 waits behind s1, and two edits land on it before its turn.
+    q.enqueue("s2");
+    edit("s2", { slide_title: "one" } as Partial<ChartSpec>);
+    q.enqueue("s2");
+    edit("s2", { slide_title: "two" } as Partial<ChartSpec>);
+    q.enqueue("s2");
+    await q.__drainForTest();
+    // Not one render per edit: the slide is queued once and reads the latest
+    // state when it runs.
+    expect(log).toEqual(["s1:-", "s2:two"]);
+  });
+
+  it("renders the last of a burst that lands mid-render, and settles", async () => {
+    const log: string[] = [];
+    put("s1");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let first = true;
+    q.__setProducersForTest([
+      chartProducer(log, async () => { if (first) { first = false; await gate; } }),
+    ]);
+    q.__setConcurrencyForTest(1);
+    q.enqueue("s1");
+    // Three keystrokes' worth of edits, each with its own enqueue, all while
+    // the first render is in flight.
+    for (const t of ["a", "ab", "abc"]) {
+      edit("s1", { slide_title: t } as Partial<ChartSpec>);
+      q.enqueue("s1");
+    }
+    release();
+    await q.__drainForTest();
+    expect(log[log.length - 1]).toBe("s1:abc");
+    expect(q.isBusy()).toBe(false);
+  });
+
+  it("strands nothing when edits land across a whole deck being rendered", async () => {
+    const log: string[] = [];
+    for (let i = 1; i <= 8; i++) put(`s${i}`);
+    q.__setProducersForTest([chartProducer(log)]);
+    q.__setConcurrencyForTest(4);
+    for (let i = 1; i <= 8; i++) q.enqueue(`s${i}`);
+    for (let i = 1; i <= 8; i++) {
+      edit(`s${i}`, { slide_title: `t${i}` } as Partial<ChartSpec>);
+      q.enqueue(`s${i}`);
+    }
+    await q.__drainForTest();
+    const s = q.snapshot();
+    expect({ queued: s.queued, running: s.running, requeue: s.requeue, active: s.active })
+      .toEqual({ queued: [], running: [], requeue: [], active: 0 });
+    // Every slide ends up drawn at the title it finally has.
+    for (let i = 1; i <= 8; i++) expect(log).toContain(`s${i}:t${i}`);
   });
 });

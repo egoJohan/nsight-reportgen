@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { api, ApiError } from "./api";
 import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
+import { noteCacheCleared } from "./previewCacheSignal";
 import type { Substitutions } from "./api";
 import type {
   AccessMode,
@@ -168,6 +169,54 @@ export function useSubstitutions() {
     },
   });
   return { ...query, save };
+}
+
+/** How many PICTURES this backend can usefully draw at once.
+ *
+ *  Asked once and cached for the session: it is a property of the machine, not
+ *  of anything the author does. The queue starts at one and is raised when the
+ *  answer arrives, so a slow or failed call leaves the SAFE setting in place
+ *  rather than the fast one.
+ *
+ *  It bounds the drawing only. Slide passes go on overlapping, so a cold deck
+ *  writes its headlines in parallel — which is where a first open spends most
+ *  of its time — while the pictures are drawn at the pace the host can manage.
+ */
+export function useRenderCapacity() {
+  const query = useQuery({
+    queryKey: ["render-capacity"],
+    queryFn: api.health,
+    staleTime: Infinity,
+    retry: 1,
+  });
+  const n = query.data?.render_concurrency;
+  useEffect(() => {
+    if (n) previewQueue.setRenderConcurrency(n);
+  }, [n]);
+  return n;
+}
+
+/** Throw away every rendered preview for this material, and say so.
+ *
+ *  Three things happen, and they are three because they are three different
+ *  caches: the server's PNGs on disk, this browser's copies of them, and the
+ *  queue's record of what it has already drawn. Clearing any two of them looks
+ *  like the button did nothing — the pictures come straight back from whichever
+ *  one was left.
+ *
+ *  It does NOT re-render here. Whether that should happen depends on which step
+ *  the author is on, which is the wizard's business; this announces the fact
+ *  and the wizard decides. See previewCacheSignal.
+ */
+export function useClearPreviewCache(materialId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.materials.clearPreviewCache(materialId!),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      noteCacheCleared();
+    },
+  });
 }
 
 export function useChartFont() {
@@ -464,10 +513,16 @@ export function useChartPreview(
   const priority = opts?.priority ?? false;
   const slideId = chart.slide_id ?? "";
   // The slide the author is looking at renders next. The queue owns ordering,
-  // so this is a promotion, not a second lane: whichever slide is selected goes
-  // to the head of the one queue.
+  // so this is not a second lane: whichever slide is selected goes to the head
+  // of the one queue.
+  //
+  // It TELLS the queue which slide that is, rather than promoting it once. This
+  // effect only re-runs when the selection changes, so a one-off promotion
+  // ordered the work outstanding at that moment and nothing after it — and the
+  // work that matters most comes after it, when the author types a headline
+  // into the slide they are looking at and it is queued again, at the back.
   useEffect(() => {
-    if (priority && slideId) previewQueue.promote(slideId);
+    if (priority && slideId) previewQueue.setFocused(slideId);
   }, [priority, slideId]);
 
   // Keep the previous picture only while looking at the SAME slide.
