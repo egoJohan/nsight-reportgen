@@ -370,6 +370,250 @@ def check_abandoned_lock_frees_itself(a: Person, b: Person, case: str,
                f"{str(bd.get('detail',''))[:70]!r}")
 
 
+def _fresh_report(p: Person, case: str, name: str) -> str:
+    st, made = p.call("POST", f"/cases/{case}/reports", dict(SEED, name=name))
+    return made.get("report_id") or ""
+
+
+def check_same_report_render_is_single_flight(a: Person, b: Person, case: str,
+                                              material: str, report: str) -> bool:
+    """Two people press Generate on the SAME report. One must be refused.
+
+    Otherwise two LibreOffice pipelines write the same deterministic output
+    directory at once, and whoever downloads gets a deck assembled from both.
+    """
+    def go(who):
+        return who.call("POST", f"/cases/{case}/reports/{report}/render",
+                        {"material_id": material}, timeout=600)
+
+    start = threading.Barrier(2)
+    out = {}
+
+    def one(item):
+        tag, who = item
+        start.wait()
+        out[tag] = go(who)[0]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(one, [("a", a), ("b", b)]))
+    codes = sorted(out.values())
+    passed = codes.count(409) == 1 and any(c == 200 for c in codes)
+    return _ok("same report: a second Generate is refused", passed,
+               f"codes={out}")
+
+
+def check_previews_during_a_deck_build(a: Person, b: Person, case: str,
+                                       material: str, charts: list,
+                                       run_tag: str) -> bool:
+    """A builds a whole deck; B keeps editing. Does B's work still arrive?
+
+    This is the collision that matters: a deck build is minutes of LibreOffice
+    on the same single core that draws B's previews. B should stay usable, not
+    be frozen out until the deck finishes.
+    """
+    report = _fresh_report(a, case, f"MU deck {run_tag}")
+    if not report:
+        return _ok("previews stay responsive during a deck build", False,
+                   "could not create a report to render")
+
+    # Baseline first: one cold preview for B with nothing else running.
+    def cold(idx: int) -> tuple[int, float]:
+        c = charts[idx % len(charts)]
+        body = {k: c.get(k) for k in
+                ("question_ref", "chart_type", "statistic", "classifying_var",
+                 "show_not_answered", "not_answered_codes", "template_slot",
+                 "sort", "elements", "number_format")}
+        body["render_title"] = False
+        body["footer_note"] = f"deck {run_tag} {idx}"
+        t = time.monotonic()
+        st, _ = b.call("POST", f"/materials/{material}/preview-chart", body,
+                       timeout=300)
+        return st, time.monotonic() - t
+
+    st0, base = cold(0)
+    if st0 != 200:
+        return _ok("previews stay responsive during a deck build", False,
+                   f"baseline preview failed: HTTP {st0}")
+
+    deck: dict = {}
+
+    def build():
+        t = time.monotonic()
+        st, bd = a.call("POST", f"/cases/{case}/reports/{report}/render",
+                        {"material_id": material}, timeout=1800)
+        deck["status"], deck["secs"] = st, time.monotonic() - t
+
+    t_start = time.monotonic()
+    thread = threading.Thread(target=build, daemon=True)
+    thread.start()
+    time.sleep(3)                      # let the deck build get going
+
+    during: list[float] = []
+    fails = []
+    idx = 1
+    while thread.is_alive() and time.monotonic() - t_start < 900:
+        st, secs = cold(idx)
+        idx += 1
+        if st != 200:
+            fails.append(f"HTTP {st}")
+            break
+        during.append(secs)
+        if len(during) >= 5:
+            break
+    thread.join(timeout=900)
+
+    if fails:
+        return _ok("previews stay responsive during a deck build", False,
+                   f"B's preview failed while the deck built: {fails[0]}")
+    if not during:
+        return _ok("previews stay responsive during a deck build", True,
+                   f"deck finished in {deck.get('secs', 0):.0f}s before a "
+                   f"preview could be timed")
+    worst = max(during)
+    med = statistics.median(during)
+    # Contended, but a person must not be locked out. 5x the quiet time is
+    # already unpleasant; beyond that the editor is unusable during a build.
+    passed = deck.get("status") == 200 and worst < max(15.0, base * 8)
+    return _ok("previews stay responsive during a deck build", passed,
+               f"deck {deck.get('status')} in {deck.get('secs',0):.0f}s; "
+               f"B quiet {base:.1f}s -> during median {med:.1f}s worst {worst:.1f}s "
+               f"({med/base:.1f}x)")
+
+
+def check_two_decks_at_once(a: Person, b: Person, case: str, material: str,
+                            run_tag: str) -> bool:
+    """Two people generate DIFFERENT decks at the same time.
+
+    Nothing caps this: the single-flight guard is per report, so both pipelines
+    run, each starting LibreOffice on the same core.
+    """
+    ra = _fresh_report(a, case, f"MU deckA {run_tag}")
+    rb = _fresh_report(b, case, f"MU deckB {run_tag}")
+    if not (ra and rb):
+        return _ok("two decks at once both complete", False, "setup failed")
+    start = threading.Barrier(2)
+    res = {}
+
+    def one(item):
+        tag, who, rid = item
+        start.wait()
+        t = time.monotonic()
+        st, bd = who.call("POST", f"/cases/{case}/reports/{rid}/render",
+                          {"material_id": material}, timeout=1800)
+        res[tag] = (st, time.monotonic() - t, str(bd)[:80])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(one, [("A", a, ra), ("B", b, rb)]))
+    passed = all(v[0] == 200 for v in res.values())
+    return _ok("two decks at once both complete", passed,
+               "; ".join(f"{k}: HTTP {v[0]} in {v[1]:.0f}s {v[2] if v[0]!=200 else ''}"
+                         for k, v in sorted(res.items())))
+
+
+OPS = ["read", "save", "preview", "title", "rename", "list", "questions"]
+
+
+def check_mixed_workload(people, case: str, material: str, charts: list,
+                         questions: list, seconds: int, run_tag: str) -> bool:
+    """Everybody works on THEIR OWN report, doing everything, all at once.
+
+    This is the real shape of the product: several analysts each building a
+    different presentation in the same case at the same time. Each person here
+    holds their own report's lock and then loops over the whole set of
+    operations — reading, saving, rendering cold previews, asking for AI
+    headlines, renaming questions in the SHARED material config, listing the
+    case — with the mix shuffled per person so the interleavings differ.
+
+    The bar is that NOTHING BREAKS: no 5xx, and no 4xx that is not a documented
+    refusal. Latency is reported but is not the assertion.
+    """
+    import random
+
+    reports = {}
+    for p in people:
+        rid = _fresh_report(p, case, f"MU stress {p.name} {run_tag}")
+        if not rid:
+            return _ok("mixed workload", False, f"{p.name}: no report")
+        reports[p.name] = rid
+        p.call("POST", f"/cases/{case}/reports/{rid}/lock?tab={p.tab}")
+
+    stop = time.monotonic() + seconds
+    bad: list[str] = []
+    counts: dict[str, int] = {}
+    lat: dict[str, list[float]] = {}
+    start = threading.Barrier(len(people))
+
+    def record(op: str, st: int, secs: float, body, allowed=(200, 201)):
+        counts[op] = counts.get(op, 0) + 1
+        lat.setdefault(op, []).append(secs)
+        if st not in allowed:
+            bad.append(f"{op} -> HTTP {st} {str(body)[:90]}")
+
+    def worker(person_idx):
+        idx, p = person_idx
+        rid = reports[p.name]
+        rng = random.Random(1000 + idx)
+        n = 0
+        start.wait()
+        while time.monotonic() < stop and not bad:
+            n += 1
+            op = rng.choice(OPS)
+            t = time.monotonic()
+            if op == "read":
+                st, bd = p.call("GET", f"/cases/{case}/reports/{rid}")
+            elif op == "save":
+                st, doc = p.call("GET", f"/cases/{case}/reports/{rid}")
+                doc = dict(doc); doc["name"] = f"MU stress {p.name} {run_tag} #{n}"
+                st, bd = p.call("PUT", f"/cases/{case}/reports/{rid}", doc)
+            elif op == "preview":
+                c = charts[rng.randrange(len(charts))]
+                body = {k: c.get(k) for k in
+                        ("question_ref", "chart_type", "statistic",
+                         "classifying_var", "show_not_answered",
+                         "not_answered_codes", "template_slot", "sort",
+                         "elements", "number_format")}
+                body["render_title"] = False
+                body["footer_note"] = f"stress {run_tag} {p.name} {n}"
+                st, bd = p.call("POST", f"/materials/{material}/preview-chart",
+                                body, timeout=300)
+            elif op == "title":
+                q = questions[rng.randrange(len(questions))]
+                st, bd = p.call("POST", f"/materials/{material}/ai/slide-title",
+                                {"question_ref": q, "statistic": "pct"},
+                                timeout=300)
+            elif op == "rename":
+                q = questions[rng.randrange(len(questions))]
+                st, bd = p.call("PATCH",
+                                f"/materials/{material}/questions/{q}/label",
+                                {"label": f"{p.name}-{n}"})
+            elif op == "list":
+                st, bd = p.call("GET", f"/cases/{case}/reports")
+            else:
+                st, bd = p.call("GET", f"/materials/{material}/questions")
+            record(op, st, time.monotonic() - t, bd if st >= 400 else None)
+
+    with ThreadPoolExecutor(max_workers=len(people)) as pool:
+        list(pool.map(worker, list(enumerate(people))))
+
+    # Tidy: release locks, clear the labels this churned, drop the reports.
+    for p in people:
+        rid = reports[p.name]
+        p.call("DELETE", f"/cases/{case}/reports/{rid}/lock?tab={p.tab}")
+        p.call("DELETE", f"/cases/{case}/reports/{rid}")
+    for q in questions:
+        people[0].call("PATCH", f"/materials/{material}/questions/{q}/label",
+                       {"label": ""})
+
+    total = sum(counts.values())
+    summary = "  ".join(
+        f"{op}={counts[op]}({statistics.median(lat[op]):.1f}s)"
+        for op in sorted(counts))
+    return _ok(f"mixed workload: {len(people)} people, {total} operations",
+               not bad,
+               (f"{summary}" if not bad else
+                f"{len(bad)} failure(s):\n         " + "\n         ".join(bad[:5])))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--case", required=True)
@@ -377,6 +621,14 @@ def main() -> int:
     ap.add_argument("--cookies", default="work/mu",
                     help="directory of <name>.cookie files, one per person")
     ap.add_argument("--people", default="alice,bob,johan")
+    ap.add_argument("--ops", default="",
+                    help="restrict the mixed workload to these operations, "
+                         "e.g. read,save,list — isolates I/O from CPU work")
+    ap.add_argument("--stress", type=int, default=0, metavar="SECONDS",
+                    help="everyone hammers their OWN report with a mixed "
+                         "workload for this many seconds")
+    ap.add_argument("--decks", action="store_true",
+                    help="also build whole decks (minutes of LibreOffice)")
     ap.add_argument("--slow", action="store_true",
                     help="also wait out the lock TTL to prove a stranded report frees")
     ap.add_argument("--ttl", type=int, default=120, help="lock TTL seconds")
@@ -384,6 +636,9 @@ def main() -> int:
                     help="cold slides each person renders in the contention check")
     a = ap.parse_args()
 
+    if a.ops:
+        global OPS
+        OPS = [o.strip() for o in a.ops.split(",") if o.strip()]
     people = [Person(n, f"{a.cookies}/{n}.cookie") for n in a.people.split(",")]
     print(f"{len(people)} people: {', '.join(p.name for p in people)}\n")
 
@@ -411,11 +666,16 @@ def main() -> int:
     results = []
     print("CORRECTNESS")
     results.append(check_concurrent_create(people, a.case))
-    results.append(check_lock_excludes(people[0], people[1], a.case, shared))
-    results.append(check_save_needs_the_lock(people[0], people[1], a.case, shared))
-    results.append(check_stale_if_match_refused(people[0], a.case, shared))
-    results.append(check_bystander_cannot_destroy(people[0], people[1], a.case, shared))
-    if a.slow:
+    if len(people) >= 2:
+        # Everything below needs a second person to be refused by the first.
+        results.append(check_lock_excludes(people[0], people[1], a.case, shared))
+        results.append(check_save_needs_the_lock(people[0], people[1], a.case, shared))
+        results.append(check_stale_if_match_refused(people[0], a.case, shared))
+        results.append(check_bystander_cannot_destroy(people[0], people[1],
+                                                     a.case, shared))
+    else:
+        print("  (one person: the pairwise refusal checks need two)")
+    if a.slow and len(people) >= 2:
         results.append(check_abandoned_lock_frees_itself(
             people[0], people[1], a.case, shared, a.ttl))
     print("\nSHARED RESOURCES")
@@ -425,6 +685,20 @@ def main() -> int:
     results.append(check_shared_config_not_lost(people, a.material, refs))
     results.append(check_cold_contention(people, a.material, charts,
                                          a.slides, str(int(time.time()))))
+    if a.stress:
+        print("\nMIXED WORKLOAD (everyone on their OWN report)")
+        results.append(check_mixed_workload(
+            people, a.case, a.material, charts, refs, a.stress,
+            str(int(time.time()))))
+    if a.decks and len(people) >= 2:
+        print("\nDECK GENERATION")
+        tag = str(int(time.time()))
+        results.append(check_same_report_render_is_single_flight(
+            people[0], people[1], a.case, a.material, shared))
+        results.append(check_previews_during_a_deck_build(
+            people[0], people[1], a.case, a.material, charts, tag))
+        results.append(check_two_decks_at_once(
+            people[0], people[1], a.case, a.material, tag))
 
     # Tidy: release the lock so a re-run is not blocked by this one.
     people[0].call("DELETE", f"/cases/{a.case}/reports/{shared}/lock?tab={people[0].tab}")

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 from collections import OrderedDict
 
 from reportbuilder.ingest.grouping_override import apply_grouping_override
@@ -37,12 +38,22 @@ _PARSED: OrderedDict[str, tuple[object, QuestionModel, str]] = OrderedDict()
 #: access pattern is one material at a time, occasionally two while somebody
 #: compares waves.
 _PARSED_MAX = 4
+#: Guards the cache BOOKKEEPING only — never the parse itself, so two materials
+#: still parse concurrently. Without it a hit could be evicted by another
+#: request between reading the entry and touching it, and `move_to_end` raised
+#: KeyError: a 500 for the reader, needing only more materials in play than the
+#: cache holds. That is a shared-machine failure, invisible on a one-material
+#: dev box.
+_PARSED_LOCK = threading.Lock()
 
 
 def _parse(raw: bytes):
     """Parse a SAV blob, or hand back the parse we already have of it."""
     key = hashlib.sha256(raw).hexdigest()
-    cached = _PARSED.get(key)
+    with _PARSED_LOCK:
+        cached = _PARSED.get(key)
+        if cached is not None:
+            _PARSED.move_to_end(key)
     if cached is None:
         with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
             tmp.write(raw)
@@ -53,11 +64,13 @@ def _parse(raw: bytes):
         finally:
             os.unlink(path)
         cached = (df, model, label)
-        _PARSED[key] = cached
-        while len(_PARSED) > _PARSED_MAX:
-            _PARSED.popitem(last=False)
-    else:
-        _PARSED.move_to_end(key)
+        # Two threads may have parsed the same blob; they produce equal values,
+        # so either winning is fine.
+        with _PARSED_LOCK:
+            _PARSED[key] = cached
+            _PARSED.move_to_end(key)
+            while len(_PARSED) > _PARSED_MAX:
+                _PARSED.popitem(last=False)
     df, model, label = cached
     # The frame is copied and the model is not. Nothing in the codebase mutates
     # either — checked — but a DataFrame is the one people reach for a column
