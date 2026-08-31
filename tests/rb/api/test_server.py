@@ -25,7 +25,13 @@ def test_build_server_app_health(monkeypatch):
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    # Checked by key, not whole-body equality: /health also reports
+    # `render_concurrency` (how many slides this server draws at once,
+    # which the client cannot guess and sizes its queue by), and an
+    # exact-match assertion makes every future field a failure here.
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1
 
 
 def test_build_server_app_cors_default(monkeypatch):

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import (
+    TITLE_END_MARK,
     MAX_LABEL_LEN,
     generate_slide_title,
     shorten_labels,
@@ -28,7 +29,10 @@ class _RecordingChat:
 # generate_slide_title
 # --------------------------------------------------------------------------- #
 def test_slide_title_prompt_is_finnish_with_findings_and_constraints() -> None:
-    chat = _RecordingChat("Attendo johtaa tunnettuudessa")
+    # The reply carries the end mark: the prompt asks for it, and a reply
+    # without one is treated as cut short and discarded in favour of the
+    # question text. A fake that omits it is not standing in for the model.
+    chat = _RecordingChat(f"Attendo johtaa tunnettuudessa{TITLE_END_MARK}")
     title = generate_slide_title(
         "Mitä brändejä tunnet?",
         [("Attendo", 86.0), ("Esperi", 75.0)],
@@ -44,7 +48,7 @@ def test_slide_title_prompt_is_finnish_with_findings_and_constraints() -> None:
 
 
 def test_slide_title_strips_quotes_and_markdown() -> None:
-    chat = _RecordingChat('"**Attendo on tunnetuin**"')
+    chat = _RecordingChat(f'"**Attendo on tunnetuin**"{TITLE_END_MARK}')
     title = generate_slide_title("Q", [("Attendo", 50.0)], chat=chat)
     assert title == "Attendo on tunnetuin"
 
@@ -141,3 +145,28 @@ def test_shorten_labels_omits_noop_and_preserves_order() -> None:
         chat=chat,
     )
     assert out == [("Pitkä alkuperäinen A", "Lyhyt A")]
+
+
+def test_slide_title_strips_quotes_that_sit_before_the_end_mark() -> None:
+    """A reply the model wrapped in quotes must not keep half the pair.
+
+    The end mark terminates the answer, so the closing quote is not the last
+    character — `"Otsikko"¶`. Cleaning before cutting at the mark could only
+    find the opening quote, and the slide showed `"Otsikko`.
+    """
+    chat = _RecordingChat(f'"**Attendo on tunnetuin**"{TITLE_END_MARK}')
+    assert generate_slide_title("Q", [("Attendo", 50.0)], chat=chat) == \
+        "Attendo on tunnetuin"
+
+
+def test_slide_title_discards_words_written_after_the_end_mark() -> None:
+    """Only closing punctuation is carried back over the mark, never prose."""
+    chat = _RecordingChat(f"Attendo johtaa{TITLE_END_MARK} ja tässä lisää selitystä")
+    assert generate_slide_title("Q", [("A", 1.0)], chat=chat) == "Attendo johtaa"
+
+
+def test_slide_title_handles_the_mark_inside_the_wrapper() -> None:
+    """`"**Otsikko ¶**"` — the closing `**"` sits after the mark, so cutting
+    there would strand the opening half."""
+    chat = _RecordingChat(f'"**Attendo johtaa selvästi {TITLE_END_MARK}**"')
+    assert generate_slide_title("Q", [("A", 1.0)], chat=chat) == "Attendo johtaa selvästi"

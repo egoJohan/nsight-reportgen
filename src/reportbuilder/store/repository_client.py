@@ -63,15 +63,19 @@ class RepositoryClient:
     requests. `user=None` is unfiltered, for callers with no request behind
     them."""
 
-    def __init__(self, repo: Repository, auth: AuthContext, user=None):
+    def __init__(self, repo: Repository, auth: AuthContext, user=None,
+                 case_memo: dict | None = None,
+                 material_memo: dict | None = None):
         self.repo = repo
         self.auth = auth
         self.user = user
-        # Per-REQUEST memos. This client is constructed once per request
-        # (deps.get_client), so these live exactly as long as the request does
-        # and cannot serve a later caller a stale case or material.
-        self._case_memo: dict = {}
-        self._material_memo: dict = {}
+        # Per-REQUEST memos. The client is built once per request
+        # (deps.get_client), so an own dict already lives exactly as long as the
+        # request. They are INJECTABLE so the auth guard — which resolves the
+        # same case a moment earlier, through the repository directly — can
+        # share the scope instead of paying for the lookup twice.
+        self._case_memo: dict = {} if case_memo is None else case_memo
+        self._material_memo: dict = {} if material_memo is None else material_memo
 
     # -- resolution -------------------------------------------------------
 

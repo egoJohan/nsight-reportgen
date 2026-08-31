@@ -33,13 +33,18 @@ def test_slide_title_strips_markdown_and_wrapping_quotes():
 
 
 def test_slide_title_keeps_only_first_line():
-    # ACTUAL _clean behavior: the quote-unwrap check runs on the whole (still
-    # multi-line) string BEFORE the newline split, so a leading quote is only
-    # removed when the WHOLE string is quote-wrapped. Here the second line means
-    # the wrapping quotes survive onto the first line.
+    """The headline ends at the mark, and its wrapper comes off with it.
+
+    This used to assert `\'"Ensimmäinen rivi\'` — with the opening quote still
+    attached — because the quote-unwrap ran on the whole multi-line string and
+    could not find a closing partner once a second line followed. A stray quote
+    printed on a slide is a defect, not a contract, so the title path now
+    carries the closing punctuation back across the mark and the wrapper is
+    removed as a pair. The junk line is still dropped.
+    """
     chat = RecordingChat(f'"Ensimmäinen rivi {T.TITLE_END_MARK}"\nroskarivi')
     title = T.generate_slide_title("Q", [("A", 1.0)], chat=chat)
-    assert title == '"Ensimmäinen rivi'
+    assert title == "Ensimmäinen rivi"
 
 
 def test_slide_title_blank_reply_falls_back_to_question_text():

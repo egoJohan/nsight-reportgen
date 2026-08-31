@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from reportbuilder.ai.reference import ReferenceLabels
 from reportbuilder.ai.text import (
+    TITLE_END_MARK,
     generate_conclusion_bullets,
     generate_data_chat,
     generate_demographics_bullets,
@@ -25,7 +26,9 @@ from suite._helpers import RecordingChat
 # generate_slide_title
 # --------------------------------------------------------------------------- #
 def test_slide_title_prompt_carries_question_and_findings():
-    chat = RecordingChat('"**Tyytyväisyys on korkealla**"')
+    # Ends with the mark the prompt asks for — a reply without one is treated
+    # as cut short and replaced by the question text.
+    chat = RecordingChat(f'"**Tyytyväisyys on korkealla**"{TITLE_END_MARK}')
     title = generate_slide_title(
         "Kuinka tyytyväinen olet palveluun?",
         [("Erittäin tyytyväinen", 62.0), ("Melko tyytyväinen", 28.5)],

@@ -9,12 +9,19 @@ from reportbuilder.api.deps import get_client
 
 
 def test_get_health() -> None:
-    """GET /health returns 200 and JSON {"status": "ok"}. (REQ-C-30)"""
+    """GET /health returns 200, {"status": "ok"} plus the render
+    capacity the client sizes its preview queue by. (REQ-C-30)"""
     app = create_app()
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    # Checked by key, not whole-body equality: /health also reports
+    # `render_concurrency` (how many slides this server draws at once,
+    # which the client cannot guess and sizes its queue by), and an
+    # exact-match assertion makes every future field a failure here.
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1
 
 
 def test_injected_mock_is_reachable_through_dependency() -> None:
@@ -40,9 +47,18 @@ def test_injected_mock_is_reachable_through_dependency() -> None:
 
 
 def test_create_app_with_no_client_builds_and_serves_health() -> None:
-    """create_app() with no client still builds and serves /health. (REQ-C-30)"""
+    """create_app() with no client still builds and serves /health. (REQ-C-30)
+
+    The body also carries `render_concurrency` — how many slides this server
+    will draw at once, which the client cannot guess and needs in order to size
+    its own queue. Asserted by key rather than by whole-body equality: the
+    subject here is that the app builds and answers without an upstream, and an
+    exact-match assertion turns any future field into a failure of THIS test.
+    """
     app = create_app()
     client = TestClient(app)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1

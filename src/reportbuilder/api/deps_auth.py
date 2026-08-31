@@ -125,11 +125,20 @@ def current_session_id(request: Request,
 
 
 def _case_guard(write: bool):
-    def guard(case_id: str,
+    def guard(request: Request,
+              case_id: str,
               user: User = Depends(current_user),
               auth: AuthContext = Depends(get_auth),
               repo: Repository = Depends(get_repository)) -> User:
-        case = repo.find_case(auth, case_id, user=user)
+        # Shared with the storage client built for this same request, which
+        # would otherwise resolve the very same case again a moment later.
+        from reportbuilder.api.deps import request_scope  # noqa: PLC0415
+        scope = request_scope(request, "case")
+        case = scope.get(case_id)
+        if case is None:
+            case = repo.find_case(auth, case_id, user=user)
+            if case is not None:
+                scope[case_id] = case
         if case is None:
             raise HTTPException(404, f"Case '{case_id}' not found")
         _check(user, f"{case.customer_id}/{case.id}", write)

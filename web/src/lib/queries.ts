@@ -55,12 +55,39 @@ export function useCaseReports(caseId: string | null) {
     queryKey: qk.caseReports(caseId ?? ""),
     queryFn: () => api.reports.listForCase(caseId!),
     enabled: !!caseId,
-    // Keeps a "Generating…" badge honest without the user reloading: once
-    // the list shows a report mid-render, poll until none are — server-side
-    // state, so this reflects a render this browser never started too.
-    refetchInterval: (query) =>
-      query.state.data?.reports.some((r) => r.rendering) ? 3000 : false,
+    // No polling here. This list costs the server one storage read per report
+    // and one per lock, and re-fetching it every three seconds to keep a
+    // badge honest spent ~78 round-trips to answer a question the server
+    // holds in memory. `useCaseRenders` polls that instead and refreshes this
+    // once, when a render actually finishes.
   });
+}
+
+/** Which reports in the case are rendering right now.
+ *
+ *  Polled while any of them is, and only then — the same trigger the list's
+ *  own refetchInterval used, so a render started in another browser is still
+ *  picked up exactly when it was before, at a fraction of the cost. When the
+ *  set empties, the list is refreshed once so "Generated" and its timestamp
+ *  land. */
+export function useCaseRenders(caseId: string | null, active: boolean) {
+  const qc = useQueryClient();
+  const wasRendering = useRef(false);
+  const query = useQuery({
+    queryKey: ["case-renders", caseId ?? ""],
+    queryFn: () => api.reports.renderingInCase(caseId!),
+    enabled: !!caseId && active,
+    refetchInterval: (q) =>
+      (q.state.data?.rendering.length ?? 0) > 0 ? 3000 : false,
+  });
+  const busy = (query.data?.rendering.length ?? 0) > 0;
+  useEffect(() => {
+    if (wasRendering.current && !busy && caseId) {
+      qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+    }
+    wasRendering.current = busy;
+  }, [busy, caseId, qc]);
+  return new Set(query.data?.rendering ?? []);
 }
 
 // ---- Hooks ----

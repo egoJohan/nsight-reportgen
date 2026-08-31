@@ -93,6 +93,19 @@ def is_render_active(case_id: str, report_id: str) -> bool:
         return (case_id, report_id) in _active_renders
 
 
+def active_renders_for_case(case_id: str) -> list[str]:
+    """The reports of this case rendering right now, from memory.
+
+    The case page shows a "Generating…" badge per report and kept it honest by
+    re-fetching the whole report list every three seconds — one hive read per
+    report plus one per lock, to answer a question this dict already holds. A
+    thirty-second deck render cost roughly ten of those polls from a single
+    browser that was only watching.
+    """
+    with _active_renders_lock:
+        return sorted(rid for (cid, rid) in _active_renders if cid == case_id)
+
+
 # ---------------------------------------------------------------------------
 # Deterministic per-report output directory (REQ-C-19, REQ-C-21)
 # ---------------------------------------------------------------------------
@@ -436,6 +449,20 @@ def cancel_render(
         if active is not None:
             active.cancel.set()
     return {"cancelled": active is not None}
+
+
+@render_router.get("/cases/{case_id}/renders")
+def case_renders(
+    case_id: str,
+    user: User = Depends(require_case),
+) -> dict:
+    """Report ids in this case with a render in progress.
+
+    Deliberately NOT under /reports/... : a literal segment there would have to
+    win against `/reports/{report_id}` on every router ordering, and a path
+    that only works because of declaration order is a trap.
+    """
+    return {"rendering": active_renders_for_case(case_id)}
 
 
 @render_router.get("/cases/{case_id}/reports/{report_id}/render/status")

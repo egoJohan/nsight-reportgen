@@ -1303,6 +1303,17 @@ export const api = {
     // server — not per this browser tab's own state. What a returning visitor
     // (a reload, a different tab, a render nobody in this session started)
     // reads to tell "generating" apart from "not rendered".
+    /** Report ids in this case with a render in progress. Answered from the
+     *  server's own memory — no per-report storage reads — so the case page can
+     *  keep a "Generating…" badge honest without re-fetching the whole list,
+     *  which costs one read per report plus one per lock. */
+    renderingInCase: async (caseId: string): Promise<{ rendering: string[] }> => {
+      const res = await fetch(`${API_BASE}/cases/${caseId}/renders`, {
+        cache: "no-store",
+      });
+      return json<{ rendering: string[] }>(res);
+    },
+
     renderStatus: async (
       caseId: string,
       reportId: string

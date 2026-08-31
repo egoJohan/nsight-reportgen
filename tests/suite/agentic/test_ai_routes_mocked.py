@@ -56,7 +56,11 @@ def _empty_reference(monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_slide_title_returns_cleaned_title(client_mock, monkeypatch):
     # Quotes + markdown emphasis are stripped by _clean.
-    chat = _patch_chat(monkeypatch, '"**Tyytyväisyys on korkealla tasolla**"')
+    # The reply ends with the mark the prompt asks for; without it the title is
+    # treated as cut short and the question text is served instead.
+    from reportbuilder.ai.text import TITLE_END_MARK
+    chat = _patch_chat(
+        monkeypatch, f'"**Tyytyväisyys on korkealla tasolla**"{TITLE_END_MARK}')
     resp = client_mock.post(f"/materials/{client_mock.material_id}/ai/slide-title", json={"question_ref": "q1"})
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"title": "Tyytyväisyys on korkealla tasolla"}
@@ -319,7 +323,7 @@ def test_chat_empty_reply_uses_a_fallback(client_mock, monkeypatch):
 # --------------------------------------------------------------------------- #
 # purpose reaches the wire
 # --------------------------------------------------------------------------- #
-def test_each_route_asks_datahive_for_the_purpose_its_work_needs(
+def test_each_route_asks_egohive_for_the_purpose_its_work_needs(
         client_mock, monkeypatch):
     """End to end, not just at the default.
 
@@ -333,8 +337,10 @@ def test_each_route_asks_datahive_for_the_purpose_its_work_needs(
 
     cases = [
         # (path, body, expected purpose, why)
-        ("ai/slide-title", {"question_ref": "q1"}, "synthesise",
-         "the prompt demands the title INTERPRET the results"),
+        ("ai/slide-title", {"question_ref": "q1"}, "summarise",
+         "a headline condenses the findings it is given; asking for "
+         "deliberation cost seconds per slide and a thirty-slide deck pays "
+         "that thirty times"),
         ("ai/short-labels", {"categories": ["Erittäin tyytyväinen"]}, "rewrite",
          "shortening a supplied label adds nothing to it"),
         ("ai/overview", {"question_refs": ["q1"]}, "summarise",

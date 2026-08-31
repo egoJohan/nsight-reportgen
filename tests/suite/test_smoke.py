@@ -5,7 +5,13 @@ from __future__ import annotations
 def test_health(client_mock):
     r = client_mock.get("/health")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    # Checked by key, not whole-body equality: /health also reports
+    # `render_concurrency` (how many slides this server draws at once,
+    # which the client cannot guess and sizes its queue by), and an
+    # exact-match assertion makes every future field a failure here.
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1
 
 
 def test_synthetic_model_loads(synthetic_model):

@@ -27,6 +27,7 @@ import {
   useQuestions,
   useSensitiveTerms,
   useCaseReports,
+  useCaseRenders,
   useDuplicateReport,
   qk,
 } from "@/lib/queries";
@@ -336,6 +337,15 @@ export default function ReportsSection({
   // Reports come from the SERVER (visible to any user/device), newest first.
   // Enrich with this browser's locally-remembered createdAt when we have it.
   const { data: serverReports, isPending: reportsPending } = useCaseReports(caseId);
+  // The list itself is expensive to re-fetch (a storage read per report, plus
+  // one per lock), so the "Generating…" badge is kept live by polling the
+  // server's in-memory set of active renders instead. Polling starts on the
+  // same signal as before — the list already showing a render — so a render
+  // begun in another browser is still noticed exactly when it used to be.
+  const renderingNow = useCaseRenders(
+    caseId,
+    (serverReports?.reports ?? []).some((r) => r.rendering)
+  );
   const duplicateReport = useDuplicateReport(caseId);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const wsById = new Map(workspace.reports.map((r) => [r.id, r]));
@@ -345,7 +355,9 @@ export default function ReportsSection({
     createdAt: wsById.get(r.report_id)?.createdAt,
     rendered: r.rendered,
     renderedAt: r.rendered_at,
-    rendering: r.rendering,
+    // The freshly-polled set wins once it has an answer: the list's own flag
+    // is as old as the last time this expensive query ran.
+    rendering: renderingNow.size > 0 ? renderingNow.has(r.report_id) : r.rendering,
     modifiedAt: r.modified_at,
     modifiedBy: r.modified_by,
     lockedByName: r.locked_by_name,

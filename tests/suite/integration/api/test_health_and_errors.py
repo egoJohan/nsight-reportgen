@@ -20,14 +20,26 @@ from reportbuilder.store.datahive_client import DataHiveError
 def test_health_ok(client_mock):
     resp = client_mock.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    # Checked by key, not whole-body equality: /health also reports
+    # `render_concurrency` (how many slides this server draws at once,
+    # which the client cannot guess and sizes its queue by), and an
+    # exact-match assertion makes every future field a failure here.
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1
 
 
 def test_health_without_client():
-    """An app built with no injected client still serves /health (no upstream needed)."""
+    """An app built with no injected client still serves /health (no upstream needed).
+
+    Checked by key: the body also reports `render_concurrency`, and the subject
+    of this test is that the app answers at all without an upstream.
+    """
     resp = TestClient(create_app()).get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["render_concurrency"] >= 1
 
 
 # --- DataHiveError shape -----------------------------------------------------

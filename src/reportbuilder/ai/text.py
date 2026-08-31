@@ -136,20 +136,28 @@ def generate_slide_title(
     """
     prompt = _slide_title_prompt(question_text, findings)
     reply = chat(prompt)
-    title = _clean(reply)
     fallback = (question_text or "").strip()
-    if not title:
+    raw = (reply or "").strip()
+    if not raw:
         return fallback
     # Only a headline that reached its end is a headline. Without the mark the
     # answer was cut off somewhere we cannot see, and half a sentence printed on
     # a slide is worse than the question it was meant to improve on — which is
     # exactly what the question text is: what the deck showed before there were
     # generated headlines at all.
-    if TITLE_END_MARK not in title:
+    if TITLE_END_MARK not in raw:
         log.warning("ai: slide title arrived without its end mark, so it was cut "
-                    "short; falling back to the question text (%r)", title[-40:])
+                    "short; falling back to the question text (%r)", raw[-40:])
         return fallback
-    return title.split(TITLE_END_MARK, 1)[0].strip() or fallback
+    # The mark may land either side of the model's own wrapping: `"Otsikko"¶`
+    # puts it outside, `"**Otsikko ¶**"` inside. Cleaning the whole reply first
+    # leaves a stray opening quote in the first case; cutting at the mark first
+    # leaves one in the second. So cut at the mark, then re-attach only the
+    # closing WRAPPER PUNCTUATION that followed it — never words, so anything
+    # the model kept writing after its headline is still discarded.
+    head, _, tail = raw.partition(TITLE_END_MARK)
+    closer = "".join(ch for ch in tail if ch in '*_"\'`»)]}')
+    return _clean(head + closer) or fallback
 
 
 def _group_subtitle_prompt(member_labels: list[str]) -> str:
