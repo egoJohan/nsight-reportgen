@@ -83,6 +83,10 @@ services:
       # NOT under /tmp: that is a tmpfs on many hosts, so the caches were held
       # in RAM on a 4 GB box. Backed by the `nsight-cache` volume.
       NSIGHT_CACHE_DIR: /var/cache/nsight
+      # Set from process START, not just by create_app. `tempfile` caches its
+      # directory on first use, so anything that opens a temp file during
+      # import would otherwise pin /tmp before the app can redirect it.
+      TMPDIR: /var/cache/nsight/scratch
       # The hive this instance stores into. Defaults to the in-container
       # hive below; set it in .env to point at a hosted hive instead, in
       # which case do NOT start the `datahive` service (see its profile).

@@ -86,6 +86,10 @@ services:
       # NOT under /tmp — that is a tmpfs on many hosts, so the caches were
       # held in RAM (see reportbuilder/cache_dirs.py).
       NSIGHT_CACHE_DIR: /var/cache/nsight
+      # Set from process START, not just by create_app. `tempfile` caches its
+      # directory on first use, so anything that opens a temp file during
+      # import would otherwise pin /tmp before the app can redirect it.
+      TMPDIR: /var/cache/nsight/scratch
       # The service credential is read-write across the tenant; nSight narrows
       # per user itself (reportbuilder/auth/permissions.py, spec §5.3).
       NSIGHT_DATAHIVE_URL: "http://datahive:7891"

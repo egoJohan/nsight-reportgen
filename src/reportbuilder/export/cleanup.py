@@ -46,6 +46,11 @@ PROFILE_ROOT = cache_dirs.profile_root()
 #: took any of them away again.
 TEMPLATE_ROOT = cache_dirs.template_root()
 GROUND_ROOT = cache_dirs.ground_root()
+#: Intermediates written straight through `tempfile` — uploaded .sav and .pptx,
+#: backup/restore ZIPs, chart PNGs. Each site unlinks its own file, but only on
+#: the happy path: an exception between creating one and unlinking it leaks it,
+#: and nothing swept here, so a leak was permanent.
+SCRATCH_ROOT = cache_dirs.scratch_root()
 
 # A day is long enough that an analyst returning after lunch still gets an
 # instant preview, and short enough that a week of use cannot fill a disk.
@@ -59,11 +64,12 @@ class SweepResult:
     profiles: int = 0
     templates: int = 0
     grounds: int = 0
+    scratch: int = 0
 
     @property
     def total(self) -> int:
         return (self.render + self.preview + self.profiles
-                + self.templates + self.grounds)
+                + self.templates + self.grounds + self.scratch)
 
     def __str__(self) -> str:
         return (f"{self.render} render dir(s), {self.preview} preview dir(s), "
@@ -165,6 +171,7 @@ def sweep_all(max_age_seconds: float = DEFAULT_MAX_AGE_SECONDS) -> SweepResult:
         result.profiles = sweep_orphaned_profiles()
         result.templates = sweep_stale(TEMPLATE_ROOT, max_age_seconds, depth=1)
         result.grounds = sweep_stale(GROUND_ROOT, max_age_seconds, depth=1)
+        result.scratch = sweep_stale(SCRATCH_ROOT, max_age_seconds, depth=1)
     except Exception:  # noqa: BLE001 — see module docstring
         log.warning("cleanup: sweep failed", exc_info=True)
     if result.total:
