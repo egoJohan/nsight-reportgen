@@ -80,6 +80,32 @@ def template_root() -> Path:
     return _sub("templates")
 
 
+def scratch_root() -> Path:
+    """Intermediate files: uploaded .sav and .pptx, backup/restore ZIPs, chart
+    PNGs, LibreOffice's own working files. Short-lived, but not small — an
+    uploaded SPSS file can be hundreds of megabytes, and in a tmpfs that is
+    hundreds of megabytes of RAM."""
+    return _sub("scratch")
+
+
+def use_disk_backed_tempdir() -> Path:
+    """Point this PROCESS's temp dir at disk, and return it.
+
+    Fourteen places write intermediates through `tempfile` directly, and the
+    module defaults to /tmp — a tmpfs on many hosts. Redirecting the default
+    covers all of them at once, including code we do not own, and exporting
+    TMPDIR carries it into child processes: LibreOffice writes its own
+    intermediates during a PPTX->PDF conversion and only the environment
+    reaches it.
+
+    Idempotent, and safe to call before anything has used tempfile.
+    """
+    scratch = scratch_root()
+    tempfile.tempdir = str(scratch)
+    os.environ["TMPDIR"] = str(scratch)
+    return scratch
+
+
 def profile_root() -> Path:
     """LibreOffice user profiles. Scratch, but LibreOffice writes freely into
     them during a conversion, so they do not belong in RAM either."""

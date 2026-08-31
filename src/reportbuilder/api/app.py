@@ -23,6 +23,7 @@ from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
 from reportbuilder.api.routes_users import users_router
 from reportbuilder.export._cpu import workers_for
+from reportbuilder import cache_dirs
 from reportbuilder.export.cleanup import sweep_all
 from reportbuilder.store.datahive_client import DataHiveError
 
@@ -39,6 +40,14 @@ def create_app(client=None) -> FastAPI:
     instance returned by the get_client dependency — this is how tests inject a mock without a
     live datahive. If None, get_client falls back to constructing a real DataHiveClient.
     Registers GET /health -> {"status": "ok"}. Later tasks add routers via app.include_router."""
+
+    # Intermediate files go to DISK, not to a ramdisk. Fourteen places write
+    # through `tempfile` directly — uploaded .sav and .pptx, backup/restore
+    # ZIPs, chart PNGs — and the module defaults to /tmp, which on many hosts
+    # is a tmpfs. An uploaded SPSS file is not small. Done first, before any
+    # router or dependency has had the chance to open a temp file, and it
+    # exports TMPDIR so LibreOffice's own intermediates follow.
+    cache_dirs.use_disk_backed_tempdir()
 
     async def _janitor() -> None:
         """Evict stale temp caches on boot, then once a day."""

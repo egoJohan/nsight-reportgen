@@ -69,3 +69,43 @@ def test_an_unwritable_setting_falls_back_rather_than_crashing(monkeypatch):
     monkeypatch.setenv("NSIGHT_CACHE_DIR", "/proc/nsight-cannot-exist")
     root = cache_dirs.cache_root()
     assert root.is_dir()
+
+
+# ------------------------------------------------------- intermediate files ---
+# The caches were the visible half. The other half is every intermediate file
+# written through `tempfile` directly — uploaded .sav files, backup/restore
+# ZIPs, template .pptx uploads, chart PNGs — all of which defaulted to /tmp and
+# so, on a tmpfs host, to RAM. An uploaded SPSS file is not small.
+
+def test_scratch_is_under_the_cache_root(monkeypatch, tmp_path):
+    monkeypatch.setenv("NSIGHT_CACHE_DIR", str(tmp_path / "c"))
+    assert cache_dirs.scratch_root().is_relative_to(cache_dirs.cache_root())
+
+
+def test_adopting_the_scratch_dir_redirects_plain_tempfile_use(monkeypatch, tmp_path):
+    """One switch has to cover all fourteen call sites, not fourteen edits."""
+    import tempfile
+    monkeypatch.setenv("NSIGHT_CACHE_DIR", str(tmp_path / "c"))
+    cache_dirs.use_disk_backed_tempdir()
+    fd, path = tempfile.mkstemp()
+    os.close(fd)
+    try:
+        assert Path(path).is_relative_to(cache_dirs.scratch_root())
+    finally:
+        os.unlink(path)
+    d = tempfile.mkdtemp()
+    assert Path(d).is_relative_to(cache_dirs.scratch_root())
+
+
+def test_it_exports_tmpdir_so_subprocesses_follow(monkeypatch, tmp_path):
+    """LibreOffice writes its own intermediates during a PPTX->PDF conversion.
+    It is a child process, so only the environment reaches it."""
+    monkeypatch.setenv("NSIGHT_CACHE_DIR", str(tmp_path / "c"))
+    cache_dirs.use_disk_backed_tempdir()
+    assert os.environ["TMPDIR"] == str(cache_dirs.scratch_root())
+
+
+def test_adopting_twice_is_harmless(monkeypatch, tmp_path):
+    monkeypatch.setenv("NSIGHT_CACHE_DIR", str(tmp_path / "c"))
+    first = cache_dirs.use_disk_backed_tempdir()
+    assert cache_dirs.use_disk_backed_tempdir() == first
