@@ -46,6 +46,12 @@ LABEL_CASE = "nsight:case"
 LABEL_REPORT = "nsight:report"
 LABEL_REPORT_META = "nsight:report-meta"
 LABEL_REPORT_LOCK = "nsight:report-lock"
+#: A lock that has been HANDED BACK. The object stays (deleting is gated behind
+#: a consent prompt, and the released record is a useful trace of who had it),
+#: but it carries this label instead so the live-lock listing stops returning
+#: it. Without that split, one lock object accumulates per report ever opened
+#: and the case page pays a hive read for each to learn that none are held.
+LABEL_REPORT_LOCK_RELEASED = "nsight:report-lock-released"
 LABEL_RENDER = "nsight:render"
 LABEL_MATERIAL = "nsight:material"
 LABEL_CONFIG = "nsight:config"

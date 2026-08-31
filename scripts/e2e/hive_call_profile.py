@@ -28,6 +28,11 @@ API = "http://localhost:8200"
 # that are an HTTP request line are calls; counting everything inflated a report
 # GET from 74 to whatever postgres happened to log alongside it.
 REQ_RE = re.compile(r'"(GET|PUT|POST|DELETE|HEAD|PATCH) (/[^ "]*)')
+# The container runs the entrance AND the hive behind it, and BOTH log the same
+# logical call, so every count came out exactly doubled. The forwarded, internal
+# hop reports a source port of 0; a call arriving from nSight has a real
+# ephemeral port. Count only the latter, or every number here is 2x the truth.
+SOURCE_RE = re.compile(r"([0-9.]+):([0-9]+) - \"")
 PATH_RE = re.compile(r"path=([^\s\"&]+)")
 ID_RE = re.compile(r"(usr|sess|rep|mat|cust|case)-[0-9a-f]+")
 
@@ -84,6 +89,9 @@ def profile(container: str, cookie: str, label: str, method: str, path: str,
         req = REQ_RE.search(line)
         if not req:
             continue                      # postgres chatter, not an API call
+        src = SOURCE_RE.search(line)
+        if src and src.group(2) == "0":
+            continue                      # the entrance's internal forward
         calls += 1
         m = PATH_RE.search(line)
         if m:

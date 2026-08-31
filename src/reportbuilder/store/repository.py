@@ -851,10 +851,14 @@ class Repository:
         # to hand back — the release would fail and the report would stay
         # locked until it expired. A released lock also leaves a trace of who
         # had it and when, which a deletion would not.
+        # Relabelled, not deleted: the object and its trace of who held it stay,
+        # but it leaves the live-lock listing. `report_locks` reads every object
+        # that listing returns, so a released lock keeping the live label cost a
+        # hive read on every case-page load, for every report ever opened.
         self._write_json(
             auth, P.report_lock_path(customer_id, case_id, report_id),
             {**held, "released": True, "released_at": _now()},
-            [P.LABEL_REPORT_LOCK])
+            [P.LABEL_REPORT_LOCK_RELEASED])
         return True
 
     def release_user_locks(self, auth: AuthContext, user_id: str,
@@ -911,9 +915,11 @@ class Repository:
                     continue
                 if not owned and tabs:
                     continue    # nothing here belongs to this sign-in
+            # A full release on sign-out, so it leaves the live listing too —
+            # same reasoning as unlock_report.
             self._write_json(auth, info.path,
                              {**d, "released": True, "released_at": _now()},
-                             [P.LABEL_REPORT_LOCK])
+                             [P.LABEL_REPORT_LOCK_RELEASED])
             released += 1
         return released
 
@@ -999,6 +1005,20 @@ class Repository:
         ordered = sorted([r for r in refs if r],
                          key=lambda r: r.modified_at, reverse=True)
         return ordered[:limit]
+
+    def report_version(self, auth: AuthContext, customer_id: str, case_id: str,
+                       report_id: str) -> int:
+        """The stored version of ONE report, or 0 when it has no sidecar yet.
+
+        One read of that report's own sidecar. This used to be answered by
+        listing the case and picking the matching ref out of the result, which
+        read every report's sidecar to return a single integer — and the ETag
+        on every report GET calls it, so opening one report cost a full case
+        listing that grew as the case accumulated reports.
+        """
+        ref = self._ref_from_meta(
+            auth, P.report_meta_path(customer_id, case_id, report_id))
+        return ref.version if ref is not None else 0
 
     def _ref_from_meta(self, auth: AuthContext, path: str) -> "ReportRef | None":
         """A sidecar may vanish between listing and read (another session

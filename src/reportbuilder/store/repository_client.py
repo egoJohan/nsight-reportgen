@@ -67,19 +67,45 @@ class RepositoryClient:
         self.repo = repo
         self.auth = auth
         self.user = user
+        # Per-REQUEST memos. This client is constructed once per request
+        # (deps.get_client), so these live exactly as long as the request does
+        # and cannot serve a later caller a stale case or material.
+        self._case_memo: dict = {}
+        self._material_memo: dict = {}
 
     # -- resolution -------------------------------------------------------
 
     def _material(self, material_id: str):
+        """The material record, resolved ONCE per request — see `_case`."""
+        hit = self._material_memo.get(material_id)
+        if hit is not None:
+            return hit
         m = self.repo.find_material(self.auth, material_id, user=self.user)
         if m is None:
             raise MaterialNotFound(material_id)
+        self._material_memo[material_id] = m
         return m
 
     def _case(self, case_id: str):
+        """The case record, resolved ONCE per request.
+
+        This client is built per request, and nearly every method here starts
+        by resolving the case, so one endpoint read the case record four to
+        eight times — each a serialised round-trip to a hive that handles one
+        request at a time. A case cannot change underneath a request that is
+        already running, so the repeat reads bought nothing.
+
+        A miss is never cached: an unknown case must keep raising, so that a
+        case created (or granted) between two calls in the same request is not
+        remembered as absent.
+        """
+        hit = self._case_memo.get(case_id)
+        if hit is not None:
+            return hit
         k = self.repo.find_case(self.auth, case_id, user=self.user)
         if k is None:
             raise KeyError(case_id)
+        self._case_memo[case_id] = k
         return k
 
     def _may_edit(self, k) -> bool:
@@ -275,12 +301,14 @@ class RepositoryClient:
         return ref.id, ref.version
 
     def report_version(self, case_id: str, report_id: str) -> int:
-        """The version a caller is about to edit from, or 0 if unknown."""
+        """The version a caller is about to edit from, or 0 if unknown.
+
+        One sidecar read. This listed the whole case and discarded all but the
+        matching ref, so the ETag on every report GET read every report in the
+        case — 56 hive reads to produce one integer.
+        """
         k = self._case(case_id)
-        ref = next((r for r in self.repo.list_reports(self.auth, k.customer_id, k.id,
-                                                      user=self.user)
-                    if r.id == report_id), None)
-        return ref.version if ref is not None else 0
+        return self.repo.report_version(self.auth, k.customer_id, k.id, report_id)
 
     def list_reports(self, case_id: str) -> list[dict]:
         k = self._case(case_id)
