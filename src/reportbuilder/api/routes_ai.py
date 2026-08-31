@@ -134,17 +134,54 @@ def _findings_for_refs(
 def _findings_from_series(
     series: SeriesResult, top_n: int
 ) -> list[tuple[str, float]]:
-    """Top-N (category, value) pairs by the Total-segment value of the statistic."""
+    """Top-N (label, value) pairs to headline, read from whatever columns exist.
+
+    `SeriesResult` is explicit that a "Total" column is usual but NOT
+    guaranteed — "Read a segment's presence, never assume it". This read only
+    `(category, "Total")`, so a series without that column produced NO findings,
+    and the route's "nothing to summarise" fallback returned the raw question
+    text. That is why a comparison slide never got a generated headline: a
+    comparison overlays its member questions AS the segments, so no Total column
+    exists. The SEPARATE layout has the same shape, emitting
+    "<variable> · Total" per panel instead of a bare Total.
+
+    With ONE reference column (a Total, or a lone segment) the findings are that
+    column's top categories, as before. With SEVERAL segments and no Total, they
+    are each segment's strongest category, labelled "<segment> — <category>".
+    Per segment rather than a global top-N on purpose: the strongest few cells
+    can all belong to one entity, which would hand the model a "comparison" with
+    nothing to compare.
+    """
     stat = series.statistic
-    pairs: list[tuple[str, float]] = []
-    for cat in series.categories:
-        cell = series.cells.get((cat, "Total"))
+
+    def _val(cat: str, seg: str) -> float | None:
+        cell = series.cells.get((cat, seg))
         if cell is None:
-            continue
+            return None
         val = cell.value(stat)
-        if val is None:
-            continue
-        pairs.append((cat, float(val)))
+        return None if val is None else float(val)
+
+    ref: str | None = None
+    if "Total" in series.segments:
+        ref = "Total"
+    elif len(series.segments) == 1:
+        ref = series.segments[0]
+
+    pairs: list[tuple[str, float]] = []
+    if ref is not None:
+        for cat in series.categories:
+            val = _val(cat, ref)
+            if val is not None:
+                pairs.append((cat, val))
+    else:
+        for seg in series.segments:
+            scored = [(cat, v) for cat in series.categories
+                      if (v := _val(cat, seg)) is not None]
+            if not scored:
+                continue
+            cat, val = max(scored, key=lambda p: p[1])
+            pairs.append((f"{seg} — {cat}", val))
+
     pairs.sort(key=lambda p: p[1], reverse=True)
     return pairs[: max(1, top_n)]
 
