@@ -28,6 +28,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from reportbuilder import cache_dirs
 from reportbuilder.export.pdf_convert import pptx_to_pdf
 from reportbuilder.export.preview import rasterize_pages
 
@@ -37,7 +38,7 @@ EMU_PER_INCH = 914400
 # PowerPoint's own text-frame insets, applied when a shape does not state its own.
 _DEFAULT_LR_INSET = 91440      # 0.1in
 _DEFAULT_TB_INSET = 45720      # 0.05in
-_CACHE = Path(tempfile.gettempdir()) / "nsight-preview-ground"
+_CACHE = cache_dirs.ground_root()
 
 
 def _key(style, dpi: int) -> str:

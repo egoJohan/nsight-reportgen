@@ -11,30 +11,37 @@ file on disk"), and either is a legitimate 404 for this assertion.
 from __future__ import annotations
 
 import tempfile
+
+from reportbuilder import cache_dirs
 from unittest.mock import Mock, patch
 
 from reportbuilder.api.routes_render import render_output_dir
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — render_output_dir is deterministic and under tempdir (REQ-C-19)
+# Test 1 — render_output_dir is deterministic and under the cache root (REQ-C-19)
 # ---------------------------------------------------------------------------
 
 
 def test_render_output_dir_deterministic() -> None:
-    """render_output_dir returns the same path for the same ids and is under tempdir. (REQ-C-19)"""
+    """Same ids -> same path, under the render cache root. (REQ-C-19)
+
+    Rendered decks are whole PPTX/PDF files and used to be written under
+    `tempfile.gettempdir()`, which on a tmpfs host is RAM; they now live under
+    `cache_dirs.render_root()`.
+    """
     d1 = render_output_dir("c1", "r1")
     d2 = render_output_dir("c1", "r1")
     assert d1 == d2
-    assert str(d1).startswith(tempfile.gettempdir())
+    assert d1.is_relative_to(cache_dirs.render_root())
     assert d1.exists()
 
 
 def test_render_output_dir_sanitises_ids() -> None:
     """render_output_dir sanitises special chars out of ids, preventing path traversal. (REQ-C-19)"""
     d = render_output_dir("case/../../etc", "rep;rm -rf /")
-    # Path must remain under the nsight-render subdir (no traversal)
-    assert str(d).startswith(tempfile.gettempdir())
+    # Path must remain under the render root (no traversal)
+    assert d.is_relative_to(cache_dirs.render_root())
     # Must exist (mkdir succeeded with sanitised path)
     assert d.exists()
 

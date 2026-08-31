@@ -44,10 +44,15 @@ class _Repo:
 
 @pytest.fixture
 def temp_root(tmp_path, monkeypatch):
-    import tempfile
+    """Redirect the template cache.
 
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
-    return tmp_path / "nsight-preview-templates"
+    This used to monkeypatch `tempfile.gettempdir`, because the cache hung off
+    the temp dir. It no longer does — on a tmpfs host that put the cache in RAM
+    — so the redirect silently stopped working and the test asserted against a
+    directory nothing wrote to. `NSIGHT_CACHE_DIR` is the supported knob.
+    """
+    monkeypatch.setenv("NSIGHT_CACHE_DIR", str(tmp_path))
+    return tmp_path / "templates"
 
 
 def test_the_published_path_never_holds_a_partial_file(temp_root, monkeypatch):

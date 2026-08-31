@@ -30,6 +30,7 @@ from reportbuilder.api.deps_auth import current_user, require_material, require_
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth.permissions import User
 from reportbuilder.render.template_cache import resolve as _resolve_template
+from reportbuilder import cache_dirs
 from reportbuilder.store import paths as _paths
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -1533,7 +1534,7 @@ def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
         f"{_PREVIEW_CACHE_SALT}:{material_id}:{spec_json}:"
         f"{rendering_fingerprint()}".encode()
     ).hexdigest()[:16]
-    d = pathlib.Path(tempfile.gettempdir()) / "nsight-preview" / key
+    d = cache_dirs.preview_root() / key
     d.mkdir(parents=True, exist_ok=True)
     # Who this entry belongs to. The key is a hash, so without this the cache
     # can only be cleared entirely — which on a shared host throws away every
@@ -1607,9 +1608,7 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "",
                 repo.store.get(auth, _paths.default_template_path()))
         if not blob:
             return None, ""
-        import tempfile as _tf
-        path = pathlib.Path(_tf.gettempdir()) / "nsight-preview-templates"
-        path.mkdir(parents=True, exist_ok=True)
+        path = cache_dirs.template_root()
         f = path / _preview_template_filename(template_id, blob)
         if not f.exists():
             # Written aside and moved into place, never written where a reader
@@ -1878,7 +1877,7 @@ def clear_preview_cache(
     is how a clear-cache button becomes the thing that made the morning slow.
     """
     del user
-    root = pathlib.Path(tempfile.gettempdir()) / "nsight-preview"
+    root = cache_dirs.preview_root()
     if not root.is_dir():
         return {"cleared": 0}
     cleared = 0

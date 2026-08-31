@@ -22,19 +22,21 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import logging
 
+from reportbuilder import cache_dirs
+
 log = logging.getLogger(__name__)
 
-TMP = Path(tempfile.gettempdir())
-RENDER_ROOT = TMP / "nsight-render"
-PREVIEW_ROOT = TMP / "nsight-preview"
-PROFILE_ROOT = TMP / "nsight-lo-profiles"
+# The caches live under `cache_dirs.cache_root()`, on disk. They used to hang
+# off the temp dir, which on a tmpfs host meant RAM (see cache_dirs).
+RENDER_ROOT = cache_dirs.render_root()
+PREVIEW_ROOT = cache_dirs.preview_root()
+PROFILE_ROOT = cache_dirs.profile_root()
 #: The copy of each distinct template CONTENT a preview renders from, and the
 #: blank slide LibreOffice draws once per template. Both are content-keyed
 #: caches — deleting one costs the next request a rebuild and nothing else —
@@ -42,8 +44,8 @@ PROFILE_ROOT = TMP / "nsight-lo-profiles"
 #: 16 MB and counting, in a /tmp that is a ramfs, so it was real memory. A new
 #: entry appears for every template anyone has ever previewed with, and nothing
 #: took any of them away again.
-TEMPLATE_ROOT = TMP / "nsight-preview-templates"
-GROUND_ROOT = TMP / "nsight-preview-ground"
+TEMPLATE_ROOT = cache_dirs.template_root()
+GROUND_ROOT = cache_dirs.ground_root()
 
 # A day is long enough that an analyst returning after lunch still gets an
 # instant preview, and short enough that a week of use cannot fill a disk.

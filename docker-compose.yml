@@ -82,6 +82,10 @@ services:
     environment:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
+      # Previews, grounds, templates, rendered decks, LibreOffice profiles.
+      # NOT under /tmp — that is a tmpfs on many hosts, so the caches were
+      # held in RAM (see reportbuilder/cache_dirs.py).
+      NSIGHT_CACHE_DIR: /var/cache/nsight
       # The service credential is read-write across the tenant; nSight narrows
       # per user itself (reportbuilder/auth/permissions.py, spec §5.3).
       NSIGHT_DATAHIVE_URL: "http://datahive:7891"
@@ -137,6 +141,8 @@ services:
       - "8200"
     restart: unless-stopped
 
+    volumes:
+      - nsight-cache:/var/cache/nsight
   frontend:
     build:
       context: ./web
@@ -153,3 +159,4 @@ networks:
 
 volumes:
   nsight-datahive:
+  nsight-cache:

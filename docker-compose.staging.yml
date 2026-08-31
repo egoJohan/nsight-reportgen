@@ -79,6 +79,10 @@ services:
     environment:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
+      # Previews, grounds, templates, rendered decks and LibreOffice profiles.
+      # NOT under /tmp: that is a tmpfs on many hosts, so the caches were held
+      # in RAM on a 4 GB box. Backed by the `nsight-cache` volume.
+      NSIGHT_CACHE_DIR: /var/cache/nsight
       # The hive this instance stores into. Defaults to the in-container
       # hive below; set it in .env to point at a hosted hive instead, in
       # which case do NOT start the `datahive` service (see its profile).
@@ -143,9 +147,11 @@ services:
       # routes_questions._render_code_identity), the ground carries the host's
       # font fingerprint, and a cached template is named by its content hash.
       # New code therefore reads new keys and the janitor sweeps the old ones.
-      - nsight-preview-cache:/tmp/nsight-preview
-      - nsight-ground-cache:/tmp/nsight-preview-ground
-      - nsight-template-cache:/tmp/nsight-preview-templates
+      # Every on-disk cache in one place, on DISK. These used to be three
+      # mounts under /tmp; on a host whose /tmp is a tmpfs that is RAM, and
+      # rendered decks land here too. `NSIGHT_CACHE_DIR` below points the code
+      # at it (see reportbuilder/cache_dirs.py).
+      - nsight-cache:/var/cache/nsight
     # No depends_on: `datahive` is profiled, and compose refuses a
     # dependency on a service outside the active profiles. With the local
     # hive, start it first (step 1 of the header's first-deploy recipe).
@@ -165,6 +171,4 @@ services:
 volumes:
   nsight-datahive:
   # Render caches. Losing these costs time, never data — they rebuild on demand.
-  nsight-preview-cache:
-  nsight-ground-cache:
-  nsight-template-cache:
+  nsight-cache:

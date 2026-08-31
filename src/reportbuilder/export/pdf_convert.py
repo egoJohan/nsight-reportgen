@@ -14,10 +14,11 @@ across calls so the (slow) first-run profile init happens once per slot.
 from __future__ import annotations
 import logging
 import os
+
+from reportbuilder import cache_dirs
 import queue
 import shutil
 import subprocess
-import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -48,7 +49,7 @@ _MAX_CONCURRENT = max(1, int(os.environ.get(
 # --workers N) never hand out the same UserInstallation dir to two concurrent
 # soffice invocations — which would re-introduce the single-instance-per-profile
 # lock contention/corruption the slot pool exists to prevent.
-_PROFILE_ROOT = Path(tempfile.gettempdir()) / "nsight-lo-profiles" / f"pid-{os.getpid()}"
+_PROFILE_ROOT = cache_dirs.profile_root() / f"pid-{os.getpid()}"
 
 # A queue of profile dirs acts as both the concurrency gate (get() blocks until a
 # slot is free) and the per-conversion isolation (each slot has its own profile).

@@ -91,8 +91,9 @@ def test_render_output_dir_sanitizes_path_traversal():
     assert ".." not in d.parts
     # Only alnum/-/_ survive sanitisation, so a bare-dots component collapses.
     assert d.parent.name == "evil"
-    # The whole path stays under the nsight-render base.
-    assert "nsight-render" in d.parts
+    # The whole path stays under the render cache root.
+    from reportbuilder import cache_dirs
+    assert d.is_relative_to(cache_dirs.render_root())
 
 
 # ---------------------------------------------------------------------------

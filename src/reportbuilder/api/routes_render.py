@@ -18,6 +18,7 @@ GET /cases/{case_id}/reports/{report_id}/preview.pdf
 from __future__ import annotations
 
 import asyncio
+from reportbuilder import cache_dirs
 import dataclasses
 import logging
 import pathlib
@@ -101,7 +102,7 @@ def render_output_dir(case_id: str, report_id: str) -> pathlib.Path:
     """Return (and create) a deterministic temp dir for a given case/report pair.
     IDs are sanitised to prevent path traversal. (REQ-C-19, REQ-C-21)"""
     safe = lambda s: "".join(c for c in s if c.isalnum() or c in "-_")[:64]
-    d = pathlib.Path(tempfile.gettempdir()) / "nsight-render" / safe(case_id) / safe(report_id)
+    d = cache_dirs.render_root() / safe(case_id) / safe(report_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
