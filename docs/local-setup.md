@@ -115,3 +115,16 @@ import json,sys
 print(json.load(sys.stdin)['components']['schemas']['AskRequest']
       ['properties']['purpose'].get('description','')[:80])"
 ```
+
+## Testing against the hive staging actually runs
+
+The hive in this setup is a locally built image and it drifts from the one the
+fleet promotes — far enough that `/readyz` has answered with different FIELDS.
+For anything that depends on what the hive replies (readiness, upgrades,
+permissions, error shapes), bring up the verify stack beside this one:
+
+    scripts/dev/verify_stack.sh up
+
+It runs the staging image on its own ports and volume, leaves this stack
+untouched, and throws itself away on `down`. See
+[dev-verify-stack.md](dev-verify-stack.md).
