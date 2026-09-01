@@ -2,34 +2,48 @@
 
 `scripts/dev/verify_stack.sh up`
 
-A second, throwaway stack beside your normal one: the **same hive image the
-fleet promotes to staging**, its own volume, its own ports, its own nSight
-process. Your everyday stack keeps running and keeps its data.
+A second, throwaway stack beside your normal one: its own hive container, its
+own volume, its own ports, its own nSight process. Your everyday stack keeps
+running and keeps its data.
 
 | | normal | verify |
 |---|---|---|
-| hive image | `datahive:local` (built here) | `ghcr.io/egoiq/egohive:staging` |
+| hive image | `ghcr.io/egoiq/egohive:staging` | whatever `IMAGE=` you give it |
+| container | `egohive-nsight` | `nsight-verify-hive` |
 | hive entrance | `127.0.0.1:7985` | `127.0.0.1:17892` |
 | nSight backend | `127.0.0.1:8200` | `127.0.0.1:8299` |
-| volume | `nsight-datahive` | `nsight-verify-data` (deleted by `down`) |
+| volume | `egohive-data` (your work) | `nsight-verify-data` (deleted by `down`) |
 | browser | `http://localhost:5180` | none — drive it with curl or a script |
+
+**What this is for now.** The normal stack already runs the promoted image (see
+[local-setup.md](local-setup.md)), so "test against staging's hive" is the
+default rather than something you have to arrange. This stack answers the other
+question: *does a SPECIFIC build work* — one that is not promoted yet, one you
+are about to promote, or one you are bisecting — without touching the hive that
+holds your work.
+
+```bash
+IMAGE=ghcr.io/egoiq/egohive:sha-<full-git-sha> scripts/dev/verify_stack.sh up
+```
+
+It also starts from an EMPTY volume, so it is the only way to exercise first
+boot: migrations on a fresh instance, an empty tenant, the very first user.
 
 ## Why this exists
 
-The everyday hive is a locally built image and it **drifts**. On 2026-09-01 it
-was old enough that `/readyz` carried neither `build` nor `disk_free_gb`, while
-staging's had both. Anything that depends on what the hive answers — readiness,
-upgrades, permissions, the shape of an error — is therefore untestable locally
-against the thing that will actually receive it. Twice in one day that gap cost
-real time:
+The everyday hive USED to be a locally built image, and it **drifted**. On
+2026-09-01 it was old enough that `/readyz` carried neither `build` nor
+`disk_free_gb`, while staging's had both — so anything depending on what the
+hive answers was untestable against the thing that would receive it. Twice in
+one day that gap cost real time:
 
 * a fix was verified with `build_info()` in isolation and still had to be
   trusted on staging, because nothing local could run the same image;
 * a hive was found reporting `git_sha: "unknown"`, which no local stack could
   have reproduced, and which silently blocks the fleet's health gate.
 
-Running the real image locally is the only honest way to answer "will this work
-on staging".
+That is why the normal stack was moved onto the promoted image the same day.
+This one remains for the builds that are NOT promoted.
 
 ## What it is good for
 

@@ -116,15 +116,78 @@ print(json.load(sys.stdin)['components']['schemas']['AskRequest']
       ['properties']['purpose'].get('description','')[:80])"
 ```
 
-## Testing against the hive staging actually runs
+## The local hive runs the image staging runs
 
-The hive in this setup is a locally built image and it drifts from the one the
-fleet promotes — far enough that `/readyz` has answered with different FIELDS.
-For anything that depends on what the hive replies (readiness, upgrades,
-permissions, error shapes), bring up the verify stack beside this one:
+Since 2026-09-01 the local hive is **the promoted image**, not a locally built
+one:
 
-    scripts/dev/verify_stack.sh up
+| | |
+|---|---|
+| image | `ghcr.io/egoiq/egohive:staging` — the latest build of egoHive's **origin/master**, and the same image the fleet promotes to staging |
+| container | `egohive-nsight` |
+| data volume | `egohive-data` — cases, reports, materials, users, KMS material |
+| ports | `127.0.0.1:7984` (hive), `127.0.0.1:7985` (entrance, what nSight talks to) |
 
-It runs the staging image on its own ports and volume, leaves this stack
-untouched, and throws itself away on `down`. See
-[dev-verify-stack.md](dev-verify-stack.md).
+It was a locally built image before, and it had drifted far enough that
+`/readyz` answered with different FIELDS than staging's — no `build`, no
+`disk_free_gb`. Work that depended on what the hive replies was therefore
+untestable here against the thing that would receive it, and two bugs got as
+far as staging before anyone could see them.
+
+### Updating it to a newer image
+
+The same procedure the fleet uses on a real hive, which is why doing it here
+rehearses that: **keep the volume, swap the image.**
+
+```bash
+# 1. Back up the volume. Migrations are one-way.
+docker run --rm -v egohive-data:/data -v "$PWD/work/verify":/backup alpine \
+  tar czf /backup/egohive-data-$(date +%Y%m%d-%H%M).tar.gz -C /data .
+
+# 2. Keep the old container as a rollback, do not delete it yet.
+docker stop egohive-nsight && docker rename egohive-nsight egohive-nsight-prev
+
+# 3. Start the new image on the SAME volume and ports.
+docker run -d --name egohive-nsight --restart unless-stopped \
+  -e GEMINI_API_KEY=... -e PORT=7984 -e ENTRANCE_PORT=7985 \
+  -v egohive-data:/var/lib/datahive \
+  -p 127.0.0.1:7984:7984 -p 127.0.0.1:7985:7985 \
+  ghcr.io/egoiq/egohive:staging
+```
+
+Carry across **only the instance variables** — here `GEMINI_API_KEY`, `PORT`,
+`ENTRANCE_PORT`. Everything else in the old container was the old image's own
+default, and copying those forward pins a new image to an old image's values.
+`DATAHIVE_GIT_SHA` is the one that bites: the image bakes the real sha, an env
+entry masks it, `/readyz` then reports `unknown`, and the fleet's health gate —
+which compares that field to the sha it deployed — can never pass.
+
+Your session and the backend's token keep working: auth state lives in the
+volume, not the container. Expect ~30s for readiness while migrations run.
+
+Check it took:
+
+```bash
+curl -s http://127.0.0.1:7985/readyz     # ok:true, a real git_sha, disk_free_gb
+```
+
+The `git_sha` it reports should equal egoHive's `origin/master`:
+
+```bash
+git -C ../../egoiq/egohive rev-parse origin/master
+```
+
+They match today. Note that a local egoHive checkout can be AHEAD of that —
+commits that are merely committed, or even pushed, are not in the image until
+the build publishes one. `:staging` follows what was BUILT, never a working
+tree.
+
+## Testing locally
+
+| what | how |
+|---|---|
+| a SPECIFIC hive build, isolated | `IMAGE=ghcr.io/egoiq/egohive:sha-<git> scripts/dev/verify_stack.sh up` — see [dev-verify-stack.md](dev-verify-stack.md) |
+| several people at once | `.venv/bin/python scripts/e2e/multi_user.py --case <id> --material <id>` |
+| how many hive round-trips an endpoint costs | `.venv/bin/python scripts/e2e/hive_call_profile.py --case <id> --material <id>` |
+| the maintenance / error / not-found screens | `?maintenance=1`, `?maintenance=error`, any unknown path |
+| an outage end to end | `docker stop egohive-nsight`, watch the UI; `docker start` it, watch the screen clear itself |
