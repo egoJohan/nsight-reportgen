@@ -6,6 +6,7 @@ import {
   BarChart3Icon,
   GripVerticalIcon,
   ImageIcon,
+  CopyIcon,
   InfoIcon,
   Loader2Icon,
   RotateCcwIcon,
@@ -1860,6 +1861,7 @@ function StepConfigureInner({
   aiPending,
   active,
   setActive,
+  onCopyChart,
   onReorder,
   onUpdateChart,
   onRegenerateSpecial,
@@ -1872,6 +1874,10 @@ function StepConfigureInner({
   // select a slide and jump here to edit it.
   active: string | null;
   setActive: (ref: string | null) => void;
+  /** Duplicate the slide at this index. The copy lands directly below it and
+   *  carries its whole configuration; the caller returns the new slide_id so
+   *  it can be selected. */
+  onCopyChart: (index: number) => string | null;
   // Drag-reorder the report's slides in the left list (affects this report only).
   onReorder: (from: number, to: number) => void;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
@@ -2118,6 +2124,27 @@ function StepConfigureInner({
                 className="absolute right-2 top-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
               >
                 <InfoIcon className="size-4" />
+              </button>
+            )}
+            {/* Copy this slide. Here rather than in Select because what is
+                worth copying is the CONFIGURATION — the chart type, the split,
+                the sort, the colours — and this is the step where that exists.
+                Under the (i), on the picture, because it acts on the slide you
+                are looking at. */}
+            {!activeSpecial && (
+              <button
+                type="button"
+                title="Copy this slide"
+                onClick={() => {
+                  const id = onCopyChart(activeIndex);
+                  // Select the copy: otherwise the only visible effect is a new
+                  // thumbnail below, and the whole point is to change something
+                  // about it — the chart type, the split — straight away.
+                  if (id) setActive(id);
+                }}
+                className="absolute right-2 top-12 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
+              >
+                <CopyIcon className="size-4" />
               </button>
             )}
             {/* What this slide will NOT show. Sits beside the (i) rather than in

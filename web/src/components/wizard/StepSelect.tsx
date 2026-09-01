@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, InfoIcon, PlusIcon, CopyIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckIcon, CheckCheckIcon, SearchIcon, AlertCircleIcon, Layers2Icon, BarChart3Icon, XIcon, InfoIcon, PlusIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,7 +92,6 @@ export default function StepSelect({
   onToggle,
   onSelectMany,
   onRemoveChart,
-  onCopyChart,
   onAddSpecial,
   onAddComparison,
   onToggleExcluded,
@@ -107,8 +106,6 @@ export default function StepSelect({
   onToggle: (question: Question) => void;
   onSelectMany: (questions: Question[], select: boolean) => void;
   onRemoveChart: (index: number) => void;
-  /** Duplicate the slide at this index; the copy lands directly after it. */
-  onCopyChart: (index: number) => void;
   onAddSpecial: (type: string, afterRef?: string | null) => string | void;
   onAddComparison: (classifyingVar: string, qids: string[]) => void;
   onToggleExcluded: (index: number) => void;
@@ -156,13 +153,6 @@ export default function StepSelect({
     return m;
   }, [charts]);
 
-  /** Where this question's FIRST slide sits in the deck, or null if it has
-   *  none. The copy button needs a deck index, not a question — a question can
-   *  hold several slides and the copy is of one of them. */
-  const firstSlideIndex = useCallback(
-    (qid: string) => slidesByRef.get(qid)?.[0]?.index ?? null,
-    [slidesByRef]
-  );
 
   const sKey = (vars: string[]) => [...vars].sort().join(",");
   const activeSuggestions = (suggestions ?? []).filter(
@@ -575,20 +565,6 @@ export default function StepSelect({
                   checkbox includes or excludes a QUESTION; this shows what is
                   in it. Outside the toggle button so it never toggles the row. */}
               <div data-rowmenu className="absolute top-1/2 right-1.5 z-30 flex -translate-y-1/2 items-center gap-0.5">
-                {/* Copy this question's slide. Only offered once the question
-                    is IN the report: there is nothing to copy from otherwise,
-                    and a copy button on an unticked row would silently have to
-                    add the original first. */}
-                {isAdded && firstSlideIndex(q.qid) !== null && (
-                  <button
-                    type="button"
-                    title="Copy as new slide"
-                    onClick={() => onCopyChart(firstSlideIndex(q.qid)!)}
-                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <CopyIcon className="size-4" />
-                  </button>
-                )}
                 <button
                   type="button"
                   title="View details"

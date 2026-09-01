@@ -504,15 +504,18 @@ export default function ReportWizard({
    *  same sentence.
    */
   const copyChart = useCallback(
-    (index: number) => {
+    (index: number): string | null => {
+      const source = draftRef.current?.charts[index];
+      if (!source) return null;
+      const slideId = newSlideId();
       mutate((d) => {
-        const source = d.charts[index];
-        if (!source) return d;
-        const copy = { ...source, slide_id: newSlideId() };
+        const from = d.charts[index];
+        if (!from) return d;
         const charts = [...d.charts];
-        charts.splice(index + 1, 0, copy);
+        charts.splice(index + 1, 0, { ...from, slide_id: slideId });
         return { ...d, charts: normalizeSlots(charts) };
       });
+      return slideId;
     },
     [mutate]
   );
@@ -1464,7 +1467,6 @@ export default function ReportWizard({
             onAddComparison={addComparisonSection}
             onToggleExcluded={toggleChartExcluded}
             onRemoveChart={removeChart}
-            onCopyChart={copyChart}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}
@@ -1480,6 +1482,7 @@ export default function ReportWizard({
             aiPending={aiPending}
             active={active}
             setActive={setActive}
+            onCopyChart={copyChart}
             onReorder={(from, to) =>
               reorderCharts(includedToFull[from] ?? from, includedToFull[to] ?? to)
             }
