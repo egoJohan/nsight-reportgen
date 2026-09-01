@@ -61,7 +61,8 @@ class DataHiveObjectStore:
                 )
             raise AccessDenied(f"{path}: {resp.text[:200]}")
         if resp.status_code >= 400:
-            raise StoreError(f"{resp.status_code} on {path}: {resp.text[:200]}")
+            raise StoreError(f"{resp.status_code} on {path}: {resp.text[:200]}",
+                             status_code=resp.status_code)
 
     def put(self, auth: AuthContext, path: str, data: bytes,
             content_type: str, labels: Sequence[str] = ()) -> str:

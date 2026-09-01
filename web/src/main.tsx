@@ -6,6 +6,12 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 import App from "./App";
+import { MaintenanceScreen } from "@/components/MaintenanceScreen";
+import { installFetchProbe } from "@/lib/serviceHealth";
+
+// Before anything fetches: the very first request of a cold load is the
+// session check, and it must be able to raise the maintenance screen too.
+installFetchProbe();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +33,10 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <TooltipProvider>
           <App />
+          {/* Over everything: while the hive is away almost every query fails,
+              and one honest screen is better than a broken page behind a stack
+              of identical toasts. It removes itself when the hive returns. */}
+          <MaintenanceScreen />
           <Toaster position="bottom-right" richColors />
         </TooltipProvider>
       </BrowserRouter>

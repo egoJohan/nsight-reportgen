@@ -4,7 +4,8 @@ import contextlib
 import logging
 import os
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from reportbuilder.api.deps import get_client
@@ -22,6 +23,8 @@ from reportbuilder.api.routes_questions import questions_router
 from reportbuilder.api.routes_render import render_router
 from reportbuilder.api.routes_reports import reports_router
 from reportbuilder.api.routes_users import users_router
+from reportbuilder.api import readiness
+from reportbuilder.store.seam import StoreError
 from reportbuilder.export._cpu import workers_for
 from reportbuilder import cache_dirs
 from reportbuilder.export.cleanup import sweep_all
@@ -201,6 +204,60 @@ def create_app(client=None) -> FastAPI:
         `taskset`-pinned process or a one-core container answers 1.
         """
         return {"status": "ok", "render_concurrency": workers_for(4)}
+
+    @app.exception_handler(httpx.TransportError)
+    async def _hive_unreachable(_request, exc: httpx.TransportError):
+        """The hive did not answer at the transport level -> 503, not 500.
+
+        Connection refused, DNS failure, a read timeout: none of these are a
+        fault in this app, and answering 500 tells a client "I broke" when the
+        truth is "come back shortly". The browser uses the difference to decide
+        between an error toast and a maintenance screen, and a proxy or uptime
+        check reads it too.
+        """
+        log.warning("hive unreachable: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "The data service is unavailable right now. "
+                                "It may be restarting or upgrading."},
+        )
+
+    @app.exception_handler(StoreError)
+    async def _store_failed(_request, exc: StoreError):
+        """An upstream 5xx from the hive is unavailability, not our fault.
+
+        While the hive boots, its entrance answers while object reads still
+        return 500 — the exact window the maintenance screen exists for. A
+        StoreError with no upstream status came from our own handling and keeps
+        its 500, so a real bug cannot hide behind a maintenance screen.
+        """
+        upstream = getattr(exc, "status_code", None)
+        if upstream is not None and upstream >= 500:
+            log.warning("hive answered %s: %s", upstream, exc)
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "The data service is unavailable right now. "
+                                    "It may be restarting or upgrading."},
+            )
+        raise exc
+
+    @app.get("/readyz")
+    def readyz(response: Response) -> dict:
+        """Whether this deployment can actually serve — i.e. is the hive there.
+
+        Distinct from /health, which is this process's own liveness and says
+        "ok" while the hive is mid-upgrade and nothing can be loaded. The
+        browser asks this to decide whether to show a maintenance screen, and
+        keeps asking to know when to take it away, so the probe behind it is
+        cached (see readiness.CACHE_SECONDS).
+
+        Unauthenticated on purpose: it must answer while a session is dead, and
+        it discloses nothing but "the thing behind me is up".
+        """
+        body = readiness.status()
+        if not body["ok"]:
+            response.status_code = 503
+        return body
 
     # Include routers
     app.include_router(auth_router)

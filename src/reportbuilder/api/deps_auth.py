@@ -18,6 +18,13 @@ from reportbuilder.store.seam import AuthContext
 #: Routes that serve no customer data. Anything else must resolve a user — see
 #: tests/suite/integration/api/test_route_census.py.
 PUBLIC_ROUTES = frozenset({"/health", "/openapi.json", "/docs",
+                           # Whether this deployment can serve at all. Must
+                           # answer while a session is dead and while the hive
+                           # is away -- those are the moments it exists for --
+                           # and it discloses nothing but "the thing behind me
+                           # is up". The browser polls it to decide when to
+                           # take the maintenance screen away.
+                           "/readyz",
                            "/docs/oauth2-redirect", "/redoc",
                            "/auth/logout",
                            # Reachable with a signup TICKET and no account —

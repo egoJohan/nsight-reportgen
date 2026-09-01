@@ -37,6 +37,12 @@ def test_public_routes_are_few_and_named():
     """A growing public list is the failure this test exists to make visible."""
     assert PUBLIC_ROUTES == frozenset({
         "/health", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc",
+        # Whether the deployment can serve at all. Public because it must
+        # answer while a session is dead and while the hive is away — the two
+        # moments it exists for — and it discloses nothing beyond "up" or
+        # "not now". The browser polls it to know when to take the maintenance
+        # screen down.
+        "/readyz",
         "/auth/logout", "/signup/me", "/signup-requests",
         "/auth/login/{provider}", "/auth/callback/{provider}", "/auth/providers"})
 

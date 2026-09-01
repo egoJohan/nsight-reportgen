@@ -47,6 +47,10 @@ export default defineConfig({
     // reject (registered redirect_uris are matched byte-for-byte) — see
     // task-12b.
     proxy: {
+      // Readiness: the maintenance screen polls this while it is up, so it
+      // must reach the BACKEND. Left to the SPA catch-all it would be answered
+      // with index.html and parsed as JSON.
+      '/readyz': { target: backend, xfwd: true },
       '/cases': { target: backend, bypass: bypassHtmlNav, xfwd: true },
       '/customers': { target: backend, bypass: bypassHtmlNav, xfwd: true },
       '/settings': { target: backend, bypass: bypassHtmlNav, xfwd: true },

@@ -44,7 +44,18 @@ class ObjectInfo:
 
 
 class StoreError(Exception):
-    """Base for seam failures."""
+    """Base for seam failures.
+
+    `status_code` is the status the STORE answered with, when the failure came
+    from upstream rather than from us. It is what lets the API tell "the hive is
+    unwell, come back shortly" (503) apart from "we mishandled something" (500)
+    — a distinction the browser uses to choose between a maintenance screen and
+    an error, and one that a message string alone could only be guessed from.
+    """
+
+    def __init__(self, *args, status_code: int | None = None):
+        super().__init__(*args)
+        self.status_code = status_code
 
 
 class NotFound(StoreError):

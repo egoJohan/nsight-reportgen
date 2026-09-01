@@ -1,4 +1,5 @@
 import { Routes, Route } from "react-router-dom";
+import NotFoundPage from "@/pages/NotFoundPage";
 import AppShell from "@/components/layout/AppShell";
 import LoginPage from "@/pages/LoginPage";
 import RequestAccessPage from "@/pages/RequestAccessPage";
@@ -29,6 +30,11 @@ export default function App() {
         {/* The sidebar has linked here all along; this is the page. */}
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
+      {/* Anything else, OUTSIDE the shell: a wrong address is not a page of the
+          app, and framing it in the sidebar and breadcrumb of a section the
+          user never reached reads as "this section is broken" rather than
+          "that link is wrong". Full screen, with one way back. */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
