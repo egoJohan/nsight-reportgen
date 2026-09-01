@@ -486,6 +486,37 @@ export default function ReportWizard({
     [mutate]
   );
 
+  /** Copy a slide, landing the copy directly after the original.
+   *
+   *  The point is a SECOND view of the same question — the same result split by
+   *  another variable, or the same data as a different chart type — without
+   *  rebuilding its settings by hand. So the copy carries everything: statistic,
+   *  classifying variable, sort, colours, element toggles, the lot.
+   *
+   *  It gets a new slide_id (the deck is keyed by it; a duplicate id would make
+   *  two slides share one rendered picture) and lands NEXT to its original
+   *  rather than at the end, because a copy made to compare against something is
+   *  useless three screens away from it.
+   *
+   *  The generated headline is copied too, along with the key that says which
+   *  data it was written about. If the copy is then changed the key stops
+   *  matching and it regenerates; if it is not, no model is asked twice for the
+   *  same sentence.
+   */
+  const copyChart = useCallback(
+    (index: number) => {
+      mutate((d) => {
+        const source = d.charts[index];
+        if (!source) return d;
+        const copy = { ...source, slide_id: newSlideId() };
+        const charts = [...d.charts];
+        charts.splice(index + 1, 0, copy);
+        return { ...d, charts: normalizeSlots(charts) };
+      });
+    },
+    [mutate]
+  );
+
   // Tick/untick a slide that has no catalog row of its own (a special slide).
   // Unticking keeps the chart — and its bullets — and only leaves it out of the deck.
   const toggleChartExcluded = useCallback(
@@ -1433,6 +1464,7 @@ export default function ReportWizard({
             onAddComparison={addComparisonSection}
             onToggleExcluded={toggleChartExcluded}
             onRemoveChart={removeChart}
+            onCopyChart={copyChart}
             grouping={draft.grouping ?? { groups: [], singles: [] }}
             onGroupingChange={(g) => mutate((d) => ({ ...d, grouping: g }))}
             onPruneRefs={pruneToValidRefs}
