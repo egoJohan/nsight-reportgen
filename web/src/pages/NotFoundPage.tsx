@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import art404 from "@/assets/error_404.webp";
 
@@ -11,6 +11,7 @@ import art404 from "@/assets/error_404.webp";
  */
 export default function NotFoundPage() {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-8">
       <div className="max-w-lg space-y-4 text-center">
@@ -24,9 +25,7 @@ export default function NotFoundPage() {
         <p className="break-all font-mono text-xs text-muted-foreground">
           {pathname}
         </p>
-        <Button asChild>
-          <Link to="/">Takaisin etusivulle</Link>
-        </Button>
+        <Button onClick={() => navigate("/")}>Takaisin etusivulle</Button>
       </div>
     </div>
   );
