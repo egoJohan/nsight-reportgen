@@ -476,8 +476,15 @@ export function noteWanted(slideId: string, fingerprint: string, hasImage: boole
     slideId,
     detail: `fp=${short(fingerprint)} ${hasImage ? "hit" : "MISS"}`,
   });
+  // Counted per (slide, FINGERPRINT), not per slide. Design, the deck grid and
+  // the thumbnails all watch the same slide and do not necessarily compute the
+  // same fingerprint, so a hit from one used to clear the count another was
+  // accumulating: the bound never tripped, the slide was queued again on every
+  // render, and the result was a UI that flickered and a slide stuck for ever
+  // on "Rendering preview".
+  const seen = `${slideId}|${fingerprint}`;
   if (hasImage) {
-    blankSince.delete(slideId);
+    blankSince.delete(seen);
     return;
   }
   // From here the screen is blank and says so. Whether that is because nothing
@@ -486,7 +493,7 @@ export function noteWanted(slideId: string, fingerprint: string, hasImage: boole
   // — the answer is the same, and none of those need to be told apart to give
   // it. What must not happen is what happened: nothing.
   if (queued.has(slideId) || running.has(slideId)) return;  // already being made
-  const attempts = blankSince.get(slideId) ?? 0;
+  const attempts = blankSince.get(seen) ?? 0;
   if (attempts >= BLANK_ATTEMPTS) {
     // Asked for often enough. Stop, and say so where the author will see it —
     // a slide that cannot be drawn is a fact they can act on; a slide that is
@@ -499,7 +506,7 @@ export function noteWanted(slideId: string, fingerprint: string, hasImage: boole
     }
     return;
   }
-  blankSince.set(slideId, attempts + 1);
+  blankSince.set(seen, attempts + 1);
   say("blank-on-screen", {
     slideId,
     detail: `nothing queued and no picture; attempt ${attempts + 1}`,
@@ -527,7 +534,9 @@ export function redraw(slideId: string) {
   // Everything that would otherwise decline to do the work: the count of times
   // the screen has reported this slide blank, the retries already spent on each
   // producer, and any failed status standing against it.
-  blankSince.delete(slideId);
+  for (const key of [...blankSince.keys()]) {
+    if (key.startsWith(`${slideId}|`)) blankSince.delete(key);
+  }
   for (const key of [...retried.keys()]) {
     if (key.startsWith(`${slideId}|`)) retried.delete(key);
   }

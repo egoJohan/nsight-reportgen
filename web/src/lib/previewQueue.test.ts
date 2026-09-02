@@ -1004,3 +1004,32 @@ describe("redrawing a slide the author asks to try again", () => {
       expect(runs).toBe(1);
     });
 });
+
+describe("more than one component watching the same slide", () => {
+  it("does not redraw for ever when one observer has a picture and another does not",
+    async () => {
+      // Design, the deck grid and the thumbnails all watch the same slide, and
+      // they do not necessarily compute the same fingerprint. A hit from one
+      // must not clear the count the other is accumulating, or the bound never
+      // trips: the slide is queued again on every render, and both the flicker
+      // and a slide stuck on "Rendering preview" follow.
+      put("s1");
+      let runs = 0;
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-a",
+          storedFingerprint: () => "fp-a",
+          run: async () => {
+            runs += 1;
+          },
+        }),
+      ]);
+      for (let i = 0; i < 12; i += 1) {
+        q.noteWanted("s1", "fp-b", false);   // the pane that has nothing
+        q.noteWanted("s1", "fp-a", true);    // the grid, which does
+        await q.__drainForTest();
+      }
+      // Bounded, and nowhere near once per render.
+      expect(runs).toBeLessThanOrEqual(3);
+    });
+});
