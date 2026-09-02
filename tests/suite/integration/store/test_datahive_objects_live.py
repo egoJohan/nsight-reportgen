@@ -11,6 +11,7 @@ import os
 import pathlib
 import uuid
 
+import httpx
 import pytest
 
 from reportbuilder.store import paths as P
@@ -25,7 +26,31 @@ def _creds():
     p = pathlib.Path(CREDS)
     if not p.exists():
         pytest.skip(f"no dev-hive creds at {CREDS}")
-    return json.loads(p.read_text())
+    creds = json.loads(p.read_text())
+    _require_reachable(creds)
+    return creds
+
+
+def _require_reachable(creds) -> None:
+    """Skip unless the hive these creds name is actually answering them.
+
+    Absent creds already skip; a hive that is down, moved or no longer accepts
+    the token is the same situation and must skip too. It did not: the file
+    outlived the hive it was written for (a retired instance on another port),
+    so every test here failed with a connection error and read as a product
+    regression — the failure had to be chased through a baseline worktree before
+    it was clear no product code was involved.
+    """
+    url = creds.get("base_url", "")
+    try:
+        resp = httpx.get(f"{url}/api/v1/objects/list", params={"path_prefix": ""},
+                         headers={"Authorization": f"Bearer {creds.get('bearer', '')}"},
+                         timeout=5.0)
+    except httpx.HTTPError as exc:
+        pytest.skip(f"dev hive at {url} is unreachable: {exc}")
+    if resp.status_code in (401, 403):
+        pytest.skip(f"dev hive at {url} refuses these creds ({resp.status_code}) — "
+                    f"{CREDS} is stale")
 
 
 @pytest.fixture(scope="module")
