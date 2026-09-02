@@ -120,6 +120,15 @@ def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     return not _is_coded_string(nn)
 
 
+def _numeric(value: object) -> bool:
+    """Whether a SAV code is a number. String variables have string codes."""
+    try:
+        float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _user_missing(ranges: list | None,
                   code_of: dict[str, float] | None = None) -> frozenset[float]:
     """The user-declared missing CODES of one variable, as floats.
@@ -366,17 +375,33 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
         # with intermediate points as codes 6–8) rendered semantically jumbled under
         # "data order". Digit-labelled rating scales are still re-ordered by their parsed
         # point downstream; this only fixes text-labelled scales.
+        declared = value_labels.get(name, {})
         vls = tuple(
             ValueLabel(float(code), str(lbl))
-            for code, lbl in value_labels.get(name, {}).items()
+            for code, lbl in declared.items() if _numeric(code)
         )
+        # SPSS lets a STRING variable carry value labels, and then the codes are
+        # strings — {"K": "Kyllä"}. float() on those raised ValueError and the
+        # file would not load at all, the same failure as a string missing value.
+        string_labels = {str(code).strip(): str(lbl)
+                         for code, lbl in declared.items() if not _numeric(code)}
         measurement = _measurement(measures.get(name, ""))
         # Set when a string column is converted to codes below: the SAV may
         # declare its missing values as strings, which must follow the same map.
         code_of: dict[str, float] | None = None
+        if string_labels:
+            # A label written against a string value is the author saying this
+            # column is categorical, whatever its shape — so it is coded like any
+            # other coded string, and the SAV's own labels are what we show. A
+            # value the SAV left unlabelled keeps its raw text as its label.
+            measurement = "categorical"
+            codes, pairs = _codes_for_coded_string(df[name])
+            df[name] = codes
+            vls = tuple(ValueLabel(code, string_labels.get(cat, cat)) for code, cat in pairs)
+            code_of = {cat: code for code, cat in pairs}
         # Task G.1: classify open-ended free-text variables as measurement "text"
         # so questions built from them can be flagged non-chartable downstream.
-        if _is_text_variable(df[name], vls):
+        elif _is_text_variable(df[name], vls):
             measurement = "text"
         elif not vls and _is_coded_string(df[name]):
             # A coded STRING column is a categorical whatever the SAV's measure

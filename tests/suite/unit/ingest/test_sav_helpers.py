@@ -419,3 +419,52 @@ def test_read_sav_loads_free_text_with_a_string_missing_value(tmp_path):
 
     assert model.variables["open1"].measurement == "text"
     assert model.variables["open1"].missing_values == frozenset()
+
+
+# ---- STRING value labels ----------------------------------------------------
+#
+# SPSS also lets a STRING variable carry value labels, and then the CODES are
+# strings: {"K": "Kyllä"}. Building ValueLabel(float(code), ...) from those raised
+# ValueError and stopped the file loading, the same family of failure as a string
+# missing value. An explicit label is the author declaring the column categorical,
+# so it is coded like any other coded string and the SAV's labels are kept.
+
+def test_read_sav_loads_a_string_variable_that_has_value_labels(tmp_path):
+    df = pd.DataFrame({"q1": ["K", "E", "K", "E", "K"] * 6})
+    path = tmp_path / "string_labels.sav"
+    pyreadstat.write_sav(
+        df, str(path),
+        column_labels={"q1": "Suosittelisitko?"},
+        variable_value_labels={"q1": {"K": "Kyllä", "E": "Ei"}},
+    )
+
+    frame, model = read_sav(str(path))
+
+    q1 = model.variables["q1"]
+    assert q1.measurement == "categorical"
+    assert {vl.label for vl in q1.value_labels} == {"Kyllä", "Ei"}
+    # Coded: every consumer downstream assumes numeric codes.
+    assert all(isinstance(vl.value, float) for vl in q1.value_labels)
+    assert set(frame["q1"].dropna()) == {vl.value for vl in q1.value_labels}
+
+
+def test_read_sav_keeps_the_raw_value_when_a_string_code_has_no_label(tmp_path):
+    df = pd.DataFrame({"q1": ["K", "E", "X"] * 12})
+    path = tmp_path / "partial_labels.sav"
+    pyreadstat.write_sav(df, str(path),
+                         variable_value_labels={"q1": {"K": "Kyllä", "E": "Ei"}})
+
+    frame, model = read_sav(str(path))
+
+    assert {vl.label for vl in model.variables["q1"].value_labels} == {"Kyllä", "Ei", "X"}
+
+
+def test_read_sav_still_reads_numeric_value_labels(tmp_path):
+    df = pd.DataFrame({"q1": [1.0, 2.0, 1.0] * 12})
+    path = tmp_path / "numeric_labels.sav"
+    pyreadstat.write_sav(df, str(path), variable_value_labels={"q1": {1: "Yes", 2: "No"}})
+
+    frame, model = read_sav(str(path))
+
+    q1 = model.variables["q1"]
+    assert {(vl.value, vl.label) for vl in q1.value_labels} == {(1.0, "Yes"), (2.0, "No")}
