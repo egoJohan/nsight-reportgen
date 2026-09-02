@@ -1072,6 +1072,7 @@ declare global {
       passes: (n: number) => string;
       renders: (n: number) => string;
       debug: (on?: boolean) => string;
+      redraw: (slideId: string) => void;
     };
   }
 }
@@ -1080,6 +1081,10 @@ if (typeof window !== "undefined") {
   window.__previewQueue = {
     state: snapshot,
     trace: getTrace,
+    // The same thing the button does, for a slide you can name but cannot
+    // click — and for asking someone on a call to try it without walking them
+    // to the right pane first.
+    redraw,
     table: () => {
       // eslint-disable-next-line no-console
       console.table(
