@@ -71,12 +71,15 @@ def test_live_shorten_labels_smoke():
         assert isinstance(full, str) and isinstance(short, str)
 
 
-def test_live_route_slide_title_smoke(client_mock, monkeypatch):
-    """End-to-end through the route with the REAL egoHive seam (no patching)."""
-    import reportbuilder.api.routes_ai as R
+def test_live_route_slide_title_smoke(client_mock):
+    """End-to-end through the route with the REAL egoHive seam (no patching).
 
-    # Ensure any earlier monkeypatch in the process didn't leave a fake in place.
-    monkeypatch.setattr(R, "datahive_chat", egohive_chat)
+    Nothing is installed here on purpose: the route reaches the model through
+    `ai.text` and the purpose-bound wrappers, and pytest's monkeypatch undoes
+    itself per test, so there is no stale fake to guard against. The guard that
+    used to stand here pinned `routes_ai.datahive_chat`, which the route stopped
+    holding, and only ever raised AttributeError.
+    """
     resp = client_mock.post(f"/materials/{client_mock.material_id}/ai/slide-title", json={"question_ref": "q1"})
     if resp.status_code == 503:
         pytest.skip("egoHive unreachable (route returned 503)")

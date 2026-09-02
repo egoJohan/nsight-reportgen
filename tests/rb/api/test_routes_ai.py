@@ -1,7 +1,7 @@
 """Tests for the AI text routes (C.4): /ai/slide-title and /ai/short-labels.
 
 All offline: egoHive is replaced by a fake via monkeypatching
-``reportbuilder.api.routes_ai.datahive_chat`` (looked up at call time), and the
+``reportbuilder.ai.masked_chat.datahive_chat`` (looked up at call time), and the
 reference corpus is patched to a tiny in-memory one.
 
 Every route here is `require_material` guarded: the material_id in the path is
@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reportbuilder.ai.reference import ReferenceLabels
+from reportbuilder.ai.text import TITLE_END_MARK
 from reportbuilder.testing.fixtures import synthetic_sav_bytes
 from nsight.agent.egohive_client import EgoHiveError
 
@@ -31,9 +32,11 @@ def _client_with_material(rb_wire) -> TestClient:
 # /ai/slide-title
 # --------------------------------------------------------------------------- #
 def test_slide_title_returns_title(monkeypatch, rb_wire) -> None:
+    # The mark is how a headline says it arrived whole; without it the reply is
+    # treated as cut short and the question text is used instead.
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat",
-        lambda prompt, **kw: "Tyytyväisyys on korkealla tasolla",
+        "reportbuilder.ai.masked_chat.datahive_chat",
+        lambda prompt, **kw: f"Tyytyväisyys on korkealla tasolla {TITLE_END_MARK}",
     )
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/slide-title", json={"question_ref": "q1"})
@@ -45,7 +48,7 @@ def test_slide_title_egohive_error_returns_503(monkeypatch, rb_wire) -> None:
     def boom(prompt, **kw):
         raise EgoHiveError("egohive down")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/slide-title", json={"question_ref": "q1"})
     assert resp.status_code == 503, resp.text
@@ -58,7 +61,7 @@ def test_slide_title_empty_findings_falls_back(monkeypatch, rb_wire) -> None:
     def boom(*a, **k):
         raise AssertionError("egohive_chat must not be called when findings are empty")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     monkeypatch.setattr(
         "reportbuilder.api.routes_ai._findings_from_series", lambda series, n: []
     )
@@ -70,7 +73,7 @@ def test_slide_title_empty_findings_falls_back(monkeypatch, rb_wire) -> None:
 
 def test_slide_title_unknown_question_returns_404(monkeypatch, rb_wire) -> None:
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat", lambda prompt, **kw: "x"
+        "reportbuilder.ai.masked_chat.datahive_chat", lambda prompt, **kw: "x"
     )
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/slide-title", json={"question_ref": "nope"})
@@ -86,7 +89,7 @@ def test_short_labels_returns_overrides(monkeypatch, rb_wire) -> None:
         lambda: ReferenceLabels(labels=[], titles=[]),
     )
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat",
+        "reportbuilder.ai.masked_chat.datahive_chat",
         lambda prompt, **kw: "1. Tyytyväiset\n2. Tyytymättömät",
     )
     client = _client_with_material(rb_wire)
@@ -114,7 +117,7 @@ def test_short_labels_from_question_ref(monkeypatch, rb_wire) -> None:
         lambda: ReferenceLabels(labels=[], titles=[]),
     )
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat",
+        "reportbuilder.ai.masked_chat.datahive_chat",
         lambda prompt, **kw: "1. Kyllä\n2. Ei",
     )
     client = _client_with_material(rb_wire)
@@ -133,7 +136,7 @@ def test_short_labels_ai_unreachable_degrades_to_200(monkeypatch, rb_wire) -> No
     def boom(prompt, **kw):
         raise EgoHiveError("down")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     client = _client_with_material(rb_wire)
     resp = client.post(
         f"/materials/{client.material_id}/ai/short-labels", json={"categories": ["Jokin otsikko"]}
@@ -168,7 +171,7 @@ def test_short_labels_requires_categories_or_question_ref(rb_wire) -> None:
 # --------------------------------------------------------------------------- #
 def test_overview_returns_bullets(monkeypatch, rb_wire) -> None:
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat",
+        "reportbuilder.ai.masked_chat.datahive_chat",
         lambda prompt, **kw: "- Tutkimus kartoitti asiakastyytyväisyyttä\n- Vastaajia oli runsaasti",
     )
     client = _client_with_material(rb_wire)
@@ -184,7 +187,7 @@ def test_overview_egohive_error_returns_503(monkeypatch, rb_wire) -> None:
     def boom(prompt, **kw):
         raise EgoHiveError("down")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/overview", json={})
     assert resp.status_code == 503
@@ -192,7 +195,7 @@ def test_overview_egohive_error_returns_503(monkeypatch, rb_wire) -> None:
 
 def test_conclusion_returns_bullets(monkeypatch, rb_wire) -> None:
     monkeypatch.setattr(
-        "reportbuilder.api.routes_ai.datahive_chat",
+        "reportbuilder.ai.masked_chat.datahive_chat",
         lambda prompt, **kw: "1. Tyytyväisyys on korkealla\n2. Suosittelu yleistä",
     )
     client = _client_with_material(rb_wire)
@@ -206,7 +209,7 @@ def test_conclusion_no_findings_returns_empty(monkeypatch, rb_wire) -> None:
     def boom(*a, **k):
         raise AssertionError("egohive must not be called without findings")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/conclusion", json={"question_refs": ["nope"]})
     assert resp.status_code == 200, resp.text
@@ -220,7 +223,7 @@ def test_demographics_picks_and_returns_bullets(monkeypatch, rb_wire) -> None:
             return "q1"
         return "- Vastaajista enemmistö on tyytyväisiä"
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", chat)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", chat)
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/demographics", json={})
     assert resp.status_code == 200, resp.text
@@ -233,7 +236,7 @@ def test_demographics_egohive_error_returns_503(monkeypatch, rb_wire) -> None:
     def boom(prompt, **kw):
         raise EgoHiveError("down")
 
-    monkeypatch.setattr("reportbuilder.api.routes_ai.datahive_chat", boom)
+    monkeypatch.setattr("reportbuilder.ai.masked_chat.datahive_chat", boom)
     client = _client_with_material(rb_wire)
     resp = client.post(f"/materials/{client.material_id}/ai/demographics", json={})
     assert resp.status_code == 503
