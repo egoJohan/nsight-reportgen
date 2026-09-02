@@ -185,7 +185,52 @@ let requeue = new Set<string>();
 /** (slide, producer, fingerprint) triples that have already had their one
  *  retry after a failure. Bounds the retry to exactly one per attempt, and
  *  is cleared with the rest of the session state. */
-let retried = new Set<string>();
+let retried = new Map<string, number>();
+/** Retries scheduled but not yet due. Counted as outstanding work, or the queue
+ *  would call itself idle in the gap between a failure and its next attempt and
+ *  anything waiting for the deck would stop early. */
+let pendingRetries = 0;
+
+/** How long before the next attempt at a failure that may pass, in ms.
+ *
+ *  The spacing IS the fix. A 502 returns in milliseconds, so retrying at once
+ *  spends every attempt inside the same outage: staging logged 116 failed
+ *  renders in 7 seconds — 16-19 per second, against about one per second when
+ *  healthy — while the backend was down for six. Both of a slide's attempts
+ *  landed in that window, and it was then marked failed for good. The last step
+ *  outlasts any deploy we do, so a deck rides one out untouched. */
+const RETRY_BACKOFF_MS = [500, 1500, 4000, 10000, 20000];
+
+/** The status an error carries, if any. Read by shape rather than by importing
+ *  `ApiError`, so the queue stays independent of the API layer. */
+function errorStatus(e: unknown): number | null {
+  const s = (e as { status?: unknown } | null)?.status;
+  return typeof s === "number" ? s : null;
+}
+
+/** Is this failure worth waiting out?
+ *
+ *  5xx, 408 and 429 are the service saying "not now"; a fetch that never landed
+ *  (TypeError — the browser's shape for a dead connection) says it too. A 4xx,
+ *  or a bug in a producer, will fail identically however long we wait, and
+ *  keeps the single retry it always had. */
+function isTransient(e: unknown): boolean {
+  const status = errorStatus(e);
+  if (status !== null) return status >= 500 || status === 408 || status === 429;
+  const name = (e as { name?: unknown } | null)?.name;
+  const msg = e instanceof Error ? e.message : "";
+  return name === "TypeError" || /failed to fetch|networkerror|load failed/i.test(msg);
+}
+/** Slides a mounted component says it has no picture for, and how many times it
+ *  has said so. Cleared the moment one reports a picture. */
+let blankSince = new Map<string, number>();
+/** Slides whose next pass must run whatever its producers claim is stored. */
+let forceRedraw = new Set<string>();
+/** How many times the screen may say "still blank" before we stop trying and
+ *  show the author a failure instead. Three, because each attempt is a full
+ *  render: enough to ride out a transient cause, few enough that a slide which
+ *  genuinely cannot be drawn does not render for ever. */
+const BLANK_ATTEMPTS = 3;
 let active = 0;
 /** How many slides to draw at once.
  *
@@ -278,7 +323,7 @@ export function subscribe(fn: () => void): () => void {
 
 /** Any producer running or waiting to run. Drives the wizard's save rule. */
 export function isBusy(): boolean {
-  return active > 0 || queue.length > 0;
+  return active > 0 || queue.length > 0 || pendingRetries > 0;
 }
 
 /** This slide's statuses as a stable STRING.
@@ -334,7 +379,10 @@ export function reset(reportId: string) {
   queue = [];
   queued = new Set();
   requeue = new Set();
-  retried = new Set();
+  retried = new Map();
+  pendingRetries = 0;
+  blankSince = new Map();
+  forceRedraw = new Set();
   // In-flight bookkeeping too. A producer already awaiting cannot be recalled,
   // but its result is abandoned by the generation bump above — so counting it
   // as running afterwards makes isBusy() report the PREVIOUS session's work.
@@ -428,6 +476,36 @@ export function noteWanted(slideId: string, fingerprint: string, hasImage: boole
     slideId,
     detail: `fp=${short(fingerprint)} ${hasImage ? "hit" : "MISS"}`,
   });
+  if (hasImage) {
+    blankSince.delete(slideId);
+    return;
+  }
+  // From here the screen is blank and says so. Whether that is because nothing
+  // was ever asked for, because a render failed and was given up on, because
+  // the picture went into a key nothing reads, or because the cache entry left
+  // — the answer is the same, and none of those need to be told apart to give
+  // it. What must not happen is what happened: nothing.
+  if (queued.has(slideId) || running.has(slideId)) return;  // already being made
+  const attempts = blankSince.get(slideId) ?? 0;
+  if (attempts >= BLANK_ATTEMPTS) {
+    // Asked for often enough. Stop, and say so where the author will see it —
+    // a slide that cannot be drawn is a fact they can act on; a slide that is
+    // silently empty for ever is the fault being reported.
+    if (statusOf(slideId).chart !== "failed") {
+      setStatus(slideId, "chart", "failed", fingerprint,
+                new Error("This slide's picture could not be produced. "
+                          + "Reopening the report tries again."));
+      notify();
+    }
+    return;
+  }
+  blankSince.set(slideId, attempts + 1);
+  say("blank-on-screen", {
+    slideId,
+    detail: `nothing queued and no picture; attempt ${attempts + 1}`,
+  });
+  forceRedraw.add(slideId);
+  enqueue(slideId);
 }
 
 /** The recorded sequence. */
@@ -549,9 +627,14 @@ function isCancellation(e: unknown): boolean {
   );
 }
 
-function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">): ProducerCtx | null {
+function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">,
+                force = false): ProducerCtx | null {
   const fingerprint = p.fingerprint(base);
   const c: ProducerCtx = { ...base, fingerprint };
+  // `force` is the screen contradicting the bookkeeping: a component is showing
+  // this slide and has no picture for it. Whatever a producer believes it has
+  // already stored, the only evidence that counts is on screen, and it says no.
+  if (force) return c;
   const stored = p.storedFingerprint(c);
   return stored === null || stored !== fingerprint ? c : null;
 }
@@ -559,6 +642,10 @@ function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">): ProducerCt
 // ── The one function ─────────────────────────────────────────────────────────
 
 async function producePreview(slideId: string): Promise<void> {
+  /** Consumed here, not at the end: the tail re-check must judge this slide by
+   *  the ordinary rules, or a forced pass would find itself needed again and
+   *  queue itself for ever. */
+  const force = forceRedraw.delete(slideId);
   /** What each producer was asked to satisfy on this pass. */
   const handled = new Map<ProducerId, string>();
   const startedUnder = contextGeneration;
@@ -574,7 +661,7 @@ async function producePreview(slideId: string): Promise<void> {
       notify();
       return;
     }
-    const c = needed(p, { slideId, chart, ctx: renderContext });
+    const c = needed(p, { slideId, chart, ctx: renderContext }, force);
     if (!c) {
       // Not needed after all: clear the pending mark set at enqueue, or the
       // slide would sit showing "updating" for work nobody is going to do.
@@ -649,11 +736,33 @@ async function producePreview(slideId: string): Promise<void> {
       // slide fails exactly twice and then stops rather than looping. It goes
       // to the BACK of the queue, which is also the delay.
       const attempt = `${slideId}|${p.id}|${c.fingerprint}`;
-      if (!retried.has(attempt)) {
-        retried.add(attempt);
-        say("retry", { slideId, producer: p.id, detail: "first failure; trying once more" });
+      const made = retried.get(attempt) ?? 0;
+      // A failure that may pass is waited out; one that says the request itself
+      // is wrong gets the single retry it always had.
+      const allowed = isTransient(e) ? RETRY_BACKOFF_MS.length : 1;
+      if (made < allowed) {
+        retried.set(attempt, made + 1);
+        const delay = isTransient(e)
+          ? RETRY_BACKOFF_MS[Math.min(made, RETRY_BACKOFF_MS.length - 1)]
+          : 0;
+        say("retry", {
+          slideId,
+          producer: p.id,
+          detail: `attempt ${made + 1} of ${allowed}, in ${delay}ms`,
+        });
         setStatus(slideId, p.id, "pending", null);
-        requeueAfterRun(slideId, "one retry after a failure");
+        if (delay > 0) {
+          // Held as outstanding work across the wait, so nothing concludes the
+          // deck is finished while a slide is between attempts.
+          pendingRetries += 1;
+          setTimeout(() => {
+            pendingRetries -= 1;
+            if (currentReportId) enqueue(slideId);
+            pump();
+          }, delay);
+        } else {
+          requeueAfterRun(slideId, "one retry after a failure");
+        }
         // A producer that fails soft does not stop the slide — a headline
         // nobody could write must not also cost the slide its picture for this
         // pass. Only an "abort" producer ends it, which is what that flag
@@ -747,7 +856,7 @@ export function enqueue(slideId: string) {
   // so "the image is up to date" is only true here if nothing before it is
   // going to run. Any needed, all pending; none needed, no queue at all.
   const chart = readSlide(slideId);
-  if (chart && PRODUCERS.length
+  if (chart && PRODUCERS.length && !forceRedraw.has(slideId)
       && !PRODUCERS.some((p) => needed(p, { slideId, chart, ctx: renderContext }))) {
     say("nothing-to-do", { slideId });
     return;
@@ -898,7 +1007,10 @@ export function __resetForTest() {
   queued = new Set();
   running = new Set();
   requeue = new Set();
-  retried = new Set();
+  retried = new Map();
+  pendingRetries = 0;
+  blankSince = new Map();
+  forceRedraw = new Set();
   active = 0;
   focused = "";
   contextGeneration = 0;
