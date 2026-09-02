@@ -87,6 +87,21 @@ export async function probeReady(): Promise<boolean> {
 }
 
 
+/** One readiness check standing between a failed request and the outage screen.
+ *
+ *  Deduplicated: a deck failing on thirty-one slides asks once, not thirty-one
+ *  times, and nothing is asked at all while a screen is already up. */
+let confirming = false;
+async function confirmOutage(url: string, kind: Outage): Promise<void> {
+  if (confirming || down !== null) return;
+  confirming = true;
+  try {
+    if (!(await probeReady())) reportUnreachable(url, kind);
+  } finally {
+    confirming = false;
+  }
+}
+
 /** Watch every request the app makes, from one place.
  *
  *  Detection used to live in `json()` in api.ts, which most calls pass
@@ -128,8 +143,18 @@ export function installFetchProbe(): void {
           // 503/502/504 are "the service is away, come back" — an upgrade, a
           // restart. A 500 is "something broke", which waiting does not fix,
           // and telling the user to wait for it would be a false promise.
-          reportUnreachable(res.url || url,
-                            res.status === 500 ? "error" : "maintenance");
+          //
+          // ASKED FIRST, never assumed. A 5xx from one endpoint usually means
+          // that one thing failed, not that the service is gone, and covering
+          // the screen for it is wrong twice: it hides an app that still works,
+          // and it cannot stay up, because the readiness poll behind the screen
+          // finds the service healthy and clears it immediately. On 2026-09-02
+          // the hive lost DNS and could not reach the model; every headline
+          // answered 503 while everything else was fine, and the author got no
+          // error page — they got the screen flashing up and vanishing, once
+          // per slide, too briefly to read.
+          void confirmOutage(res.url || url,
+                             res.status === 500 ? "error" : "maintenance");
         } else if (res.ok) {
           reportReachable();
         }
