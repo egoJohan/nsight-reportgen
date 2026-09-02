@@ -1077,7 +1077,13 @@ export const api = {
           } catch {
             // not JSON — keep status text
           }
-          throw new Error(detail);
+          // ApiError, not Error: the STATUS is what the preview queue reads to
+          // decide whether a failure is worth waiting out. A bare Error carries
+          // only the message, so a 503 from the render host — the case the
+          // spaced retries exist for — was read as permanent and given one
+          // immediate retry. Measured against the running app before this:
+          // 31 slides, 63 attempts, all inside ten seconds, then silence.
+          throw new ApiError(res.status, detail);
         }
         return { blob: await res.blob(), titleMeta: readTitleMeta(res.headers) };
       })();
