@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as q from "./previewQueue";
+import { ApiError } from "./api";
 import type { ChartSpec } from "./api";
 import type { Producer } from "./previewQueue";
 
@@ -802,4 +803,233 @@ describe("several edits before the render finishes", () => {
     // Every slide ends up drawn at the title it finally has.
     for (let i = 1; i <= 8; i++) expect(log).toContain(`s${i}:t${i}`);
   });
+});
+
+describe("a transient outage must not leave a slide blank for ever", () => {
+  // The reported fault: "sometimes the preview is not rendered at all".
+  //
+  // This is a TIMING failure, which is why it is written against the clock
+  // rather than against a count of attempts. A 502 comes back in milliseconds,
+  // so a slide's first attempt and its one retry both land inside the same few
+  // seconds of downtime; the slide is then marked failed for that fingerprint,
+  // and nothing re-queues on a fingerprint that has not moved, so it stays
+  // blank until the author edits it or reopens the report.
+  //
+  // Staging shows the shape exactly: 116 failed renders inside 7 seconds,
+  // 16-19 per second, where a healthy deck renders about one per second. The
+  // backend was down for ~6s while it was redeployed; every request that
+  // reached it before and after returned 200 (227/227).
+  //
+  // A fix that merely retries MORE times, still immediately, would satisfy a
+  // count-based test and change nothing here: the attempts would still all be
+  // spent inside the outage.
+  const OUTAGE_MS = 6000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("draws every slide of a deck once the outage ends", async () => {
+    ["s1", "s2", "s3"].forEach((id) => put(id));
+    const startedAt = Date.now();
+    const attemptsAt: number[] = [];
+    q.__setProducersForTest([
+      producer("chart", {
+        run: async () => {
+          const elapsed = Date.now() - startedAt;
+          attemptsAt.push(elapsed);
+          // Exactly what the browser sees during a redeploy: nothing is
+          // listening, so the proxy answers at once.
+          if (elapsed < OUTAGE_MS) throw new ApiError(502, "502 Bad Gateway");
+        },
+      }),
+    ]);
+
+    ["s1", "s2", "s3"].forEach((id) => q.enqueue(id));
+    // A minute of wall clock, with every timer and promise the queue schedules
+    // allowed to run. Far longer than the outage: if the deck is ever going to
+    // recover by itself, it has had every chance.
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(q.statusOf("s1").chart).toBe("done");
+    expect(q.statusOf("s2").chart).toBe("done");
+    expect(q.statusOf("s3").chart).toBe("done");
+    // And it must have kept trying ACROSS the outage, not spent everything
+    // inside it — the point of the whole fix.
+    expect(Math.max(...attemptsAt)).toBeGreaterThanOrEqual(OUTAGE_MS);
+  });
+
+  it("gives up on a slide the server refuses to draw, rather than spinning", async () => {
+    put("s1");
+    let attempts = 0;
+    q.__setProducersForTest([
+      producer("chart", {
+        run: async () => {
+          attempts += 1;
+          throw new ApiError(422, "this slide cannot be drawn");
+        },
+      }),
+    ]);
+    q.enqueue("s1");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(q.statusOf("s1").chart).toBe("failed");
+    // A 4xx says the request is wrong; repeating it is noise the author pays for.
+    expect(attempts).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("a slide on screen with no picture must never stay that way", () => {
+  // The customer's report, as stated: "the preview never gets visible in the
+  // browser". Written as an INVARIANT rather than against a mechanism, because
+  // we could not establish which path they hit — and the paths that lead here
+  // are indistinguishable from outside:
+  //
+  //   * the queue decided there was nothing to do (a producer reported its work
+  //     already stored, though nothing displayable exists)
+  //   * the render failed earlier and the slide was left marked failed
+  //   * the picture was cached under a fingerprint the component does not read
+  //   * the cache entry was evicted while the queue believed it was still there
+  //
+  // All four end identically: a slide on screen, no picture, nothing happening,
+  // and no warning. The component already reports exactly this through
+  // `noteWanted(slideId, fingerprint, hasImage=false)` — the reader knows the
+  // truth, since it is the thing that would display the image. Today that is
+  // written to the trace and nothing acts on it, and the reader's own query is
+  // `enabled: false`, so no other part of the system will ever fetch it either.
+
+  it("renders a slide the queue believes needs nothing, when the screen says it is blank",
+    async () => {
+      put("s1");
+      let runs = 0;
+      // A producer that insists its work is already stored — the shape of every
+      // path above. Enqueueing alone takes the "nothing-to-do" branch.
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-1",
+          storedFingerprint: () => "fp-1",
+          run: async () => {
+            runs += 1;
+          },
+        }),
+      ]);
+      q.enqueue("s1");
+      await q.__drainForTest();
+      expect(runs).toBe(0); // nothing to do, as the queue sees it
+
+      // The component mounts, computes the same fingerprint, and finds no image.
+      q.noteWanted("s1", "fp-1", false);
+      await q.__drainForTest();
+
+      expect(runs).toBeGreaterThan(0);
+    });
+
+  it("leaves a visible failure rather than a silent blank when it cannot draw it",
+    async () => {
+      // Retries are spaced now, so this one runs on the clock.
+      vi.useFakeTimers();
+      put("s1");
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-1",
+          storedFingerprint: () => "fp-1",
+          run: async () => {
+            throw new ApiError(500, "render is broken");
+          },
+          onFailure: "abort",
+        }),
+      ]);
+      // The screen keeps saying it is blank; the queue keeps failing to fix it.
+      for (let i = 0; i < 10; i += 1) {
+        q.noteWanted("s1", "fp-1", false);
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      vi.useRealTimers();
+      // Bounded — it must not keep asking for ever — and the author is told,
+      // rather than being left looking at an empty slide with nothing to click.
+      expect(q.statusOf("s1").chart).toBe("failed");
+      expect(q.failuresOf("s1")).not.toHaveLength(0);
+    });
+});
+
+describe("redrawing a slide the author asks to try again", () => {
+  it("draws a slide that had been given up on", async () => {
+    vi.useFakeTimers();
+    put("s1");
+    let broken = true;
+    q.__setProducersForTest([
+      producer("chart", {
+        fingerprint: () => "fp-1",
+        storedFingerprint: () => null,
+        run: async () => {
+          if (broken) throw new ApiError(500, "render is broken");
+        },
+        onFailure: "abort",
+      }),
+    ]);
+    q.enqueue("s1");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(q.statusOf("s1").chart).toBe("failed");
+
+    // Whatever was wrong has been dealt with; the author presses the button.
+    broken = false;
+    q.redraw("s1");
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(q.statusOf("s1").chart).toBe("done");
+    expect(q.failuresOf("s1")).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("redraws a slide that looks complete, so the button works when nothing is marked wrong",
+    async () => {
+      // The author sees a blank slide the queue believes is finished — the very
+      // situation that has no error to clear. The button must still redraw it.
+      put("s1");
+      let runs = 0;
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-1",
+          storedFingerprint: () => "fp-1",
+          run: async () => {
+            runs += 1;
+          },
+        }),
+      ]);
+      q.redraw("s1");
+      await q.__drainForTest();
+      expect(runs).toBe(1);
+    });
+});
+
+describe("more than one component watching the same slide", () => {
+  it("does not redraw for ever when one observer has a picture and another does not",
+    async () => {
+      // Design, the deck grid and the thumbnails all watch the same slide, and
+      // they do not necessarily compute the same fingerprint. A hit from one
+      // must not clear the count the other is accumulating, or the bound never
+      // trips: the slide is queued again on every render, and both the flicker
+      // and a slide stuck on "Rendering preview" follow.
+      put("s1");
+      let runs = 0;
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-a",
+          storedFingerprint: () => "fp-a",
+          run: async () => {
+            runs += 1;
+          },
+        }),
+      ]);
+      for (let i = 0; i < 12; i += 1) {
+        q.noteWanted("s1", "fp-b", false);   // the pane that has nothing
+        q.noteWanted("s1", "fp-a", true);    // the grid, which does
+        await q.__drainForTest();
+      }
+      // Bounded, and nowhere near once per render.
+      expect(runs).toBeLessThanOrEqual(3);
+    });
 });

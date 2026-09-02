@@ -560,17 +560,7 @@ export function useChartPreview(
   // the picture of the slide you had just left. Clicking through the deck
   // showed one unchanging image. Editing a slide still keeps its own last
   // picture up, dimmed, which is what that behaviour is for.
-  // Record what this component is asking for, next to what the queue rendered.
   const qcForNote = useQueryClient();
-  useEffect(() => {
-    if (!slideId) return;
-    previewQueue.noteWanted(
-      slideId,
-      String(queryKey[2] ?? ""),
-      qcForNote.getQueryData(queryKey) !== undefined
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slideId, String(queryKey[2] ?? "")]);
 
   const lastSlide = useRef(slideId);
   const sameSlide = lastSlide.current === slideId;
@@ -580,7 +570,7 @@ export function useChartPreview(
   // that a slide's headline is written before its picture is drawn and the
   // slide is rendered once rather than twice. A component that fetched on its
   // own would be a second queue again, which is the arrangement this replaced.
-  return useQuery<ChartPreviewResult>({
+  const result = useQuery<ChartPreviewResult>({
     queryKey,
     queryFn: () => Promise.reject(new Error("previews are produced by previewQueue")),
     enabled: false,
@@ -596,6 +586,27 @@ export function useChartPreview(
     retry: false,
     placeholderData: sameSlide ? keepPreviousData : undefined,
   });
+
+  // Belt and braces on DELIVERY, not production. This query is `enabled: false`
+  // and its queryFn rejects — the queue is the only thing that ever fetches — so
+  // if this observer were ever not told about the write, nothing else would
+  // fetch it and the slide would stay blank for ever. Reading the cache
+  // directly costs one lookup per render and removes that possibility: whatever
+  // is there is shown, whether or not we were told it arrived.
+  const cached = result.data ?? qcForNote.getQueryData<ChartPreviewResult>(queryKey);
+
+  // What the queue is told is what this component will DISPLAY — not what the
+  // cache happens to hold. Those are different questions, and only the first
+  // one is the fault being reported: a picture in the cache that never reaches
+  // the screen is as blank as no picture at all.
+  const shown = cached !== undefined;
+  useEffect(() => {
+    if (!slideId) return;
+    previewQueue.noteWanted(slideId, String(queryKey[2] ?? ""), shown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slideId, String(queryKey[2] ?? ""), shown]);
+
+  return cached === result.data ? result : { ...result, data: cached };
 }
 
 /** The cache key an image is stored under. Shared with the queue's `chart`
