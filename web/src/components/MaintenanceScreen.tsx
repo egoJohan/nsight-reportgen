@@ -28,19 +28,19 @@ const COPY: Record<Outage, {
 }> = {
   maintenance: {
     art: art503,
-    title: "Huoltokatko",
+    title: "Service unavailable",
     lines: [
-      "nSight Studio ei juuri nyt saa yhteyttä tietovarastoon. Palvelua saatetaan päivittää parhaillaan.",
-      "Sivu palautuu itsestään heti kun yhteys palaa — työtäsi ei tarvitse aloittaa alusta.",
+      "nSight Studio cannot reach its data service right now. It may be being updated.",
+      "This page recovers on its own as soon as the connection returns — you will not lose your work.",
     ],
     auto: true,
   },
   error: {
     art: art500,
-    title: "Odottamaton virhe",
+    title: "Unexpected error",
     lines: [
-      "nSight Studio kohtasi virheen, josta se ei toipunut itse.",
-      "Yritä uudelleen. Jos virhe toistuu, ilmoita siitä ylläpidolle — myös alla näkyvä osoite auttaa selvittämisessä.",
+      "nSight Studio hit an error it could not recover from.",
+      "Try again. If it keeps happening, report it — the address below helps track it down.",
     ],
     auto: false,
   },
@@ -136,19 +136,19 @@ export function MaintenanceScreen() {
           <p className="break-all font-mono text-xs text-muted-foreground">{failed}</p>
         ) : null}
         <Button onClick={() => void retry()} disabled={checking} className="w-full">
-          {checking ? "Yritetään…" : "Yritä uudelleen"}
+          {checking ? "Retrying…" : "Try again"}
         </Button>
         {forced ? (
           <p className="text-xs text-muted-foreground">
-            Esikatselu (?maintenance={forcedParam}) — palvelu toimii normaalisti.
+            Preview (?maintenance={forcedParam}) — the service is running normally.
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">
           {stillDown
-            ? "Yhteyttä ei vieläkään saada."
+            ? "Still no connection."
             : copy.auto
-              ? "Yritetään automaattisesti 5 s välein"
-              : "Virhe ei korjaannu odottamalla."}
+              ? "Retrying automatically every 5s"
+              : "Waiting will not fix this one."}
           {minutes >= 1 ? ` · ${minutes} min` : ""}
         </p>
       </div>

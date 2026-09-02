@@ -17,15 +17,15 @@ export default function NotFoundPage() {
       <div className="max-w-lg space-y-4 text-center">
         <img src={art404} alt="" aria-hidden="true"
              className="mx-auto w-full max-w-[320px]" />
-        <h1 className="text-lg font-semibold">Sivua ei löytynyt</h1>
+        <h1 className="text-lg font-semibold">Page not found</h1>
         <p className="text-sm text-muted-foreground">
-          nSight Studio ei tunne tätä osoitetta. Linkki voi olla vanhentunut, tai
-          kohde on poistettu.
+          nSight Studio does not know this address. The link may be out of date,
+          or what it pointed at has been deleted.
         </p>
         <p className="break-all font-mono text-xs text-muted-foreground">
           {pathname}
         </p>
-        <Button onClick={() => navigate("/")}>Takaisin etusivulle</Button>
+        <Button onClick={() => navigate("/")}>Back to the start</Button>
       </div>
     </div>
   );
