@@ -26,5 +26,17 @@ nsight.egohive.ai {
         # surfaces promptly.
         lb_try_duration 15s
         lb_try_interval 250ms
+        transport http {
+            # No connection reuse to nginx. Reloading nginx leaves its old
+            # workers finishing what they are serving but closing IDLE
+            # connections, and a pooled connection picked at that instant dies
+            # with EOF as the request goes out. A proxy may not retry a POST, so
+            # it reaches the user: one author's headline request died exactly
+            # that way during a deploy on 2026-09-02.
+            #
+            # The cost is a TCP handshake per request to 127.0.0.1 — no TLS, no
+            # routing, microseconds — against a race that has no safe retry.
+            keepalive off
+        }
     }
 }

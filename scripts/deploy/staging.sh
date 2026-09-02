@@ -79,7 +79,14 @@ if [ "${READY:-}" != "1" ]; then
 fi
 
 say "6/7  retiring the old backend (nginx re-resolves within 10s)"
-ssh_ "docker stop -t 25 ${OLD:0:12} && docker rm ${OLD:0:12}"
+# Stopped first, removed only after nginx can have re-resolved. A STOPPED
+# container still owns its IP and refuses connections outright, which nginx
+# turns into an instant retry; a REMOVED one leaves the address unrouted, and a
+# connect to it hangs until somebody's timeout. The gap between the two is the
+# resolver's TTL (web/nginx.conf), so this waits longer than that.
+ssh_ "docker stop -t 25 ${OLD:0:12}"
+sleep 5
+ssh_ "docker rm ${OLD:0:12}"
 
 say "7/7  updating the frontend IN PLACE (nginx reload, not a recreate)"
 # Recreating this container is not free: it holds the published port, so it
