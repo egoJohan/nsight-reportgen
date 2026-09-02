@@ -1,4 +1,5 @@
 import type { Me } from "@/lib/session";
+import { errorMessage } from "./apiError";
 // Relative by default (spec §5.4): same-origin is what makes the
 // SameSite=Strict session cookie work at all, in prod (nginx) and in dev
 // (the Vite proxy in vite.config.ts) alike.
@@ -339,7 +340,9 @@ async function json<T>(res: Response): Promise<T> {
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new ApiError(res.status, `${res.status} ${res.statusText}: ${text}`);
+    // The server's own `detail` is written for the person who made the request;
+    // show that sentence rather than the JSON it arrived in.
+    throw new ApiError(res.status, errorMessage(res.status, res.statusText, text));
   }
   return res.json() as Promise<T>;
 }

@@ -1,4 +1,6 @@
 """Materials routes: upload, list and delete a case's dataset. (REQ-C-01, REQ-C-04)"""
+import logging
+import os
 import tempfile
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -9,6 +11,8 @@ from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.store.datahive_client import DataHiveClient
 from reportbuilder.store.seam import NotFound
 
+
+log = logging.getLogger(__name__)
 
 materials_router = APIRouter()
 
@@ -60,13 +64,28 @@ async def upload_material(
         tmp_path = tmp.name
 
     try:
-        df, model = read_sav(tmp_path)
-        # The SAV's embedded study title (if any) — lets the UI name the case
-        # from the file itself, falling back to the filename.
-        file_label = sav_file_label(tmp_path)
+        try:
+            df, model = read_sav(tmp_path)
+            # The SAV's embedded study title (if any) — lets the UI name the case
+            # from the file itself, falling back to the filename.
+            file_label = sav_file_label(tmp_path)
+        except Exception as exc:
+            # A file we cannot read is the AUTHOR'S problem — wrong file, a
+            # corrupt or truncated export — and saying so belongs where they are
+            # standing. Letting it out as a 500 makes the web app declare a
+            # service outage and cover the screen with the internal-error page,
+            # which names neither the file nor the reason and offers a retry that
+            # will fail identically. The traceback is logged for us; the author
+            # gets the filename back.
+            log.warning("upload: %s could not be read (%s: %s)",
+                        file.filename, type(exc).__name__, exc, exc_info=True)
+            raise HTTPException(
+                status_code=422,
+                detail=(f"{file.filename} could not be read as an SPSS .sav file. "
+                        f"Check that the export completed and is not password "
+                        f"protected, then try again."),
+            ) from exc
     finally:
-        # Clean up the temp file
-        import os
         os.unlink(tmp_path)
 
     # 3. Build codebook_summary
