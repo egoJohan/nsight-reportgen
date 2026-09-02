@@ -6,6 +6,7 @@ the product is the source of truth.
 """
 from __future__ import annotations
 
+import pyreadstat
 import pandas as pd
 import pytest
 
@@ -346,3 +347,75 @@ def test_read_sav_question_text_from_variable_label(tmp_path):
     _, model = read_sav(synthetic_sav(tmp_path))
     assert model.question("q1").text == "Satisfaction"
     assert model.question("age").text == "Age"
+
+
+# ---- _user_missing: STRING user-missing values ------------------------------
+#
+# SPSS lets a STRING variable declare user-missing values, and they are strings:
+# pyreadstat hands back ``{"lo": "-", "hi": "-"}`` where a numeric variable would
+# give ``{"lo": 99.0, "hi": 99.0}``. Coercing those with ``float()`` raised
+# ValueError and took the whole upload down with a 500 — a customer's file simply
+# would not load. A dash meaning "not asked" is ordinary in Finnish survey
+# exports, so this is the common case, not an exotic one.
+
+def test_user_missing_string_point_does_not_crash():
+    assert _user_missing([{"lo": "-", "hi": "-"}]) == frozenset()
+
+
+def test_user_missing_numeric_string_still_counts():
+    # pyreadstat can hand back numbers as strings; those are real codes.
+    assert _user_missing([{"lo": "9", "hi": "9"}]) == frozenset({9.0})
+
+
+def test_user_missing_string_maps_to_the_code_its_column_was_given():
+    # A coded string column becomes numeric codes, so the string missing value
+    # must follow it to the code it was assigned, or it stops counting as missing.
+    assert _user_missing([{"lo": "-", "hi": "-"}], {"Kyllä": 1.0, "-": 2.0}) == frozenset({2.0})
+
+
+def test_user_missing_mixed_string_and_numeric_keeps_the_numeric():
+    assert _user_missing([{"lo": "-", "hi": "-"}, {"lo": 99, "hi": 99}]) == frozenset({99.0})
+
+
+def test_read_sav_loads_a_file_whose_string_variable_has_a_string_missing_value(tmp_path):
+    """The customer's file, reduced: a coded string question with '-' declared missing.
+
+    Repetition matters — a string column is only read as a coded categorical when
+    its values recur (``_CODED_MIN_RATIO``), which is what a real survey export
+    looks like. '-' then becomes a code, and the SAV's string declaration has to
+    follow it there or the answers it marks quietly count as real ones.
+    """
+    df = pd.DataFrame({
+        "q1": ["Kyllä", "Ei", "-"] * 20,
+        "age": [31.0, 44.0, 99.0] * 20,
+    })
+    path = tmp_path / "string_missing.sav"
+    pyreadstat.write_sav(
+        df, str(path),
+        column_labels={"q1": "Suosittelisitko?", "age": "Ikä"},
+        missing_ranges={"q1": [{"lo": "-", "hi": "-"}], "age": [{"lo": 99, "hi": 99}]},
+    )
+
+    frame, model = read_sav(str(path))
+
+    assert model.variables["age"].missing_values == frozenset({99.0})
+    q1 = model.variables["q1"]
+    assert q1.measurement == "categorical"
+    dash = [vl.value for vl in q1.value_labels if vl.label == "-"]
+    assert dash, "'-' should have been given a code"
+    assert q1.missing_values == frozenset(dash)
+
+
+def test_read_sav_loads_free_text_with_a_string_missing_value(tmp_path):
+    """A free-text column keeps no codes, so its string declaration has none to
+    point at. It must still load — dropping the marker is survivable, raising is
+    not."""
+    df = pd.DataFrame({"open1": [f"vastaus {i}" for i in range(30)]})
+    path = tmp_path / "text_missing.sav"
+    pyreadstat.write_sav(df, str(path), column_labels={"open1": "Kommentit"},
+                         missing_ranges={"open1": [{"lo": "-", "hi": "-"}]})
+
+    frame, model = read_sav(str(path))
+
+    assert model.variables["open1"].measurement == "text"
+    assert model.variables["open1"].missing_values == frozenset()

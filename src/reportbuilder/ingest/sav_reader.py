@@ -120,15 +120,40 @@ def _is_text_variable(series: pd.Series, value_labels: tuple) -> bool:
     return not _is_coded_string(nn)
 
 
-def _user_missing(ranges: list | None) -> frozenset[float]:
+def _user_missing(ranges: list | None,
+                  code_of: dict[str, float] | None = None) -> frozenset[float]:
+    """The user-declared missing CODES of one variable, as floats.
+
+    SPSS lets a STRING variable declare its missing values, and they come back as
+    strings: pyreadstat gives ``{"lo": "-", "hi": "-"}`` where a numeric variable
+    gives ``{"lo": 99.0, "hi": 99.0}``. Coercing that with ``float()`` raised
+    ValueError and failed the entire upload — a customer's file would not load at
+    all, over one dash meaning "not asked".
+
+    A coded string column has by this point been given numeric codes, and
+    ``code_of`` carries that mapping so the declaration keeps pointing at the
+    right one. With no mapping (free-text, or a value that never occurs in the
+    data) there is no code to name, so the declaration is dropped rather than
+    fatal: a variable that loses a missing marker still charts, one that raises
+    stops the file.
+    """
     codes: set[float] = set()
     for r in ranges or []:
         lo, hi = (r["lo"], r["hi"]) if isinstance(r, dict) else (r[0], r[1])
-        lo, hi = float(lo), float(hi)
-        if lo == hi:
-            codes.add(lo)
+        try:
+            lo_f, hi_f = float(lo), float(hi)
+        except (TypeError, ValueError):
+            # A string declaration; ranges over strings are not meaningful, so
+            # only the endpoints themselves are looked up.
+            for value in {lo, hi}:
+                mapped = (code_of or {}).get(str(value).strip())
+                if mapped is not None:
+                    codes.add(float(mapped))
+            continue
+        if lo_f == hi_f:
+            codes.add(lo_f)
         else:
-            codes.update(float(c) for c in range(int(lo), int(hi) + 1))
+            codes.update(float(c) for c in range(int(lo_f), int(hi_f) + 1))
     return frozenset(codes)
 
 
@@ -346,6 +371,9 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             for code, lbl in value_labels.get(name, {}).items()
         )
         measurement = _measurement(measures.get(name, ""))
+        # Set when a string column is converted to codes below: the SAV may
+        # declare its missing values as strings, which must follow the same map.
+        code_of: dict[str, float] | None = None
         # Task G.1: classify open-ended free-text variables as measurement "text"
         # so questions built from them can be flagged non-chartable downstream.
         if _is_text_variable(df[name], vls):
@@ -361,12 +389,13 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             codes, pairs = _codes_for_coded_string(df[name])
             df[name] = codes
             vls = tuple(ValueLabel(code, label) for code, label in pairs)
+            code_of = {label: code for code, label in pairs}
         variables[name] = Variable(
             name=name,
             label=labels.get(name) or name,
             measurement=measurement,
             value_labels=vls,
-            missing_values=_user_missing(missing_ranges.get(name)),
+            missing_values=_user_missing(missing_ranges.get(name), code_of),
         )
 
     # A0.1: build questions from non-metadata variables only. Metadata,
