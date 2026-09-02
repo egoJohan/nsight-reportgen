@@ -2147,26 +2147,6 @@ function StepConfigureInner({
                 <CopyIcon className="size-4" />
               </button>
             )}
-            {/* Draw this slide again.
-                Always offered, not only when something is marked wrong — the
-                fault it exists for shows nothing wrong at all: a slide that is
-                blank while the queue believes it is finished. A button that
-                appeared only next to a recorded failure would be missing in
-                exactly that case. It also lifts the automatic bounds, which
-                have to exist so a slide that cannot be drawn stops occupying
-                the render host, and which are the only thing in the way once
-                the reason has been dealt with. */}
-            {!activeSpecial && activeChart?.slide_id && (
-              <button
-                type="button"
-                title="Draw this slide again"
-                aria-label="Draw this slide again"
-                onClick={() => previewQueue.redraw(activeChart.slide_id!)}
-                className="absolute right-2 top-[5.5rem] z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
-              >
-                <RotateCcwIcon className="size-4" />
-              </button>
-            )}
             {/* What this slide will NOT show. Sits beside the (i) rather than in
                 the config panel: it is about the RENDERED slide, so it belongs on
                 the picture. Only appears when there is something to say. */}
@@ -2256,21 +2236,6 @@ function StepConfigureInner({
                 <p className="text-sm leading-relaxed text-muted-foreground">{p.detail}</p>
               </div>
             ))}
-            {/* Offered here too: this dialog is where an author arrives having
-                just read that something could not be made, and "try it again"
-                is the next thing they want. */}
-            {activeProblems.some((p) => p.id.startsWith("producer-")) && activeChart?.slide_id && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  previewQueue.redraw(activeChart.slide_id!);
-                  setProblemsOpen(false);
-                }}
-              >
-                <RotateCcwIcon className="size-4" />
-                Draw this slide again
-              </Button>
-            )}
           </div>
         </DialogContent>
       </Dialog>
