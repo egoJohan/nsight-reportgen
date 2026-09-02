@@ -954,3 +954,53 @@ describe("a slide on screen with no picture must never stay that way", () => {
       expect(q.failuresOf("s1")).not.toHaveLength(0);
     });
 });
+
+describe("redrawing a slide the author asks to try again", () => {
+  it("draws a slide that had been given up on", async () => {
+    vi.useFakeTimers();
+    put("s1");
+    let broken = true;
+    q.__setProducersForTest([
+      producer("chart", {
+        fingerprint: () => "fp-1",
+        storedFingerprint: () => null,
+        run: async () => {
+          if (broken) throw new ApiError(500, "render is broken");
+        },
+        onFailure: "abort",
+      }),
+    ]);
+    q.enqueue("s1");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(q.statusOf("s1").chart).toBe("failed");
+
+    // Whatever was wrong has been dealt with; the author presses the button.
+    broken = false;
+    q.redraw("s1");
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(q.statusOf("s1").chart).toBe("done");
+    expect(q.failuresOf("s1")).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("redraws a slide that looks complete, so the button works when nothing is marked wrong",
+    async () => {
+      // The author sees a blank slide the queue believes is finished — the very
+      // situation that has no error to clear. The button must still redraw it.
+      put("s1");
+      let runs = 0;
+      q.__setProducersForTest([
+        producer("chart", {
+          fingerprint: () => "fp-1",
+          storedFingerprint: () => "fp-1",
+          run: async () => {
+            runs += 1;
+          },
+        }),
+      ]);
+      q.redraw("s1");
+      await q.__drainForTest();
+      expect(runs).toBe(1);
+    });
+});

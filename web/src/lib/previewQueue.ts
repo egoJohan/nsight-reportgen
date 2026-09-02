@@ -508,6 +508,40 @@ export function noteWanted(slideId: string, fingerprint: string, hasImage: boole
   enqueue(slideId);
 }
 
+/** Draw this slide again, now, whatever anyone believes about it.
+ *
+ *  The author's own override — the button offered beside a slide that will not
+ *  draw. It exists because every automatic guarantee here is bounded, and has to
+ *  be: a slide that cannot be drawn must stop asking for the render host rather
+ *  than occupy it for ever. When the reason has been dealt with — the service is
+ *  back, the template is fixed — the bound is exactly what stands in the way, so
+ *  it is lifted on request rather than waited out.
+ *
+ *  Deliberately not limited to a slide in a failed state. The fault this was
+ *  built for shows nothing wrong at all: a blank slide the queue believes is
+ *  finished. A button that only worked when something was marked broken would
+ *  be missing precisely then.
+ */
+export function redraw(slideId: string) {
+  say("redraw", { slideId, detail: "asked for by the author" });
+  // Everything that would otherwise decline to do the work: the count of times
+  // the screen has reported this slide blank, the retries already spent on each
+  // producer, and any failed status standing against it.
+  blankSince.delete(slideId);
+  for (const key of [...retried.keys()]) {
+    if (key.startsWith(`${slideId}|`)) retried.delete(key);
+  }
+  const forSlide = statuses.get(slideId);
+  if (forSlide) {
+    for (const [id, entry] of forSlide) {
+      if (entry.status === "failed") setStatus(slideId, id, "pending", null);
+    }
+  }
+  forceRedraw.add(slideId);
+  enqueue(slideId);
+  notify();
+}
+
 /** The recorded sequence. */
 export function getTrace(): TraceEvent[] {
   return trace;
