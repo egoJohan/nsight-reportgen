@@ -16,5 +16,15 @@ nsight.egohive.ai {
     request_body {
         max_size 50MB
     }
-    reverse_proxy localhost:8090
+    reverse_proxy localhost:8090 {
+        # Hold the caller while the frontend container is replaced instead of
+        # answering 502. A deploy recreates that container, and every request
+        # made in the second or two it takes used to fail — the browser reads a
+        # 502 as "the service is away" and covers the screen. Caddy keeps trying
+        # to get a connection for this long before it gives up, which is longer
+        # than any swap and short enough that a genuinely dead backend still
+        # surfaces promptly.
+        lb_try_duration 15s
+        lb_try_interval 250ms
+    }
 }
