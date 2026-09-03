@@ -680,19 +680,28 @@ export type TemplateLayoutOption = {
 
 export type TemplateLayout = {
   slide: { w: number; h: number };
+  /** The layout these numbers describe. */
   chosen_layout: number | null;
+  /** The layout we would pick ourselves — what the star marks. */
+  auto_layout: number | null;
   content_is_chart_area: boolean;
   layouts: TemplateLayoutOption[];
   harvested: {
     title: Required<TemplateArea>;
     content: Required<TemplateArea>;
+    /** Derived, not placed — shown so an author can see and restyle them. */
+    subtitle: Required<TemplateArea> & { derived: true };
+    footer: Required<TemplateArea> & { derived: true };
     accent: string;
     background: string;
   };
+  available_fonts: string[];
   overrides: {
     layout_index?: number;
     title?: TemplateArea;
     content?: TemplateArea;
+    subtitle?: TemplateArea;
+    footer?: TemplateArea;
     accent?: string;
     background?: string;
   };
@@ -802,9 +811,18 @@ export const api = {
 
     /** What we harvested from this template, what an author has corrected, and
      *  every layout they could choose instead. */
-    layout: (customerId: string, templateId: string): Promise<TemplateLayout> =>
-      fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}/layout`)
-        .then((r) => json<TemplateLayout>(r)),
+    layout: (
+      customerId: string,
+      templateId: string,
+      /** Ask what a DIFFERENT layout would give: its title box, its colour, its
+       *  content area. Without this the answer is always the automatic choice's,
+       *  and picking another in the dropdown appears to do nothing. */
+      layout?: number | null
+    ): Promise<TemplateLayout> =>
+      fetch(
+        `${API_BASE}/customers/${customerId}/templates/${templateId}/layout`
+        + (layout === null || layout === undefined ? "" : `?layout=${layout}`)
+      ).then((r) => json<TemplateLayout>(r)),
 
     saveLayout: (
       customerId: string,
@@ -823,6 +841,25 @@ export const api = {
     groundUrl: (customerId: string, templateId: string, layout: number | null): string =>
       `${API_BASE}/customers/${customerId}/templates/${templateId}/ground.png`
       + (layout === null ? "" : `?layout=${layout}`),
+
+    /** A whole slide as this template would draw it — furniture, headline,
+     *  question, chart and the n-line. An empty ground says where the boxes are
+     *  and nothing about whether the result reads. */
+    sampleUrl: (
+      customerId: string,
+      templateId: string,
+      layout: number | null,
+      /** The unsaved draft, so the picture answers while it is being edited
+       *  rather than only after Save. */
+      overrides?: string
+    ): string => {
+      const q = new URLSearchParams();
+      if (layout !== null) q.set("layout", String(layout));
+      if (overrides && overrides !== "{}") q.set("o", overrides);
+      const s = q.toString();
+      return `${API_BASE}/customers/${customerId}/templates/${templateId}/sample.png`
+        + (s ? `?${s}` : "");
+    },
 
     // null clears the binding, so the level above takes over again.
     bindCustomer: (customerId: string, templateId: string | null) =>

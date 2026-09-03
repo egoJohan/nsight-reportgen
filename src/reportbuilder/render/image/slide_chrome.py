@@ -916,11 +916,17 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # From the spec, not fitted to the box: the question must be the
             # same size on every slide of every deck, which is the whole point
             # of sizing by cap height.
-            s_size = _spec_subtitle_pt(ctx.style, s_font) or 13.0
+            # An author's own size wins: a question that runs three lines is
+            # shrunk by hand, not by us guessing a different rule.
+            s_font = getattr(ctx.style, "subtitle_font", "") or s_font
+            s_size = (getattr(ctx.style, "subtitle_size_pt", 0.0)
+                      or _spec_subtitle_pt(ctx.style, s_font) or 13.0)
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
-                [(secondary, s_size, _muted, False)],
+                [(secondary, s_size,
+                  f"#{getattr(ctx.style, 'subtitle_colour', '')}"
+                  if getattr(ctx.style, "subtitle_colour", "") else _muted, False)],
                 anchor=anchor,
                 font=s_font,
             )

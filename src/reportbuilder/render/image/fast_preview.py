@@ -56,8 +56,18 @@ def _key(style, dpi: int) -> str:
         stamp = str(os.path.getmtime(source))
     except OSError:
         pass
+    # The LAYOUT and the author's corrections change what an empty slide looks
+    # like while the template file is untouched — a different layout has a
+    # different band and logo, and a corrected background is a different colour.
+    # Without them a ground cached for one layout was served for every other,
+    # and choosing a layout appeared to do nothing.
+    slot = getattr(style, "chart_slot", None)
+    shape = (f"{getattr(style, 'chart_layout_index', None)}"
+             f"|{getattr(style, 'background', '')}|{getattr(style, 'ink', '')}"
+             f"|{getattr(style, 'accent', '')}"
+             f"|{'' if slot is None else f'{slot.left},{slot.top},{slot.width},{slot.height}'}")
     raw = (f"{source}|{stamp}|{dpi}|{getattr(style, 'slide_width', 0)}"
-           f"|{rendering_fingerprint()}")
+           f"|{shape}|{rendering_fingerprint()}")
     return hashlib.md5(raw.encode()).hexdigest()[:16]
 
 

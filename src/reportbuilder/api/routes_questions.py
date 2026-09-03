@@ -1722,7 +1722,15 @@ def preview_chart(
     # one id and it is the most important one: the default template's id is the
     # literal string "default" however many different files pass through it, so
     # replacing the tenant's default kept serving pictures of the old one.
-    _template_identity = os.path.basename(template_path) if template_path else "none"
+    # The template's identity for caching is the FILE plus the customer's
+    # corrections to it. Those are stored beside the template, not in it, so
+    # without them here a layout change or a resized chart area produced the
+    # same key and the cache served the picture from before it.
+    _overrides = _template_overrides(repo, auth, material_id, template_id)
+    _template_identity = (os.path.basename(template_path) if template_path else "none")
+    if _overrides:
+        _template_identity += "." + hashlib.sha256(
+            json.dumps(_overrides, sort_keys=True).encode()).hexdigest()[:12]
     # The material's curation — question renames, value merges — is part of what
     # the picture SHOWS but is stored beside the material rather than sent in the
     # body, so without it here a rename produced the same key and the cache

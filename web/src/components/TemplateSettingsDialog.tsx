@@ -6,14 +6,11 @@ import {
   TemplateLayoutControls, TemplateSlidePreview, useTemplateLayout,
 } from "@/components/settings/TemplateLayoutEditor";
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { useTemplateDetail, useSubstitutions } from "@/lib/queries";
 import type { TemplateFont } from "@/lib/api";
 
-function bytes(n: number): string {
-  return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
-}
 
 /** One font the template names, and what this server will actually draw it as.
  *
@@ -135,11 +132,6 @@ export default function TemplateSettingsDialog({
             <DialogTitle className="truncate">
               {data?.name ?? "Template settings"}
             </DialogTitle>
-            <DialogDescription>
-              {data ? `${bytes(data.size)} · ` : ""}
-              What nSight Studio read out of this template, and where to say it read
-              it wrong. Empty means "use what we read".
-            </DialogDescription>
           </DialogHeader>
 
           {!data ? (
@@ -157,8 +149,8 @@ export default function TemplateSettingsDialog({
                     machine drawing the preview HAS the face the template names.
                     The old summary rows above are gone — layout, heading font,
                     body font and palette are all shown, and editable, next door. */}
-                <details className="rounded-md border bg-muted/30 p-3">
-                  <summary className="cursor-pointer text-sm font-medium">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <h4 className="text-sm font-medium">
                     Fonts
                     {data.fonts.some((f) => !f.ok) && (
                       <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -167,7 +159,7 @@ export default function TemplateSettingsDialog({
                           : `${data.fonts.filter((f) => !f.ok).length} need a stand-in`}
                       </span>
                     )}
-                  </summary>
+                  </h4>
                   <p className="mb-1 mt-2 text-xs text-muted-foreground">
                     A substitute affects the preview and the PDF only — the PowerPoint
                     file always names the template's own font.
@@ -188,7 +180,7 @@ export default function TemplateSettingsDialog({
                       />
                     ))}
                   </div>
-                </details>
+                </div>
               </div>
             </div>
           )}

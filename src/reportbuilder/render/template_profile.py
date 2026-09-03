@@ -776,7 +776,8 @@ def _ground_and_accent(shapes, sw: int, sh_: int) -> tuple[str, str]:
 
 # --- the entry point --------------------------------------------------------
 
-def extract_profile(template_path: str) -> TemplateProfile:
+def extract_profile(template_path: str,
+                    force_layout: int | None = None) -> TemplateProfile:
     """Harvest the borrowable part of *template_path*.
 
     Never raises on a readable .pptx: a template we cannot read a title from
@@ -788,7 +789,17 @@ def extract_profile(template_path: str) -> TemplateProfile:
     profile = TemplateProfile(slide_width=sw, slide_height=sh_)
     brand = _Brand(prs)
 
-    found = _design_layout(prs)
+    if force_layout is not None and 0 <= force_layout < len(prs.slide_layouts):
+        # An author has chosen the layout. Harvest THAT one — its title style and
+        # box, and whether its content box is big enough to be a chart area —
+        # because choosing a layout that then contributed nothing is what "the
+        # dropdown does nothing" looked like.
+        chosen = prs.slide_layouts[force_layout]
+        ranked = {c.index: c for c in rank_layouts(prs)}
+        pct = ranked[force_layout].content_area_pct if force_layout in ranked else 0.0
+        found = (force_layout, chosen, pct >= _MIN_CONTENT_SHARE)
+    else:
+        found = _design_layout(prs)
     if found is not None:
         index, source, take_geometry = found
         profile.layout_index = index

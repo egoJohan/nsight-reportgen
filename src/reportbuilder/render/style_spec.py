@@ -71,6 +71,15 @@ class TemplateStyleSpec(StyleSpec):
     # nothing and would otherwise sit on a customer's slide in our font.
     heading_font: str = ""
     body_font: str = ""
+    #: Overrides for the two elements that have no box of their own. The
+    #: subtitle sits a fixed gap above the chart and the footer a fixed gap
+    #: above the template's own foot, so there is nothing to move — but their
+    #: SIZE is the thing an author reaches for first: "kysymystekstin
+    #: pienentäminen", shrinking a question that runs too long.
+    subtitle_font: str = ""
+    subtitle_size_pt: float = 0.0
+    subtitle_colour: str = ""
+    footer_colour: str = ""
 
     def __init__(self, slide_width, slide_height, slots, fonts, palette, spec_source="generic"):
         self.slide_width = slide_width
@@ -94,7 +103,8 @@ class TemplateStyleSpec(StyleSpec):
         return dict(self._slots)
 
 
-def load_style_spec(template_path: str) -> TemplateStyleSpec:
+def load_style_spec(template_path: str,
+                    force_layout: int | None = None) -> TemplateStyleSpec:
     prs = Presentation(template_path)
     fonts = dict(_DEFAULT_FONTS)
     slots: dict[str, Slot] = {}
@@ -155,7 +165,7 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     # the profile carries the title's style and box and the repeating furniture,
     # and the renderer draws the slide itself.
     try:
-        spec.profile = extract_profile(str(template_path))
+        spec.profile = extract_profile(str(template_path), force_layout)
     except Exception:  # noqa: BLE001 — a template we cannot harvest still renders
         # LOUDLY. Swallowed, this reverts to building on the template's layouts,
         # and for a stock-Office file that is the plain-PowerPoint deck this
@@ -282,6 +292,25 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
         _apply_box(profile.title, title)
     _apply_chart_text(spec, content)
 
+    subtitle = overrides.get("subtitle") or {}
+    if subtitle.get("font"):
+        spec.subtitle_font = str(subtitle["font"])
+    if _num(subtitle.get("size")):
+        spec.subtitle_size_pt = _num(subtitle["size"])
+    if _hex(subtitle.get("colour")):
+        spec.subtitle_colour = _hex(subtitle["colour"])
+
+    # The footer is the "n = 3144" line. It is a font role already, so its size
+    # and face go where every other chart-text size goes.
+    footer = overrides.get("footer") or {}
+    if footer.get("font") or _num(footer.get("size")):
+        had_family, had_size = spec.font_for("n_annotation")
+        _set_fonts(spec, {"n_annotation": (
+            str(footer.get("font") or had_family),
+            int(_num(footer.get("size")) or had_size))})
+    if _hex(footer.get("colour")):
+        spec.footer_colour = _hex(footer["colour"])
+
     _apply_slot(spec, content)
 
 
@@ -294,6 +323,22 @@ _CHART_TEXT_ROLES = ("category_names", "data_labels", "axis_values",
                      "axis_names", "legend")
 
 
+def _set_fonts(spec, changes: dict[str, tuple[str, int]]) -> None:
+    """Change what `font_for` answers.
+
+    It reads `_fonts`, which the constructor set — assigning a `fonts` attribute
+    instead made a new one that nothing reads, so a content or footer size was
+    stored, echoed back by the API, and had no effect on a single pixel.
+
+    The resolved spec is dropped with it: it was built from the sizes as they
+    were, and anything reading it would go on answering with those.
+    """
+    fonts = dict(getattr(spec, "_fonts", {}) or {})
+    fonts.update(changes)
+    spec._fonts = fonts
+    spec.resolved_spec = None
+
+
 def _apply_chart_text(spec, given: dict) -> None:
     family = str(given.get("font") or "").strip()
     size = _num(given.get("size"))
@@ -301,11 +346,11 @@ def _apply_chart_text(spec, given: dict) -> None:
         return
     if family:
         spec.body_font = family
-    fonts = dict(getattr(spec, "fonts", {}) or {})
-    for role in _CHART_TEXT_ROLES:
-        had_family, had_size = fonts.get(role, ("", 0))
-        fonts[role] = (family or had_family, int(size) if size else had_size)
-    spec.fonts = fonts
+    _set_fonts(spec, {
+        role: (family or spec.font_for(role)[0],
+               int(size) if size else spec.font_for(role)[1])
+        for role in _CHART_TEXT_ROLES
+    })
 
 
 def _apply_text(style, given: dict) -> None:

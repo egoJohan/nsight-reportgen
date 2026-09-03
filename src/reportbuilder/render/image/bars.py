@@ -130,6 +130,20 @@ _MAX_LABELED_SEGMENTS_V: int = 4
 _MIN_LABEL_BAR_PT: float = 5.0
 
 
+#: The size the style carries when nobody has chosen one. A template that has
+#: not been corrected leaves the auto-fit alone, which is what it is for.
+_DEFAULT_LABEL_PT = 10
+
+
+def _explicit_label_pt(ctx) -> float:
+    """An author's own row-label size, or 0 to keep auto-fitting."""
+    try:
+        _family, size = ctx.style.font_for("category_names")
+    except Exception:  # noqa: BLE001
+        return 0.0
+    return float(size) if size and int(size) != _DEFAULT_LABEL_PT else 0.0
+
+
 def _hbar_row_pt(n_cats: int, fig_h_in: float) -> float:
     """Vertical space (in points) available to ONE category row."""
     usable_pt = fig_h_in * 72.0 * 0.80   # ~80% of figure height is the plot area
@@ -979,7 +993,19 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     fig_h_in = float(fig.get_size_inches()[1])
     row_pt = _hbar_row_pt(n_cats, fig_h_in)
     max_lines = label_lines
+    # Auto-fit, unless somebody has said otherwise.
+    #
+    # The row label size is computed from how many categories there are and how
+    # tall the slot is, clamped to 8.5-11.5pt. That is right until it is not:
+    # the reported slide had nine long statements whose labels ran into each
+    # other at the floor of that range, and no amount of auto-fitting reads a
+    # sentence into 0.4in. A template's own `content` size, set by an author who
+    # can see the result, wins outright — including when it is smaller than the
+    # clamp would ever choose.
     ylabel_fs = max(8.5, min(11.5, row_pt / (max_lines * 1.3)))
+    chosen_pt = _explicit_label_pt(ctx)
+    if chosen_pt:
+        ylabel_fs = chosen_pt
     # Scale the value-label font to a SINGLE BAR's height (which shrinks as segments
     # multiply — a two-classifier cross-tab packs many thin bars per row), so the
     # label stays a bit smaller than the bar and never touches its neighbours.

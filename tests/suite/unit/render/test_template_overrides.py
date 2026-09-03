@@ -22,7 +22,11 @@ EMU_IN = 914400
 
 def _spec():
     s = TemplateStyleSpec(slide_width=int(13.333 * EMU_IN), slide_height=int(7.5 * EMU_IN),
-                          slots={}, fonts={}, palette=["1F77B4"])
+                          slots={},
+                          fonts={"category_names": ("Arial", 10),
+                                 "legend": ("Arial", 10),
+                                 "n_annotation": ("Arial", 9)},
+                          palette=["1F77B4"])
     s.ink, s.background, s.accent = "000000", "FFFFFF", "82CE71"
     s.chart_slot = Slot(slide_index=-1, left=EMU_IN, top=EMU_IN,
                         width=6 * EMU_IN, height=3 * EMU_IN, name="chart")
@@ -105,22 +109,67 @@ class TestChartText:
     the side, the numbers in the bars, the legend, the axis. The first thing
     anyone asked for after seeing a rendered slide was labels that fit."""
 
+    # Asserted through `font_for`, which is what the renderers call. Asserting
+    # on a `fonts` attribute passed while production was untouched: the override
+    # was writing one the constructor never made and nothing reads.
+
     def test_the_size_reaches_the_row_labels(self):
         s = _spec()
-        s.fonts = {"category_names": ("Arial", 10), "legend": ("Arial", 10)}
         apply_template_overrides(s, {"content": {"size": 8}})
-        assert s.fonts["category_names"] == ("Arial", 8)
-        assert s.fonts["legend"] == ("Arial", 8)
+        assert s.font_for("category_names") == ("Arial", 8)
+        assert s.font_for("legend") == ("Arial", 8)
 
     def test_the_family_reaches_them_too_and_keeps_the_size(self):
         s = _spec()
-        s.fonts = {"category_names": ("Arial", 10)}
         apply_template_overrides(s, {"content": {"font": "Verdana"}})
-        assert s.fonts["category_names"] == ("Verdana", 10)
+        assert s.font_for("category_names") == ("Verdana", 10)
         assert s.body_font == "Verdana"
 
     def test_saying_nothing_leaves_the_chart_alone(self):
         s = _spec()
-        s.fonts = {"category_names": ("Arial", 10)}
         apply_template_overrides(s, {"content": {"x": 1.0}})
-        assert s.fonts["category_names"] == ("Arial", 10)
+        assert s.font_for("category_names") == ("Arial", 10)
+
+
+class TestDerivedElements:
+    """The subtitle and the footer have no box of their own.
+
+    The subtitle sits a fixed gap above the chart, bottom-anchored, sharing the
+    title's left and width; the footer sits a fixed gap above the template's own
+    foot. So there is nothing to move — but their SIZE is the first thing an
+    author reaches for. The complaint that started this asked for exactly that:
+    "kysymystekstin (subtitle) pienentäminen", shrinking a question too long for
+    its line.
+    """
+
+    def test_the_subtitle_can_be_shrunk(self):
+        s = _spec()
+        apply_template_overrides(s, {"subtitle": {"size": 10, "font": "Verdana"}})
+        assert s.subtitle_size_pt == 10
+        assert s.subtitle_font == "Verdana"
+
+    def test_the_subtitle_can_be_recoloured(self):
+        s = _spec()
+        apply_template_overrides(s, {"subtitle": {"colour": "#666666"}})
+        assert s.subtitle_colour == "666666"
+
+    def test_the_footer_is_a_font_role_like_any_other(self):
+        """"n = 3144" is drawn from `n_annotation`, so its size goes where every
+        other chart-text size goes rather than into a special case."""
+        s = _spec()
+        apply_template_overrides(s, {"footer": {"size": 11}})
+        assert s.font_for("n_annotation") == ("Arial", 11)
+
+    def test_saying_nothing_about_them_changes_nothing(self):
+        s = _spec()
+        apply_template_overrides(s, {"title": {"colour": "FFFFFF"}})
+        assert s.subtitle_size_pt == 0.0 and s.subtitle_font == ""
+        assert s.font_for("n_annotation") == ("Arial", 9)
+
+    def test_a_stale_resolved_spec_is_dropped(self):
+        """It was built from the sizes as they were; anything reading it would
+        go on answering with those."""
+        s = _spec()
+        s.resolved_spec = object()
+        apply_template_overrides(s, {"content": {"size": 8}})
+        assert s.resolved_spec is None

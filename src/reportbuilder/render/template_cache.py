@@ -109,9 +109,20 @@ def style_with_overrides(template_path: str, overrides: dict | None):
     """
     from reportbuilder.render.style_spec import apply_template_overrides
 
-    style = resolve(template_path).style
     if not overrides:
-        return style
-    style = copy.deepcopy(style)
+        return resolve(template_path).style
+
+    chosen = overrides.get("layout_index")
+    if isinstance(chosen, int):
+        # A chosen layout changes what there is to harvest, so it cannot be
+        # patched onto an already-resolved style — the title box, the title
+        # colour and the content area all come from the layout. Not cached: it
+        # is one author's choice for one template, and the cache is keyed on the
+        # file alone.
+        from reportbuilder.render.style_spec import load_style_spec
+
+        style = load_style_spec(template_path, force_layout=chosen)
+    else:
+        style = copy.deepcopy(resolve(template_path).style)
     apply_template_overrides(style, overrides)
     return style

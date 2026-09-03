@@ -9,6 +9,8 @@ single report, and the lower level always wins. An already-delivered report
 keeps the template it rendered with until someone asks for the update — see
 Repository.resolve_template.
 """
+import json
+import logging
 from dataclasses import replace
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -23,6 +25,8 @@ from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth.permissions import User
 from reportbuilder.render.template_check import inspect_template
 from reportbuilder.store.repository import Repository
+
+log = logging.getLogger(__name__)
 from reportbuilder.store.seam import AuthContext, NotFound
 
 templates_router = APIRouter()
@@ -252,8 +256,46 @@ def _in(emu) -> float:
     return round(int(emu or 0) / 914400, 2)
 
 
+def _content_rect(style, prs) -> tuple[int, int, int, int]:
+    """Where a chart will ACTUALLY be drawn on this layout, in EMU.
+
+    The layout's own content placeholder when we are taking it, and otherwise
+    the renderer's own placement — under the title, inside the template's side
+    margins. Reporting zeroes for the second case is what made most of the
+    layouts in the picker show a content box collapsed into the top-left corner:
+    "not visible, or invalid coordinates".
+
+    Always inside the slide, and never smaller than an inch. A rectangle an
+    author cannot see is one they cannot drag back.
+    """
+    sw, sh = int(prs.slide_width or 0), int(prs.slide_height or 0)
+    slot = getattr(style, "chart_slot", None)
+    if slot is not None and int(slot.width or 0) > 0 and int(slot.height or 0) > 0:
+        rect = (int(slot.left), int(slot.top), int(slot.width), int(slot.height))
+    else:
+        profile = getattr(style, "profile", None)
+        title = getattr(profile, "title", None) if profile else None
+        if title is not None and getattr(title, "positioned", False):
+            from reportbuilder.render.image.slide_chrome import harvested_chart_box
+
+            rect = harvested_chart_box(profile, "", sw, sh)
+        else:
+            # No opinion anywhere: the house placement — a margin in from each
+            # side, starting under where a title would sit.
+            margin = int(0.05 * sw)
+            rect = (margin, int(0.28 * sh), sw - 2 * margin, int(0.60 * sh))
+
+    left, top, width, height = rect
+    inch = 914400
+    width = max(inch, min(width, sw))
+    height = max(inch, min(height, sh))
+    left = max(0, min(left, sw - width))
+    top = max(0, min(top, sh - height))
+    return left, top, width, height
+
+
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/layout")
-def template_layout(customer_id: str, template_id: str,
+def template_layout(customer_id: str, template_id: str, layout: int | None = None,
                     auth: AuthContext = Depends(get_auth),
                     repo: Repository = Depends(get_repository),
                     user: User = Depends(require_customer)) -> dict:
@@ -270,24 +312,67 @@ def template_layout(customer_id: str, template_id: str,
     from reportbuilder.render.template_check import rank_layouts
 
     path = _template_on_disk(repo, auth, customer_id, template_id)
-    style = load_style_spec(path)
+    stored = repo.template_layout(auth, customer_id, template_id)
+    # Harvested FOR the layout in question: the caller's `layout` while they are
+    # trying one in the dropdown, else the one they saved, else ours. Reporting
+    # the automatic choice's numbers whatever was selected is what made the
+    # dropdown look like it did nothing.
+    chosen = layout if layout is not None else stored.get("layout_index")
+    style = load_style_spec(path, force_layout=chosen if isinstance(chosen, int) else None)
     prs = Presentation(path)
     profile = getattr(style, "profile", None)
     title = getattr(profile, "title", None)
-    slot = getattr(style, "chart_slot", None)
+    slot_left, slot_top, slot_w, slot_h = _content_rect(style, prs)
+    from reportbuilder.render import house_style as _H
+
+    title_left = int(getattr(title, "left", 0) or slot_left)
+    title_width = int(getattr(title, "width", 0) or slot_w)
+    # Where the "n = 100" line really goes, from the function that puts it
+    # there — a guess of "near the bottom" drew the box somewhere the text was
+    # not. content_floor reads the template's own foot furniture, which is why
+    # it needs a slide rather than just a page size.
+    try:
+        from reportbuilder.export.pptx_build import build_presentation
+        from reportbuilder.render.image.slide_chrome import footer_top
+
+        _report, _model, _df = _sample_report()
+        _slide = build_presentation(_report, _model, _df, style=style).slides[0]
+        footer_y = footer_top(_slide, int(prs.slide_height or 0), int(prs.slide_width or 0))
+    except Exception:  # noqa: BLE001 — a template we cannot draw still opens
+        footer_y = max(0, int(prs.slide_height or 0) - int(0.80 * 914400))
     ranked = {c.index: c for c in rank_layouts(prs)}
+    # OUR pick, independent of what the caller is trying — the star in the
+    # picker means "this is what we chose", and reporting the selected one as
+    # chosen put a star on every option in turn.
+    from collections import Counter
+
+    from reportbuilder.render.template_profile import choose_layout
+
+    usage: Counter = Counter()
+    for slide in prs.slides:
+        try:
+            usage[slide.slide_layout.name] += 1
+        except AttributeError:
+            continue
+    auto_index, _auto_geometry = choose_layout(list(ranked.values()), usage, len(prs.slides))
     slide_area = (int(prs.slide_width or 0) * int(prs.slide_height or 0)) or 1
 
     return {
         "slide": {"w": _in(prs.slide_width), "h": _in(prs.slide_height)},
+        # What is in force for these numbers…
         "chosen_layout": getattr(profile, "layout_index", None),
+        # …and what we would have chosen on our own.
+        "auto_layout": auto_index,
         "content_is_chart_area": bool(
             getattr(profile, "layout_content_is_chart_area", False)),
+        # Only the layouts that could hold a headline and a chart. Arla has 69
+        # and 27 of them qualify; offering the other 42 — covers, dividers,
+        # photo pages — is offering choices that cannot work.
         "layouts": [
             {"index": i, "name": lay.name,
-             "content_pct": round(ranked[i].content_area_pct, 1) if i in ranked else 0.0,
-             "suitable": i in ranked}
-            for i, lay in enumerate(prs.slide_layouts)
+             "content_pct": round(ranked[i].content_area_pct, 1),
+             "suitable": True}
+            for i, lay in enumerate(prs.slide_layouts) if i in ranked
         ],
         "harvested": {
             "title": {
@@ -298,15 +383,37 @@ def template_layout(customer_id: str, template_id: str,
                 "colour": getattr(title, "colour", "") or "",
             },
             "content": {
-                "x": _in(getattr(slot, "left", 0)), "y": _in(getattr(slot, "top", 0)),
-                "w": _in(getattr(slot, "width", 0)), "h": _in(getattr(slot, "height", 0)),
+                "x": _in(slot_left), "y": _in(slot_top),
+                "w": _in(slot_w), "h": _in(slot_h),
                 "font": getattr(style, "body_font", "") or "",
                 "size": (getattr(style, "fonts", {}) or {}).get("category_names", ("", 0))[1],
                 "colour": "",
             },
+            # Derived, not placed: the subtitle sits a fixed gap above the
+            # chart sharing the title's left and width, and the footer a fixed
+            # gap above the template's own foot. Reported so an author can SEE
+            # where they land — and restyle them — without being offered a drag
+            # that would do nothing.
+            "subtitle": {
+                "x": _in(title_left), "y": _in(max(0, slot_top - int(0.18 * 914400)
+                                                   - int(0.55 * 914400))),
+                "w": _in(title_width), "h": 0.55,
+                "font": getattr(style, "body_font", "") or "",
+                "size": getattr(style, "subtitle_size_pt", 0) or 13,
+                "colour": getattr(style, "subtitle_colour", "") or "",
+                "derived": True,
+            },
+            "footer": {
+                "x": _in(title_left), "y": _in(footer_y), "w": _in(title_width), "h": 0.35,
+                "font": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[0],
+                "size": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[1],
+                "colour": getattr(style, "footer_colour", "") or "",
+                "derived": True,
+            },
             "accent": getattr(style, "accent", "") or "",
             "background": getattr(style, "background", "") or "",
         },
+        "available_fonts": _H.available_chart_fonts(),
         "overrides": repo.template_layout(auth, customer_id, template_id),
     }
 
@@ -336,6 +443,104 @@ def template_ground(customer_id: str, template_id: str, layout: int | None = Non
     image = ground_image(style)
     if image is None:
         raise HTTPException(404, "this template has no ground to draw")
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+def _sample_report():
+    """A slide's worth of invented data, shaped like a real one.
+
+    Five categories with a plausible spread, a Finnish question and a headline
+    of the length these actually run to — enough that an author judging a layout
+    is judging what their slides will look like rather than an empty rectangle.
+    Invented on purpose: no customer's numbers are needed to show where a title
+    sits, and a settings dialog is no place to load a study.
+    """
+    import pandas as pd
+
+    from reportbuilder.model.question import (
+        Question, QuestionModel, ValueLabel, Variable,
+    )
+    from reportbuilder.model.report import (
+        ChartSpec, ElementToggles, NumberFormat, Report, SortSpec,
+    )
+
+    labels = ("Erittäin tyytyväinen", "Melko tyytyväinen", "Ei kumpaakaan",
+              "Melko tyytymätön", "Erittäin tyytymätön")
+    var = Variable(name="q1", label="Esimerkki", measurement="categorical",
+                   value_labels=tuple(ValueLabel(float(i + 1), t)
+                                      for i, t in enumerate(labels)),
+                   missing_values=frozenset())
+    model = QuestionModel(
+        variables={"q1": var},
+        questions=[Question(qid="q1", kind="single", variables=("q1",),
+                            text="Kuinka tyytyväinen olet palveluun kokonaisuutena?")])
+    counts = (34, 41, 12, 9, 4)
+    df = pd.DataFrame({"q1": [float(i + 1) for i, n in enumerate(counts) for _ in range(n)]})
+    spec = ChartSpec(
+        question_ref="q1", chart_type="horizontal_bar", statistic="pct",
+        classifying_var=None, number_format=NumberFormat(),
+        sort=SortSpec(basis="data_order"), template_slot="s1",
+        elements=ElementToggles(),
+        slide_title="Enemmistö on tyytyväinen palveluun ja tyytymättömiä on vain harva",
+    )
+    return Report(name="sample", render_mode="image", template_ref="",
+                  charts=(spec,)), model, df
+
+
+@templates_router.get("/customers/{customer_id}/templates/{template_id}/sample.png")
+def template_sample(customer_id: str, template_id: str, layout: int | None = None,
+                    o: str | None = None,
+                    auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer)) -> Response:
+    """A whole slide as this template would draw it — furniture, headline,
+    question, chart and the n-line — for the layout editor to draw its areas on.
+
+    The same path a preview takes, so what an author sees here is what a slide
+    is. An empty ground told them where the boxes were and nothing about whether
+    the result reads.
+    """
+    from io import BytesIO
+
+    from reportbuilder.render.image.fast_preview import compose_from_slide, ground_image
+    from reportbuilder.export.pptx_build import build_presentation
+    from reportbuilder.render.style_spec import load_style_spec
+
+    path = _template_on_disk(repo, auth, customer_id, template_id)
+    stored = repo.template_layout(auth, customer_id, template_id)
+    chosen = layout if layout is not None else stored.get("layout_index")
+    # `o` is what the author is TRYING — the unsaved draft. Without it the
+    # sample answers with what was last saved, so changing a font or a size
+    # showed no effect until Save, which reads as the setting doing nothing.
+    trying = stored
+    if o:
+        try:
+            candidate = json.loads(o)
+            if isinstance(candidate, dict):
+                trying = candidate
+                chosen = candidate.get("layout_index", chosen)
+        except ValueError:
+            pass
+    style = load_style_spec(path, force_layout=chosen if isinstance(chosen, int) else None)
+    from reportbuilder.render.style_spec import apply_template_overrides
+
+    apply_template_overrides(style, trying)
+
+    report, model, df = _sample_report()
+    image = None
+    try:
+        image = compose_from_slide(
+            style, build_presentation(report, model, df, style=style).slides[0])
+    except Exception:  # noqa: BLE001 — a template we cannot draw still opens
+        log.warning("sample slide failed for %s; falling back to the empty ground",
+                    template_id, exc_info=True)
+    if image is None:
+        image = ground_image(style)
+    if image is None:
+        raise HTTPException(404, "this template has no slide to draw")
     buf = BytesIO()
     image.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png",
