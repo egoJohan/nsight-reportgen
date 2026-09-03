@@ -140,3 +140,70 @@ class TestTheColoursComeOffTheSlide:
         profile = _profile("attendo")
         assert profile.background == ""
         assert profile.accent == ""
+
+
+# ---------------------------------------------------------------------------
+# Choosing the layout — the policy, with no file in sight
+# ---------------------------------------------------------------------------
+#
+# The numbers below are measured from the three customer templates on staging.
+# Kept as a pure function because the fault it fixes is a JUDGEMENT, not a
+# reading: the reading was always right about Arla, and what it concluded from
+# two slides was not.
+
+from reportbuilder.render.template_check import LayoutCandidate  # noqa: E402
+from reportbuilder.render.template_profile import choose_layout  # noqa: E402
+
+
+def _cand(index, name, pct, score=10):
+    return LayoutCandidate(index=index, name=name, score=score, has_title=True,
+                           content_count=1, has_picture=False, content_area_pct=pct)
+
+
+class TestChoosingTheLayout:
+    def test_a_deck_says_where_its_design_lives(self):
+        """Attendo: 42 of 56 slides on one layout. Usage IS the answer here,
+        even against a candidate with a roomier content box."""
+        cands = [_cand(3, "1 layout area", 45.0), _cand(9, "Big Picture", 70.0)]
+        idx, take_geometry = choose_layout(cands, {"1 layout area": 42}, slide_count=56)
+        assert idx == 3
+        assert take_geometry is True
+
+    def test_two_sample_slides_do_not_decide_anything(self):
+        """Arla: 69 layouts, 27 candidates, and TWO slides. One of them landed
+        on a sub-brand layout, which is how every rendered deck came out in Arla
+        Protein branding with a black band."""
+        cands = [_cand(36, "Sub Brand Protein 1", 22.2),
+                 _cand(17, "Normal Text Diagram", 22.2),
+                 _cand(60, "Cover_no subtitle", 1.9)]
+        idx, _ = choose_layout(cands, {"Sub Brand Protein 1": 1}, slide_count=2)
+        assert idx != 36, "one demo slide must not outvote 27 candidates"
+
+    def test_a_column_is_not_a_chart_area(self):
+        """Arla again: its best content box is 22% of the slide, because every
+        Normal layout is two-column. The layout is still worth having — the
+        band, the logo, the title style — but its box is not where a chart goes.
+        """
+        cands = [_cand(17, "Normal Text Diagram", 22.2)]
+        idx, take_geometry = choose_layout(cands, {}, slide_count=2)
+        assert idx == 17, "still used, for its ground and its title"
+        assert take_geometry is False, "but we place the chart ourselves"
+
+    def test_a_real_content_area_is_used(self):
+        """Prima Pet 54.7%, Suomalainen Työ 61.9% — both are genuinely the
+        slide's content area, and both were drawn to leave room for a footer."""
+        for pct in (54.7, 61.9):
+            idx, take_geometry = choose_layout([_cand(7, "Otsikko ja sisältö", pct)],
+                                               {}, slide_count=3)
+            assert (idx, take_geometry) == (7, True)
+
+    def test_nothing_to_choose_from(self):
+        assert choose_layout([], {}, slide_count=10) == (None, False)
+
+    def test_a_deck_built_on_a_blank_layout_is_hand_drawn(self):
+        """Synsam: 98 of 147 slides on "Tom", which is not a candidate at all.
+        That is the signal the design was drawn by hand — falling back to the
+        roomiest candidate would build it on a layout it never uses and lose the
+        design entirely."""
+        cands = [_cand(3, "Innehåll", 55.0)]
+        assert choose_layout(cands, {"Tom": 98, "Innehåll": 2}, slide_count=147) == (None, False)

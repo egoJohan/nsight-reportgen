@@ -172,6 +172,15 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
     if spec.profile is not None:
         spec.chart_layout_index = spec.profile.layout_index
         spec.chart_slot = None
+        # The title is drawn by US, on the ground the template gives us — so it
+        # has to be the colour that template writes its titles in, whichever
+        # branch below we take. This used to be set only when the design lived
+        # on SLIDES, which is the one case where it rarely matters: Arla's
+        # design lives in a LAYOUT whose title is white on a black band, so the
+        # harvested white was discarded and the default black drawn onto black.
+        # The headline was there on every slide and could not be read.
+        if spec.profile.title is not None and spec.profile.title.colour:
+            spec.ink = spec.profile.title.colour
         if spec.profile.layout_index is None:
             # Design on the slides means colours on the slides too. The theme of
             # such a file describes nothing that is on screen: attendo_agent_deck
@@ -179,9 +188,9 @@ def load_style_spec(template_path: str) -> TemplateStyleSpec:
             # blue, and reading the theme is what made a client's deck come back
             # in colours that appear nowhere in their template.
             spec.background = spec.profile.background or spec.background
-            spec.ink = spec.profile.title.colour or spec.ink
             spec.accent = spec.accent or spec.profile.accent
-        if spec.profile.layout_index is not None:
+        if (spec.profile.layout_index is not None
+                and spec.profile.layout_content_is_chart_area):
             content = _largest_content_placeholder(
                 prs.slide_layouts[spec.profile.layout_index])
             if content is not None:
@@ -215,3 +224,127 @@ def attendo_interim_spec() -> TemplateStyleSpec:
     spec = load_style_spec(str(config.ATTENDO_TEMPLATE))
     spec.spec_source = "attendo-interim-proxy"
     return spec
+
+# ---------------------------------------------------------------------------
+# What an author says, on top of what we harvested
+# ---------------------------------------------------------------------------
+
+#: Geometry is given in INCHES, because that is what PowerPoint's own ruler
+#: says and what somebody dragging a box on screen is really adjusting. EMU is
+#: an implementation detail of the file format and belongs on this side of the
+#: boundary only.
+_EMU_PER_INCH = 914400
+
+
+def _hex(value) -> str:
+    """A colour an author typed, or "" for "no opinion"."""
+    text = str(value or "").strip().lstrip("#").upper()
+    return text if len(text) in (6, 8) and all(c in "0123456789ABCDEF" for c in text) else ""
+
+
+def _num(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 or out == 0 else None
+
+
+def apply_template_overrides(spec, overrides: dict | None) -> None:
+    """Apply an author's corrections to a harvested style, in place.
+
+    Harvesting is a guess made from a file nobody wrote for us, and each of the
+    three customer templates we have is unusual in a different way. The rules
+    are better now; the next template will find a new way. So an author can say
+    what the answer is and be believed — per template, because everything we
+    have seen is a property of the template rather than of one deck.
+
+    BLANK MEANS INHERIT, everywhere. A template nobody has touched renders
+    exactly as the harvester decided, which is what keeps this an override
+    rather than a second place the truth has to be maintained.
+    """
+    if not overrides:
+        return
+
+    title = overrides.get("title") or {}
+    content = overrides.get("content") or {}
+
+    if _hex(title.get("colour")):
+        spec.ink = _hex(title["colour"])
+    if _hex(overrides.get("accent")):
+        spec.accent = _hex(overrides["accent"])
+    if _hex(overrides.get("background")):
+        spec.background = _hex(overrides["background"])
+
+    profile = getattr(spec, "profile", None)
+    if profile is not None and getattr(profile, "title", None) is not None:
+        _apply_text(profile.title, title)
+        _apply_box(profile.title, title)
+    _apply_chart_text(spec, content)
+
+    _apply_slot(spec, content)
+
+
+#: The chart's own text. "Content font/size" means these: the row labels down
+#: the side, the numbers in the bars, the legend and the axis. Naming them is
+#: what makes the setting do the thing an author asked for — the first complaint
+#: about a rendered slide was row labels overlapping each other, and the answer
+#: to that is a smaller category font, not a different body font somewhere.
+_CHART_TEXT_ROLES = ("category_names", "data_labels", "axis_values",
+                     "axis_names", "legend")
+
+
+def _apply_chart_text(spec, given: dict) -> None:
+    family = str(given.get("font") or "").strip()
+    size = _num(given.get("size"))
+    if not family and not size:
+        return
+    if family:
+        spec.body_font = family
+    fonts = dict(getattr(spec, "fonts", {}) or {})
+    for role in _CHART_TEXT_ROLES:
+        had_family, had_size = fonts.get(role, ("", 0))
+        fonts[role] = (family or had_family, int(size) if size else had_size)
+    spec.fonts = fonts
+
+
+def _apply_text(style, given: dict) -> None:
+    if given.get("font"):
+        style.font = str(given["font"])
+    size = _num(given.get("size"))
+    if size:
+        style.size_pt = size
+
+
+def _apply_box(style, given: dict) -> None:
+    for key, attr in (("x", "left"), ("y", "top"), ("w", "width"), ("h", "height")):
+        value = _num(given.get(key))
+        if value is not None and hasattr(style, attr):
+            setattr(style, attr, int(value * _EMU_PER_INCH))
+
+
+def _apply_slot(spec, given: dict) -> None:
+    """The chart's own box. Absent edges keep whatever they had."""
+    edges = {k: _num(given.get(k)) for k in ("x", "y", "w", "h")}
+    if all(v is None for v in edges.values()):
+        return
+    current = getattr(spec, "chart_slot", None)
+    if current is None:
+        # Nothing to amend, so a whole box is required: three numbers do not
+        # make one, and guessing the fourth puts a chart somewhere nobody asked
+        # for. This is the Arla case — no usable content area in the template,
+        # so the renderer places the chart until an author says where it goes.
+        if any(v is None for v in edges.values()):
+            return
+        spec.chart_slot = Slot(slide_index=-1, left=int(edges["x"] * _EMU_PER_INCH),
+                               top=int(edges["y"] * _EMU_PER_INCH),
+                               width=int(edges["w"] * _EMU_PER_INCH),
+                               height=int(edges["h"] * _EMU_PER_INCH), name="chart")
+        return
+    spec.chart_slot = Slot(
+        slide_index=current.slide_index,
+        left=int(edges["x"] * _EMU_PER_INCH) if edges["x"] is not None else current.left,
+        top=int(edges["y"] * _EMU_PER_INCH) if edges["y"] is not None else current.top,
+        width=int(edges["w"] * _EMU_PER_INCH) if edges["w"] is not None else current.width,
+        height=int(edges["h"] * _EMU_PER_INCH) if edges["h"] is not None else current.height,
+        name=current.name)

@@ -229,6 +229,128 @@ def template_detail(customer_id: str, template_id: str,
     raise HTTPException(404, f"Template '{template_id}' not found")
 
 
+def _template_on_disk(repo, auth, customer_id: str, template_id: str) -> str:
+    """The template's bytes as a file, content-addressed like the preview path."""
+    import hashlib
+    import os
+    import uuid
+
+    from reportbuilder import cache_dirs
+
+    blob = repo.get_template_bytes(auth, customer_id, template_id)
+    root = cache_dirs.template_root()
+    f = root / f"{template_id}.{hashlib.sha256(blob).hexdigest()[:16]}.pptx"
+    if not f.exists():
+        tmp = root / f"{f.name}.{uuid.uuid4().hex[:8]}.part"
+        tmp.write_bytes(blob)
+        os.replace(tmp, f)
+    return str(f)
+
+
+def _in(emu) -> float:
+    """EMU to inches, rounded to something a person would type."""
+    return round(int(emu or 0) / 914400, 2)
+
+
+@templates_router.get("/customers/{customer_id}/templates/{template_id}/layout")
+def template_layout(customer_id: str, template_id: str,
+                    auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer)) -> dict:
+    """What we harvested from this template, what an author has overridden, and
+    every layout they could choose instead.
+
+    Harvesting is a guess made from a file nobody wrote for us. On the three
+    customer templates we have it was wrong three different ways, so this is
+    the surface where an author says what the answer is.
+    """
+    from pptx import Presentation
+
+    from reportbuilder.render.style_spec import load_style_spec
+    from reportbuilder.render.template_check import rank_layouts
+
+    path = _template_on_disk(repo, auth, customer_id, template_id)
+    style = load_style_spec(path)
+    prs = Presentation(path)
+    profile = getattr(style, "profile", None)
+    title = getattr(profile, "title", None)
+    slot = getattr(style, "chart_slot", None)
+    ranked = {c.index: c for c in rank_layouts(prs)}
+    slide_area = (int(prs.slide_width or 0) * int(prs.slide_height or 0)) or 1
+
+    return {
+        "slide": {"w": _in(prs.slide_width), "h": _in(prs.slide_height)},
+        "chosen_layout": getattr(profile, "layout_index", None),
+        "content_is_chart_area": bool(
+            getattr(profile, "layout_content_is_chart_area", False)),
+        "layouts": [
+            {"index": i, "name": lay.name,
+             "content_pct": round(ranked[i].content_area_pct, 1) if i in ranked else 0.0,
+             "suitable": i in ranked}
+            for i, lay in enumerate(prs.slide_layouts)
+        ],
+        "harvested": {
+            "title": {
+                "x": _in(getattr(title, "left", 0)), "y": _in(getattr(title, "top", 0)),
+                "w": _in(getattr(title, "width", 0)), "h": _in(getattr(title, "height", 0)),
+                "font": getattr(title, "font", "") or "",
+                "size": getattr(title, "size_pt", 0) or 0,
+                "colour": getattr(title, "colour", "") or "",
+            },
+            "content": {
+                "x": _in(getattr(slot, "left", 0)), "y": _in(getattr(slot, "top", 0)),
+                "w": _in(getattr(slot, "width", 0)), "h": _in(getattr(slot, "height", 0)),
+                "font": getattr(style, "body_font", "") or "",
+                "size": (getattr(style, "fonts", {}) or {}).get("category_names", ("", 0))[1],
+                "colour": "",
+            },
+            "accent": getattr(style, "accent", "") or "",
+            "background": getattr(style, "background", "") or "",
+        },
+        "overrides": repo.template_layout(auth, customer_id, template_id),
+    }
+
+
+class TemplateLayoutBody(BaseModel):
+    layout_index: int | None = None
+    title: dict = {}
+    content: dict = {}
+    accent: str = ""
+    background: str = ""
+
+
+@templates_router.put("/customers/{customer_id}/templates/{template_id}/layout")
+def set_template_layout(customer_id: str, template_id: str,
+                        body: TemplateLayoutBody,
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(require_customer_write)) -> dict:
+    """Save an author's corrections. Blank fields are dropped, not stored as
+    blanks, so "inherit" stays the absence of an opinion rather than a value
+    that has to be recognised everywhere it is read."""
+    def kept(area: dict) -> dict:
+        out = {}
+        for key in ("x", "y", "w", "h", "size"):
+            value = area.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                out[key] = float(value)
+        for key in ("font", "colour"):
+            text = str(area.get(key) or "").strip()
+            if text:
+                out[key] = text
+        return out
+
+    layout = {k: v for k, v in {
+        "layout_index": body.layout_index,
+        "title": kept(body.title or {}),
+        "content": kept(body.content or {}),
+        "accent": str(body.accent or "").strip(),
+        "background": str(body.background or "").strip(),
+    }.items() if v not in (None, "", {})}
+    repo.record_template_layout(auth, customer_id, template_id, layout)
+    return {"saved": layout}
+
+
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/file")
 def download_template(customer_id: str, template_id: str,
                       auth: AuthContext = Depends(get_auth),

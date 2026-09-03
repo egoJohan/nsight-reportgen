@@ -1863,6 +1863,28 @@ class Repository:
         meta["fonts"] = fonts
         self._write_json(auth, path, meta, [P.LABEL_TEMPLATE_META])
 
+    def record_template_layout(self, auth: AuthContext, customer_id: str,
+                               template_id: str, layout: dict) -> None:
+        """An author's corrections to what we harvested from this template.
+
+        Merged into the same summary the font check writes to, for the same
+        reason: a concurrent change to one must not clobber the other.
+        """
+        path = P.template_meta_path(customer_id, template_id)
+        meta = self._read_json(auth, path)
+        meta["layout"] = layout
+        self._write_json(auth, path, meta, [P.LABEL_TEMPLATE_META])
+
+    def template_layout(self, auth: AuthContext, customer_id: str,
+                        template_id: str) -> dict:
+        """Those corrections, or {} when nobody has made any."""
+        try:
+            meta = self._read_json(auth, P.template_meta_path(customer_id, template_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return {}
+        layout = meta.get("layout")
+        return layout if isinstance(layout, dict) else {}
+
     def list_templates(self, auth: AuthContext, customer_id: str) -> list[Template]:
         out = []
         for info in self.store.list(auth, P.templates_prefix(customer_id),

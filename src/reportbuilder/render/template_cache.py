@@ -22,6 +22,7 @@ key and re-resolves on its own; nothing has to remember to invalidate it.
 """
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -96,3 +97,21 @@ def resolve(template_path: str) -> ResolvedTemplate:
     """
     st = os.stat(template_path)
     return _resolve(template_path, st.st_size, st.st_mtime_ns)
+
+
+def style_with_overrides(template_path: str, overrides: dict | None):
+    """The resolved style, with an author's corrections applied to a COPY.
+
+    `resolve` is cached on the file, and the corrections are not in the file —
+    they are stored per template, and one customer's are not another's. Mutating
+    the cached style would serve the first caller's corrections to everybody
+    who renders on that template afterwards.
+    """
+    from reportbuilder.render.style_spec import apply_template_overrides
+
+    style = resolve(template_path).style
+    if not overrides:
+        return style
+    style = copy.deepcopy(style)
+    apply_template_overrides(style, overrides)
+    return style

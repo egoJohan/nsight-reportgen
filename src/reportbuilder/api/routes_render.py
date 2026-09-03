@@ -134,6 +134,7 @@ def orchestrate_render(
     out_dir: str | None = None,
     cancel_check=None,
     template_path: str | None = None,
+    template_overrides: dict | None = None,
 ) -> dict:
     """Load the report + the material's data, build the deck, convert to PDF.
     Returns {"pptx": <path>, "pdf": <path>}. (REQ-C-19, REQ-C-21, REQ-C-22)
@@ -182,8 +183,11 @@ def orchestrate_render(
         style = None
         if template_path:
             try:
-                from reportbuilder.render.template_cache import resolve
-                style = resolve(template_path).style
+                from reportbuilder.render.template_cache import style_with_overrides
+                # The customer's own corrections to what we harvested from this
+                # template. Applied to a copy — resolve() is cached on the file
+                # and these are not in the file.
+                style = style_with_overrides(template_path, template_overrides)
             except Exception:  # noqa: BLE001
                 # An unreadable template must not fail the render; the deck
                 # falls back to the generic style it used before templates.
@@ -250,8 +254,14 @@ def _font_warnings(repo: Repository, auth: AuthContext, case_id: str,
 
 
 def _template_for(repo: Repository, auth: AuthContext, case_id: str,
-                  report_id: str, out_dir: pathlib.Path) -> str | None:
-    """Put the report's resolved template on disk and return its path.
+                  report_id: str, out_dir: pathlib.Path) -> tuple[str | None, dict]:
+    """Put the report's resolved template on disk; return its path and the
+    customer's corrections to it.
+
+    The corrections come back from HERE because this is where the customer and
+    the resolved template id are both known. Read anywhere else they would need
+    re-resolving, and a `report` carries a template_ref that is often blank —
+    the template it actually renders on is inherited.
 
     Resolution is report -> pinned -> tutkimus -> asiakas -> house default
     (Repository.resolve_template). Returns None when nothing is available, and
@@ -263,14 +273,18 @@ def _template_for(repo: Repository, auth: AuthContext, case_id: str,
     """
     k = repo.find_case(auth, case_id)
     if k is None:
-        return None
+        return None, {}
     try:
         template_id, level = repo.resolve_template(auth, k.customer_id, k.id, report_id)
         blob = repo.template_bytes_for_report(auth, k.customer_id, k.id, report_id)
     except Exception:  # noqa: BLE001 — styling must not break rendering
-        return None
+        return None, {}
     if not blob:
-        return None
+        return None, {}
+    try:
+        overrides = repo.template_layout(auth, k.customer_id, template_id)
+    except Exception:  # noqa: BLE001
+        overrides = {}
 
     path = out_dir / "template.pptx"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -281,7 +295,7 @@ def _template_for(repo: Repository, auth: AuthContext, case_id: str,
                           level=('customer' if level == 'pinned' else level))
     except Exception:  # noqa: BLE001
         pass
-    return str(path)
+    return str(path), overrides
 
 
 def _persist_deck(repo: Repository, auth: AuthContext, case_id: str,
@@ -387,7 +401,8 @@ async def render_report(
 
         # Resolved before the render so the deck is built INTO the client's
         # template rather than styled afterwards.
-        template_path = _template_for(repo, auth, case_id, report_id, out_dir)
+        template_path, template_overrides = _template_for(
+            repo, auth, case_id, report_id, out_dir)
         # Chart text uses the configured font, which is deliberately independent of
         # the template's: brand faces are often too wide for category labels.
         from reportbuilder.api.routes_settings import apply_chart_font
@@ -400,6 +415,7 @@ async def render_report(
                     case_id, report_id, body.material_id, client,
                     out_dir=str(out_dir), cancel_check=cancel.is_set,
                     template_path=template_path,
+                    template_overrides=template_overrides,
                 ),
             )
         except RenderCancelled:

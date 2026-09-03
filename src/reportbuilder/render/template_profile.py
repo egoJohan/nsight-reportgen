@@ -115,6 +115,10 @@ class TemplateProfile:
     #: the design was harvested off a slide, so `furniture` has to be cloned onto
     #: a blank slide instead.
     layout_index: int | None = None
+    #: Whether that layout's own content placeholder is big enough to be the
+    #: chart area. False for a two-column library like Arla's, where the layout
+    #: is still worth building on but its box is a column.
+    layout_content_is_chart_area: bool = False
     title: TextStyle = field(default_factory=TextStyle)
     subtitle_font: str = ""
     #: The ground the slide is drawn on, and the colour its design leads with —
@@ -451,27 +455,78 @@ def _decoration(container) -> list:
     return out
 
 
+#: Below this share of the slide, a template's largest "content" placeholder is
+#: a COLUMN, not a chart area. Arla's every Normal layout is two-column and its
+#: best box covers 22% of the slide; taking that as the chart area is what put a
+#: full-width chart into a half-width box. The layout is still worth having for
+#: its band, its logo and its title style — only its geometry is refused.
+_MIN_CONTENT_SHARE = 40.0
+
+#: Usage is evidence only when there is enough of it. Attendo puts 42 of its 56
+#: slides on one layout and that settles it; Arla's file is a LIBRARY — 69
+#: layouts, two sample slides — and one of those slides landed on a sub-brand
+#: layout, which is how every deck came out in Arla Protein branding with a
+#: black band. Two slides cannot outvote 27 candidates.
+_MIN_SLIDES_FOR_USAGE = 5
+
+
+def choose_layout(candidates, usage, slide_count: int):
+    """Which layout to build on, and whether its content box is the chart area.
+
+    Returns ``(index, take_geometry)``; ``(None, False)`` when the template
+    offers nothing that could hold a headline and a chart.
+
+    Two questions, and they are separate. WHICH layout is about where the
+    design lives — a deck's own usage answers it when there is a deck, and the
+    roomiest candidate answers it when the file is a layout library. WHETHER to
+    use its content box is about whether that box is a chart area at all, which
+    is a measurement and not a preference.
+    """
+    if not candidates:
+        return None, False
+    by_name = {c.name: c for c in candidates}
+
+    if usage and slide_count >= _MIN_SLIDES_FOR_USAGE:
+        # Enough slides for usage to mean something, so it decides — including
+        # when it decides AGAINST every candidate. Synsam puts 98 of its 147
+        # slides on "Tom" and the agent deck all 20 on `Blank`; a blank layout
+        # is not a candidate at all, and that is precisely the signal that those
+        # decks were drawn by hand and must be harvested from a slide. Falling
+        # back to "the roomiest candidate" here would build them on a layout
+        # they never use and lose the design entirely.
+        mainstay = max(usage.values())
+        for name, count in sorted(usage.items(), key=lambda kv: -kv[1]):
+            if name not in by_name:
+                continue
+            # A candidate the deck barely touches is not where its design lives.
+            if count < _MAINSTAY_SHARE * mainstay:
+                break
+            chosen = by_name[name]
+            return chosen.index, chosen.content_area_pct >= _MIN_CONTENT_SHARE
+        return None, False
+
+    # Too few slides to learn anything from: the roomiest content area, then the
+    # ranking's own score, then a stable index so the answer does not wander.
+    chosen = max(candidates, key=lambda c: (c.content_area_pct, c.score, -c.index))
+    return chosen.index, chosen.content_area_pct >= _MIN_CONTENT_SHARE
+
+
 def _design_layout(prs):
-    """(index, layout) of the layout carrying this template's design, or None.
+    """(index, layout, take_geometry) of the layout carrying this template's
+    design, or None.
 
     Two questions, in this order. Which layouts COULD hold a headline and a
     chart — that is template_check's area ranking, which already identifies "1
     layout area", "Innehåll" and "Title and Content" across three languages.
-    And then: is one of them what the deck itself is built on?
-
-    The second question is the one that separates the two kinds of customer
-    file. Attendo puts 42 of its 56 slides on "1 layout area", so its design is
-    in the layouts and a slide built from that layout inherits it. Synsam puts
-    98 of 147 on "Tom" and Johan's agent deck puts all 20 on `Blank` — a blank
-    layout is not a candidate at all, which is exactly the signal that those
-    decks were drawn by hand and must be harvested from a slide.
+    And then, in `choose_layout`, which of them this file actually says to use,
+    and whether its content box is a chart area or a column.
 
     Ranking on decoration count instead, as the first version did, picked
     Attendo's "Agenda slide" and Synsam's "Slutbild" (title box 0.14in tall,
     above the top edge of the slide). Decoration says a layout is pretty, not
     that it is the one the deck is made of.
     """
-    candidates = {c.name: c for c in rank_layouts(prs)}
+    candidates = list(rank_layouts(prs))
     if not candidates:
         return None
 
@@ -481,22 +536,11 @@ def _design_layout(prs):
             usage[slide.slide_layout.name] += 1
         except AttributeError:
             continue
-    if not usage:
-        # A template with no slides of its own — a real .potx, or one already
-        # stripped. Nothing to learn from usage, so take the best candidate.
-        best = min(candidates.values(), key=lambda c: (-c.score, c.index))
-        return best.index, prs.slide_layouts[best.index]
 
-    mainstay = usage.most_common(1)[0][1]
-    for name, count in usage.most_common():
-        if name not in candidates:
-            continue
-        # A candidate the deck barely touches is not where its design lives.
-        if count < _MAINSTAY_SHARE * mainstay:
-            break
-        idx = candidates[name].index
-        return idx, prs.slide_layouts[idx]
-    return None
+    index, take_geometry = choose_layout(candidates, usage, len(prs.slides))
+    if index is None:
+        return None
+    return index, prs.slide_layouts[index], take_geometry
 
 
 def _body_slides(prs) -> list:
@@ -746,8 +790,9 @@ def extract_profile(template_path: str) -> TemplateProfile:
 
     found = _design_layout(prs)
     if found is not None:
-        index, source = found
+        index, source, take_geometry = found
         profile.layout_index = index
+        profile.layout_content_is_chart_area = take_geometry
         profile.source = f"layout:{source.name}"
     else:
         source = _representative_slide(prs)

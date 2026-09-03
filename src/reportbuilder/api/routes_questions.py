@@ -1564,6 +1564,38 @@ def _preview_headline(body) -> str:
     return (getattr(body, "slide_title", None) or "").strip()
 
 
+def _template_overrides(repo, auth, material_id: str, template_id: str) -> dict:
+    """An author's corrections to this template, or {} — never an error.
+
+    Styling must not be able to stop a preview: a template whose corrections
+    cannot be read renders as the harvester decided, which is what it did
+    before anybody could correct anything.
+    """
+    if not template_id or template_id == "default":
+        return {}
+    try:
+        m = repo.find_material(auth, material_id)
+        if m is None:
+            return {}
+        return repo.template_layout(auth, m.customer_id, template_id)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _styled_template(repo, auth, material_id: str, template_path: str,
+                     template_id: str):
+    """The template's style with this customer's corrections applied.
+
+    Applied to a COPY: template_cache.resolve is keyed on the FILE, and the
+    corrections are not in the file. Mutating the cached style would serve one
+    customer's corrections to everyone rendering on the same template.
+    """
+    from reportbuilder.render.template_cache import style_with_overrides
+
+    return style_with_overrides(
+        template_path, _template_overrides(repo, auth, material_id, template_id))
+
+
 def _preview_template_filename(template_id: str, blob: bytes) -> str:
     """The temp-file name for this exact template CONTENT.
 
@@ -1714,7 +1746,7 @@ def preview_chart(
     style = None
     if not body.render_title and template_path:
         try:
-            style = _resolve_template(template_path).style
+            style = _styled_template(repo, auth, material_id, template_path, template_id)
             # The headline this slide will carry, so the reported size is the
             # one the deck would use for THIS text rather than the template's
             # nominal size — see title_box_headers.
@@ -1768,7 +1800,7 @@ def preview_chart(
         # case, render_title=False) rather than parsing the template twice.
         if style is None and template_path:
             try:
-                style = _resolve_template(template_path).style
+                style = _styled_template(repo, auth, material_id, template_path, template_id)
             except Exception:  # noqa: BLE001
                 style = None
 
