@@ -124,6 +124,19 @@ describe("titleDataKey stays blind to presentation", () => {
     expect(titleDataKey(chart({ statistic: "mean" }), q)).not.toBe(base);
     expect(titleDataKey(chart(), { text: "A different question", variables: ["v1"] })).not.toBe(base);
   });
+
+  it("DOES move when the slide is drawn on different groups", () => {
+    // The pair of slides this feature exists for — the same battery through
+    // design 1 and through design 2 — is made by duplicating the slide and
+    // changing the tick. The copy's headline was written about the first
+    // group's numbers; leaving it keeps a sentence that is now false, stated
+    // as a finding.
+    const base = titleDataKey(chart(), q);
+    const one = titleDataKey(chart({ classifying_values: ["Design 1"] }), q);
+    const two = titleDataKey(chart({ classifying_values: ["Design 2"] }), q);
+    expect(one).not.toBe(base);
+    expect(two).not.toBe(one);
+  });
 });
 
 describe("the template a slide is drawn on", () => {

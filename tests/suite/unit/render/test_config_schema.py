@@ -152,7 +152,9 @@ def test_standard_schema_field_set():
     # percent_base sits right after statistic (renders on the "Statistic" row);
     # show_total (the "Total column" control) follows it.
     assert keys == [
-        "statistic", "percent_base", "show_total", "classifying_var", "sort",
+        "statistic", "percent_base", "show_total", "classifying_var",
+        # which of the classifier's groups THIS SLIDE is drawn on
+        "classifying_values", "sort",
         "number_format", "show_not_answered", "show_empty_categories",
         "not_answered_codes", "category_label_overrides",
     ]
@@ -173,7 +175,8 @@ def test_stacked_schema_fields():
     # Stacked bars support a second classifying variable (cross-tab combos, grouped by
     # the primary classifier) AND an overall "Total" reference bar (a 100% ref stack).
     assert _keys(stacked_schema()) == [
-        "statistic", "percent_base", "classifying_var", "classifying_var_2",
+        "statistic", "percent_base", "classifying_var", "classifying_values",
+        "classifying_var_2",
         "xtab_layout", "show_total", "sort", "number_format", "show_not_answered",
         "show_empty_categories", "not_answered_codes", "category_label_overrides",
     ]
@@ -185,7 +188,7 @@ def test_single_series_schema_has_classifying_var_but_no_crosstab_controls():
     # reference series, none of which a row of pies can express.
     keys = _keys(single_series_schema())
     assert keys == [
-        "statistic", "classifying_var", "sort", "number_format",
+        "statistic", "classifying_var", "classifying_values", "sort", "number_format",
         "show_not_answered", "show_empty_categories", "not_answered_codes",
         "category_label_overrides",
     ]

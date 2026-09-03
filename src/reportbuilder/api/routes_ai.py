@@ -195,6 +195,10 @@ class SlideTitleBody(BaseModel):
     question_ref: str
     statistic: str = "pct"
     classifying_var: str | None = None
+    # Which of the classifier's groups the SLIDE is drawn on. The headline is a
+    # sentence about those respondents and no others: written from the whole
+    # sample it states, as a finding, a number that is not on the chart.
+    classifying_values: list[str] = []
     show_not_answered: bool = False
     not_answered_codes: list[float] | None = None
     show_empty_categories: bool = True
@@ -219,6 +223,7 @@ def _spec_from_title_body(body: SlideTitleBody) -> ChartSpec:
         chart_type="horizontal_bar",  # irrelevant to compute()
         statistic=body.statistic,
         classifying_var=body.classifying_var,
+        classifying_values=tuple(body.classifying_values or ()),
         number_format=NumberFormat(),
         sort=SortSpec(basis="data_order"),
         template_slot="ai",

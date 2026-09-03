@@ -77,6 +77,7 @@ const title: Producer = {
       question_ref: c.chart.question_ref,
       statistic: c.chart.statistic,
       classifying_var: c.chart.classifying_var,
+      classifying_values: c.chart.classifying_values,
       show_not_answered: c.chart.show_not_answered,
       not_answered_codes: c.chart.not_answered_codes,
       grouping: env.grouping(),

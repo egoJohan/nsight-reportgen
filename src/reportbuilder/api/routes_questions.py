@@ -1358,6 +1358,10 @@ class ChartSpecBody(BaseModel):
     statistic: str = "pct"
     classifying_var: str | None = None
     classifying_var_2: str | None = None  # secondary classifier → cross-tab combos
+    # Which of the classifier's groups THIS SLIDE is computed on; empty is all.
+    # Part of the preview's cache key via model_dump_json, so changing the tick
+    # redraws the slide.
+    classifying_values: list[str] = []
     number_format: _NumberFormatBody = _NumberFormatBody()
     sort: _SortSpecBody = _SortSpecBody()
     elements: _ElementTogglesBody = _ElementTogglesBody()
@@ -1423,6 +1427,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         statistic=body.statistic,
         classifying_var=body.classifying_var,
         classifying_var_2=body.classifying_var_2,
+        classifying_values=tuple(body.classifying_values or ()),
         number_format=NumberFormat(
             mode=body.number_format.mode,
             pct_decimals=body.number_format.pct_decimals,

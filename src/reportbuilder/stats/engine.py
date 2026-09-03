@@ -1259,9 +1259,44 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     mieltä" in the Category labels box changed nothing about the legend, and the
     only way to say what the scale meant was to type it into the subtitle.
     """
-    result = _compute_series(question, spec, data, model)
+    result = _compute_series(question, spec, _selected_rows(spec, data, model), model)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     return _relabelled(result, overrides) if overrides else result
+
+
+def _selected_rows(spec, data: pd.DataFrame, model: QuestionModel) -> pd.DataFrame:
+    """*data* narrowed to the classifier groups this slide names, or *data*.
+
+    ONE place, deliberately. A battery crossed with a classifier is three
+    dimensions and a SeriesResult holds two, so every statement became several
+    bars called "<statement> · <group>" — twenty statements by three countries
+    is sixty bars that say nothing. What a packaging study wants is the whole
+    battery seen through one path, and the next slide the same battery through
+    the other. Narrowing the ROWS here gives that to every question kind and
+    every chart type at once — single, multi, battery, comparison, cross-tab,
+    image and native — instead of teaching each segmentation path its own rule
+    and forgetting one.
+
+    It narrows respondents, so "Total" is the selected respondents and the
+    footer's N counts them: one base for everything on the slide.
+
+    A named group that no longer resolves is ignored rather than fatal. The data
+    under a saved slide can change, and a stale grouping already degrades here
+    instead of 422-ing the slide; a stale filter does the same.
+    """
+    wanted = tuple(getattr(spec, "classifying_values", ()) or ())
+    if not wanted or not getattr(spec, "classifying_var", None):
+        return data
+    masks = _classifier_masks(spec, data, model)
+    if not masks:
+        return data
+    keep = [m for label, m in masks.items() if label in wanted]
+    if not keep or len(keep) == len(masks):
+        return data
+    selected = keep[0].copy()
+    for m in keep[1:]:
+        selected = selected | m
+    return data[selected]
 
 
 def _relabelled(result: SeriesResult, overrides: dict[str, str]) -> SeriesResult:
@@ -1775,6 +1810,16 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         vars_, data)
     all_mask = pd.Series(True, index=data.index)
     seg_items = list((seg_masks or {}).items()) or [(None, all_mask)]
+    # When the SLIDE asked for one group, its name comes off the bars: every bar
+    # would carry the same suffix, saying nothing and stealing the width the
+    # statement needs, and the slide names the group on its filter line instead.
+    #
+    # Keyed on what the slide ASKED for, never on how many groups survived. A
+    # battery asked of only one path collapses to one group on its own, and there
+    # the suffix is the only thing saying which path is drawn — strip it and the
+    # slide reads as the whole sample.
+    sole_group = len(tuple(getattr(spec, "classifying_values", ()) or ())) == 1 \
+        and len(seg_items) == 1
 
     cells: dict[tuple[str, str], Cell] = {}
     base_by_bar: dict[str, int] = {}
@@ -1786,7 +1831,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
         for seg_label, mask in seg_items:
-            bar = stmt if seg_label is None else f"{stmt} · {seg_label}"
+            bar = stmt if seg_label is None or sole_group else f"{stmt} · {seg_label}"
             bars.append(bar)
             if seg_label is not None:
                 segment_primary[bar] = stmt

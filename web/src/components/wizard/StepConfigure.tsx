@@ -882,6 +882,84 @@ function ScatterXyWidget({ chart, materialId, onChange }: WidgetProps) {
 
 // Dispatch a schema field to its widget. Unknown widget types are skipped so an
 // older UI degrades gracefully against a newer schema.
+
+/** Which of the classifying variable's groups this SLIDE is drawn on.
+ *
+ *  A battery crossed with a classifier is three dimensions and a chart holds
+ *  two, so every statement becomes several bars — twenty statements by three
+ *  countries is sixty bars nobody can read. Naming one group gives the whole
+ *  battery seen through that group, and the next slide is the same battery
+ *  through the next one: duplicate the slide, change the tick.
+ *
+ *  All ticked is stored as NO restriction, not as "every group listed". This is
+ *  the only place that knows the full list, so it is the only place that can
+ *  tell the two apart — and once the rows are narrowed the finished chart
+ *  cannot: the groups left are always exactly the ones picked.
+ */
+function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetProps) {
+  const grouping = useContext(GroupingCtx);
+  const clf = chart.classifying_var;
+  const { data, isPending } = useQuery({
+    queryKey: ["segments", materialId, chart.question_ref, clf],
+    queryFn: () => api.segments(materialId, chart.question_ref, clf!, grouping),
+    enabled: !!materialId && !!clf,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const groups = data?.segments ?? [];
+  const picked = chart.classifying_values ?? [];
+  // Empty means all — so an empty selection SHOWS as everything ticked, which is
+  // also what the chart does.
+  const on = (g: string) => picked.length === 0 || picked.includes(g);
+
+  // A field that vanishes teaches nothing; say why it cannot be used yet.
+  if (!clf) {
+    return (
+      <Field label={field.label}>
+        <p className="text-xs text-muted-foreground">
+          Choose a classifying variable first — this picks which of its groups
+          the slide is drawn on.
+        </p>
+      </Field>
+    );
+  }
+  if (isPending) {
+    return (
+      <Field label={field.label}>
+        <p className="text-xs text-muted-foreground">Reading the groups…</p>
+      </Field>
+    );
+  }
+  if (groups.length < 2) return null;   // nothing to choose between
+
+  const toggle = (g: string) => {
+    const now = picked.length === 0 ? groups : picked;
+    const next = now.includes(g) ? now.filter((x) => x !== g) : [...now, g];
+    // Every group ticked is not a subset: store "no restriction" so the slide
+    // says nothing about groups and reads as the whole sample.
+    const all = next.length === groups.length;
+    onChange({ classifying_values: all || next.length === 0 ? [] : next });
+  };
+
+  return (
+    <Field label={field.label}>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {groups.map((g) => (
+          <label key={g} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={on(g)} onChange={() => toggle(g)} />
+            {g}
+          </label>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {picked.length === 0
+          ? "All groups — the slide covers the whole sample."
+          : `Only ${picked.join(", ")} — N and every percentage on the slide count those respondents.`}
+      </p>
+    </Field>
+  );
+}
+
 function FieldWidget(props: WidgetProps) {
   const { field, question, chart, materialId, onChange } = props;
   switch (field.widget) {
@@ -902,6 +980,8 @@ function FieldWidget(props: WidgetProps) {
       return <NumberFormatWidget {...props} />;
     case "scatter_xy":
       return <ScatterXyWidget {...props} />;
+    case "classifier_values":
+      return <ClassifierValuesWidget {...props} />;
     case "note":
       return <NoteWidget {...props} />;
     case "text":

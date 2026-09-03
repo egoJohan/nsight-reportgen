@@ -179,6 +179,27 @@ def _common_tail(*, sort_stacked: bool = False) -> tuple[ConfigField, ...]:
     )
 
 
+def classifying_values_field() -> ConfigField:
+    """Which of the classifier's groups THIS SLIDE is drawn on.
+
+    A battery crossed with a classifier is three dimensions and a chart holds
+    two, so every statement becomes several bars and a big battery comes out
+    unreadable. Naming one group gives the whole battery seen through that
+    group; the next slide is the same battery through the next one, made by
+    duplicating the slide and changing the tick.
+    """
+    return ConfigField(
+        "classifying_values", "classifier_values", "Groups on this slide",
+        help=(
+            "Draw this slide on only some of the classifying variable's groups. "
+            "All of them by default. Naming one is how a whole battery is shown "
+            "through a single group — duplicate the slide and pick another to "
+            "compare them side by side."
+        ),
+        required=False,
+    )
+
+
 def classifying_var_2_field() -> ConfigField:
     return ConfigField(
         "classifying_var_2", "variable", "Second classifying variable",
@@ -195,7 +216,7 @@ def standard_schema() -> tuple[ConfigField, ...]:
     # percent_base sits right after the statistic so the "Percentages of" direction
     # renders on the same row as "Statistic" (and self-hides for non-% statistics).
     return (statistic_field(), percent_base_field(), show_total_field(),
-            classifying_var_field(), *_common_tail())
+            classifying_var_field(), classifying_values_field(), *_common_tail())
 
 
 _XTAB_LAYOUT_LABELS: dict[str, str] = {
@@ -239,7 +260,7 @@ def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
     return (statistic_field(), percent_base_field(), show_total_field(),
-            classifying_var_field(), classifying_var_2_field(), xtab_layout_field(),
+            classifying_var_field(), classifying_values_field(), classifying_var_2_field(), xtab_layout_field(),
             *_common_tail())
 
 
@@ -282,7 +303,7 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
     chart is a single 100%-stacked bar of the question's answer distribution
     (the 'total'). `with_row_summary` appends the right-hand summary column fields
     (stacked HORIZONTAL bar only)."""
-    return (statistic_field(), percent_base_field(), classifying_var_field(),
+    return (statistic_field(), percent_base_field(), classifying_var_field(), classifying_values_field(),
             # A SECOND classifying variable groups the stacked bars into cross-tab combos
             # (e.g. gender × age) — the engine builds the combos and the stacked renderer
             # groups them by the primary classifier.
@@ -307,11 +328,11 @@ def single_series_schema() -> tuple[ConfigField, ...]:
     `resolve_percent_base` always answers "classifier", so each panel already sums
     to 100% within its own group. (spec 2026-08-22-multi-pie-panels-design)
     """
-    return (statistic_field(), classifying_var_field(), *_common_tail())
+    return (statistic_field(), classifying_var_field(), classifying_values_field(), *_common_tail())
 
 
 def combo_schema() -> tuple[ConfigField, ...]:
     """Combo: this question is the x-axis (bars); pick a numeric secondary
     variable for the mean-per-category line, or split by a classifying variable."""
     return (statistic_field(), percent_base_field(), show_total_field(),
-            combo_secondary_field(), classifying_var_field(), *_common_tail())
+            combo_secondary_field(), classifying_var_field(), classifying_values_field(), *_common_tail())

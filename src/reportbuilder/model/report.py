@@ -55,6 +55,15 @@ class ChartSpec:
     elements: ElementToggles
     scatter_xy: tuple[str, str] | None = None   # scatter only (design §9a)
     classifying_var_2: str | None = None        # secondary classifier → cross-tab combos (REQ-C-14b)
+    #: Which of the classifying variable's groups THIS SLIDE is computed on.
+    #:
+    #: Empty is every group, which is what every slide had before this existed.
+    #: A property of the slide, not of the variable: a packaging study shows the
+    #: whole battery through design 1 on one slide and design 2 on the next, and
+    #: the pair is made by duplicating the slide and changing the tick. Naming
+    #: groups narrows the RESPONDENTS, so "Total", the base and the footer's N
+    #: all describe the people selected — one base for everything on the slide.
+    classifying_values: tuple[str, ...] = ()
     show_not_answered: bool = False              # opt-in "Not answered" bucket for missing (REQ-D-06, MV)
     slide_title: str | None = None              # override slide title (REQ-C-24a, D-04)
     # Opaque fingerprint of the DATA slide_title was generated for (question_ref,
@@ -261,6 +270,7 @@ def report_from_json(data: dict | str) -> Report:
             elements=ElementToggles(**el),
             scatter_xy=tuple(sx) if sx is not None else None,
             classifying_var_2=c.get("classifying_var_2"),
+            classifying_values=tuple(c.get("classifying_values") or ()),
             show_not_answered=c.get("show_not_answered", False),
             slide_title=c.get("slide_title"),
             slide_title_key=c.get("slide_title_key"),

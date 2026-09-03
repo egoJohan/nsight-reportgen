@@ -114,6 +114,10 @@ export function titleDataKey(
     chart.question_ref,
     chart.classifying_var ?? null,
     chart.classifying_var_2 ?? null,
+    // Which groups the slide is drawn on. The headline is a sentence about
+    // THESE respondents: duplicate a slide, tick another group, and the one
+    // written about the first group is no longer true of what is on the screen.
+    chart.classifying_values ?? null,
     resolved?.text ?? null,
     resolved?.variables ?? null,
     chart.category_label_overrides,

@@ -191,6 +191,11 @@ export interface ChartSpec {
   statistic: "pct" | "count" | "mean" | "median" | "sum";
   classifying_var: string | null;
   classifying_var_2?: string | null;  // secondary classifier → cross-tab combos
+  /** Which of the classifying variable's groups THIS SLIDE is drawn on.
+   *  Empty/absent is all of them. A property of the slide: the pair of
+   *  "battery through design 1" / "through design 2" slides is made by
+   *  duplicating the slide and changing the tick. */
+  classifying_values?: string[];
   number_format: NumberFormat;
   sort: SortSpec;
   template_slot: string;
@@ -283,6 +288,9 @@ export interface AiSlideTitleBody {
   question_ref: string;
   statistic?: string;
   classifying_var?: string | null;
+  /** Which of the classifier's groups the slide is drawn on — the headline is a
+   *  sentence about those respondents, so it must be written from their rows. */
+  classifying_values?: string[];
   number_format?: NumberFormat;
   show_not_answered?: boolean;
   not_answered_codes?: number[] | null;

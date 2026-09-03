@@ -995,6 +995,21 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         omission = _omission_clause(ctx).removeprefix(" · ")
         if omission:
             footer_text = f"{footer_text}   ·   {omission}"
+    # A slide computed on SOME of the classifier's groups names them on the same
+    # line, for the same reason: N counts those respondents and nobody else, and a
+    # reader who is not told reads the slide as the whole study. The groups are
+    # named, not the variable — RenderContext carries no model to resolve a raw
+    # column name ("polku") to anything a reader would recognise, and the group
+    # labels are the words the author picked from.
+    #
+    # Unconditional on the list being non-empty, and it cannot be otherwise here:
+    # once the rows are narrowed, the segments left ARE the ones picked, so there
+    # is nothing in the finished series to compare against to ask "was this a
+    # subset?". The picker answers it instead, where the full group list is
+    # known: ticking every group stores no restriction at all.
+    picked = tuple(getattr(ctx.spec, "classifying_values", ()) or ())
+    if picked:
+        footer_text = f"{footer_text}   ·   {', '.join(picked)}"
     # Left margin follows the chart on a templated or harvested slide: those
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.
