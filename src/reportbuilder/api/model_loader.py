@@ -166,15 +166,27 @@ def _apply_merges(model: QuestionModel, merges: dict) -> QuestionModel:
     return QuestionModel(variables=model.variables, questions=questions)
 
 
+def apply_curation(model: QuestionModel, material_id: str, client) -> QuestionModel:
+    """The material's own per-question cleaning: renames and value merges.
+
+    Public because grouping is not the only thing a question list needs. The
+    stateless regroup endpoint builds its model from the file and applies a
+    report's grouping to it, and used to stop there — so a question renamed
+    under Study kept its original SAV label everywhere a report looked at it,
+    and every value merge was dropped with it. Anything that assembles a model
+    outside `_finalize` has to end here too.
+    """
+    cfg = material_config(material_id, client)
+    model = _apply_labels(model, _labels_from_cfg(cfg))
+    return _apply_merges(model, _merges_from_cfg(cfg))
+
+
 def _finalize(model, material_id: str, client, override: dict | None, df=None):
     """Apply the report's grouping override, then the material's per-question
     cleaning (name overrides + value merges) — so they show consistently
     everywhere the model is used. Config is loaded once."""
     model = apply_grouping_override(model, override or {}, df=df)
-    cfg = material_config(material_id, client)
-    model = _apply_labels(model, _labels_from_cfg(cfg))
-    model = _apply_merges(model, _merges_from_cfg(cfg))
-    return model
+    return apply_curation(model, material_id, client)
 
 
 def raw_model_for_material(material_id: str, client):

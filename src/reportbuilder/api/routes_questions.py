@@ -1063,6 +1063,12 @@ def regroup(
         ],
     }
     model = apply_grouping_override(base, override)
+    # The report's grouping is not the only thing that shapes this list. Without
+    # this, a question renamed under Study came back with its original SAV label
+    # the moment a report asked — the case reported from staging — and value
+    # merges were dropped the same way.
+    from reportbuilder.api.model_loader import apply_curation
+    model = apply_curation(model, material_id, client)
     # Battery suggestions among the questions that are STILL single after this grouping
     # (runs of ≥3 contiguous same-scale variables). A confirmable hint, never applied.
     suggestions = [
