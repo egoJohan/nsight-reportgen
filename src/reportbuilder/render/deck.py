@@ -348,7 +348,12 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
         # bottom edge does not move, so the customer's margin is kept.
         top, height = int(chart_slot.top), int(chart_slot.height)
         profile = getattr(style, "profile", None)
-        if profile is not None and profile.title.positioned:
+        # Not when somebody has placed the area themselves. Pushing the chart
+        # below the title is how a LAYOUT's content box is kept clear of a
+        # headline that runs longer than the customer's own — it has no business
+        # moving a rectangle an author dragged while watching the result.
+        if (profile is not None and profile.title.positioned
+                and not getattr(style, "content_is_authored", False)):
             _l, t_top, _w, t_height = harvested_title_box(profile, title)
             wanted = t_top + t_height + int(Inches(0.70))
             if wanted > top:
@@ -369,6 +374,18 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
     # A template whose design lives on its slides gives us the title's box, so
     # the chart can start under the customer's title instead of at a guessed
     # 1.9in — and sit inside their side margins rather than ours.
+    # An author's own rectangle, on a template whose design was harvested from a
+    # slide. Without this the box below is computed entirely from the TITLE box,
+    # so a dragged content area was read back by the editor, drawn as a dashed
+    # rectangle, and then ignored: "it does not respect the content area, it
+    # aligns to the title".
+    authored = getattr(style, "chart_slot", None)
+    if render_mode == "image" and authored is not None and getattr(
+            style, "content_is_authored", False):
+        return Slot(slide_index=slide_index, left=int(authored.left),
+                    top=int(authored.top), width=int(authored.width),
+                    height=int(authored.height), name=slot_name)
+
     profile = harvested_profile(style)
     if render_mode == "image" and profile is not None and profile.title.positioned:
         left, top, width, height = harvested_chart_box(

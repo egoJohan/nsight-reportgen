@@ -932,10 +932,17 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 # which left it exactly where it had been overlapping.
                 sub_top = max(sub_top, ceiling)
                 sub_h = max(int(Inches(0.20)), sub_bottom - sub_top)
-                # Left edge and width from the TITLE, so the two line up.
-                t_left, t_width = title_left_width(slide, ctx.style, title)
-                sub_left = t_left or int(ctx.slot.left)
-                sub_w = t_width or int(ctx.slot.width)
+                # Left edge and width from the TITLE, so the two line up — until
+                # somebody places the content area themselves, when the question
+                # belongs to the rectangle it introduces rather than to the
+                # headline above it. Its bottom already sits a fixed gap above
+                # that rectangle; this makes the corner agree.
+                if getattr(ctx.style, "content_is_authored", False):
+                    sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
+                else:
+                    t_left, t_width = title_left_width(slide, ctx.style, title)
+                    sub_left = t_left or int(ctx.slot.left)
+                    sub_w = t_width or int(ctx.slot.width)
             else:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
@@ -990,6 +997,13 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # it reads as a mistake rather than as a choice.
     foot_left = int(ctx.slot.left) if (templated or profile is not None) else int(Inches(0.62))
     foot_top = footer_top(slide, sh, sw)
+    if getattr(ctx.style, "content_is_authored", False):
+        # Under the chart the author placed, not at a height fixed by the
+        # template — the x already followed the chart and only the y did not,
+        # which is the reading that made it look detached. Still never BELOW the
+        # template's own foot furniture, which is what footer_top protects.
+        foot_top = min(foot_top, int(ctx.slot.top) + int(ctx.slot.height)
+                       + int(_SUBTITLE_GAP))
     _textbox(
         slide,
         foot_left, foot_top,

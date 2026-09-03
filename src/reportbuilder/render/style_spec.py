@@ -76,6 +76,11 @@ class TemplateStyleSpec(StyleSpec):
     #: above the template's own foot, so there is nothing to move — but their
     #: SIZE is the thing an author reaches for first: "kysymystekstin
     #: pienentäminen", shrinking a question that runs too long.
+    #: True once an author has placed the content area themselves. The renderer
+    #: otherwise reserves room under the title and puts the chart below it, which
+    #: is the right guess when nobody has said where the chart goes — and simply
+    #: overrides them when somebody has.
+    content_is_authored: bool = False
     title_size_pt: float = 0.0
     title_colour: str = ""
     subtitle_font: str = ""
@@ -423,6 +428,7 @@ def _apply_slot(spec, given: dict) -> None:
     edges = {k: _num(given.get(k)) for k in ("x", "y", "w", "h")}
     if all(v is None for v in edges.values()):
         return
+    spec.content_is_authored = True
     current = getattr(spec, "chart_slot", None)
     if current is None:
         # No slot does not mean no rectangle. Where a template offers us no
