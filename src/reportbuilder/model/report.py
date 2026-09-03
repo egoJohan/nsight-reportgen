@@ -24,6 +24,10 @@ class NumberFormat:
 @dataclass(frozen=True)
 class ElementToggles:
     title: bool = True
+    #: The line under the headline — the question, or whatever the author typed
+    #: instead. Off is a real answer: clearing the text box means "use the
+    #: question", which is the right default and left no way to say "none".
+    subtitle: bool = True
     legend: bool = True
     n: bool = True
     axis_names: bool = True

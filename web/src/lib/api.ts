@@ -152,6 +152,9 @@ export interface SortSpec {
 
 export interface ChartElements {
   title: boolean;
+  /** The line under the headline. Off means none at all — clearing the text box
+   *  means "use the question", which is a different thing. */
+  subtitle: boolean;
   legend: boolean;
   n: boolean;
   axis_names: boolean;

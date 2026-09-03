@@ -824,14 +824,17 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # blank it defaults to the QUESTION — but only when the title is a DISTINCT headline
         # (otherwise the title already IS the question, so no redundant subtitle).
         has_distinct_title = bool(slide_title) and slide_title != question
-        secondary = slide_description or (question if has_distinct_title else "")
+        wants_subtitle = getattr(getattr(ctx.spec, "elements", None), "subtitle", True)
+        secondary = (slide_description or (question if has_distinct_title else "")
+                     ) if wants_subtitle else ""
         # On a STACKED bar the scale sits in the legend as bare numbers; move the endpoint
         # wording (1 = … · 7 = …) into the subtitle so the meaning isn't lost. (customer)
         # Only as the DEFAULT: an authored slide_description owns the whole line, so the
         # author can reword or drop a gloss that fits only one battery member (the levels
         # come from the first member with a parseable scale). The frontend prefills its
         # Subtitle box with this same default, so what you edit is what renders.
-        if not slide_description and getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES:
+        if (wants_subtitle and not slide_description
+                and getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES):
             gloss = scale_endpoint_gloss(ctx.series.categories)
             if gloss:
                 secondary = f"{secondary}   {gloss}" if secondary else gloss

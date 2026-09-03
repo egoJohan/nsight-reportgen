@@ -240,6 +240,7 @@ export const DEFAULT_NUMBER_FORMAT: NumberFormat = {
 
 export const DEFAULT_ELEMENTS: ChartElements = {
   title: true,
+  subtitle: true,
   legend: true,
   n: true,
   axis_names: true,

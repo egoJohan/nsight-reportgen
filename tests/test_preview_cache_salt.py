@@ -73,3 +73,35 @@ def test_the_salt_moves_when_the_drawing_code_does(tmp_path):
     finally:
         os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
     assert _render_code_identity() == before
+
+
+def test_the_salt_moves_when_what_a_slide_CARRIES_changes(tmp_path):
+    """The drawing code is not the only code that decides what a picture shows.
+
+    A slide's elements are declared in `model/report.py` and mapped onto the
+    preview's ChartSpec in `api/routes_questions.py`. Adding the "show a
+    subtitle" switch changed both — and a cached preview drawn before the
+    switch existed kept being served for a request that said `subtitle=false`,
+    so turning the subtitle off appeared to do nothing at all. Scoping the
+    identity to `render/` alone is what let a picture disagree with its own
+    cache key.
+    """
+    import os
+    import pathlib
+
+    import reportbuilder
+    from reportbuilder.api.routes_questions import _render_code_identity
+
+    root = pathlib.Path(reportbuilder.__file__).parent
+    for rel in ("model/report.py", "api/routes_questions.py"):
+        before = _render_code_identity()
+        target = root / rel
+        st = target.stat()
+        try:
+            os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+            assert _render_code_identity() != before, (
+                f"{rel} decides what a slide carries, but the preview cache "
+                f"cannot tell that it changed")
+        finally:
+            os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+        assert _render_code_identity() == before

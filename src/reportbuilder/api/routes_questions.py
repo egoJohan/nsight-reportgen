@@ -1333,6 +1333,7 @@ class _SortSpecBody(BaseModel):
 
 class _ElementTogglesBody(BaseModel):
     title: bool = True
+    subtitle: bool = True
     legend: bool = True
     n: bool = True
     axis_names: bool = True
@@ -1443,6 +1444,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             # template), so render_title selects only HOW a slide is rasterised
             # — compositor or LibreOffice — never what is on it.
             title=body.elements.title,
+            subtitle=body.elements.subtitle,
             legend=body.elements.legend,
             n=body.elements.n,
             axis_names=body.elements.axis_names,
@@ -1483,10 +1485,20 @@ def _render_code_identity() -> str:
     """A digest of the code that draws a preview.
 
     The salt below has to change when a render would come out DIFFERENT, and
-    at no other time. What actually changes a picture is the drawing code, so
-    that is what this hashes: every source file under render/ and export/, by
-    size and mtime — the same "identity, not content" trick `template_cache`
-    uses on a template file, and just as cheap.
+    at no other time. This hashes every source file in the package, by size and
+    mtime — the same "identity, not content" trick `template_cache` uses on a
+    template file, and just as cheap.
+
+    It used to hash render/ and export/ only, on the reasoning that the drawing
+    code is what draws. It is not the only code that decides what is drawn: a
+    slide's elements are declared in model/report.py and mapped onto the
+    preview's spec in this module, and when the "show a subtitle" switch was
+    added there, previews drawn before it existed kept being served for
+    requests that asked for no subtitle — a picture disagreeing with its own
+    cache key, which reads as a switch that does nothing. Nothing is saved by
+    guessing which files matter: in a container every file is written at build
+    time, so a wider net invalidates on exactly the same occasions and never
+    on one where a stale picture could survive.
 
     In a container these are baked at build time, so this is constant for the
     life of an image and changes the moment a new one is built. That is the
@@ -1495,13 +1507,12 @@ def _render_code_identity() -> str:
     import reportbuilder
     root = pathlib.Path(reportbuilder.__file__).parent
     parts = []
-    for sub in ("render", "export"):
-        for f in sorted((root / sub).rglob("*.py")):
-            try:
-                st = f.stat()
-            except OSError:      # a file racing a redeploy: skip, not crash
-                continue
-            parts.append(f"{f.relative_to(root)}:{st.st_size}:{st.st_mtime_ns}")
+    for f in sorted(root.rglob("*.py")):
+        try:
+            st = f.stat()
+        except OSError:      # a file racing a redeploy: skip, not crash
+            continue
+        parts.append(f"{f.relative_to(root)}:{st.st_size}:{st.st_mtime_ns}")
     return hashlib.md5("|".join(parts).encode()).hexdigest()[:8]
 
 

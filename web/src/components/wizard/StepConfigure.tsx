@@ -1172,14 +1172,29 @@ function SubtitleField({
   // and usually needs rewording once several questions are merged into one battery.
   const gloss = isStacked(chart.chart_type) ? scaleGloss : "";
   const fallback = gloss ? `${questionText}   ${gloss}` : questionText;
+  const shown = chart.elements?.subtitle !== false;
   return (
     <Field label="Subtitle">
       <Textarea
         value={chart.slide_description ?? fallback}
         rows={2}
-        className="resize-y"
+        disabled={!shown}
+        className="resize-y disabled:opacity-50"
         onChange={(e) => onChange({ slide_description: e.target.value || null })}
       />
+      {/* Emptying the box means "use the question", which is the right default
+          and no way to say "none" — so "none" is a switch, not a magic value in
+          a text box. */}
+      <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={shown}
+          onChange={(e) =>
+            onChange({ elements: { ...chart.elements, subtitle: e.target.checked } })
+          }
+        />
+        Show a subtitle on this slide
+      </label>
       <p className="text-xs text-muted-foreground">
         The question line shown just above the chart. Defaults to the question text
         {gloss ? " plus the scale legend" : ""}; edits are saved to this report only — they
