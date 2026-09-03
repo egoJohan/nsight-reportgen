@@ -2,7 +2,9 @@ import { useState } from "react";
 import { SettingsIcon, AlertTriangleIcon, CheckIcon, ArrowRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { TemplateLayoutEditor } from "@/components/settings/TemplateLayoutEditor";
+import {
+  TemplateLayoutControls, TemplateSlidePreview, useTemplateLayout,
+} from "@/components/settings/TemplateLayoutEditor";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -11,15 +13,6 @@ import type { TemplateFont } from "@/lib/api";
 
 function bytes(n: number): string {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right">{children}</span>
-    </div>
-  );
 }
 
 /** One font the template names, and what this server will actually draw it as.
@@ -102,6 +95,7 @@ export default function TemplateSettingsDialog({
   const [open, setOpen] = useState(false);
   const { data } = useTemplateDetail(customerId, open ? templateId : undefined);
   const subs = useSubstitutions();
+  const layout = useTemplateLayout(customerId, templateId);
 
   const map = subs.data?.map ?? {};
 
@@ -132,73 +126,72 @@ export default function TemplateSettingsDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        {/* Wide, and the slide keeps its own proportions inside it. The picture
+            IS the thing being edited — a narrow dialog put it below the fold and
+            squeezed a 13x7.5in slide into a thumbnail, which is no way to judge
+            where a title sits. */}
+        <DialogContent className="flex max-h-[92vh] w-[95vw] flex-col overflow-hidden sm:max-w-[1400px]">
           <DialogHeader>
             <DialogTitle className="truncate">
               {data?.name ?? "Template settings"}
             </DialogTitle>
             <DialogDescription>
-              The template's details and fonts. A substitute affects the
-              preview and the PDF only — the PowerPoint file always names the
-              template's own font.
+              {data ? `${bytes(data.size)} · ` : ""}
+              What nSight Studio read out of this template, and where to say it read
+              it wrong. Empty means "use what we read".
             </DialogDescription>
           </DialogHeader>
 
           {!data ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <div className="space-y-4">
-              <div className="rounded-lg border px-3 py-1">
-                <Field label="Chart layout">{data.layout_name || "—"}</Field>
-                <Field label="Heading font">{data.heading_font || "—"}</Field>
-                <Field label="Body font">{data.body_font || "—"}</Field>
-                <Field label="Size">{bytes(data.size)}</Field>
-                <Field label="Colour palette">
-                  <span className="inline-flex gap-0.5 align-middle">
-                    {data.palette.map((c) => (
-                      <span
-                        key={c}
-                        title={`#${c}`}
-                        className="size-3 rounded-sm border border-border"
-                        style={{ backgroundColor: `#${c}` }}
-                      />
-                    ))}
-                  </span>
-                </Field>
+            <div className="grid min-h-0 flex-1 gap-6 overflow-y-auto lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+              <div className="lg:sticky lg:top-0 lg:self-start lg:pt-2">
+                <TemplateSlidePreview state={layout} />
               </div>
 
-              <div>
-                <h4 className="text-sm font-semibold">Fonts</h4>
-                <div className="mt-1">
-                  {data.fonts.length === 0 && (
-                    <p className="py-2 text-xs text-muted-foreground">The template names no fonts.</p>
-                  )}
-                  {data.fonts.map((f) => (
-                    <FontRow
-                      key={f.family}
-                      font={f}
-                      available={data.available_fonts}
-                      chosen={map[f.family] ?? ""}
-                      onChoose={(use) => choose(f.family, use)}
-                    />
-                  ))}
-                </div>
+              <div className="space-y-6">
+                <TemplateLayoutControls state={layout} />
+
+                {/* Fonts stay: this is not about geometry but about whether the
+                    machine drawing the preview HAS the face the template names.
+                    The old summary rows above are gone — layout, heading font,
+                    body font and palette are all shown, and editable, next door. */}
+                <details className="rounded-md border bg-muted/30 p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Fonts
+                    {data.fonts.some((f) => !f.ok) && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        {data.fonts.filter((f) => !f.ok).length === 1
+                          ? "1 needs a stand-in"
+                          : `${data.fonts.filter((f) => !f.ok).length} need a stand-in`}
+                      </span>
+                    )}
+                  </summary>
+                  <p className="mb-1 mt-2 text-xs text-muted-foreground">
+                    A substitute affects the preview and the PDF only — the PowerPoint
+                    file always names the template's own font.
+                  </p>
+                  <div className="mt-1">
+                    {data.fonts.length === 0 && (
+                      <p className="py-2 text-xs text-muted-foreground">
+                        The template names no fonts.
+                      </p>
+                    )}
+                    {data.fonts.map((f) => (
+                      <FontRow
+                        key={f.family}
+                        font={f}
+                        available={data.available_fonts}
+                        chosen={map[f.family] ?? ""}
+                        onChoose={(use) => choose(f.family, use)}
+                      />
+                    ))}
+                  </div>
+                </details>
               </div>
             </div>
           )}
-
-          {/* Where this template's slide is laid out, and how to correct it.
-              Below the fonts because it is the heavier of the two: fonts are a
-              yes/no per family, this is a picture with things to drag. */}
-          <div className="mt-6 border-t pt-4">
-            <h3 className="mb-1 text-sm font-medium">Slide layout</h3>
-            <p className="mb-3 text-xs text-muted-foreground">
-              What nSight Studio read out of this template, and where to say it read
-              it wrong. Drag an area, or type an exact value. Empty means "use what
-              we read".
-            </p>
-            <TemplateLayoutEditor customerId={customerId} templateId={templateId} />
-          </div>
         </DialogContent>
       </Dialog>
     </>
