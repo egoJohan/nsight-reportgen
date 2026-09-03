@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SettingsIcon, AlertTriangleIcon, CheckIcon, ArrowRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { TemplateLayoutEditor } from "@/components/settings/TemplateLayoutEditor";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -131,7 +132,7 @@ export default function TemplateSettingsDialog({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="truncate">
               {data?.name ?? "Template settings"}
@@ -185,6 +186,19 @@ export default function TemplateSettingsDialog({
               </div>
             </div>
           )}
+
+          {/* Where this template's slide is laid out, and how to correct it.
+              Below the fonts because it is the heavier of the two: fonts are a
+              yes/no per family, this is a picture with things to drag. */}
+          <div className="mt-6 border-t pt-4">
+            <h3 className="mb-1 text-sm font-medium">Slide layout</h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              What nSight Studio read out of this template, and where to say it read
+              it wrong. Drag an area, or type an exact value. Empty means "use what
+              we read".
+            </p>
+            <TemplateLayoutEditor customerId={customerId} templateId={templateId} />
+          </div>
         </DialogContent>
       </Dialog>
     </>

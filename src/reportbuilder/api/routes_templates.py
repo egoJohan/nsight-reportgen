@@ -311,6 +311,37 @@ def template_layout(customer_id: str, template_id: str,
     }
 
 
+@templates_router.get("/customers/{customer_id}/templates/{template_id}/ground.png")
+def template_ground(customer_id: str, template_id: str, layout: int | None = None,
+                    auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(require_customer)) -> Response:
+    """The customer's empty slide, as a picture, for the layout editor to draw on.
+
+    The same image a preview is composed onto — their layout, or their harvested
+    furniture redrawn — with no chart and none of our text. `layout` asks for a
+    DIFFERENT one than we chose, which is what makes the dropdown show its
+    effect before anything is saved.
+    """
+    from io import BytesIO
+
+    from reportbuilder.render.image.fast_preview import ground_image
+    from reportbuilder.render.style_spec import load_style_spec
+
+    style = load_style_spec(_template_on_disk(repo, auth, customer_id, template_id))
+    if layout is not None:
+        style.chart_layout_index = layout
+        if getattr(style, "profile", None) is not None:
+            style.profile.layout_index = layout
+    image = ground_image(style)
+    if image is None:
+        raise HTTPException(404, "this template has no ground to draw")
+    buf = BytesIO()
+    image.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 class TemplateLayoutBody(BaseModel):
     layout_index: int | None = None
     title: dict = {}

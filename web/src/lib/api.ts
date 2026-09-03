@@ -663,6 +663,41 @@ const jsonPatch = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
+/** One area of a slide, as an author sees it: inches, points, hex. */
+export type TemplateArea = {
+  x?: number; y?: number; w?: number; h?: number;
+  font?: string; size?: number; colour?: string;
+};
+
+export type TemplateLayoutOption = {
+  index: number;
+  name: string;
+  /** How much of the slide this layout's biggest content box covers. */
+  content_pct: number;
+  /** Whether it could hold a headline and a chart at all. */
+  suitable: boolean;
+};
+
+export type TemplateLayout = {
+  slide: { w: number; h: number };
+  chosen_layout: number | null;
+  content_is_chart_area: boolean;
+  layouts: TemplateLayoutOption[];
+  harvested: {
+    title: Required<TemplateArea>;
+    content: Required<TemplateArea>;
+    accent: string;
+    background: string;
+  };
+  overrides: {
+    layout_index?: number;
+    title?: TemplateArea;
+    content?: TemplateArea;
+    accent?: string;
+    background?: string;
+  };
+};
+
 export const api = {
   /** What this backend can do, and how much of it at once.
    *
@@ -744,6 +779,7 @@ export const api = {
       ).then((r) => json<CustomerCase>(r)),
   },
 
+
   templates: {
     list: (customerId: string): Promise<Template[]> =>
       fetch(`${API_BASE}/customers/${customerId}/templates`).then((r) =>
@@ -763,6 +799,30 @@ export const api = {
       fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}`, {
         method: "DELETE",
       }).then((r) => json<{ removed: number }>(r)),
+
+    /** What we harvested from this template, what an author has corrected, and
+     *  every layout they could choose instead. */
+    layout: (customerId: string, templateId: string): Promise<TemplateLayout> =>
+      fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}/layout`)
+        .then((r) => json<TemplateLayout>(r)),
+
+    saveLayout: (
+      customerId: string,
+      templateId: string,
+      body: TemplateLayout["overrides"]
+    ): Promise<{ saved: unknown }> =>
+      fetch(`${API_BASE}/customers/${customerId}/templates/${templateId}/layout`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => json<{ saved: unknown }>(r)),
+
+    /** The customer's empty slide as a picture, for the editor to draw on.
+     *  `layout` asks for one we did not choose, so the dropdown can show its
+     *  effect before anything is saved. */
+    groundUrl: (customerId: string, templateId: string, layout: number | null): string =>
+      `${API_BASE}/customers/${customerId}/templates/${templateId}/ground.png`
+      + (layout === null ? "" : `?layout=${layout}`),
 
     // null clears the binding, so the level above takes over again.
     bindCustomer: (customerId: string, templateId: string | null) =>
