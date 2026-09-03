@@ -64,6 +64,11 @@ class TextStyle:
 
     font: str = ""
     size_pt: float = 0.0
+    #: An author chose this size, so it is not a starting point to shrink from.
+    #: `fit_title_size` steps down until a headline fits its box, which is right
+    #: for a size we guessed and wrong for one somebody typed while looking at
+    #: the result — a modest choice was fitted straight back to what it replaced.
+    size_locked: bool = False
     bold: bool | None = None
     #: PowerPoint's `cap="all"`: the text renders upper-case whatever we type,
     #: which makes a line about a tenth wider than the same string in mixed case.

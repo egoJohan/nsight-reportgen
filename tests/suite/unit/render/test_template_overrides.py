@@ -95,13 +95,22 @@ class TestGeometry:
         assert s.chart_slot is not None
         assert s.chart_slot.width == int(12.0 * EMU_IN)
 
-    def test_a_half_given_area_is_ignored(self):
-        """Three numbers do not make a box, and guessing the fourth would put a
-        chart somewhere nobody asked for."""
+    def test_a_partial_area_amends_where_the_chart_ALREADY_goes(self):
+        """No slot does not mean no rectangle.
+
+        Where a template offers no usable content area — Arla, whose every
+        layout is two-column — the renderer places the chart itself, and that
+        placement is what a drag amends. This used to require all four numbers,
+        so dragging such a chart, which sends only x and y, changed nothing at
+        all: "when content is resizing or moving the chart does not update".
+        """
         s = _spec()
         s.chart_slot = None
-        apply_template_overrides(s, {"content": {"x": 0.66, "y": 2.0, "w": 12.0}})
-        assert s.chart_slot is None
+        apply_template_overrides(s, {"content": {"y": 2.0}})
+        assert s.chart_slot is not None
+        assert s.chart_slot.top == int(2.0 * EMU_IN)
+        # The edges nobody touched keep the placement they had.
+        assert s.chart_slot.width > 0 and s.chart_slot.height > 0
 
 
 class TestChartText:
@@ -173,3 +182,31 @@ class TestDerivedElements:
         s.resolved_spec = object()
         apply_template_overrides(s, {"content": {"size": 8}})
         assert s.resolved_spec is None
+
+
+class TestTheTitleSizeReachesTheRenderer:
+    """The drawn title takes its size from the `title` font role, which
+    `build_spec` reads — not from the harvested profile. Setting only the
+    profile stored the number, echoed it back in the editor, and left the
+    headline exactly as it was on every template whose title is drawn rather
+    than inherited from a placeholder."""
+
+    def test_the_size_lands_in_the_font_role(self):
+        s = _spec()
+        apply_template_overrides(s, {"title": {"size": 24}})
+        assert s.font_for("title")[1] == 24
+
+    def test_the_family_lands_there_too(self):
+        s = _spec()
+        apply_template_overrides(s, {"title": {"font": "Georgia"}})
+        assert s.font_for("title")[0] == "Georgia"
+
+    def test_and_still_on_the_profile_where_the_box_is_measured(self):
+        class _T:
+            font = ""; size_pt = 0.0; left = 0; top = 0; width = 0; height = 0
+        class _P:
+            title = _T()
+        s = _spec()
+        s.profile = _P()
+        apply_template_overrides(s, {"title": {"size": 24}})
+        assert s.profile.title.size_pt == 24

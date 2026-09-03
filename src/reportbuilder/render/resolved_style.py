@@ -187,10 +187,16 @@ def build_spec(style, title_font: str = "", subtitle_font: str = "") -> Template
     s_font = (subtitle_font or getattr(style, "body_font", "")
               or getattr(style, "heading_font", "") or "")
 
-    t_size = size_for_cap_height(t_font, TARGET_TITLE_CAP_IN)
-    s_size = size_for_cap_height(s_font, TARGET_SUBTITLE_CAP_IN)
+    # Sized by CAP HEIGHT so a headline looks the same size whatever face the
+    # template names — which is right until somebody looking at the result says
+    # otherwise. An author's own size is not a starting point to normalise.
+    t_size = (getattr(style, "title_size_pt", 0.0)
+              or size_for_cap_height(t_font, TARGET_TITLE_CAP_IN))
+    s_size = (getattr(style, "subtitle_size_pt", 0.0)
+              or size_for_cap_height(s_font, TARGET_SUBTITLE_CAP_IN))
 
-    t_colour = title_colour(getattr(harvested, "colour", "") or "", style)
+    t_colour = (getattr(style, "title_colour", "")
+                or title_colour(getattr(harvested, "colour", "") or "", style))
     return TemplateSpec(
         background=ground(style),
         ink=ink_hex,

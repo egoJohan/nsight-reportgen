@@ -257,41 +257,15 @@ def _in(emu) -> float:
 
 
 def _content_rect(style, prs) -> tuple[int, int, int, int]:
-    """Where a chart will ACTUALLY be drawn on this layout, in EMU.
+    """Where a chart will actually be drawn, in EMU.
 
-    The layout's own content placeholder when we are taking it, and otherwise
-    the renderer's own placement — under the title, inside the template's side
-    margins. Reporting zeroes for the second case is what made most of the
-    layouts in the picker show a content box collapsed into the top-left corner:
-    "not visible, or invalid coordinates".
-
-    Always inside the slide, and never smaller than an inch. A rectangle an
-    author cannot see is one they cannot drag back.
+    One definition, in style_spec, because a DRAG amends this same rectangle:
+    two of them drift, and the one the editor drew stopped being the one a drag
+    was moving.
     """
-    sw, sh = int(prs.slide_width or 0), int(prs.slide_height or 0)
-    slot = getattr(style, "chart_slot", None)
-    if slot is not None and int(slot.width or 0) > 0 and int(slot.height or 0) > 0:
-        rect = (int(slot.left), int(slot.top), int(slot.width), int(slot.height))
-    else:
-        profile = getattr(style, "profile", None)
-        title = getattr(profile, "title", None) if profile else None
-        if title is not None and getattr(title, "positioned", False):
-            from reportbuilder.render.image.slide_chrome import harvested_chart_box
+    from reportbuilder.render.style_spec import effective_content_rect
 
-            rect = harvested_chart_box(profile, "", sw, sh)
-        else:
-            # No opinion anywhere: the house placement — a margin in from each
-            # side, starting under where a title would sit.
-            margin = int(0.05 * sw)
-            rect = (margin, int(0.28 * sh), sw - 2 * margin, int(0.60 * sh))
-
-    left, top, width, height = rect
-    inch = 914400
-    width = max(inch, min(width, sw))
-    height = max(inch, min(height, sh))
-    left = max(0, min(left, sw - width))
-    top = max(0, min(top, sh - height))
-    return left, top, width, height
+    return effective_content_rect(style)
 
 
 @templates_router.get("/customers/{customer_id}/templates/{template_id}/layout")

@@ -76,6 +76,8 @@ class TemplateStyleSpec(StyleSpec):
     #: above the template's own foot, so there is nothing to move — but their
     #: SIZE is the thing an author reaches for first: "kysymystekstin
     #: pienentäminen", shrinking a question that runs too long.
+    title_size_pt: float = 0.0
+    title_colour: str = ""
     subtitle_font: str = ""
     subtitle_size_pt: float = 0.0
     subtitle_colour: str = ""
@@ -281,6 +283,9 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
 
     if _hex(title.get("colour")):
         spec.ink = _hex(title["colour"])
+        spec.title_colour = _hex(title["colour"])
+    if _num(title.get("size")):
+        spec.title_size_pt = _num(title["size"])
     if _hex(overrides.get("accent")):
         spec.accent = _hex(overrides["accent"])
     if _hex(overrides.get("background")):
@@ -290,6 +295,14 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
     if profile is not None and getattr(profile, "title", None) is not None:
         _apply_text(profile.title, title)
         _apply_box(profile.title, title)
+    # AND the font role, which is where the drawn title actually gets its size:
+    # `build_spec` reads `fonts["title"]`, not the profile, so setting only the
+    # profile stored the number, showed it back in the editor, and left the
+    # headline exactly as it was.
+    if title.get("font") or _num(title.get("size")):
+        had_family, had_size = spec.font_for("title")
+        _set_fonts(spec, {"title": (str(title.get("font") or had_family),
+                                    int(_num(title.get("size")) or had_size))})
     _apply_chart_text(spec, content)
 
     subtitle = overrides.get("subtitle") or {}
@@ -359,6 +372,9 @@ def _apply_text(style, given: dict) -> None:
     size = _num(given.get("size"))
     if size:
         style.size_pt = size
+        # Not a starting point to shrink from: see TextStyle.size_locked.
+        if hasattr(style, "size_locked"):
+            style.size_locked = True
 
 
 def _apply_box(style, given: dict) -> None:
@@ -368,6 +384,40 @@ def _apply_box(style, given: dict) -> None:
             setattr(style, attr, int(value * _EMU_PER_INCH))
 
 
+def effective_content_rect(spec) -> tuple[int, int, int, int]:
+    """Where the chart actually goes on this style, in EMU.
+
+    The layout's own content placeholder when we are taking it, and otherwise
+    the renderer's own placement — under the title, inside the template's side
+    margins. There is no third answer, and every caller needs the same one: the
+    editor draws this rectangle, and a drag has to amend THIS rectangle rather
+    than an absence.
+    """
+    sw = int(getattr(spec, "slide_width", 0) or 0)
+    sh = int(getattr(spec, "slide_height", 0) or 0)
+    slot = getattr(spec, "chart_slot", None)
+    if slot is not None and int(slot.width or 0) > 0 and int(slot.height or 0) > 0:
+        rect = (int(slot.left), int(slot.top), int(slot.width), int(slot.height))
+    else:
+        profile = getattr(spec, "profile", None)
+        title = getattr(profile, "title", None) if profile is not None else None
+        if title is not None and getattr(title, "positioned", False):
+            from reportbuilder.render.image.slide_chrome import harvested_chart_box
+
+            rect = harvested_chart_box(profile, "", sw, sh)
+        else:
+            margin = int(0.05 * sw)
+            rect = (margin, int(0.28 * sh), sw - 2 * margin, int(0.60 * sh))
+
+    left, top, width, height = rect
+    inch = _EMU_PER_INCH
+    width = max(inch, min(width, sw or width))
+    height = max(inch, min(height, sh or height))
+    left = max(0, min(left, (sw or left + width) - width))
+    top = max(0, min(top, (sh or top + height) - height))
+    return left, top, width, height
+
+
 def _apply_slot(spec, given: dict) -> None:
     """The chart's own box. Absent edges keep whatever they had."""
     edges = {k: _num(given.get(k)) for k in ("x", "y", "w", "h")}
@@ -375,17 +425,14 @@ def _apply_slot(spec, given: dict) -> None:
         return
     current = getattr(spec, "chart_slot", None)
     if current is None:
-        # Nothing to amend, so a whole box is required: three numbers do not
-        # make one, and guessing the fourth puts a chart somewhere nobody asked
-        # for. This is the Arla case — no usable content area in the template,
-        # so the renderer places the chart until an author says where it goes.
-        if any(v is None for v in edges.values()):
-            return
-        spec.chart_slot = Slot(slide_index=-1, left=int(edges["x"] * _EMU_PER_INCH),
-                               top=int(edges["y"] * _EMU_PER_INCH),
-                               width=int(edges["w"] * _EMU_PER_INCH),
-                               height=int(edges["h"] * _EMU_PER_INCH), name="chart")
-        return
+        # No slot does not mean no rectangle. Where a template offers us no
+        # usable content area — Arla, whose every layout is two-column — the
+        # renderer places the chart itself, and THAT is what a drag is amending.
+        # Requiring all four numbers here meant dragging such a chart, which
+        # sends only x and y, changed nothing at all.
+        base_l, base_t, base_w, base_h = effective_content_rect(spec)
+        current = Slot(slide_index=-1, left=base_l, top=base_t,
+                       width=base_w, height=base_h, name="chart")
     spec.chart_slot = Slot(
         slide_index=current.slide_index,
         left=int(edges["x"] * _EMU_PER_INCH) if edges["x"] is not None else current.left,

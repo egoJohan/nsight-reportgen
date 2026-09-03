@@ -149,6 +149,11 @@ type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 export function TemplateSlidePreview({ state }: { state: State }) {
   const surface = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState<AreaKey | null>(null);
+  // Which picture is on screen. While a gesture is running, or while the next
+  // one is still being drawn, the one we have describes a layout that is no
+  // longer being asked for — showing it makes the chart look stuck under the
+  // box being moved, which is the opposite of what the box is for.
+  const [drawn, setDrawn] = useState("");
   const { data, areas, groundUrl, patch } = state;
   if (!data || !areas) return null;
   const slide = data.slide;
@@ -236,7 +241,20 @@ export function TemplateSlidePreview({ state }: { state: State }) {
         className="relative w-full touch-none overflow-hidden rounded-md border bg-white shadow-md ring-1 ring-black/5"
         style={{ aspectRatio: `${slide.w} / ${slide.h}` }}
       >
-        <img src={groundUrl} alt="" className="absolute inset-0 h-full w-full object-fill" />
+        <img
+          src={groundUrl}
+          alt=""
+          onLoad={() => setDrawn(groundUrl)}
+          className={"absolute inset-0 h-full w-full object-fill transition-opacity duration-150 "
+            + (busy || drawn !== groundUrl ? "opacity-0" : "opacity-100")}
+        />
+        {(busy || drawn !== groundUrl) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-muted/40">
+            <span className="rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+              {busy ? "Release to redraw" : "Drawing…"}
+            </span>
+          </div>
+        )}
         {/* The grid positions snap to, drawn only while something is moving —
             visible when it explains what is happening, invisible otherwise. */}
         {busy && (

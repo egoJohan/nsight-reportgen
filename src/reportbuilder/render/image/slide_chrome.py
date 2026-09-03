@@ -255,6 +255,8 @@ def fit_title_size(st, text: str, max_growth: float | None = None) -> float:
     even if the text still does not fit there.
     """
     base = st.size_pt or TITLE_PT
+    if getattr(st, "size_locked", False):
+        return base          # chosen by hand, with the result in view
     if not text or not st.width or not st.height:
         return base
     floor = base * _TITLE_MIN_SCALE
@@ -385,6 +387,24 @@ def content_floor(slide, sw: int, sh: int) -> int:
                 continue
             floor = min(floor, top)
     return floor
+
+
+#: What the "n = 100" line is drawn at when nobody has said otherwise. It was
+#: written twice as a literal 9.5, which is why setting a footer size stored a
+#: number and moved nothing.
+_FOOTER_PT = 9.5
+
+
+def _footer_pt(style) -> float:
+    try:
+        return float(style.font_for("n_annotation")[1]) or _FOOTER_PT
+    except Exception:  # noqa: BLE001
+        return _FOOTER_PT
+
+
+def _footer_ink(style, fallback):
+    chosen = getattr(style, "footer_colour", "")
+    return f"#{chosen}" if chosen else fallback
 
 
 def footer_top(slide, sh: int, sw: int) -> int:
@@ -653,6 +673,13 @@ def title_colour_for(st, style):
     the template's own ink for that ground. Both are the template's; this picks
     the one it did not contradict. Nothing here invents a colour.
     """
+    # An author's own choice is not a harvest to be second-guessed. The
+    # contrast rule below exists because a colour read off one slide of a deck
+    # may not suit the ground this template states — it cannot know that about a
+    # colour somebody picked with the slide in front of them.
+    chosen = (getattr(style, "title_colour", "") or "").strip().lstrip("#")
+    if chosen:
+        return f"#{chosen}"
     harvested = _rgb(getattr(st, "colour", "") or "")
     bg = (getattr(style, "background", "") or "").strip()
     if harvested is None or not bg:
@@ -967,7 +994,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         slide,
         foot_left, foot_top,
         sw - Inches(4.0), Inches(0.40),
-        [(footer_text, 9.5, _muted, False)],
+        [(footer_text, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
         align=PP_ALIGN.LEFT,
         font=_body_font(ctx),
     )
@@ -982,7 +1009,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             slide,
             sw - Inches(6.4), foot_top,
             Inches(6.0), Inches(0.40),
-            [(caption, 9.5, _muted, False)],
+            [(caption, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
             align=PP_ALIGN.RIGHT,
             font=_body_font(ctx),
         )
