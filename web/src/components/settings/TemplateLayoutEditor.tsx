@@ -84,16 +84,37 @@ export function useTemplateLayout(customerId: string, templateId: string) {
 
 type State = ReturnType<typeof useTemplateLayout>;
 
+/** How far apart the positions an author can choose are, in inches.
+ *
+ *  A twentieth of an inch. Fine enough that nothing feels stuck, coarse enough
+ *  that two areas dragged to "the same" left edge actually share one — which is
+ *  the thing that looks wrong on a rendered slide and cannot be seen while
+ *  dragging. Typed values are not snapped: somebody entering 1.23 means it.
+ */
+const SNAP_IN = 0.05;
+
+const snap = (v: number) => Math.round(v / SNAP_IN) * SNAP_IN;
+/** Kill the float dust 0.05-steps leave behind (0.30000000000000004). */
+const tidy = (v: number) => Math.round(v * 100) / 100;
+
+/** The smallest box worth having. Below this a drag has effectively deleted the
+ *  area, and there is no handle left to drag back. */
+const MIN_IN = 0.2;
+
+type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
 /** The slide itself, at the proportions the template really has. */
 export function TemplateSlidePreview({ state }: { state: State }) {
   const surface = useRef<HTMLDivElement | null>(null);
-  const [dragging, setDragging] = useState<AreaKey | null>(null);
+  const [busy, setBusy] = useState<AreaKey | null>(null);
   const { data, areas, groundUrl, patch } = state;
   if (!data || !areas) return null;
   const slide = data.slide;
 
-  const onPointerDown = (key: AreaKey) => (e: React.PointerEvent) => {
+  /** One gesture: move the box, or pull one of its edges. */
+  const gesture = (key: AreaKey, edge: Edge | null) => (e: React.PointerEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const box = surface.current?.getBoundingClientRect();
     if (!box) return;
     const perInchX = box.width / slide.w;
@@ -101,14 +122,38 @@ export function TemplateSlidePreview({ state }: { state: State }) {
     const startX = e.clientX;
     const startY = e.clientY;
     const from = { ...areas[key] };
-    setDragging(key);
-    const move = (ev: PointerEvent) =>
+    setBusy(key);
+
+    const move = (ev: PointerEvent) => {
+      const dx = (ev.clientX - startX) / perInchX;
+      const dy = (ev.clientY - startY) / perInchY;
+      if (edge === null) {
+        patch(key, {
+          x: tidy(Math.max(0, Math.min(slide.w - from.w, snap(from.x + dx)))),
+          y: tidy(Math.max(0, Math.min(slide.h - from.h, snap(from.y + dy)))),
+        });
+        return;
+      }
+      let { x, y, w, h } = from;
+      if (edge.includes("w")) {
+        const right = from.x + from.w;
+        x = Math.min(snap(from.x + dx), right - MIN_IN);
+        w = right - x;
+      }
+      if (edge.includes("e")) w = Math.max(MIN_IN, snap(from.w + dx));
+      if (edge.includes("n")) {
+        const bottom = from.y + from.h;
+        y = Math.min(snap(from.y + dy), bottom - MIN_IN);
+        h = bottom - y;
+      }
+      if (edge.includes("s")) h = Math.max(MIN_IN, snap(from.h + dy));
       patch(key, {
-        x: Math.max(0, Math.round((from.x + (ev.clientX - startX) / perInchX) * 100) / 100),
-        y: Math.max(0, Math.round((from.y + (ev.clientY - startY) / perInchY) * 100) / 100),
+        x: tidy(Math.max(0, x)), y: tidy(Math.max(0, y)),
+        w: tidy(Math.min(w, slide.w - x)), h: tidy(Math.min(h, slide.h - y)),
       });
+    };
     const up = () => {
-      setDragging(null);
+      setBusy(null);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
@@ -117,6 +162,18 @@ export function TemplateSlidePreview({ state }: { state: State }) {
   };
 
   const pct = (v: number, of: number) => `${(v / of) * 100}%`;
+
+  //: Where each handle sits on its box, and which cursor says what it does.
+  const HANDLES: Array<[Edge, string, string]> = [
+    ["nw", "-top-1 -left-1", "cursor-nwse-resize"],
+    ["ne", "-top-1 -right-1", "cursor-nesw-resize"],
+    ["sw", "-bottom-1 -left-1", "cursor-nesw-resize"],
+    ["se", "-bottom-1 -right-1", "cursor-nwse-resize"],
+    ["n", "-top-1 left-1/2 -translate-x-1/2", "cursor-ns-resize"],
+    ["s", "-bottom-1 left-1/2 -translate-x-1/2", "cursor-ns-resize"],
+    ["w", "top-1/2 -left-1 -translate-y-1/2", "cursor-ew-resize"],
+    ["e", "top-1/2 -right-1 -translate-y-1/2", "cursor-ew-resize"],
+  ];
 
   return (
     <div className="space-y-2">
@@ -134,53 +191,71 @@ export function TemplateSlidePreview({ state }: { state: State }) {
       >
       <div
         ref={surface}
-        className="relative w-full overflow-hidden rounded-md border bg-white shadow-md ring-1 ring-black/5"
+        className="relative w-full touch-none overflow-hidden rounded-md border bg-white shadow-md ring-1 ring-black/5"
         style={{ aspectRatio: `${slide.w} / ${slide.h}` }}
       >
         <img src={groundUrl} alt="" className="absolute inset-0 h-full w-full object-fill" />
+        {/* The grid positions snap to, drawn only while something is moving —
+            visible when it explains what is happening, invisible otherwise. */}
+        {busy && (
+          <div
+            className="pointer-events-none absolute inset-0 opacity-70"
+            style={{
+              backgroundImage:
+                "linear-gradient(to right,rgba(59,130,246,.25) 1px,transparent 1px)," +
+                "linear-gradient(to bottom,rgba(59,130,246,.25) 1px,transparent 1px)",
+              backgroundSize: `${(SNAP_IN / slide.w) * 100}% ${(SNAP_IN / slide.h) * 100}%`,
+            }}
+          />
+        )}
         {(["title", "content"] as AreaKey[]).map((key) => {
           const a = areas[key];
+          const tone = key === "title"
+            ? { border: "border-sky-500", fill: "bg-sky-500/10", chip: "bg-sky-500" }
+            : { border: "border-emerald-600", fill: "bg-emerald-500/10", chip: "bg-emerald-600" };
           return (
             <div
               key={key}
-              onPointerDown={onPointerDown(key)}
-              className={
-                "absolute cursor-move border-2 border-dashed transition-shadow " +
-                (key === "title"
-                  ? "border-sky-500 bg-sky-500/10"
-                  : "border-emerald-600 bg-emerald-500/10") +
-                (dragging === key ? " shadow-lg" : "")
-              }
+              onPointerDown={gesture(key, null)}
+              className={`absolute cursor-move border-2 border-dashed ${tone.border} ${tone.fill}`
+                + (busy === key ? " shadow-lg" : "")}
               style={{
                 left: pct(a.x, slide.w), top: pct(a.y, slide.h),
                 width: pct(a.w, slide.w), height: pct(a.h, slide.h),
               }}
-              title={`${key} — drag to move`}
+              title={`${key} — drag to move, pull an edge to resize`}
             >
               <span
-                className={
-                  "absolute left-0 top-0 -translate-y-full rounded-t px-1.5 py-0.5 text-[10px] " +
-                  "font-medium uppercase tracking-wide text-white " +
-                  (key === "title" ? "bg-sky-500" : "bg-emerald-600")
-                }
+                className={"absolute left-0 top-0 -translate-y-full rounded-t px-1.5 py-0.5 "
+                  + `text-[10px] font-medium uppercase tracking-wide text-white ${tone.chip}`}
               >
                 {key}
               </span>
+              {busy === key && (
+                <span className="absolute right-1 top-1 rounded bg-background/90 px-1 py-0.5 text-[10px] font-mono">
+                  {a.w.toFixed(2)}″ × {a.h.toFixed(2)}″
+                </span>
+              )}
+              {HANDLES.map(([edge, place, cursor]) => (
+                <span
+                  key={edge}
+                  onPointerDown={gesture(key, edge)}
+                  className={`absolute size-2.5 rounded-sm border border-white ${tone.chip} ${place} ${cursor}`}
+                />
+              ))}
             </div>
           );
         })}
       </div>
       </div>
       <p className="text-center text-xs text-muted-foreground">
-        {slide.w}″ × {slide.h}″ — the template's own empty slide.
-        Drag either area to move it; the numbers follow.
+        {slide.w}″ × {slide.h}″ — the template's own empty slide. Drag an area to move
+        it, pull an edge to resize; both snap to {SNAP_IN}″.
       </p>
     </div>
   );
 }
 
-/** A colour, as a swatch to click and a hex to type. Empty is "inherit", which
- *  is why the swatch shows the harvested value while the text stays blank. */
 function ColourField({
   label, value, inherited, onChange,
 }: {
@@ -210,17 +285,35 @@ function ColourField({
 }
 
 function AreaFields({ state, area }: { state: State; area: AreaKey }) {
-  const { data, areas, patch } = state;
+  const { data, areas, patch, draft, setDraft } = state;
   if (!data || !areas) return null;
+  const corrected = Object.keys(draft[area] ?? {}).length > 0;
   const values = areas[area];
   const harvested = data.harvested[area];
   const spine = area === "title" ? "border-l-sky-500" : "border-l-emerald-600";
   const dot = area === "title" ? "bg-sky-500" : "bg-emerald-600";
   return (
     <fieldset className={`space-y-3 rounded-md border border-l-4 ${spine} bg-muted/30 p-3`}>
-      <legend className="flex items-center gap-1.5 px-1 text-sm font-medium capitalize">
+      <legend className="flex w-full items-center gap-1.5 px-1 text-sm font-medium capitalize">
         <span className={`size-2 rounded-full ${dot}`} />
         {area}
+        {/* Per area, because a correction is usually to ONE of them — putting a
+            title back where the template had it should not also throw away a
+            chart area that took some dragging to get right. */}
+        <button
+          type="button"
+          onClick={() => setDraft((d) => {
+            const next = { ...d };
+            delete next[area];
+            return next;
+          })}
+          disabled={!corrected}
+          className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-normal normal-case text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
+          title={corrected ? `Put ${area} back where the template had it`
+                           : `${area} is as the template had it`}
+        >
+          Reset to original
+        </button>
       </legend>
       <div className="grid grid-cols-4 gap-2">
         {(["x", "y", "w", "h"] as const).map((edge) => (
