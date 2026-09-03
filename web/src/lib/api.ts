@@ -140,6 +140,10 @@ export interface NumberFormat {
   mean_decimals: number;
   count_round_up: boolean;
   show_pct_sign: boolean;
+  /** The share of the value axis below which a data label is not drawn.
+   *  null leaves each chart type on its own floor (1% of a stack, 4% of a
+   *  pie wedge); 0 draws every value the chart has. */
+  hide_below_pct: number | null;
 }
 
 export interface SortSpec {

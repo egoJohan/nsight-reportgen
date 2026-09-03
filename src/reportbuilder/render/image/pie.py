@@ -36,7 +36,7 @@ from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (chart_accent,
-    render_png, place_picture_square, format_value,
+    render_png, place_picture_square, format_value, label_floor,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import (
@@ -53,6 +53,8 @@ _EMU_PER_IN = 914400.0
 _LEGEND_WRAP: int = 26
 # Only annotate a wedge with its % when the slice is big enough to hold the text
 # without colliding with a neighbouring label; every value is also in the legend.
+# The DEFAULT only: an author who wants the thin slices spelled out anyway moves
+# the cut-off on the chart's number format (see `label_floor`).
 _MIN_WEDGE_PCT: float = 4.0
 
 
@@ -162,8 +164,10 @@ def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool):
     total = sum(v or 0.0 for v in vals) or 1.0
     fracs = [(v or 0.0) / total * 100.0 for v in vals]
 
+    floor = label_floor(fmt, default_pct=_MIN_WEDGE_PCT, axis_max=100.0)
+
     def _autopct(pct: float) -> str:
-        if pct < _MIN_WEDGE_PCT:
+        if pct < floor:
             return ""
         if statistic == "pct":
             return format_value(pct, statistic, fmt, fracs)

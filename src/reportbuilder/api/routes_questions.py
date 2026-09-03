@@ -1323,6 +1323,10 @@ class _NumberFormatBody(BaseModel):
     mean_decimals: int = 1
     count_round_up: bool = False
     show_pct_sign: bool = True
+    # The share of the value axis below which a data label is not drawn. None
+    # leaves each chart type on its own long-standing floor; part of the cache
+    # key via model_dump_json, so moving it re-renders the slide.
+    hide_below_pct: float | None = None
 
 
 class _SortSpecBody(BaseModel):
@@ -1425,6 +1429,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             mean_decimals=body.number_format.mean_decimals,
             count_round_up=body.number_format.count_round_up,
             show_pct_sign=body.number_format.show_pct_sign,
+            hide_below_pct=body.number_format.hide_below_pct,
         ),
         sort=SortSpec(
             basis=body.sort.basis,

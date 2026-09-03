@@ -236,6 +236,7 @@ export const DEFAULT_NUMBER_FORMAT: NumberFormat = {
   mean_decimals: 1,
   count_round_up: false,
   show_pct_sign: true,
+  hide_below_pct: null,
 };
 
 export const DEFAULT_ELEMENTS: ChartElements = {

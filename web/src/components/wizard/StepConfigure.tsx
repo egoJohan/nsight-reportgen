@@ -639,8 +639,22 @@ function SortWidget({ field, chart, onChange }: WidgetProps) {
   );
 }
 
+// Where each chart type stops drawing a value that is too small to hold its own
+// label — the renderer's own floor, as a share of the value axis. A stack packs
+// the tail of a scale into slivers narrower than the numbers that belong in them;
+// a pie's labels sit on a curve and run into each other sooner. Chart types not
+// listed here never hide a label for being small (a plain bar writes its value
+// outside the bar), so the field is not offered on them.
+const HIDE_BELOW_DEFAULT: Record<string, number> = {
+  stacked_horizontal_bar: 1,
+  stacked_vertical_bar: 1,
+  pie: 4,
+  doughnut: 4,
+};
+
 function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
   const manual = chart.number_format.mode === "manual";
+  const floorDefault = HIDE_BELOW_DEFAULT[chart.chart_type];
   return (
     <>
       <Field label={field.label}>
@@ -665,6 +679,37 @@ function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
           </SelectContent>
         </Select>
       </Field>
+
+      {floorDefault !== undefined && (
+        <Field label="Hide values below">
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              className="w-24"
+              placeholder={String(floorDefault)}
+              value={chart.number_format.hide_below_pct ?? ""}
+              onChange={(e) =>
+                onChange({
+                  number_format: {
+                    ...chart.number_format,
+                    hide_below_pct:
+                      e.target.value === "" ? null : Number(e.target.value),
+                  },
+                })
+              }
+            />
+            <span className="text-sm text-muted-foreground">%</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            A slice narrower than this does not get its number printed, because the
+            number is wider than the slice and would land on its neighbour. Leave
+            blank for the default ({floorDefault} %); 0 prints every value.
+          </p>
+        </Field>
+      )}
 
       {manual && (
         <div className="col-span-2 grid grid-cols-3 items-end gap-4 rounded-lg border bg-muted/30 p-3">

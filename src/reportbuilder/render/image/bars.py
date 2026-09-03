@@ -35,7 +35,7 @@ import textwrap
 import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
-    place_picture_square, series_values, format_value, style_legend,
+    place_picture_square, series_values, format_value, label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     _new_agg_figure, _EMU_PER_IN,
 )
@@ -1266,7 +1266,8 @@ def build_image_column_stacked(ctx) -> None:
     totals = np.array([sum(data[s][i] or 0.0 for s in segs) for i in range(len(cats))])
     norm = (np.where(totals > 0, 100.0 / totals, 1.0) if normalise
             else np.ones(len(cats)))
-    label_min = axis_max / 100.0    # "too thin to label" = 1% of the value axis
+    # "Too thin to label" — 1% of the value axis unless the author moved it.
+    label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
     bottoms = np.zeros(len(cats))
 
     for i, seg in enumerate(segs):
@@ -1335,10 +1336,12 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
         norm = np.where(totals > 0, 100.0 / totals, 1.0)
     else:
         norm = np.ones(n_bars)
-    # "Too thin to label" is 1% of the value axis, not a fixed 1 unit: on a
+    # "Too thin to label" is a share of the value axis, not a fixed 1 unit: on a
     # true-width 0-465 axis a 1-unit sliver is invisible but would still be
-    # labelled, and the labels would pile up on each other.
-    label_min = axis_max / 100.0
+    # labelled, and the labels would pile up on each other. 1% by default, and
+    # the author's own cut-off when they set one — a 100%-stacked scale puts its
+    # whole tail into slivers narrower than the numbers that belong in them.
+    label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
     lefts = np.zeros(n_bars)
     for i, seg in enumerate(stack):
         orig = np.array([data[seg][j] or 0.0 for j in range(n_bars)])

@@ -19,6 +19,14 @@ class NumberFormat:
     mean_decimals: int = 1                      # REQ-N-02 — manual mode only
     count_round_up: bool = False                # REQ-N-03
     show_pct_sign: bool = True
+    #: The share of the value axis below which a data label is NOT drawn.
+    #:
+    #: None means "whatever this chart type has always used" — 1% of the axis
+    #: for a stack, 4% for a pie wedge, whose labels sit on a curve and collide
+    #: sooner. There is no one right cut-off: it depends on how wide the chart
+    #: is drawn and how much of the scale's tail the author is willing to lose,
+    #: so it is theirs to move. 0 draws every value the chart has.
+    hide_below_pct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +250,7 @@ def report_from_json(data: dict | str) -> Report:
                 mean_decimals=nf.get("mean_decimals", 1),
                 count_round_up=nf.get("count_round_up", False),
                 show_pct_sign=nf.get("show_pct_sign", True),
+                hide_below_pct=nf.get("hide_below_pct"),
             ),
             sort=SortSpec(
                 basis=so["basis"],

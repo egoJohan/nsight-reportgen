@@ -385,6 +385,28 @@ def auto_decimals(values: list[float], statistic: str) -> int:
     return 0
 
 
+def label_floor(fmt, *, default_pct: float, axis_max: float = 100.0) -> float:
+    """The value below which a data label is not worth drawing.
+
+    A share of the value axis, never a number of units: on a true-width 0-465
+    axis a one-unit sliver is invisible but would still be labelled, and the
+    labels pile onto each other.
+
+    `default_pct` is what the chart type has always used — 1% of the axis for a
+    stack, 4% for a pie wedge, whose labels sit on a curve and run into each
+    other sooner. The author's own cut-off, when they set one, wins: on a
+    100%-stacked scale the whole tail (the 1%, the 2%, the 3%) lands in slivers
+    narrower than the number that belongs in them, and where to stop drawing
+    them depends on how wide the chart is and how much of the tail they are
+    willing to lose. 0 is a real answer and means "draw every value", so this
+    tests for None rather than falsiness.
+    """
+    pct = getattr(fmt, "hide_below_pct", None) if fmt else None
+    if pct is None:
+        pct = default_pct
+    return axis_max * float(pct) / 100.0
+
+
 def format_value(v: float, statistic: str, fmt, all_values: list[float] | None = None) -> str:
     """Format a single data-label value, honouring NumberFormat.mode (REQ-N-01/02/03).
 
