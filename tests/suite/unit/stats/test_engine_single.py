@@ -252,3 +252,42 @@ def test_endpoint_scale_shows_full_range_including_empty_points():
     assert r.categories == ("7", "6", "5", "4", "3", "2", "1")  # 4 present, no gap
     assert r.cell("4", "Total").count == 0.0
     assert r.cell("4", "Total").pct == 0.0
+
+
+# ---- the author's own category labels reach every chart ----------------------
+#
+# Reported from a live deck: the legend of a 7-point scale read "1 2 3 4 5 6 7"
+# and the only way to say what the numbers meant was to type
+# "1 = Täysin eri mieltä · 7 = Täysin samaa mieltä" into the subtitle. Editing
+# them in the Category labels box did nothing, because the labels were applied
+# in some chart builders and not others — a battery honoured them on its member
+# bars and ignored them on its scale levels.
+#
+# They are applied once now, where every chart leaves.
+
+def _renamed(**kw):
+    var = _catvar(missing=(9.0,))
+    model, q = _model_q(var)
+    df = pd.DataFrame({"q": [1, 1, 2, 2, 2, 3]})
+    return engine.compute(q, _spec(**kw), df, model)
+
+
+def test_a_renamed_category_is_renamed_in_the_result():
+    out = _renamed(category_label_overrides=(("Red", "Punainen"),))
+    assert "Punainen" in out.categories and "Red" not in out.categories
+
+
+def test_the_cells_follow_the_rename():
+    """A rename that moved the names and left the cells keyed by the old ones
+    would empty the chart."""
+    out = _renamed(category_label_overrides=(("Red", "Punainen"),))
+    assert out.cell("Punainen", "Total").count == 2.0
+
+
+def test_saying_nothing_renames_nothing():
+    assert _renamed().categories == ("Red", "Green", "Blue")
+
+
+def test_a_rename_that_matches_nothing_is_harmless():
+    out = _renamed(category_label_overrides=(("Vihreä", "Green"),))
+    assert out.categories == ("Red", "Green", "Blue")

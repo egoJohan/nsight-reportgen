@@ -1250,6 +1250,42 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
+    """Compute the SeriesResult for one question + chart spec, with the author's
+    own category labels applied.
+
+    The labels are applied HERE, once, rather than in each chart's own builder.
+    They were applied in some and not others: a battery honoured them on its
+    member bars and ignored them on its scale levels, so editing "1 - Täysin eri
+    mieltä" in the Category labels box changed nothing about the legend, and the
+    only way to say what the scale meant was to type it into the subtitle.
+    """
+    result = _compute_series(question, spec, data, model)
+    overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
+    return _relabelled(result, overrides) if overrides else result
+
+
+def _relabelled(result: SeriesResult, overrides: dict[str, str]) -> SeriesResult:
+    """*result* with categories and segments renamed, cells and bases following.
+
+    A rename that moved the names and left the cells keyed by the old ones would
+    empty the chart, so both move together or neither does.
+    """
+    name = lambda t: overrides.get(t, t)  # noqa: E731
+    cats = tuple(name(c) for c in result.categories)
+    segs = tuple(name(sg) for sg in result.segments)
+    if cats == result.categories and segs == result.segments:
+        return result
+    return dataclasses.replace(
+        result,
+        categories=cats,
+        segments=segs,
+        cells={(name(c), name(sg)): v for (c, sg), v in result.cells.items()},
+        base_n={name(sg): v for sg, v in result.base_n.items()},
+    )
+
+
+def _compute_series(question: Question, spec: ChartSpec, data: pd.DataFrame,
+                    model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
     # Two-variable combo: question distribution (bars) + secondary var mean (line).
     if spec.chart_type == "combo" and spec.options.get("combo_secondary"):
