@@ -79,6 +79,18 @@ def _prose_functions():
             yield name, params["chat"].default
 
 
+#: The one function allowed to reach a model unmasked, and why.
+#:
+#: `pick_company_terms` is handed candidate strings read off the study's
+#: structure and asked which of them name a company. Masking would replace
+#: those strings with surrogates before the model saw them: it would be asked
+#: to recognise names it had been stopped from reading. What makes it safe is
+#: what does NOT go with them — no findings, no percentages, no respondent
+#: answers. A bare list of names discloses nothing; the sensitivity is in
+#: associating a company with a result. (Johan's call, 2026-09-02.)
+_MAY_RUN_UNMASKED = {"pick_company_terms"}
+
+
 def test_every_prose_function_defaults_to_the_masked_route():
     """The guard. A new function here that calls a model directly would send a
     confidential tracker to a vendor, and nothing else in the suite would say so.
@@ -89,10 +101,19 @@ def test_every_prose_function_defaults_to_the_masked_route():
     `_bound` and nothing else, and every wrapper it makes calls `datahive_chat`.
     """
     offenders = [name for name, default in _prose_functions()
-                 if default is not datahive_chat
+                 if name not in _MAY_RUN_UNMASKED
+                 and default is not datahive_chat
                  and not getattr(default, "masked", False)]
     assert not offenders, (
         f"these take `chat` but do not default to the masked route: {offenders}")
+
+
+def test_the_unmasked_exception_is_still_the_only_one():
+    """Named, not loosened. A second function wanting this has to be argued for
+    here, in the open, rather than inheriting an exemption someone else won."""
+    unmasked = {name for name, default in _prose_functions()
+                if not getattr(default, "masked", False)}
+    assert unmasked == _MAY_RUN_UNMASKED
 
 
 def test_each_prose_function_asks_for_the_purpose_its_prompt_describes():
@@ -124,6 +145,9 @@ def test_each_prose_function_asks_for_the_purpose_its_prompt_describes():
         "generate_conclusion_bullets": "synthesise",
         "generate_open_themes": "summarise",
         "pick_demographic_questions": "classify",
+        # Choosing among the strings the caller supplied is exactly `classify`:
+        # the answer is a subset of the input, never anything new.
+        "pick_company_terms": "classify",
         "generate_demographics_bullets": "summarise",
     }
     actual = {name: getattr(default, "purpose", None)

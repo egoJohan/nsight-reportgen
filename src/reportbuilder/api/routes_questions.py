@@ -1926,14 +1926,36 @@ def get_sensitive_terms(
     )
     from reportbuilder.ingest.sensitive_terms import propose_from_models
 
+    from nsight.agent.egohive_client import EgoHiveError
+    from reportbuilder.ai import text as ai_text
+
+    unavailable = False
     try:
         grouped = model_for_material(material_id, client)
         model = raw_model_for_material(material_id, client)
     except Exception:  # noqa: BLE001 — an unreadable file proposes nothing
-        proposed: list[str] = []
+        proposed: list[str] | None = []
     else:
-        proposed = propose_from_models(grouped, model)
-    return {"proposed": proposed, **client.sensitive_terms(material_id)}
+        # The structure proposes; the model decides. Reading the shape is what
+        # finds every candidate, and no list of Finnish rules told a company
+        # from a rating scale: one study offered six terms and all six were
+        # scale points, which is how an analyst learns to stop reading them.
+        candidates = propose_from_models(grouped, model)
+        if not candidates:
+            proposed = []
+        else:
+            try:
+                proposed = ai_text.pick_company_terms(
+                    candidates, [q.text for q in grouped.questions][:60])
+            except EgoHiveError:
+                # No list at all, and the caller is told why. An empty one
+                # reads as "nothing to mask" and leaves the study unprotected
+                # without saying so; an unjudged one is what stopped being
+                # believed. The gate does not move either way — a report still
+                # cannot be created until terms are accepted.
+                proposed, unavailable = None, True
+    return {"proposed": proposed, "unavailable": unavailable,
+            **client.sensitive_terms(material_id)}
 
 
 @questions_router.put("/materials/{material_id}/sensitive-terms")

@@ -34,7 +34,7 @@ export default function SensitiveTermsPanel({
   materialId: string | undefined;
   canEdit: boolean;
 }) {
-  const { data, isLoading } = useSensitiveTerms(materialId);
+  const { data, isLoading, isFetching, refetch } = useSensitiveTerms(materialId);
   const accept = useAcceptSensitiveTerms(materialId);
   const [chosen, setChosen] = useState<Set<string> | null>(null);
   const [adding, setAdding] = useState("");
@@ -64,6 +64,35 @@ export default function SensitiveTermsPanel({
       <section className={PANEL_PADDED}>
         <h2 className={PANEL_TITLE}>Sensitive terms</h2>
         <p className="mt-2 text-sm text-muted-foreground">Reading the study…</p>
+      </section>
+    );
+  }
+
+  // The model that decides which candidates are companies did not answer.
+  //
+  // No list is shown, deliberately. An empty one reads as "nothing to mask"
+  // and would leave the study unprotected without saying so; the full unjudged
+  // list is what analysts stopped believing, because on one study every one of
+  // its six entries was a rating-scale point. Nothing about report creation
+  // changes here — that gate is still closed until terms are accepted.
+  if (data.unavailable || data.proposed === null) {
+    return (
+      <section className={PANEL_PADDED}>
+        <h2 className={PANEL_TITLE}>Sensitive terms</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The terms could not be read: nSight Studio could not reach the service
+          that decides which of this study's words name a company. Nothing has
+          been proposed, and reports still cannot be created until the terms are
+          accepted.
+        </p>
+        <Button
+          variant="outline"
+          className="mt-3"
+          disabled={isFetching}
+          onClick={() => void refetch()}
+        >
+          {isFetching ? "Trying again…" : "Try again"}
+        </Button>
       </section>
     );
   }

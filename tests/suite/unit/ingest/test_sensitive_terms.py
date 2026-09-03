@@ -285,3 +285,36 @@ def test_the_company_names_beside_them_still_are():
     proposed = propose_sensitive_terms(m)
     for b in brands:
         assert b in proposed, f"{b!r} was dropped"
+
+
+# ---- rating scales are not companies ---------------------------------------
+#
+# `Mobiilivarmennedata-FINAL.sav` on staging proposed six terms and every one
+# was a rating-scale point: Erinomaisesti, Heikosti, Kohtalaisesti, Tärkeä,
+# Vain vähän tärkeä, Ensisijaisesti. The rules here had grown a list per study
+# and still lost ground with each new one — the openers happened to catch the
+# two ends of each scale and none of its middle.
+#
+# That judgement now belongs to `ai.text.pick_company_terms`, which reads the
+# candidates and the study's questions and answers in about a second. So this
+# module's job is RECALL: offer everything that could be a name and let the
+# model decide. These assert the shape is still read correctly, not that the
+# wording was guessed correctly.
+
+def test_a_rating_scale_still_reaches_the_proposal_stage():
+    """Not filtered out here — offered, for the model to reject."""
+    scale = ("Ei lainkaan tärkeä", "Vain vähän tärkeä", "Melko tärkeä",
+             "Tärkeä", "Erittäin tärkeä", "En osaa sanoa")
+    model = _model(*(_var(f"s{i}", f"Statement {i}", scale) for i in range(13)))
+    assert "Tärkeä" in propose_sensitive_terms(model)
+
+
+def test_a_company_is_still_proposed_alongside_it():
+    model = _model(
+        *(_var(f"s{i}", f"Statement {i}",
+               ("Ei lainkaan tärkeä", "Tärkeä", "Erittäin tärkeä"))
+          for i in range(13)),
+        _var("b1", "Attendo:Mitä ajattelet?"),
+        _var("b2", "Mehiläinen:Mitä ajattelet?"),
+    )
+    assert {"Attendo", "Mehiläinen"} <= set(propose_sensitive_terms(model))

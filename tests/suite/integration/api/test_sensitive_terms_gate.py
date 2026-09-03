@@ -64,7 +64,11 @@ def test_a_report_is_refused_until_the_terms_are_accepted(case_with_data):
     assert "accept them" in refused.json()["detail"].lower()
 
 
-def test_the_terms_are_proposed_from_the_study_itself(case_with_data):
+def test_the_terms_are_proposed_from_the_study_itself(case_with_data, monkeypatch):
+    # About the STRUCTURE, so the model is stubbed to keep whatever the
+    # structure offered — what it would then reject is its own test.
+    monkeypatch.setattr("reportbuilder.ai.text.pick_company_terms",
+                        lambda candidates, questions, **kw: candidates)
     client, _kid, mid = case_with_data
     r = client.get(f"/materials/{mid}/sensitive-terms")
     assert r.status_code == 200, r.text
@@ -227,7 +231,8 @@ def test_duplicating_is_allowed_once_the_terms_are_accepted(case_with_data):
     assert r.status_code == 200, r.text
 
 
-def test_the_gate_reads_the_file_not_the_grouped_model(client_memory, brand_study_bytes):
+def test_the_gate_reads_the_file_not_the_grouped_model(client_memory, brand_study_bytes,
+                                                       monkeypatch):
     """The defect this covers: no proposals, so no gate, so no masking.
 
     `model_for_material` finalises the model, and the battery grouper relabels
@@ -237,6 +242,8 @@ def test_the_gate_reads_the_file_not_the_grouped_model(client_memory, brand_stud
     proposal from 34 terms to zero: the case page said reports could not be
     created, and every report was created.
     """
+    monkeypatch.setattr("reportbuilder.ai.text.pick_company_terms",
+                        lambda candidates, questions, **kw: candidates)
     cid = client_memory.post("/customers", json={"name": "A"}).json()["id"]
     kid = client_memory.post(f"/customers/{cid}/cases",
                              json={"name": "K"}).json()["id"]
@@ -263,3 +270,43 @@ def test_the_gate_reads_the_file_not_the_grouped_model(client_memory, brand_stud
     assert _new_report(client_memory, kid).status_code == 409
     # Named so the contrast is on the record rather than implied.
     assert model_for_material(mid, store) is not None
+
+
+# ---- the model resolves the list; its absence is an error, not an empty list --
+#
+# The structural proposer offers everything that could be a name and
+# `pick_company_terms` decides which are. When it cannot be reached the panel
+# must SAY so and offer a retry: an empty list would read as "nothing to mask"
+# and quietly leave the study unprotected, and a full unjudged list is the
+# thing analysts stopped trusting.
+
+def test_only_what_the_model_calls_a_company_is_proposed(case_with_data, monkeypatch):
+    client, _kid, mid = case_with_data
+    monkeypatch.setattr("reportbuilder.ai.text.pick_company_terms",
+                        lambda candidates, questions, **kw: ["Attendo"])
+    body = client.get(f"/materials/{mid}/sensitive-terms").json()
+    assert body["proposed"] == ["Attendo"]
+    assert body.get("unavailable") is False
+
+
+def test_the_model_being_unreachable_says_so_and_proposes_nothing(
+        case_with_data, monkeypatch):
+    from nsight.agent.egohive_client import EgoHiveError
+
+    def down(*a, **k):
+        raise EgoHiveError("egoHive is unavailable")
+
+    client, _kid, mid = case_with_data
+    monkeypatch.setattr("reportbuilder.ai.text.pick_company_terms", down)
+    body = client.get(f"/materials/{mid}/sensitive-terms").json()
+    assert body["unavailable"] is True
+    assert body["proposed"] is None, "no list at all, rather than an unjudged one"
+
+
+def test_the_gate_still_holds_while_the_model_is_down(case_with_data, monkeypatch):
+    """The report must not become creatable just because we could not ask."""
+    from nsight.agent.egohive_client import EgoHiveError
+    client, kid, _mid = case_with_data
+    monkeypatch.setattr("reportbuilder.ai.text.pick_company_terms",
+                        lambda *a, **k: (_ for _ in ()).throw(EgoHiveError("down")))
+    assert _new_report(client, kid).status_code == 409

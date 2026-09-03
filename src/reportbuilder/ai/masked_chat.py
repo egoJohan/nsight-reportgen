@@ -70,7 +70,8 @@ REGULATORY_CLASS = "personal"
 
 def datahive_chat(prompt: str, *, purpose: str = PURPOSE,
                   regulatory_class: str = REGULATORY_CLASS,
-                  timeout: float = DEFAULT_TIMEOUT) -> str:
+                  timeout: float = DEFAULT_TIMEOUT,
+                  mask: bool = True) -> str:
     """One completion, with the study's names hidden from the model.
 
     Signature-compatible with ``egohive_chat`` so it can be the default `chat`
@@ -98,7 +99,12 @@ def datahive_chat(prompt: str, *, purpose: str = PURPOSE,
                 "prompt": prompt,
                 "purpose": purpose,
                 "regulatory_class": regulatory_class,
-                "require_pseudonymization": True,
+                # Masked unless a caller has a reason not to be, and there is
+                # exactly one: `identify` below. Everything that sends the
+                # study's PROSE goes masked and cannot opt out of it here,
+                # because the default is True and only that wrapper passes
+                # False.
+                "require_pseudonymization": mask,
                 "timeout_s": timeout,
             },
             headers={"Authorization": f"Bearer {token}"},
@@ -154,11 +160,12 @@ def _why(resp: httpx.Response) -> str:
 # call site and could drift from the prompt it belongs to.
 
 
-def _bound(purpose: str):
+def _bound(purpose: str, *, mask: bool = True):
     """`datahive_chat` with *purpose* fixed, keeping the `chat(prompt)` shape
     every caller and every test fake already uses."""
     def chat(prompt: str, **kwargs) -> str:
         kwargs.setdefault("purpose", purpose)
+        kwargs.setdefault("mask", mask)
         return datahive_chat(prompt, **kwargs)
     chat.__name__ = f"chat_{purpose}"
     chat.__doc__ = f"One completion for {purpose!r} work. See datahive_chat."
@@ -166,7 +173,7 @@ def _bound(purpose: str):
     # `tests/test_ai_masked_chat.py` reads both: the first is the guard that no
     # prose function reaches a model outside datahive, the second catches a
     # function whose purpose has drifted from what its prompt actually asks.
-    chat.masked = True
+    chat.masked = mask
     chat.purpose = purpose
     return chat
 
@@ -177,6 +184,20 @@ rewrite = _bound("rewrite")
 
 #: Choose among options the caller supplied — the answer is one of the inputs.
 classify = _bound("classify")
+
+#: The one entry point that does NOT mask, and the only one that may.
+#:
+#: It is handed a list of candidate strings read off a study's structure and
+#: asked which of them name a company. Masking it would replace those strings
+#: with surrogates before the model saw them — it would be asked to recognise
+#: names it had been prevented from reading, which is not a stricter version of
+#: the task but a different and impossible one.
+#:
+#: What makes that acceptable is what is NOT sent: no findings, no percentages,
+#: no respondent answers, no open text. A bare list of names, with nothing said
+#: about them, discloses nothing — the sensitivity is in associating a company
+#: with a result, and no result goes with it. (Johan's call, 2026-09-02.)
+identify = _bound("classify", mask=False)
 
 #: Condense supplied material faithfully: says less than the input, and nothing
 #: the input did not say. Background, demographics, open-answer themes.
@@ -190,5 +211,5 @@ synthesise = _bound("synthesise")
 #: Answer a person's question, with that person waiting on the reply.
 converse = _bound("converse")
 
-__all__ = ["datahive_chat", "rewrite", "classify", "summarise", "synthesise",
+__all__ = ["datahive_chat", "rewrite", "classify", "identify", "summarise", "synthesise",
            "converse", "PURPOSE", "REGULATORY_CLASS", "DEFAULT_TIMEOUT"]

@@ -28,6 +28,7 @@ let it default the same way.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 
@@ -561,3 +562,63 @@ __all__ = [
     "MAX_TITLE_LEN",
     "MAX_BULLETS",
 ]
+
+def pick_company_terms(candidates: list[str], questions: list[str], *,
+                       chat=M.identify) -> list[str]:
+    """Which of *candidates* actually name a company, organisation or brand.
+
+    The structural proposer reads the study's shape and offers everything that
+    could be a name; this decides. It replaced a growing pile of Finnish word
+    rules that lost ground with every new study — on `Mobiilivarmennedata` the
+    rules offered six terms and every one was a rating-scale point ("Tärkeä",
+    "Heikosti", "Ensisijaisesti"), which teaches an analyst that the list is
+    not worth reading, and an analyst who stops reading it either confirms
+    everything or skips the step. Both lose the protection.
+
+    Only the candidate strings and the question wording are sent: no findings,
+    no percentages, no respondent answers. A bare list of names, with nothing
+    said about them, discloses nothing — which is what makes this the one call
+    that runs unmasked (see `M.identify`). Masking it would hand the model
+    surrogates of the very strings it is being asked to recognise.
+
+    The reply must be a JSON list drawn from the candidates. Anything else
+    raises, because "no answer" must reach the analyst as an error they can
+    retry: an empty list would read as "nothing to mask" and leave the study
+    unprotected without saying so.
+    """
+    wanted = [c for c in (candidates or []) if c and c.strip()]
+    if not wanted:
+        return []
+    context = "\n".join(q for q in (questions or []) if q)[:4000]
+    prompt = (
+        "Tämä on suomalaisen kyselytutkimuksen rakenteesta poimittu lista "
+        "ehdokasmerkkijonoja. Osa on yritysten, organisaatioiden tai "
+        "tuotemerkkien nimiä; osa on asteikon vastausvaihtoehtoja, kyselyn "
+        "omaa sanastoa tai muuta yleiskieltä.\n\n"
+        + (f"Kyselyn kysymyksiä kontekstiksi:\n{context}\n\n" if context else "")
+        + "Ehdokkaat:\n" + "\n".join(f"- {c}" for c in wanted) + "\n\n"
+        "Vastaa JSON-listana, joka sisältää VAIN ne ehdokkaat, jotka ovat "
+        "yrityksen, organisaation tai tuotemerkin nimiä, täsmälleen samassa "
+        "kirjoitusasussa kuin yllä. Jos yksikään ei ole, vastaa []. "
+        "Älä selitä mitään; vastaa pelkkä JSON-lista."
+    )
+    reply = (chat(prompt) or "").strip()
+    match = re.search(r"\[.*\]", reply, re.S)
+    if not match:
+        raise EgoHiveError(
+            f"the model did not answer with a list of terms: {reply[:120]!r}")
+    try:
+        named = json.loads(match.group(0))
+    except ValueError as exc:
+        raise EgoHiveError(f"unreadable list of terms: {exc}") from exc
+    if not isinstance(named, list):
+        raise EgoHiveError("the model's answer was not a list")
+    # Only ever a subset of what was asked about. A name we never proposed is
+    # invented, and registering it would mask a word the study never used.
+    allowed = {c.strip().casefold(): c for c in wanted}
+    out: list[str] = []
+    for item in named:
+        hit = allowed.get(str(item).strip().casefold())
+        if hit and hit not in out:
+            out.append(hit)
+    return out

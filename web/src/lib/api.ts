@@ -306,7 +306,10 @@ export interface ReportDoc {
  *  which is a different statement from an empty list, and is what the
  *  report-creation gate refuses on. */
 export interface SensitiveTerms {
-  proposed: string[];
+  /** Null when the model could not be reached — see `unavailable`. */
+  proposed: string[] | null;
+  /** The model that decides which candidates are companies did not answer. */
+  unavailable?: boolean;
   accepted: string[] | null;
   accepted_at?: string;
   accepted_by?: string;

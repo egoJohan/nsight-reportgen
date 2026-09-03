@@ -275,3 +275,57 @@ def test_bullet_prompts_forbid_conversational_meta():
         prompt = chat.prompts[0].lower()
         assert "kysymys lukijalle" in prompt      # no reader-directed questions
         assert "auttaa lisää" in prompt           # no offers of further help
+
+
+# --------------------------------------------------------------------------- #
+# pick_company_terms — which candidates are actually names
+# --------------------------------------------------------------------------- #
+#
+# The structural proposer offers everything that could be a name; this decides.
+# It replaced a growing pile of Finnish word rules that lost ground with every
+# new study: `Mobiilivarmennedata-FINAL.sav` on staging proposed six terms and
+# all six were rating-scale points ("Tärkeä", "Heikosti", "Ensisijaisesti"),
+# which teaches an analyst the list is not worth reading.
+#
+# The candidates and the question wording are all that is sent. No findings, no
+# percentages, no respondent answers — a bare list of names discloses nothing,
+# which is what makes this call allowed to run unmasked.
+
+def test_it_asks_about_exactly_the_candidates_given():
+    chat = RecordingChat('["Attendo"]')
+    T.pick_company_terms(["Attendo", "Tärkeä"], ["Mitä tunnet?"], chat=chat)
+    prompt = chat.prompts[0]
+    assert "Attendo" in prompt and "Tärkeä" in prompt
+    assert "Mitä tunnet?" in prompt
+
+
+def test_it_keeps_only_what_the_model_named():
+    chat = RecordingChat('["Attendo", "Esperi"]')
+    kept = T.pick_company_terms(["Attendo", "Esperi", "Tärkeä"], [], chat=chat)
+    assert kept == ["Attendo", "Esperi"]
+
+
+def test_none_of_them_being_names_is_an_answer_not_a_failure():
+    chat = RecordingChat("[]")
+    assert T.pick_company_terms(["Tärkeä", "Heikosti"], [], chat=chat) == []
+
+
+def test_a_term_the_model_invents_is_discarded():
+    """It may only choose among the inputs. A name we never proposed is a
+    hallucination, and registering it would mask a word the study never used."""
+    chat = RecordingChat('["Attendo", "Mehiläinen"]')
+    assert T.pick_company_terms(["Attendo"], [], chat=chat) == ["Attendo"]
+
+
+def test_a_reply_that_is_not_a_list_raises_rather_than_guessing():
+    """No answer is an error the analyst retries — never a silent empty list,
+    which would read as "nothing to mask" and leave the study unprotected."""
+    chat = RecordingChat("Attendo on yritys.")
+    with pytest.raises(EgoHiveError):
+        T.pick_company_terms(["Attendo"], [], chat=chat)
+
+
+def test_no_candidates_asks_nothing():
+    chat = RecordingChat("[]")
+    assert T.pick_company_terms([], ["Mitä tunnet?"], chat=chat) == []
+    assert chat.calls == 0
