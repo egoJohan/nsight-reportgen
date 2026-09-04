@@ -36,7 +36,7 @@ export interface ProducerEnv {
   fetchImage: (
     chart: ChartSpec,
     fingerprint: string,
-    ctx: { templateRef: string; reportId: string }
+    ctx: { templateRef: string; reportId: string; force?: boolean }
   ) => Promise<void>;
 }
 
@@ -49,11 +49,16 @@ export function setProducerEnv(next: ProducerEnv) {
 const title: Producer = {
   id: "title",
 
+  // Special slides carry bullets and a heading the author owns, not a headline
+  // written from a question's data — they have no question. Said here rather
+  // than as "already up to date", because a forced pass ignores that: pressing
+  // "draw this slide again" on a conclusions page asked the model for a
+  // headline for a question that does not exist, and got back a 404.
+  applies: (c) => !isSpecialSlide(c.chart),
+
   fingerprint: (c) => titleDataKey(c.chart, env?.questionFor(c.chart.question_ref)),
 
   storedFingerprint: (c: ProducerCtx) => {
-    // Special slides carry bullets, not a generated headline.
-    if (isSpecialSlide(c.chart)) return c.fingerprint;
     // The grouping has not resolved this question yet. Claim "nothing to do"
     // rather than run: a run that produced nothing would be recorded as DONE at
     // this fingerprint and never retried, which left four slides of a sixty
@@ -103,6 +108,12 @@ const title: Producer = {
 const bullets: Producer = {
   id: "bullets",
 
+  // Only an open-ended question's themes are written here. A conclusions or
+  // overview page has bullets too, but they are written for the report as a
+  // whole (regenerateSpecial), not per question — and asking for this one's
+  // themes 404s on a question that does not exist.
+  applies: (c) => isThemes(c.chart),
+
   fingerprint: (c) => c.chart.question_ref,
 
   storedFingerprint: (c: ProducerCtx) => {
@@ -142,6 +153,11 @@ const chart: Producer = {
     await env.fetchImage(c.chart, c.fingerprint, {
       templateRef: c.ctx.templateRef,
       reportId: c.ctx.reportId,
+      // "Draw this slide again" has to reach the render host. The image is read
+      // through a cache that never goes stale by itself (staleTime: Infinity),
+      // so without this the fetch returns the picture already held and the
+      // button does nothing — which is precisely the state it exists for.
+      force: c.force,
     });
   },
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { copySlideInDeck } from "./charts";
+import { copySlideInDeck, isDuplicateSlide, removeSlideInDeck } from "./charts";
 import type { ChartSpec } from "./api";
 
 /** Reported: "there is no copy or redraw buttons on special slides."
@@ -56,5 +56,57 @@ describe("copying a slide", () => {
 
   it("does nothing when the index is not a slide", () => {
     expect(copySlideInDeck([chart()], 7, "new")).toHaveLength(1);
+  });
+});
+
+describe("removing a slide", () => {
+  it("takes exactly the one asked for", () => {
+    const deck = [chart(), special(), chart({ slide_id: "s3" })];
+    const out = removeSlideInDeck(deck, 1);
+    expect(out.map((c) => c.slide_id)).toEqual(["s1", "s3"]);
+  });
+
+  it("leaves the deck alone when the index is not a slide", () => {
+    const deck = [chart()];
+    expect(removeSlideInDeck(deck, 7)).toHaveLength(1);
+  });
+
+  it("removes a copy without touching the slide it was copied from", () => {
+    // The reported case: a copy has nowhere else to be removed from — it has no
+    // catalog row of its own, and unticking its question would hide the
+    // original with it.
+    const deck = copySlideInDeck([special()], 0, "copy");
+    const out = removeSlideInDeck(deck, 1);
+    expect(out).toHaveLength(1);
+    expect(out[0].slide_id).toBe("s2");
+  });
+});
+
+describe("telling a duplicate apart", () => {
+  it("marks the copy, and only the copy", () => {
+    // A duplicate is the one slide Select cannot reach: a chart slide's copy
+    // shares its question, so the catalog's single row covers both, and a
+    // special slide's copy has no row at any time. So the copy has to say what
+    // it is — nothing about its shape distinguishes it.
+    const [orig, copy] = copySlideInDeck([chart()], 0, "new");
+    expect(isDuplicateSlide(copy)).toBe(true);
+    expect(isDuplicateSlide(orig)).toBe(false);
+  });
+
+  it("marks a copied special slide too", () => {
+    const [orig, copy] = copySlideInDeck([special()], 0, "new");
+    expect(isDuplicateSlide(copy)).toBe(true);
+    expect(isDuplicateSlide(orig)).toBe(false);
+  });
+
+  it("keeps the mark on a copy of a copy", () => {
+    const once = copySlideInDeck([chart()], 0, "c1");
+    const twice = copySlideInDeck(once, 1, "c2");
+    expect(twice.map(isDuplicateSlide)).toEqual([false, true, true]);
+  });
+
+  it("leaves the rest of the slide's options alone", () => {
+    const [, copy] = copySlideInDeck([special()], 0, "new");
+    expect(copy.options?.bullets).toEqual(["one", "two"]);
   });
 });

@@ -643,8 +643,20 @@ export async function fetchChartPreviewInto(
     /** The template this fingerprint was computed FOR — sent to the server so
      *  the picture cannot be drawn on a different one. */
     templateRef: string;
+    /** The author asked for this slide to be drawn again. */
+    force?: boolean;
   }
 ): Promise<void> {
+  // The picture is held under its fingerprint and never goes stale by itself
+  // (staleTime: Infinity), which is right: the fingerprint changes when the
+  // slide does. "Draw this slide again" is the one case that has nothing to do
+  // with the slide changing — the author is saying what is on screen is wrong —
+  // so the held picture is dropped first. Without this, fetchQuery answered
+  // from the cache, the queue recorded a successful pass, and the button did
+  // nothing at all.
+  if (opts.force) {
+    qc.removeQueries({ queryKey: ["chart-preview", materialId, fingerprint], exact: true });
+  }
   await qc.fetchQuery<ChartPreviewResult>({
     queryKey: ["chart-preview", materialId, fingerprint],
     queryFn: () =>

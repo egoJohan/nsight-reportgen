@@ -50,6 +50,7 @@ import {
   buildSpecialPages,
   isSpecialSlide,
   copySlideInDeck,
+  removeSlideInDeck,
   insertionIndex,
   toggleQuestionInDeck,
   isThemes,
@@ -445,13 +446,14 @@ export default function ReportWizard({
   );
 
   // Delete ONE slide by its position in the full chart list. Distinct from
-  // unticking a question (which removes every slide showing it) — a question may
-  // hold both a total-level slide and one split by another variable.
+  // unticking a question, which HIDES every slide showing it and gives them
+  // back where they were on a re-tick — a question may hold both a total-level
+  // slide and one split by another variable.
   const removeChart = useCallback(
     (index: number) => {
       mutate((d) => ({
         ...d,
-        charts: normalizeSlots(d.charts.filter((_, i) => i !== index)),
+        charts: normalizeSlots(removeSlideInDeck(d.charts, index)),
       }));
     },
     [mutate]
@@ -794,6 +796,7 @@ export default function ReportWizard({
           reportId: runCtx.reportId,
           grouping: draftRef.current?.grouping,
           templateRef: runCtx.templateRef,
+          force: runCtx.force,
         }),
     });
   }, [materialId, reportId, effectiveTemplateRef, groupingKey, qc]);
@@ -1453,6 +1456,7 @@ export default function ReportWizard({
             active={active}
             setActive={setActive}
             onCopyChart={copyChart}
+            onRemoveChart={(i) => removeChart(includedToFull[i] ?? i)}
             onReorder={(from, to) =>
               reorderCharts(includedToFull[from] ?? from, includedToFull[to] ?? to)
             }

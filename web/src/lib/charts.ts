@@ -62,6 +62,24 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
   special_blank: "Empty slide",
 };
 
+//: Which slide this one was copied from. Its presence is what marks a slide as
+//: a duplicate; the value is kept because it costs nothing and says where it
+//: came from when somebody reads the document.
+const DUPLICATE_KEY = "copied_from";
+
+/** Was this slide made by copying another?
+ *
+ *  It is the only slide the Select page cannot remove — a chart slide's copy
+ *  shares its question with the original, so unticking that question hides both,
+ *  and a special slide never had a row there. So it is the only slide that
+ *  carries its own delete.
+ */
+export function isDuplicateSlide(chart: {
+  options?: Record<string, unknown> | null;
+}): boolean {
+  return Boolean(chart.options && DUPLICATE_KEY in chart.options);
+}
+
 /** A slide, copied to sit directly below itself.
  *
  *  A chart slide's copy is the same slide with a new id: what is worth copying
@@ -83,18 +101,43 @@ export function copySlideInDeck<C extends {
 }>(charts: readonly C[], index: number, slideId: string): C[] {
   const from = charts[index];
   if (!from) return [...charts];
-  let copy = { ...from, slide_id: slideId } as C;
+  // Marked as a duplicate, because nothing about its shape says so and it is
+  // the one slide Select cannot reach: a chart slide's copy shares its
+  // question, so the catalog's single row covers both, and a special slide's
+  // copy has no row at any time. The mark rides in the slide's free-form
+  // options, which the report document passes through unchanged.
+  let copy = {
+    ...from,
+    slide_id: slideId,
+    options: { ...(from.options ?? {}), [DUPLICATE_KEY]: from.question_ref },
+  } as C;
   if (isSpecialSlide(from)) {
     const ref = specialRef(from.chart_type);
     copy = {
       ...copy,
       question_ref: ref,
-      options: { ...(from.options ?? {}), group: ref },
+      options: { ...(copy.options ?? {}), group: ref },
     } as C;
   }
   const out = [...charts];
   out.splice(index + 1, 0, copy);
   return out;
+}
+
+/** A slide, taken out of the deck for good.
+ *
+ *  Unticking a question HIDES its slides, which is what makes a re-tick put
+ *  them back where they were. That leaves nothing to remove a slide with, and a
+ *  copy has nowhere else to be removed from: it has no catalog row of its own,
+ *  and unticking the question it came from would hide the original with it.
+ *
+ *  Deleting a question's slide is not the end of it — ticking the question in
+ *  Select builds a new one at its place in the file's order. What is lost is
+ *  the configuration on this particular slide, which is the point of asking.
+ */
+export function removeSlideInDeck<C>(charts: readonly C[], index: number): C[] {
+  if (index < 0 || index >= charts.length) return [...charts];
+  return charts.filter((_c, i) => i !== index);
 }
 
 /** Tick or untick a question in the catalog, without ever moving a slide.

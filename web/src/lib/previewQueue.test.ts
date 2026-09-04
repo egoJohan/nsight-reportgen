@@ -1033,3 +1033,41 @@ describe("more than one component watching the same slide", () => {
       expect(runs).toBeLessThanOrEqual(3);
     });
 });
+
+describe("drawing a slide again, on the author's say-so", () => {
+  it("does not run producers that have no work on this kind of slide", async () => {
+    // A special slide has no question, so the title and bullets producers can
+    // only fail against it — "Question 'sp_special_conclusion_…' not found",
+    // twice, every time the author pressed the button. Saying "already done"
+    // is not enough: a forced pass exists precisely to ignore that.
+    put("s1", { chart_type: "special_conclusion", question_ref: "sp_x" } as never);
+    const ran: string[] = [];
+    q.__setProducersForTest([
+      producer("title", {
+        applies: (c) => !String(c.chart.chart_type).startsWith("special_"),
+        run: async () => { ran.push("title"); },
+      }),
+      producer("chart", { run: async () => { ran.push("chart"); } }),
+    ]);
+    q.redraw("s1");
+    await q.__drainForTest();
+    expect(ran).toEqual(["chart"]);
+  });
+
+  it("tells the producer this pass is forced, so it can bypass its cache", async () => {
+    // "Draw this slide again" exists for a slide that is blank while everything
+    // believes it is finished. The image cache believes it too — fetching
+    // through it returns the same picture and the button does nothing at all.
+    put("s1");
+    const forced: (boolean | undefined)[] = [];
+    q.__setProducersForTest([
+      producer("chart", {
+        storedFingerprint: (c) => c.fingerprint,   // "already have it"
+        run: async (c) => { forced.push(c.force); },
+      }),
+    ]);
+    q.redraw("s1");
+    await q.__drainForTest();
+    expect(forced).toEqual([true]);
+  });
+});

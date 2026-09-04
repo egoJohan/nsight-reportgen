@@ -32,10 +32,20 @@ export interface ProducerCtx {
   ctx: RenderContext;
   /** What this producer is about to satisfy, computed once by the worker. */
   fingerprint: string;
+  /** The author pressed "draw this slide again". Everything that would decline
+   *  the work has been cleared, INCLUDING the producer's own record of having
+   *  done it — so a producer that reads through a cache must go past it, or the
+   *  button hands back the same picture and appears to do nothing. */
+  force?: boolean;
 }
 
 export interface Producer {
   id: ProducerId;
+  /** Whether this producer has any work on this KIND of slide. Separate from
+   *  "already done", because a forced pass deliberately ignores that one: a
+   *  special slide has no question, so the title and bullets producers could
+   *  only fail against it, twice, every time the author asked for a redraw. */
+  applies?(c: Omit<ProducerCtx, "fingerprint">): boolean;
   fingerprint(c: Omit<ProducerCtx, "fingerprint">): string;
   /** What the existing output was made for, or null when there is none.
    *  Returning `c.fingerprint` means "already up to date, leave it alone". */
@@ -672,8 +682,13 @@ function isCancellation(e: unknown): boolean {
 
 function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">,
                 force = false): ProducerCtx | null {
+  // Does this producer have work on this KIND of slide at all? Asked before
+  // `force`, and it is the one thing force must not override: a special slide
+  // has no question, so asking for its headline can only fail — twice per
+  // forced pass, once for the title and once for the bullets.
+  if (p.applies && !p.applies(base)) return null;
   const fingerprint = p.fingerprint(base);
-  const c: ProducerCtx = { ...base, fingerprint };
+  const c: ProducerCtx = { ...base, fingerprint, force };
   // `force` is the screen contradicting the bookkeeping: a component is showing
   // this slide and has no picture for it. Whatever a producer believes it has
   // already stored, the only evidence that counts is on screen, and it says no.

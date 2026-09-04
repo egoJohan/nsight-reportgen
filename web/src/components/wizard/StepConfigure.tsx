@@ -10,6 +10,7 @@ import {
   InfoIcon,
   Loader2Icon,
   RotateCcwIcon,
+  Trash2Icon,
   SparklesIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,6 +47,7 @@ import {
   NUMBER_FORMAT_ITEMS,
   SORT_DIRECTIONS,
   isDemographicsGrid,
+  isDuplicateSlide,
   isStacked,
   isThemes,
   rendersAsBullets,
@@ -1995,6 +1997,7 @@ function StepConfigureInner({
   active,
   setActive,
   onCopyChart,
+  onRemoveChart,
   onReorder,
   onUpdateChart,
   onRegenerateSpecial,
@@ -2011,6 +2014,9 @@ function StepConfigureInner({
    *  carries its whole configuration; the caller returns the new slide_id so
    *  it can be selected. */
   onCopyChart: (index: number) => string | null;
+  /** Take this slide out of the deck. Offered on duplicates only — see
+   *  `isDuplicateSlide`. */
+  onRemoveChart: (index: number) => void;
   // Drag-reorder the report's slides in the left list (affects this report only).
   onReorder: (from: number, to: number) => void;
   onUpdateChart: (index: number, patch: Partial<ChartSpec>) => void;
@@ -2308,6 +2314,33 @@ function StepConfigureInner({
                 )}
               >
                 <RotateCcwIcon className="size-4" />
+              </button>
+            )}
+            {/* Remove this slide — a DUPLICATE only. It is the one slide Select
+                cannot remove: a chart slide's copy shares its question with the
+                original, so unticking that question hides both, and a special
+                slide never had a row there. Everything else is removed by
+                unticking its question, which hides it where it stands and gives
+                it back untouched. */}
+            {activeChart && isDuplicateSlide(activeChart) && (
+              <button
+                type="button"
+                title="Remove this duplicate"
+                aria-label="Remove this duplicate"
+                onClick={() => {
+                  const gone = activeIndex;
+                  // Land on a neighbour, or the pane keeps showing a slide that
+                  // is no longer in the deck.
+                  const next = charts[gone + 1] ?? charts[gone - 1];
+                  onRemoveChart(gone);
+                  setActive(next?.slide_id ?? null);
+                }}
+                className={cn(
+                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-destructive",
+                  activeSpecial ? "top-[5.5rem]" : "top-[7.5rem]"
+                )}
+              >
+                <Trash2Icon className="size-4" />
               </button>
             )}
             {/* What this slide will NOT show. Sits beside the (i) rather than in
