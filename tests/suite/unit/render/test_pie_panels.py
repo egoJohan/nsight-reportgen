@@ -15,6 +15,20 @@ def _series(segments, bases, *, statistic="pct") -> SeriesResult:
                         base_n=dict(bases), statistic=statistic)
 
 
+def _names(axes) -> list[str]:
+    """The group each panel is, off the first line of its title — the second
+    line is the panel's own base (see test_panel_base_labels)."""
+    return [ax.get_title() for ax in axes]
+
+
+def _bases(axes) -> list[str]:
+    """Each panel's base, off the quiet line under its name. It used to sit
+    under the circle, which is below the axes and so outside what the shared
+    legend's clearance measures — the legend printed on top of it."""
+    return [next((t.get_text() for t in ax.texts
+                  if t.get_text().startswith("n = ")), "") for ax in axes]
+
+
 def _pie_axes(fig):
     return list(fig.axes)
 
@@ -35,8 +49,8 @@ def test_three_groups_draw_three_titled_panels_in_segment_order():
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex")
     fig = _build_pie_figure(ctx, donut=False)
     axes = _pie_axes(fig)
-    assert [ax.get_title() for ax in axes] == ["Naiset", "Miehet", "Muut"]
-    assert [ax.get_xlabel() for ax in axes] == ["n = 512", "n = 486", "n = 25"]
+    assert _names(axes) == ["Naiset", "Miehet", "Muut"]
+    assert _bases(axes) == ["n = 512", "n = 486", "n = 25"]
 
 
 def test_five_groups_draw_only_the_three_largest():
@@ -45,7 +59,7 @@ def test_five_groups_draw_only_the_three_largest():
                       "Total": 240})
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="age")
     fig = _build_pie_figure(ctx, donut=False)
-    assert [ax.get_title() for ax in _pie_axes(fig)] == ["18-29", "30-44", "45-59"]
+    assert _names(_pie_axes(fig)) == ["18-29", "30-44", "45-59"]
 
 
 def test_count_statistic_split_draws_no_total_panel():
@@ -57,7 +71,7 @@ def test_count_statistic_split_draws_no_total_panel():
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
                                         statistic="count")
     fig = _build_pie_figure(ctx, donut=False)
-    assert [ax.get_title() for ax in _pie_axes(fig)] == ["Naiset", "Miehet"]
+    assert _names(_pie_axes(fig)) == ["Naiset", "Miehet"]
 
 
 def test_all_groups_thin_degrades_to_one_whole_sample_pie():
@@ -79,8 +93,8 @@ def test_one_surviving_group_draws_a_titled_single_panel():
     fig = _build_pie_figure(ctx, donut=False)
     axes = list(fig.axes)
     assert len(axes) == 1
-    assert axes[0].get_title() == "Naiset"
-    assert axes[0].get_xlabel() == "n = 512"
+    assert _names(axes) == ["Naiset"]
+    assert _bases(axes) == ["n = 512"]
 
 
 def test_panel_percentages_are_the_engine_s_own_numbers():

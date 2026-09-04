@@ -159,6 +159,31 @@ def _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
         t.set_color(ink)
 
 
+#: The group name's size and the base line's, which sits under it. The base is
+#: quieter than the name on purpose: it says what the circle is drawn on, not
+#: what it is.
+_PANEL_TITLE_PT: float = 12.5
+_PANEL_BASE_PT: float = 10.0
+
+
+def _panel_heading(ax, name: str, base: int, ink: str, *, x: float = 0.5) -> None:
+    """A panel's name, with its base on a quieter second line beneath it.
+
+    Both ABOVE the circle. The base used to sit under it, which is below the
+    axes and so outside what the shared legend's clearance measures — the
+    legend printed straight over it on a row of three.
+
+    Two artists rather than a two-line title because a title carries one style,
+    and the base is not a heading: it is neither bold nor the same size.
+    """
+    ax.text(x, 1.0, f"n = {base}", transform=ax.transAxes, ha="center",
+            va="bottom", fontsize=_PANEL_BASE_PT, color=ink)
+    # Cleared above the base line: `pad` is in points, so this is the base's own
+    # line box plus the gap the title had before.
+    ax.set_title(name, fontsize=_PANEL_TITLE_PT, fontweight="bold", color=ink,
+                 pad=6 + _PANEL_BASE_PT * 1.35, x=x)
+
+
 def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool):
     """Draw a single pie onto `ax`. Returns its wedge artists."""
     total = sum(v or 0.0 for v in vals) or 1.0
@@ -230,10 +255,9 @@ def _build_pie_figure(ctx, *, donut: bool):
         seg = sel.labels[0]
         wedges = _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg, donut)
         if sel.split and not sel.degraded:
-            # One group survived: the reader must be told WHICH group this is.
-            ax.set_title(_wrap_legend_label(seg), fontsize=12.5, fontweight="bold",
-                         color=ink, pad=6)
-            ax.set_xlabel(f"n = {series.base_n.get(seg, 0)}", fontsize=9.5, color=ink)
+            # One group survived: the reader must be told WHICH group this is,
+            # and on what.
+            _panel_heading(ax, _wrap_legend_label(seg), series.base_n.get(seg, 0), ink)
         _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
                               bg, ink, grid)
         return fig
@@ -241,9 +265,7 @@ def _build_pie_figure(ctx, *, donut: bool):
     fig, axes = _make_panel_axes(ctx, bg, len(sel.labels))
     for ax, seg in zip(axes, sel.labels):
         _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg, donut)
-        ax.set_title(_wrap_legend_label(seg), fontsize=12.5, fontweight="bold",
-                     color=ink, pad=6)
-        ax.set_xlabel(f"n = {series.base_n.get(seg, 0)}", fontsize=9.5, color=ink)
+        _panel_heading(ax, _wrap_legend_label(seg), series.base_n.get(seg, 0), ink)
 
     if want_panel_legend:
         # ONE legend for the row: the categories are identical in every panel, so a
