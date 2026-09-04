@@ -944,12 +944,6 @@ function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetPr
           </label>
         ))}
       </div>
-      {picked.length > 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          Only {picked.join(", ")} — N and every percentage on the slide count
-          those respondents.
-        </p>
-      )}
     </Field>
   );
 }
