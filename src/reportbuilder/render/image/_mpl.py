@@ -407,6 +407,25 @@ def label_floor(fmt, *, default_pct: float, axis_max: float = 100.0) -> float:
     return axis_max * float(pct) / 100.0
 
 
+#: What a picture nSight drew a CHART into is called on the slide.
+#:
+#: The completeness check counts chart objects, and in image mode a chart IS a
+#: picture — but so is a template's harvested furniture, which is redrawn with
+#: `add_picture` by design. Counting every picture made one logo plus one chart
+#: read as two charts where one was expected, and refused a deck that was
+#: complete. Named, so the count can tell them apart.
+CHART_PICTURE_NAME = "nsight-chart"
+
+
+def name_chart_picture(pic):
+    """Mark a placed picture as the slide's chart. Returns it, for chaining."""
+    try:
+        pic.name = CHART_PICTURE_NAME
+    except Exception:  # noqa: BLE001 — a name is bookkeeping, never a render
+        pass
+    return pic
+
+
 def format_value(v: float, statistic: str, fmt, all_values: list[float] | None = None) -> str:
     """Format a single data-label value, honouring NumberFormat.mode (REQ-N-01/02/03).
 
@@ -493,7 +512,8 @@ def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
     else:
         top = ctx.slot.top + (slot_h - disp_h) // 2
     try:
-        ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h)
+        name_chart_picture(
+            ctx.slide.shapes.add_picture(png_path, left, top, disp_w, disp_h))
     finally:
         # render_png() mkstemp'd this file and nothing else owns it: python-pptx
         # has copied the bytes into the package by now, so the temp copy is

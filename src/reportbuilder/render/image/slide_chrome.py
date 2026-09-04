@@ -697,8 +697,15 @@ def title_colour_for(st, style):
     bg = (getattr(style, "background", "") or "").strip()
     if harvested is None or not bg:
         return harvested or _furniture_px(style)[0]
+    # ONE rule for "can this be read on that", shared with the compositor that
+    # draws the preview. This used to be a luminance difference of its own, and
+    # the two had drifted: black harvested from a customer's deck passed here
+    # and failed there, so the preview showed a white headline and the exported
+    # deck a black one — invisible — on every slide of that template.
+    from reportbuilder.render.resolved_style import legible_on
+
     ground = bg if bg.startswith("#") else f"#{bg}"
-    if abs(_relative_luminance(f"#{st.colour}") - _relative_luminance(ground)) < 0.25:
+    if not legible_on(st.colour, ground):
         return _furniture_px(style)[0]
     return harvested
 

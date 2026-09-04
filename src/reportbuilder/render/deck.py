@@ -114,6 +114,23 @@ def _count_chart_shapes(prs: Presentation) -> tuple[int, int]:
     return charts, pics
 
 
+def _count_chart_pictures(prs: Presentation) -> int:
+    """Pictures nSight drew a CHART into, across all slides.
+
+    Distinct from "every picture", which is what the native-purity gate asks: a
+    template's harvested furniture is redrawn with `add_picture` by design — a
+    logo, a rule, a band — so counting all of them made one logo plus one chart
+    read as two charts where one was expected, and refused a deck that was
+    complete.
+    """
+    from reportbuilder.render.image._mpl import CHART_PICTURE_NAME
+
+    return sum(
+        1 for s in prs.slides for sh in s.shapes
+        if sh.shape_type == MSO_SHAPE_TYPE.PICTURE and sh.name == CHART_PICTURE_NAME
+    )
+
+
 def assert_complete(prs: Presentation, report: Report,
                     expected_pics: int | None = None) -> None:
     """The deck contains exactly one rendered chart object per ChartSpec, nothing extra.
@@ -123,8 +140,8 @@ def assert_complete(prs: Presentation, report: Report,
     chart object; a demographics grid adds several pictures, so the caller passes
     ``expected_pics`` (computed where the series are known). (REQ-C-18)
     """
-    charts, pics = _count_chart_shapes(prs)
-    rendered = charts if report.render_mode == "native" else pics
+    charts, _all_pics = _count_chart_shapes(prs)
+    rendered = charts if report.render_mode == "native" else _count_chart_pictures(prs)
     if expected_pics is not None and report.render_mode != "native":
         expected = expected_pics
     else:
