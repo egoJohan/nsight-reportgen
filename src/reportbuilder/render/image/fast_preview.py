@@ -499,6 +499,13 @@ def _run_style(shape, para, run, style):
     return family, size_pt or 11.0, colour, bold, italic
 
 
+#: A tab in a run's text. Its own segment because it is not something to draw
+#: but somewhere to move to — the tab stop this deck's bullets set at marL. An
+#: object, not a "\t" string, so no piece of real text can ever be mistaken for
+#: one.
+_TAB = object()
+
+
 def _indents(para, to_px) -> tuple[int, int]:
     """(first-line x, wrapped-line x) offsets from the shape's left edge.
 
@@ -556,11 +563,24 @@ def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
             family, size_pt, colour, bold, italic = _run_style(shape, para, run, style)
             font = _font(family, max(6.0, size_pt * dpi / 72), bold=bold, italic=italic)
             step = max(step, _line_step(shape, style, font))
-            text = run.text.replace("\t", "  ")
+            # The tab is kept, not spelled as spaces. A bullet is written as
+            # "glyph TAB text" with a left tab stop at marL, which is what puts
+            # the first line's text at the same x as its wrapped lines. Turning
+            # it into two spaces started the text wherever the glyph happened to
+            # end — about ten pixels short of its own continuation, on every
+            # template, because the glyph's width has nothing to do with marL.
+            text = run.text
             if _caps(shape, run, style):
                 text = text.upper()
-            segments.append((text, font, colour))
-        avail = width_px - first_x
+            for j, piece in enumerate(text.split("\t")):
+                if j:
+                    segments.append((_TAB, font, colour))
+                if piece:
+                    segments.append((piece, font, colour))
+        # A first line that snaps to the tab stop has the wrapped lines' width,
+        # not the glyph's head start — otherwise it takes one word too many.
+        has_tab = any(t is _TAB for t, _f, _c in segments)
+        avail = width_px - (wrap_x if has_tab else first_x)
         for i, chunk in enumerate(_wrap_segments(draw, segments, avail,
                                                  width_px - wrap_x)
                                   if frame.word_wrap is not False else [segments]):
@@ -575,12 +595,17 @@ def _draw_text(draw, shape, to_px, dpi: int, style) -> None:
     for (segments, alignment, first_x, wrap_x, is_first), step in zip(lines, line_steps):
         x = to_px(left_emu) + (first_x if is_first else wrap_x)
         if alignment in (PP_ALIGN.RIGHT, PP_ALIGN.CENTER):
-            width = sum(draw.textlength(t, font=f) for t, f, _c in segments)
+            width = sum(draw.textlength(t, font=f)
+                    for t, f, _c in segments if t is not _TAB)
             if alignment == PP_ALIGN.RIGHT:
                 x = to_px(left_emu) + width_px - int(width)
             else:
                 x = to_px(left_emu) + (width_px - int(width)) // 2
         for text, font, colour in segments:
+            if text is _TAB:
+                # Left tab stop at marL — the same place the wrapped lines start.
+                x = max(x, to_px(left_emu) + wrap_x)
+                continue
             draw.text((x, y), text, font=font, fill=f"#{colour}")
             x += int(round(draw.textlength(text, font=font)))
         y += step
@@ -598,12 +623,19 @@ def _wrap_segments(draw, segments, first_width: int, wrap_width: int) -> list[li
     used = 0.0
     limit = first_width
     for text, font, colour in segments:
+        if text is _TAB:
+            # Carried through, never broken on and never measured: it moves the
+            # pen to the tab stop, and how far that is depends on where the line
+            # starts, which is decided when the line is drawn.
+            current.append((text, font, colour))
+            continue
         for word in _tokens(text):
             w = draw.textlength(word, font=font)
             if current and used + w > limit and word.strip():
                 out.append(current)
                 current, used, limit = [], 0.0, wrap_width
-            if current and current[-1][1] is font and current[-1][2] == colour:
+            if (current and current[-1][0] is not _TAB
+                    and current[-1][1] is font and current[-1][2] == colour):
                 current[-1] = (current[-1][0] + word, font, colour)
             else:
                 current.append((word, font, colour))
@@ -624,20 +656,3 @@ def _tokens(text: str) -> list[str]:
     if buf:
         out.append(buf)
     return out
-
-
-    if not lines:
-        return
-    if frame.vertical_anchor == MSO_ANCHOR.BOTTOM:
-        y = to_px(top_emu) + height_px - sum(step for _, step in line_steps)
-    for (segments, alignment, first_x, wrap_x, is_first), step in zip(lines, [s for _, s in line_steps]):
-        x = to_px(left_emu) + (first_x if is_first else wrap_x)
-        if alignment in (PP_ALIGN.RIGHT, PP_ALIGN.CENTER):
-            width = sum(draw.textlength(t, font=f) for t, f, _c in segments)
-            edge = to_px(left_emu + int(shape.width or 0))
-            x = edge - int(width) if alignment == PP_ALIGN.RIGHT else \
-                to_px(left_emu) + (width_px - int(width)) // 2
-        for text, font, colour in segments:
-            draw.text((x, y), text, font=font, fill=f"#{colour}")
-            x += int(round(draw.textlength(text, font=font)))
-        y += step
