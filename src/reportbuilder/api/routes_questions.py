@@ -88,6 +88,8 @@ def list_chart_types(user: User = Depends(current_user)) -> dict:
     config option — adds its plugin + schema field and needs no frontend change.
     Material-independent; safe to fetch once. (REQ-C-13, REQ-C-30)
     """
+    from reportbuilder.render.image._mpl import default_label_floor
+
     return {
         "chart_types": [
             {
@@ -95,6 +97,11 @@ def list_chart_types(user: User = Depends(current_user)) -> dict:
                 "label": p.label,
                 "requires": list(p.requires),
                 "config": [f.to_dict() for f in p.config_schema],
+                # Where this type stops printing a value inside its own piece
+                # when the author has not said. Sent rather than restated in the
+                # editor: the renderer applies it and the editor shows it, and
+                # two copies of a number are one edit from disagreeing.
+                "label_floor_default": default_label_floor(p.id),
             }
             for p in CHART_PLUGINS.values()
         ]

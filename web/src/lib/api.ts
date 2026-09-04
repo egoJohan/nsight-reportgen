@@ -280,6 +280,11 @@ export interface ChartTypeInfo {
   label: string;
   requires: string[];
   config: ConfigField[];
+  /** Where this chart type stops printing a value inside its own piece when the
+   *  author has not said. Sent by the backend rather than restated here: the
+   *  renderer applies it and this shows it, and two copies of a number are one
+   *  edit away from disagreeing about what the chart does. */
+  label_floor_default?: number;
 }
 
 // ---- AI text generation ----

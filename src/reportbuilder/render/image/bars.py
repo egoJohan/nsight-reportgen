@@ -35,7 +35,7 @@ import textwrap
 import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
-    place_picture_square, series_values, format_value, label_floor, style_legend,
+    place_picture_square, series_values, format_value, label_floor, default_label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     _new_agg_figure, _EMU_PER_IN,
 )
@@ -1267,7 +1267,9 @@ def build_image_column_stacked(ctx) -> None:
     norm = (np.where(totals > 0, 100.0 / totals, 1.0) if normalise
             else np.ones(len(cats)))
     # "Too thin to label" — 1% of the value axis unless the author moved it.
-    label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
+    label_min = label_floor(ctx.spec.number_format,
+                            default_pct=default_label_floor(ctx.spec.chart_type),
+                            axis_max=axis_max)
     col_ink, _col_muted, col_grid = chart_furniture(ctx)
     # A column is drawn thinner when some of its numbers have to sit beside it,
     # so there is a gap between columns for them to sit IN. Placed at the next
@@ -1485,7 +1487,9 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
     # labelled, and the labels would pile up on each other. 1% by default, and
     # the author's own cut-off when they set one — a 100%-stacked scale puts its
     # whole tail into slivers narrower than the numbers that belong in them.
-    label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
+    label_min = label_floor(ctx.spec.number_format,
+                            default_pct=default_label_floor(ctx.spec.chart_type),
+                            axis_max=axis_max)
     # A number that does not fit inside its own segment is drawn BESIDE the bar
     # on a line back to it, rather than dropped — the tail of a scale is exactly
     # where a reader of the finished deck cannot look the number up.

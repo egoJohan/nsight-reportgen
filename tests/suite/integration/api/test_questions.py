@@ -33,9 +33,14 @@ def test_chart_types_lists_all_twelve_with_config_schema(client_mock):
     assert {"vertical_bar", "stacked_vertical_bar", "pie", "scatter",
             "wordcloud"} <= ids
     for t in types:
-        assert set(t.keys()) == {"id", "label", "requires", "config"}
+        assert set(t.keys()) == {"id", "label", "requires", "config",
+                                 # where this type stops printing a value inside
+                                 # its own piece; the editor shows what the
+                                 # renderer applies rather than its own copy
+                                 "label_floor_default"}
         assert isinstance(t["requires"], list)
         assert isinstance(t["config"], list)
+        assert isinstance(t["label_floor_default"], (int, float))
     # config entries are declarative widget dicts (schema flows from plugins).
     vbar = next(t for t in types if t["id"] == "vertical_bar")
     assert all("key" in f and "widget" in f for f in vbar["config"])

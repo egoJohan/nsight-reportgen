@@ -385,6 +385,25 @@ def auto_decimals(values: list[float], statistic: str) -> int:
     return 0
 
 
+#: Where each chart type stops printing a value inside its own piece, when the
+#: author has not said. A pie's labels sit on a curve and run into each other
+#: sooner than a bar's, which is the only reason these differ.
+#:
+#: Stated ONCE. The editor shows the default beside the field and the renderer
+#: applies it, and when the two were written out separately they were one edit
+#: away from disagreeing about what the chart does.
+LABEL_FLOOR_DEFAULT_PCT: dict[str, float] = {
+    "pie": 4.0,
+    "doughnut": 4.0,
+}
+LABEL_FLOOR_FALLBACK_PCT: float = 1.0
+
+
+def default_label_floor(chart_type: str) -> float:
+    """The cut-off this chart type uses when the author has not set one."""
+    return LABEL_FLOOR_DEFAULT_PCT.get(chart_type, LABEL_FLOOR_FALLBACK_PCT)
+
+
 def label_floor(fmt, *, default_pct: float, axis_max: float = 100.0) -> float:
     """The value below which a data label is not worth drawing.
 
@@ -404,7 +423,11 @@ def label_floor(fmt, *, default_pct: float, axis_max: float = 100.0) -> float:
     pct = getattr(fmt, "hide_below_pct", None) if fmt else None
     if pct is None:
         pct = default_pct
-    return axis_max * float(pct) / 100.0
+    # Clamped where it is READ, so it means something wherever it came from: the
+    # editor offers 0-100, but the API and the saved document take any number,
+    # and a hand-edited -5 compares against widths as a floor below zero while
+    # 500 takes every value off every chart.
+    return axis_max * min(100.0, max(0.0, float(pct))) / 100.0
 
 
 #: What a picture nSight drew a CHART into is called on the slide.

@@ -641,22 +641,25 @@ function SortWidget({ field, chart, onChange }: WidgetProps) {
   );
 }
 
-// Where each chart type stops drawing a value that is too small to hold its own
-// label — the renderer's own floor, as a share of the value axis. A stack packs
-// the tail of a scale into slivers narrower than the numbers that belong in them;
-// a pie's labels sit on a curve and run into each other sooner. Chart types not
-// listed here never hide a label for being small (a plain bar writes its value
-// outside the bar), so the field is not offered on them.
-const HIDE_BELOW_DEFAULT: Record<string, number> = {
-  stacked_horizontal_bar: 1,
-  stacked_vertical_bar: 1,
-  pie: 4,
-  doughnut: 4,
-};
+//: Which chart types hide a value for being too small at all. A plain bar
+//: writes its values outside the bar and never hides one, so the field is not
+//: offered there. The NUMBER each type uses comes from the backend
+//: (`label_floor_default`) — the renderer applies it, and a second copy here
+//: would be one edit away from disagreeing with it.
+const HAS_LABEL_FLOOR = new Set([
+  "stacked_horizontal_bar",
+  "stacked_vertical_bar",
+  "pie",
+  "doughnut",
+]);
 
 function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
   const manual = chart.number_format.mode === "manual";
-  const floorDefault = HIDE_BELOW_DEFAULT[chart.chart_type];
+  // The catalog is fetched once and cached, so asking for it here costs nothing.
+  const { data: chartTypes } = useChartTypes();
+  const floorDefault = HAS_LABEL_FLOOR.has(chart.chart_type)
+    ? (chartTypes?.find((t) => t.id === chart.chart_type)?.label_floor_default ?? 1)
+    : undefined;
   return (
     <>
       <Field label={field.label}>

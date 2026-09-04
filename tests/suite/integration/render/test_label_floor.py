@@ -94,3 +94,14 @@ def test_the_default_draws_exactly_what_1_percent_draws():
 
 def test_zero_puts_every_value_back_on_the_chart():
     assert _stacked_png(0.0) != _stacked_png(None)
+
+
+def test_a_nonsense_cut_off_cannot_hide_or_reveal_everything():
+    """The UI clamps 0-100; the API and the saved report do not, so a hand-edited
+    document could carry -5 (nothing ever hidden, and a negative floor compared
+    against widths) or 500 (every value on every chart gone). Clamped where the
+    value is read, so wherever it came from it means something."""
+    assert label_floor(NumberFormat(hide_below_pct=-5.0),
+                       default_pct=1.0, axis_max=100.0) == 0.0
+    assert label_floor(NumberFormat(hide_below_pct=500.0),
+                       default_pct=1.0, axis_max=100.0) == 100.0

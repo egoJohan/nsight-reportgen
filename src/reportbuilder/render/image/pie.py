@@ -39,6 +39,7 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (chart_accent,
     render_png, place_picture_square, format_value, label_floor,
+    LABEL_FLOOR_DEFAULT_PCT,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import (
@@ -57,7 +58,7 @@ _LEGEND_WRAP: int = 26
 # without colliding with a neighbouring label; every value is also in the legend.
 # The DEFAULT only: an author who wants the thin slices spelled out anyway moves
 # the cut-off on the chart's number format (see `label_floor`).
-_MIN_WEDGE_PCT: float = 4.0
+_MIN_WEDGE_PCT: float = LABEL_FLOOR_DEFAULT_PCT["pie"]
 
 
 def _wrap_legend_label(text: str) -> str:
