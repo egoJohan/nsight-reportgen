@@ -1265,6 +1265,14 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     sec_scale = _rating_scale(sec)
     scol = sec_num.map(sec_scale) if sec_scale else sec_num
     label_to_code = {vl.label: vl.value for vl in var.value_labels}
+    if not label_to_code:
+        # The categories are the codes themselves (see `code_labels`), so the
+        # way back is the same map read the other way round. Without this every
+        # lookup missed and the line came out empty — bars with nothing over
+        # them and no error to say why.
+        label_to_code = {label: code
+                         for code, label in code_labels(var, data, _effective_missing(
+                             spec, var)).items()}
     primary_label = (var.label or var.name)[:30]
     secondary_label = (sec.label or sec.name)[:30]
 

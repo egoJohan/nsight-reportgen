@@ -92,3 +92,49 @@ def test_codes_come_out_in_numeric_order():
     r = engine.compute(model.question("q1"), _spec(),
                        _df([3.0, 1.0, 2.0, 10.0, 2.0]), model)
     assert r.categories == ("1", "2", "3", "10")
+
+
+# ── the same variable used the other way round ───────────────────────────────
+
+def test_it_can_also_be_SPLIT_by():
+    """The fallback was wired into the single-question path only, so the very
+    variable that now charts fine could not be used as a classifier: the mask
+    builder asks for value labels, finds none, and the split silently does not
+    happen — no error, just a chart of the whole sample."""
+    from reportbuilder.model.question import Question, QuestionModel, ValueLabel, Variable
+
+    asked = Variable(name="q1", label="Suositteletko?", measurement="categorical",
+                     value_labels=(ValueLabel(1.0, "Kyllä"), ValueLabel(2.0, "Ei")),
+                     missing_values=frozenset())
+    clf = Variable(name="g", label="Ryhmä", measurement="categorical",
+                   value_labels=(), missing_values=frozenset())
+    model = QuestionModel(
+        variables={"q1": asked, "g": clf},
+        questions=[Question(qid="q1", kind="single", variables=("q1",), text="Q")])
+    df = pd.DataFrame({"q1": [1.0, 2.0] * 10, "g": [1.0] * 10 + [2.0] * 10})
+    r = engine.compute(model.question("q1"), _spec(classifying_var="g"), df, model)
+    assert set(r.segments) == {"1", "2", "Total"}, r.segments
+    assert r.base_n["1"] == 10 and r.base_n["2"] == 10
+
+
+def test_a_combo_line_is_drawn_for_it_too():
+    """A combo maps each drawn category back to the code behind it, through the
+    value labels. With none, every lookup missed and the line came out empty —
+    bars with nothing over them, and no error to say why."""
+    from reportbuilder.model.question import Question, QuestionModel, Variable
+
+    asked = Variable(name="q1", label="Q", measurement="categorical",
+                     value_labels=(), missing_values=frozenset())
+    score = Variable(name="score", label="Score", measurement="scale",
+                     value_labels=(), missing_values=frozenset())
+    model = QuestionModel(
+        variables={"q1": asked, "score": score},
+        questions=[Question(qid="q1", kind="single", variables=("q1",), text="Q")])
+    df = pd.DataFrame({"q1": [1.0] * 10 + [2.0] * 10,
+                       "score": [3.0] * 10 + [7.0] * 10})
+    r = engine.compute(model.question("q1"),
+                       _spec(chart_type="combo",
+                             options={"combo_secondary": "score"}), df, model)
+    line = r.segments[1]
+    assert r.cell("1", line).pct == pytest.approx(3.0)
+    assert r.cell("2", line).pct == pytest.approx(7.0)

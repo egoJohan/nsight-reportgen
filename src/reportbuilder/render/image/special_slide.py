@@ -23,7 +23,17 @@ from reportbuilder.render.image.slide_chrome import (
 
 
 # Inline markdown: **bold** / __bold__ and *italic* / _italic_ (non-nested).
-_MD_RE = re.compile(r"(\*\*|__)(.+?)\1|(\*|_)(.+?)\3")
+#
+# An underscore only marks emphasis at the EDGE of a word. Bullets are ordinary
+# prose that happens to contain identifiers — "asiakas_tyytyvaisyys_indeksi" —
+# and treating every underscore as a marker silently deleted them and italicised
+# the middle of the name: the slide did not say what the author wrote. The same
+# rule every markdown renderer uses, and the reason it has it.
+_MD_RE = re.compile(
+    r"(\*\*|__)(.+?)\1"          # **bold** / __bold__
+    r"|(\*)(.+?)\3"              # *italic*
+    r"|(?<![^\W_])_(?!\s)(.+?)(?<!\s)_(?![^\W_])"   # _italic_, at word edges
+)
 
 
 def _md_runs(text: str) -> list[tuple[str, bool, bool]]:
@@ -36,8 +46,10 @@ def _md_runs(text: str) -> list[tuple[str, bool, bool]]:
             runs.append((text[pos:m.start()], False, False))
         if m.group(1):  # **bold** / __bold__
             runs.append((m.group(2), True, False))
-        else:  # *italic* / _italic_
+        elif m.group(3):  # *italic*
             runs.append((m.group(4), False, True))
+        else:  # _italic_ around a whole word
+            runs.append((m.group(5), False, True))
         pos = m.end()
     if pos < len(text):
         runs.append((text[pos:], False, False))
@@ -229,4 +241,8 @@ def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]],
             body.font.bold = bold
             body.font.italic = italic
             body.font.color.rgb = ink
-            body.font.name = _FONT
+            # The template's face, as the glyph beside it already used. The
+            # bullet said "typeface is the template's" and then set the house
+            # font here, so a customer's deck drew the dot in their face and the
+            # sentence next to it in ours.
+            body.font.name = font
