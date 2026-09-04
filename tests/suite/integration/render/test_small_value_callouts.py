@@ -178,3 +178,78 @@ def test_segments_wide_enough_keep_their_number_inside():
 def test_a_stacked_column_calls_its_slivers_out_too():
     out = _stacked_annotations([2.0, 98.0], chart_type="stacked_vertical_bar")
     assert {t for t, _kw in out} == {"2 %"}
+
+
+# ── where the called-out numbers actually land ───────────────────────────────
+
+def _drawn(chart_type, pcts, segments=("Suomi",), summary=None):
+    """Every callout as (text, xy on the shape, xytext where the number goes)."""
+    import matplotlib
+
+    seen: list = []
+    orig = matplotlib.axes.Axes.annotate
+
+    def spy(self, text, *a, **kw):
+        # The bars are read HERE, while they exist: the builder closes its
+        # figure once the PNG is made, and an axes inspected afterwards has no
+        # artists left — which is how the first version of this check passed
+        # against a placement that was plainly wrong.
+        from matplotlib.patches import Rectangle
+
+        cols = [(r.get_x(), r.get_x() + r.get_width())
+                for c in self.containers for r in c
+                if isinstance(r, Rectangle) and r.get_width()]
+        seen.append((text, kw.get("xy"), kw.get("xytext"), self, cols))
+        return orig(self, text, *a, **kw)
+
+    matplotlib.axes.Axes.annotate = spy
+    try:
+        from reportbuilder.render.image import IMAGE_BUILDERS
+
+        ctx = _ctx([f"c{i}" for i in range(len(pcts))], pcts, chart_type,
+                   segments=segments)
+        IMAGE_BUILDERS[chart_type](ctx)
+    finally:
+        matplotlib.axes.Axes.annotate = orig
+    return seen
+
+
+def test_a_column_callout_stays_clear_of_the_next_column():
+    """It was placed a full column-width to the right of its own left edge, so
+    the number sat on a neighbour it does not describe. Asserted against the
+    drawn rectangles, not a guessed distance."""
+    from matplotlib.patches import Rectangle
+
+    out = _drawn("stacked_vertical_bar", [2.0, 2.0, 96.0], segments=("a", "b", "c"))
+    assert out, "nothing was called out"
+    for text, xy, xytext, _ax, cols in out:
+        assert cols, "no columns seen — the check would pass vacuously"
+        mine = [c for c in cols if c[0] - 1e-9 <= xy[0] <= c[1] + 1e-9]
+        others = [c for c in cols if c not in mine]
+        for left, right in others:
+            # ha="left", so the number runs RIGHT from its anchor: landing on
+            # the neighbour's left edge is landing on the neighbour.
+            assert not (left - 1e-9 <= xytext[0] < right), (
+                f"{text} at x={xytext[0]:.2f} sits on the column {left:.2f}..{right:.2f}")
+
+
+def test_two_callouts_on_one_column_do_not_share_a_line():
+    """Two slivers a couple of percent apart put their numbers a couple of
+    percent apart — which on a 0-100 axis is a few pixels, so they overlapped.
+    Measured in pixels, where the question actually lives."""
+    out = _drawn("stacked_vertical_bar", [1.5, 1.5, 97.0], segments=("a",))
+    assert len(out) >= 2
+    ax = out[0][3]
+    ax.figure.canvas.draw()
+    ys = sorted(ax.transData.transform((0.0, t[2][1]))[1] for t in out)
+    # a line of 8.5pt text is ~12px at the figure's dpi
+    assert all(b - a >= 11.0 for a, b in zip(ys, ys[1:])), (
+        f"callouts {ys} are closer than a line of text")
+
+
+def test_callouts_stay_inside_the_plot():
+    """Eight slivers in a row used to march the numbers off the right edge."""
+    out = _drawn("stacked_horizontal_bar", [2.0] * 8 + [84.0])
+    assert out
+    for _text, _xy, xytext, _ax, _cols in out:
+        assert xytext[0] <= 100.0, xytext

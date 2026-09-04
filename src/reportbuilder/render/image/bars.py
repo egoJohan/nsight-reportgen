@@ -1269,6 +1269,14 @@ def build_image_column_stacked(ctx) -> None:
     # "Too thin to label" — 1% of the value axis unless the author moved it.
     label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
     col_ink, _col_muted, col_grid = chart_furniture(ctx)
+    # A column is drawn thinner when some of its numbers have to sit beside it,
+    # so there is a gap between columns for them to sit IN. Placed at the next
+    # column's left edge, a number sat on a neighbour it does not describe.
+    any_out = any(0.0 < (data[seg][j] or 0.0) * norm[j]
+                  for seg in segs for j in range(len(cats)))
+    col_w = _STACK_BAR_H_CALLOUT if any_out else _STACK_BAR_H
+    # Where the last callout on each column went, so the next clears it.
+    last_y: dict[float, float] = {}
     # Measured against the scale the columns are drawn on — the caller sets the
     # limits after this, and against matplotlib's default every label looks as
     # though it fits.
@@ -1281,7 +1289,7 @@ def build_image_column_stacked(ctx) -> None:
         # R4.2: "Not answered" category bars get MUTED grey.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         bars = ax.bar(x, heights, bottom=bottoms, label=seg, color=bar_clrs,
-                      edgecolor="none", zorder=3)
+                      edgecolor="none", zorder=3, width=col_w)
         for bar, ov, b, h in zip(bars, orig, bottoms, heights):
             if h <= label_min:
                 # The author's cut-off: not printed, and not printed beside the
@@ -1298,12 +1306,27 @@ def build_image_column_stacked(ctx) -> None:
                     color=contrast_ink(bar.get_facecolor()), zorder=5,
                 )
             else:
-                # Too short to hold its number: beside the column, on a line
-                # back to the segment it belongs to.
-                callout_value(ax, text,
-                              at=(bar.get_x() + bar.get_width() * 1.25, b + h / 2),
-                              to=(bar.get_x() + bar.get_width(), b + h / 2),
-                              ink=col_ink, grid=col_grid, ha="left")
+                # Too short to hold its number: in the gap beside the column, on
+                # a line back to the segment it belongs to. Inside the gap, not
+                # across it — the far side of a gap belongs to the next column.
+                right = bar.get_x() + bar.get_width()
+                gap = (1.0 - bar.get_width()) * 0.15
+                # The rightmost column has no gap to its right — the plot ends
+                # there — so its numbers go to its LEFT instead of off the edge.
+                to_left = right + gap + _w > ax.get_xlim()[1]
+                side = "right" if to_left else "left"
+                at_x = (bar.get_x() - gap) if to_left else (right + gap)
+                anchor_x = bar.get_x() if to_left else right
+                at_y = b + h / 2
+                prev = last_y.get(round(bar.get_x(), 6))
+                # Two slivers a couple of percent apart put their numbers a
+                # couple of percent apart, which is a few pixels: push the
+                # second clear of the first by a line's height.
+                if prev is not None and at_y - prev < _h * 1.2:
+                    at_y = prev + _h * 1.2
+                last_y[round(bar.get_x(), 6)] = at_y
+                callout_value(ax, text, at=(at_x, at_y), to=(anchor_x, b + h / 2),
+                              ink=col_ink, grid=col_grid, ha=side)
         bottoms = bottoms + heights
 
     ax.set_xticks(x)
@@ -1397,6 +1420,47 @@ def callout_value(ax, text: str, *, at, to, ink: str, grid: str,
                                 shrinkA=1, shrinkB=1))
 
 
+def final_axis_max(ctx, axis_max: float) -> float:
+    """The x limit the finished panel carries, not the one it is drawn with.
+
+    Labels are placed before `_apply_bar_style` and `_draw_row_summary` run, and
+    the row-summary column widens the axis by ~18% to make room for its strip.
+    Measuring a label against the narrower scale says it fits when it will be
+    drawn into a segment about 15% narrower than measured — the failure the
+    measurement exists to prevent.
+    """
+    vals = _row_summary_by_bar(ctx.series, getattr(ctx.series, "segments", ()))
+    if vals and not all(v is None for v in vals):
+        return 118.0 * axis_max / 100.0
+    return axis_max
+
+
+def spread_along(targets: list[float], room: list[float], limit: float,
+                 pad: float) -> list[float]:
+    """Where to put numbers that all point at nearly the same place.
+
+    Each wants to sit at its target; each needs `room` of its own. Walking
+    right by a fixed step was the old rule, and a fixed step is exactly what
+    the measurement above exists to avoid — on a narrow chart the step was
+    smaller than the numbers, so they overlapped anyway, and with several
+    slivers in a row the walk marched them off the end of the plot.
+
+    So: place left to right, never closer than the two halves plus a pad, then
+    if the run has overflowed `limit`, push the whole run back left — moving
+    them together keeps each one nearer its own target than shuffling would.
+    """
+    out: list[float] = []
+    for i, want in enumerate(targets):
+        x = want
+        if out:
+            x = max(x, out[-1] + room[i - 1] / 2 + room[i] / 2 + pad)
+        out.append(x)
+    over = (out[-1] + room[-1] / 2) - limit if out else 0.0
+    if over > 0:
+        out = [x - over for x in out]
+    return out
+
+
 def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
                         normalise: bool = True, axis_max: float = 100.0) -> None:
     """Draw ONE stacked horizontal panel onto `ax`.
@@ -1438,7 +1502,7 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
     # measurement is taken against matplotlib's default 0..1 and every label
     # looks as though it fits — which is how a row of digits came to be printed
     # on top of each other at the foot of a scale.
-    ax.set_xlim(0, axis_max)
+    ax.set_xlim(0, final_axis_max(ctx, axis_max))
     room = {t: text_width_in_data(ax, t, fontsize=9.0) * 1.06 for t in set(said.values())}
 
     def _width(seg, j) -> float:
@@ -1457,8 +1521,10 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
         _width(seg, j) > 0 and not _hidden(seg, j) and not _fits(seg, j)
         for seg in stack for j in range(n_bars))
     bar_h = _STACK_BAR_H_CALLOUT if any_callout else _STACK_BAR_H
-    # Where the last callout on each bar went, so the next one clears it.
-    last_x: dict[float, float] = {}
+    # The callouts per bar, gathered as the stack is walked and laid out in one
+    # pass at the end: where each goes depends on its neighbours, which are not
+    # known until the whole row has been seen.
+    pending: dict[float, list[tuple[float, float, str]]] = {}
     lefts = np.zeros(n_bars)
     for i, seg in enumerate(stack):
         orig = np.array([data[seg][j] or 0.0 for j in range(n_bars)])
@@ -1476,19 +1542,22 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
                         ha="center", va="center", fontsize=9.0, fontweight="bold",
                         color=contrast_ink(bc), zorder=5)
             elif w > 0:
-                # ABOVE its own bar, never below: the gap under a bar belongs to
-                # the next one down, and a number sitting in it reads as that
-                # bar's however carefully the line is drawn.
-                mid = l + w / 2
-                gap = axis_max * _CALLOUT_MIN_GAP_FRAC
-                prev = last_x.get(float(yi))
-                if prev is not None and mid - prev < gap:
-                    mid = prev + gap
-                last_x[float(yi)] = mid
-                callout_value(ax, text, at=(mid, yi + bar_h / 2 + _CALLOUT_OFFSET),
-                              to=(l + w / 2, yi + bar_h / 2), ink=ink, grid=grid,
-                              va="bottom")
+                pending.setdefault(float(yi), []).append((l + w / 2, w, text))
         lefts = lefts + widths
+
+    # ABOVE its own bar, never below: the gap under a bar belongs to the next
+    # one down, and a number sitting in it reads as that bar's however
+    # carefully the line is drawn.
+    limit = final_axis_max(ctx, axis_max)
+    for yi, items in pending.items():
+        items.sort()
+        widths_needed = [room[t] for _x, _w, t in items]
+        placed = spread_along([x for x, _w, _t in items], widths_needed,
+                              limit, room[items[0][2]] * 0.25)
+        for (target, _w, text), at_x in zip(items, placed):
+            callout_value(ax, text, at=(at_x, yi + bar_h / 2 + _CALLOUT_OFFSET),
+                          to=(target, yi + bar_h / 2), ink=ink, grid=grid,
+                          va="bottom")
 
 
 def build_image_bar_stacked(ctx) -> None:
