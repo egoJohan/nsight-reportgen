@@ -2,8 +2,8 @@
 
 Marking it categorical was not enough: every path that charts a question assumes
 numeric codes and value labels, so charting "Pakkausilme 1 tai 2" raised
-`could not convert string to float` and the slide showed "Ei tietoja
-näytettäväksi". Normalising once at ingest means no consumer needs a string case.
+`could not convert string to float` and the slide showed the
+"no data" placeholder. Normalising once at ingest means no consumer needs a string case.
 """
 from __future__ import annotations
 

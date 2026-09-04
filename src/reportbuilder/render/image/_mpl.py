@@ -84,7 +84,7 @@ def wrap_label_capped(text: str, width: int, max_lines: int) -> str:
     return "\n".join(kept)
 
 
-def render_empty_chart(ctx, message: str = "Ei tietoja näytettäväksi") -> None:
+def render_empty_chart(ctx, message: str = "No data to show") -> None:
     """Render a centred 'no data' placeholder as a picture, so a chart with no
     categories (e.g. a scale variable with no value labels) degrades cleanly
     instead of crashing the deck. Counts as the chart's one picture."""

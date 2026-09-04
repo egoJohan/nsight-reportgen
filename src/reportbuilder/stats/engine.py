@@ -671,6 +671,41 @@ def _top_scale_categories(var: Variable, categories: list[str], n: int,
     return out
 
 
+#: The most distinct values a variable may hold and still be read as CODES when
+#: it carries no labels. Above it the numbers are a measurement — an age, a
+#: spend — and a chart of one category per value says nothing.
+_MAX_UNLABELLED_CODES = 20
+
+
+def code_labels(var, data: pd.DataFrame, missing) -> dict[float, str]:
+    """Labels for a variable whose codes carry none, or {}.
+
+    A live study asked "19 Onko viihdeboksin käyttöönotto ja käyttö sujunut
+    ilman ongelmia?" as a nominal variable holding 1, 2 and 99, with no value
+    labels in the SAV at all — not lost on the way in; the file has none. The
+    categories are built from the labels, so there were none, and the slide came
+    out empty under a footer reading N = 665: the data is plainly there.
+
+    The codes are what the file gives, so the codes are what the chart shows.
+    Whole numbers print without their decimal, since a code of 1.0 is written 1
+    everywhere else a person would see it, and an author who wants words puts
+    them in the category-label editor.
+
+    Only for CODES: a continuous variable with no labels is a measurement, and
+    one category per distinct value would be a chart of nothing.
+    """
+    name = getattr(var, "name", None)
+    if not name or name not in data.columns:
+        return {}
+    col = pd.to_numeric(data[name], errors="coerce").dropna()
+    codes = sorted({float(v) for v in col.unique() if float(v) not in missing})
+    if not codes or len(codes) > _MAX_UNLABELLED_CODES:
+        return {}
+    if any(float(c) != int(c) for c in codes):
+        return {}                       # 3.7 is a measurement, not a code
+    return {c: str(int(c)) for c in codes}
+
+
 def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             model: QuestionModel) -> SeriesResult:
     var = model.variable(question.variables[0])
@@ -679,6 +714,9 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     show_empty: bool = getattr(spec, "show_empty_categories", True)
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
+    # No labels at all: chart the codes rather than nothing. See `code_labels`.
+    if not labels:
+        labels = code_labels(var, data, eff)
     separate = _separate_masks(spec, data, model)
     banner = None if separate is not None else _banner_masks(spec, data, model)
     seg_series, ordered = ((None, None) if (banner or separate is not None)
