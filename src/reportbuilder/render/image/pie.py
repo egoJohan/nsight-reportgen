@@ -60,17 +60,6 @@ _LEGEND_WRAP: int = 26
 _MIN_WEDGE_PCT: float = 4.0
 
 
-#: Where the first slice begins — 6 o'clock, sweeping clockwise from there.
-#:
-#: matplotlib measures anticlockwise from 3 o'clock, so the bottom is 270.
-#: Starting at 12 (90) sent the first category up the RIGHT of the circle while
-#: the legend listed it first, on the LEFT: "kuvaajassa 'Kyllä' on oikealla
-#: puolella mutta legendissä se on vasemmalla puolella". From the bottom, the
-#: categories climb the left side and cross to the right in the order the
-#: legend reads them.
-_START_ANGLE: float = 270.0
-
-
 def _wrap_legend_label(text: str) -> str:
     """Wrap a legend category label at word boundaries — full text, never '…'."""
     if len(text) <= _LEGEND_WRAP:
@@ -329,7 +318,7 @@ def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool,
     wedges, _texts, autotexts = ax.pie(
         vals, labels=None, colors=clrs, autopct=_autopct,
         pctdistance=0.80 if donut else 0.72,
-        startangle=_START_ANGLE, counterclock=False, wedgeprops=wedgeprops,
+        startangle=90, counterclock=False, wedgeprops=wedgeprops,
     )
     ax.set_aspect("equal")
     for t, wedge in zip(autotexts, wedges):
