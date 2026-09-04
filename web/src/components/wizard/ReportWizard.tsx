@@ -49,6 +49,7 @@ import {
   buildDemographicsGrids,
   buildSpecialPages,
   isSpecialSlide,
+  copySlideInDeck,
   insertionIndex,
   toggleQuestionInDeck,
   isThemes,
@@ -478,13 +479,12 @@ export default function ReportWizard({
       const source = draftRef.current?.charts[index];
       if (!source) return null;
       const slideId = newSlideId();
-      mutate((d) => {
-        const from = d.charts[index];
-        if (!from) return d;
-        const charts = [...d.charts];
-        charts.splice(index + 1, 0, { ...from, slide_id: slideId });
-        return { ...d, charts: normalizeSlots(charts) };
-      });
+      mutate((d) => ({
+        ...d,
+        // A special slide's copy gets its own ref and group, or regenerating
+        // the original would take the copy with it — see copySlideInDeck.
+        charts: normalizeSlots(copySlideInDeck(d.charts, index, slideId)),
+      }));
       return slideId;
     },
     [mutate]

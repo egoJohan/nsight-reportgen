@@ -62,6 +62,41 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
   special_blank: "Empty slide",
 };
 
+/** A slide, copied to sit directly below itself.
+ *
+ *  A chart slide's copy is the same slide with a new id: what is worth copying
+ *  is the configuration — the chart type, the split, the sort — and the point is
+ *  to change one thing about it.
+ *
+ *  A SPECIAL slide's copy needs more than that. Special slides belong to a
+ *  GROUP: regenerating the conclusions replaces every page of that group with
+ *  freshly written ones, so a copy that kept the group would vanish the next
+ *  time the original was regenerated. The copy gets its own ref and its own
+ *  group, and stands alone — its words come with it and are then the author's
+ *  to edit.
+ */
+export function copySlideInDeck<C extends {
+  chart_type: string;
+  question_ref: string;
+  slide_id?: string;
+  options?: Record<string, unknown> | null;
+}>(charts: readonly C[], index: number, slideId: string): C[] {
+  const from = charts[index];
+  if (!from) return [...charts];
+  let copy = { ...from, slide_id: slideId } as C;
+  if (isSpecialSlide(from)) {
+    const ref = specialRef(from.chart_type);
+    copy = {
+      ...copy,
+      question_ref: ref,
+      options: { ...(from.options ?? {}), group: ref },
+    } as C;
+  }
+  const out = [...charts];
+  out.splice(index + 1, 0, copy);
+  return out;
+}
+
 /** Tick or untick a question in the catalog, without ever moving a slide.
  *
  *  Unticking used to DELETE every slide showing the question, so ticking it

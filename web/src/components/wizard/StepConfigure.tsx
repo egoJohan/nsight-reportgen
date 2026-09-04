@@ -2263,9 +2263,12 @@ function StepConfigureInner({
                 worth copying is the CONFIGURATION — the chart type, the split,
                 the sort, the colours — and this is the step where that exists.
                 Under the (i), on the picture, because it acts on the slide you
-                are looking at. */}
-            {!activeSpecial && (
-              <button
+                are looking at.
+
+                Special slides copy too: a conclusions page is worth splitting
+                in two by hand, and the copy is independent of the original's
+                group so regenerating one does not take the other. */}
+            <button
                 type="button"
                 title="Copy this slide"
                 onClick={() => {
@@ -2275,11 +2278,15 @@ function StepConfigureInner({
                   // about it — the chart type, the split — straight away.
                   if (id) setActive(id);
                 }}
-                className="absolute right-2 top-12 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
+                // The (i) is chart-slides-only, so on a special slide the
+                // stack starts here rather than leaving a hole where it was.
+                className={cn(
+                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground",
+                  activeSpecial ? "top-2" : "top-12"
+                )}
               >
                 <CopyIcon className="size-4" />
               </button>
-            )}
             {/* Draw this slide again.
                 Always offered, not only when something is marked wrong — the
                 fault it exists for shows nothing wrong at all: a slide that is
@@ -2289,13 +2296,16 @@ function StepConfigureInner({
                 have to exist so a slide that cannot be drawn stops occupying
                 the render host, and which are the only thing in the way once
                 the reason has been dealt with. */}
-            {!activeSpecial && activeChart?.slide_id && (
+            {activeChart?.slide_id && (
               <button
                 type="button"
                 title="Draw this slide again"
                 aria-label="Draw this slide again"
                 onClick={() => previewQueue.redraw(activeChart.slide_id!)}
-                className="absolute right-2 top-[5.5rem] z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
+                className={cn(
+                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground",
+                  activeSpecial ? "top-12" : "top-[5.5rem]"
+                )}
               >
                 <RotateCcwIcon className="size-4" />
               </button>
