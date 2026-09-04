@@ -760,7 +760,9 @@ export default function ReportWizard({
     previewQueue.setSlideSource(
       (id) => draftRef.current?.charts.find((c) => c.slide_id === id) ?? null
     );
-    previewQueue.setDeck((draftRef.current?.charts ?? []).map((c) => c.slide_id ?? ""));
+    previewQueue.setDeck((draftRef.current?.charts ?? [])
+      .filter((c) => !c.excluded)
+      .map((c) => c.slide_id ?? ""));
     previewQueue.setPatchSink((id, patch) => updateChartById(id, patch));
   }, [reportId, updateChartById]);
 
@@ -848,7 +850,10 @@ export default function ReportWizard({
     if (!resolvedCount) return;
     // Debounced, so a burst of edits queues one render rather than one each.
     const h = setTimeout(() => {
-      const charts = draftRef.current?.charts ?? [];
+      // Hidden slides are left out: the queue would otherwise spend a render
+      // and a headline call on each of them, on a render host with one core,
+      // for slides that are not in the deck.
+      const charts = (draftRef.current?.charts ?? []).filter((c) => !c.excluded);
       previewQueue.setDeck(charts.map((c) => c.slide_id ?? ""));
       const next = new Map<string, string>();
       for (const c of charts) {
@@ -994,10 +999,15 @@ export default function ReportWizard({
     special_blank: "Title",
   };
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : "unknown error");
+  /** The questions the OVERVIEW, CONCLUSIONS and DEMOGRAPHICS are written from.
+   *
+   *  What is in the deck, not what is in the document. A hidden slide is not in
+   *  the report as far as its reader is concerned, so summarising it puts
+   *  findings about questions nobody can see into the conclusions. */
   const reportQuestionRefs = useCallback(
     () =>
       (draftRef.current?.charts ?? [])
-        .filter((c) => !isSpecialSlide(c))
+        .filter((c) => !isSpecialSlide(c) && !c.excluded)
         .map((c) => c.question_ref),
     []
   );

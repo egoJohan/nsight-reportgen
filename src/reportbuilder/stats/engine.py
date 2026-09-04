@@ -1297,13 +1297,21 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     mieltä" in the Category labels box changed nothing about the legend, and the
     only way to say what the scale meant was to type it into the subtitle.
     """
-    result = _compute_series(question, spec, _selected_rows(spec, data, model), model)
+    rows, applied = _selected_rows(spec, data, model)
+    result = _compute_series(question, spec, rows, model)
+    if applied:
+        result = dataclasses.replace(result, applied_filter=applied)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     return _relabelled(result, overrides) if overrides else result
 
 
-def _selected_rows(spec, data: pd.DataFrame, model: QuestionModel) -> pd.DataFrame:
-    """*data* narrowed to the classifier groups this slide names, or *data*.
+def _selected_rows(spec, data: pd.DataFrame,
+                   model: QuestionModel) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    """(*data* narrowed to the groups this slide names, the groups it narrowed to).
+
+    The second half is not decoration: a named group the data no longer has is
+    ignored here, so what was ASKED for and what HAPPENED can differ, and only
+    this function knows.
 
     ONE place, deliberately. A battery crossed with a classifier is three
     dimensions and a SeriesResult holds two, so every statement became several
@@ -1324,17 +1332,17 @@ def _selected_rows(spec, data: pd.DataFrame, model: QuestionModel) -> pd.DataFra
     """
     wanted = tuple(getattr(spec, "classifying_values", ()) or ())
     if not wanted or not getattr(spec, "classifying_var", None):
-        return data
+        return data, ()
     masks = _classifier_masks(spec, data, model)
     if not masks:
-        return data
-    keep = [m for label, m in masks.items() if label in wanted]
-    if not keep or len(keep) == len(masks):
-        return data
-    selected = keep[0].copy()
-    for m in keep[1:]:
+        return data, ()
+    kept = [(label, m) for label, m in masks.items() if label in wanted]
+    if not kept or len(kept) == len(masks):
+        return data, ()
+    selected = kept[0][1].copy()
+    for _label, m in kept[1:]:
         selected = selected | m
-    return data[selected]
+    return data[selected], tuple(label for label, _m in kept)
 
 
 def _relabelled(result: SeriesResult, overrides: dict[str, str]) -> SeriesResult:

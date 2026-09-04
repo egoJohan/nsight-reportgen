@@ -59,6 +59,13 @@ class SeriesResult:
     # "Total" segment (unless it's the only series). Resolved by the engine from
     # ChartSpec.show_total + the percentage direction. (2026-07-10)
     show_total: bool = True
+    # The classifier groups the rows were actually NARROWED to, or (). Recorded
+    # by the engine because only it knows: a selection naming a group the data
+    # no longer has is ignored and the slide is the whole sample, and a slide
+    # that then printed the name beside a base covering everyone was asserting
+    # something untrue about itself. The renderer says what happened, not what
+    # was asked for.
+    applied_filter: tuple[str, ...] = ()
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

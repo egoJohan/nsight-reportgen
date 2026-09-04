@@ -74,3 +74,18 @@ def test_naming_every_group_draws_the_whole_sample():
     keeps the state from arising by storing no restriction when all are ticked."""
     out = _texts(("Design 1", "Design 2", "Design 3"))
     assert "N = 30" in out, out
+
+
+def test_a_group_that_no_longer_exists_is_not_claimed_on_the_slide():
+    """The engine ignores a selection it cannot resolve — the data changed under
+    a saved slide, and a blank chart helps nobody — so the slide is the whole
+    sample. The footer said otherwise: it printed the stale name beside a base
+    covering everyone, which is a slide asserting something untrue about itself.
+
+    Not an exotic path: nothing clears the selection when the classifying
+    variable changes, so any slide reclassified after being filtered carries
+    names from the old variable.
+    """
+    out = _texts(("Design 9",))
+    assert "N = 30" in out, out
+    assert "Design 9" not in out, out

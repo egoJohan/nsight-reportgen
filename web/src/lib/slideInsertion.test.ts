@@ -122,3 +122,29 @@ describe("slides that are not questions but are not 'special' either", () => {
     expect(insertionIndex(deck, rankOf("d"), rankOf)).toBe(2);
   });
 });
+
+describe("a question whose slides the author hid one at a time", () => {
+  const two = (): Slide[] => [
+    { chart_type: "horizontal_bar", question_ref: "c", slide_id: "total" },
+    { chart_type: "horizontal_bar", question_ref: "c", slide_id: "byRegion" },
+  ];
+  const made = (): Slide => ({ ...q("a"), slide_id: "new" });
+
+  it("re-ticking the question does not undo a slide hidden on its own", () => {
+    // The author hid the "by region" slide deliberately. Unticking the question
+    // hides both — but ticking it again put BOTH back, quietly reversing a
+    // decision they had made one slide at a time.
+    const deck = two();
+    deck[1].excluded = true;
+    const hidden = toggleQuestionInDeck(deck, "c", made, rankOf);
+    expect(hidden.map((c) => c.excluded)).toEqual([true, true]);
+    const back = toggleQuestionInDeck(hidden, "c", made, rankOf);
+    expect(back.map((c) => c.excluded)).toEqual([false, true]);
+  });
+
+  it("with nothing hidden by hand, both come back", () => {
+    const hidden = toggleQuestionInDeck(two(), "c", made, rankOf);
+    const back = toggleQuestionInDeck(hidden, "c", made, rankOf);
+    expect(back.map((c) => c.excluded)).toEqual([false, false]);
+  });
+});

@@ -825,7 +825,11 @@ function ScatterXyWidget({ chart, materialId, onChange }: WidgetProps) {
   const grouping = useContext(GroupingCtx);
   const clf = chart.classifying_var;
   const { data, isPending } = useQuery({
-    queryKey: ["segments", materialId, chart.question_ref, clf],
+    // The grouping is in the key because it is in the REQUEST: regrouping
+    // variables into a battery changes which segments come back, and a key that
+    // ignored it served the pre-grouping list for five minutes.
+    queryKey: ["segments", materialId, chart.question_ref, clf,
+               JSON.stringify(grouping ?? {})],
     queryFn: () => api.segments(materialId, chart.question_ref, clf!, grouping),
     enabled: !!materialId && !!clf,
     staleTime: 5 * 60_000,
@@ -903,7 +907,11 @@ function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetPr
   const grouping = useContext(GroupingCtx);
   const clf = chart.classifying_var;
   const { data, isPending } = useQuery({
-    queryKey: ["segments", materialId, chart.question_ref, clf],
+    // The grouping is in the key because it is in the REQUEST: regrouping
+    // variables into a battery changes which segments come back, and a key that
+    // ignored it served the pre-grouping list for five minutes.
+    queryKey: ["segments", materialId, chart.question_ref, clf,
+               JSON.stringify(grouping ?? {})],
     queryFn: () => api.segments(materialId, chart.question_ref, clf!, grouping),
     enabled: !!materialId && !!clf,
     staleTime: 5 * 60_000,
@@ -1897,7 +1905,8 @@ function usePanelSelection(
     // about the other two has to go, rather than sit there describing the chart
     // this slide no longer is.
     queryKey: ["panels", materialId, chart?.question_ref, chart?.classifying_var,
-               (chart?.classifying_values ?? []).join("|")],
+               (chart?.classifying_values ?? []).join("|"),
+               JSON.stringify(grouping ?? {})],
     queryFn: () =>
       api.panels(materialId, chart!.question_ref, chart!.classifying_var!, grouping,
                  chart!.classifying_values),

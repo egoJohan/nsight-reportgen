@@ -62,6 +62,12 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
   special_blank: "Empty slide",
 };
 
+//: Set on a slide that was ALREADY hidden when its question was unticked, so
+//: ticking the question again shows the others and leaves this one as the
+//: author left it. Removed as soon as it is answered — it describes one
+//: untick, not a lasting property of the slide.
+const HIDDEN_BY_HAND = "hidden_by_hand";
+
 //: Which slide this one was copied from. Its presence is what marks a slide as
 //: a duplicate; the value is kept because it costs nothing and says where it
 //: came from when somebody reads the document.
@@ -169,9 +175,22 @@ export function toggleQuestionInDeck<C extends {
     // Every slide showing it, comparison slides included: leaving one behind
     // orphans a slide for a question the list says is not in the report.
     const hide = own.some((c) => !c.excluded);
-    return charts.map((c) =>
-      c.question_ref === qid ? { ...c, excluded: hide } : c
-    );
+    if (hide) {
+      // Which ones were already hidden BY HAND, so showing the question again
+      // does not undo a decision the author made one slide at a time — a
+      // question can hold a total-level slide and one split by region, and
+      // hiding just the second is a deliberate act.
+      return charts.map((c) =>
+        c.question_ref === qid
+          ? { ...c, excluded: true, [HIDDEN_BY_HAND]: !!c.excluded || undefined }
+          : c
+      );
+    }
+    return charts.map((c) => {
+      if (c.question_ref !== qid) return c;
+      const { [HIDDEN_BY_HAND]: byHand, ...rest } = c as Record<string, unknown>;
+      return { ...(rest as C), excluded: !!byHand };
+    });
   }
   const out = [...charts];
   out.splice(insertionIndex(out, rankOf(qid), rankOf), 0, makeNew());

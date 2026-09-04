@@ -1015,12 +1015,13 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # column name ("polku") to anything a reader would recognise, and the group
     # labels are the words the author picked from.
     #
-    # Unconditional on the list being non-empty, and it cannot be otherwise here:
-    # once the rows are narrowed, the segments left ARE the ones picked, so there
-    # is nothing in the finished series to compare against to ask "was this a
-    # subset?". The picker answers it instead, where the full group list is
-    # known: ticking every group stores no restriction at all.
-    picked = tuple(getattr(ctx.spec, "classifying_values", ()) or ())
+    # What the slide was actually drawn on, as the ENGINE reports it — not what
+    # the spec asked for. A named group the data no longer has is ignored there
+    # and the slide is the whole sample; printing the name anyway put a claim on
+    # the slide that its own numbers contradict. Nothing clears the selection
+    # when the classifying variable changes, so a reclassified slide carries
+    # names from the old variable and that is not an exotic path.
+    picked = tuple(getattr(ctx.series, "applied_filter", ()) or ())
     if picked:
         footer_text = f"{footer_text}   ·   {', '.join(picked)}"
     # Left margin follows the chart on a templated or harvested slide: those

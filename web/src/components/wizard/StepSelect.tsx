@@ -200,11 +200,16 @@ export default function StepSelect({
     }
     // Drop any chart whose question no longer exists (its variable was absorbed
     // into a group, or a group was split away).
-    if ([...addedRefs].some((ref) => !current.has(ref))) {
+    // Every chart's question, not only the visible ones: a HIDDEN slide whose
+    // question was absorbed into a group is just as dangling, and reading the
+    // visible set alone left it in the saved document for ever.
+    const refs = new Set(charts.filter((c) => !isSpecialSlide(c))
+                               .map((c) => c.question_ref));
+    if ([...refs].some((ref) => !current.has(ref))) {
       onPruneRefs(current);
     }
     prevQids.current = current;
-  }, [questions, addedRefs, onToggle, onPruneRefs]);
+  }, [questions, charts, addedRefs, onToggle, onPruneRefs]);
 
   // Fade the new-group highlight after a few seconds.
   useEffect(() => {
@@ -582,9 +587,18 @@ export default function StepSelect({
                 const rowKey = chart.slide_id ?? `${q.qid}-${index}`;
                 return (
                   <div key={rowKey} className="relative mt-1.5 ml-6">
-                    <div className={cn(ITEM_ROW, "pr-11", ITEM_ROW_SELECTED)}>
-                      <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground">
-                        <CheckIcon className="size-3.5" />
+                    {/* Ticked only when the slide is actually in the deck.
+                        Unticking a question HIDES its slides, and a hidden one
+                        showing a filled checkbox says it is included when it is
+                        not. */}
+                    <div className={cn(ITEM_ROW, "pr-11",
+                                       chart.excluded ? "border-border" : ITEM_ROW_SELECTED)}>
+                      <span className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded-md border",
+                        chart.excluded
+                          ? "border-input"
+                          : "border-primary bg-primary text-primary-foreground")}>
+                        {!chart.excluded && <CheckIcon className="size-3.5" />}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className={ITEM_TITLE}>
