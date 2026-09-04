@@ -706,9 +706,10 @@ function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
             <span className="text-sm text-muted-foreground">%</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            A slice narrower than this does not get its number printed, because the
-            number is wider than the slice and would land on its neighbour. Leave
-            blank for the default ({floorDefault} %); 0 prints every value.
+            A slice narrower than this is not labelled at all. Above it, a number
+            too wide for its own slice is drawn beside the chart on a line back to
+            it, rather than left to land on its neighbour. Leave blank for the
+            default ({floorDefault} %); 0 labels every value.
           </p>
         </Field>
       )}

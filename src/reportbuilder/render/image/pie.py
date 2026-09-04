@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import textwrap
 
+import numpy as np
+
 import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
@@ -107,6 +109,29 @@ _PANEL_LEGEND_GAP_FRAC: float = 0.025
 # Gap between neighbouring panels, as a fraction of one panel's width. Pies have no
 # axis furniture to keep apart, so this only has to stop two circles touching.
 _PANEL_GAP_FRAC: float = 0.06
+
+
+def callout_overhang(fig, axes) -> float:
+    """How far the called-out numbers hang BELOW their panels, as a figure
+    fraction.
+
+    They are drawn outside the axes, which is exactly why `get_tightbbox` does
+    not report them: a clearance computed from the panels alone would let the
+    shared legend print straight over the smallest values on the chart.
+    """
+    from matplotlib.text import Annotation
+
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    worst = 0.0
+    for ax in axes:
+        floor_px = ax.get_window_extent(renderer).y0
+        for artist in ax.texts:
+            if not isinstance(artist, Annotation):
+                continue
+            box = artist.get_window_extent(renderer)
+            worst = max(worst, floor_px - box.y0)
+    return max(0.0, worst) / fig.get_window_extent().height
 
 
 def _make_panel_axes(ctx, bg: str, n_panels: int):
@@ -195,15 +220,97 @@ def _panel_heading(ax, name: str, base: int, ink: str, *, x: float = 0.5) -> Non
                  pad=6 + _PANEL_BASE_PT * 1.35, x=x)
 
 
-def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool):
+#: Where a called-out number sits, as a multiple of the circle's radius, and
+#: where its line starts. Close enough to read as belonging to the wedge.
+_CALLOUT_R: float = 1.16
+_CALLOUT_ANCHOR_R: float = 0.98
+#: The least a called-out label may be from its neighbour, in radii — two thin
+#: wedges side by side point at almost the same place, and their numbers would
+#: land on each other.
+_CALLOUT_MIN_GAP: float = 0.16
+
+
+def _text_width(ax, text: str) -> float:
+    """How wide `text` is in the circle's own units, where the radius is 1.
+
+    Measured rather than guessed from the percentage: a wedge is a triangle, so
+    the room at the label's radius is nothing like its share of the circle, and
+    "4 % of a pie" is a different number of pixels on a full-width slide and in
+    a row of three panels.
+    """
+    art = ax.text(0, 0, text, fontsize=10.0, fontweight="bold", alpha=0.0)
+    try:
+        ax.figure.canvas.draw()
+        box = art.get_window_extent(ax.figure.canvas.get_renderer())
+        x0, x1 = ax.transData.inverted().transform([(0, 0), (box.width, 0)])[:, 0]
+        return abs(x1 - x0)
+    finally:
+        art.remove()
+
+
+def _callout_small_wedges(ax, wedges, labels, ink: str, grid: str) -> None:
+    """Draw the numbers that would not fit inside their own wedge, beside it.
+
+    A thin wedge is narrower than the text that belongs in it, so the number was
+    dropped and a reader of the finished deck had no way to check it. It goes
+    outside instead, on the wedge's own bearing, with a line back to the piece
+    it describes.
+
+    Labels are pushed apart along the edge when several thin wedges sit
+    together: they point at nearly the same bearing, and printing each on its
+    own bearing would stack them on top of each other.
+    """
+    placed: list[tuple[float, float]] = []
+    for wedge, text in zip(wedges, labels):
+        if not text:
+            continue
+        mid = np.deg2rad((wedge.theta1 + wedge.theta2) / 2.0)
+        x, y = np.cos(mid), np.sin(mid)
+        lx, ly = x * _CALLOUT_R, y * _CALLOUT_R
+        # Slide along the outside until this one is clear of the last.
+        for px, py in placed:
+            if abs(lx - px) < _CALLOUT_MIN_GAP and abs(ly - py) < _CALLOUT_MIN_GAP:
+                ly = py - _CALLOUT_MIN_GAP if ly <= py else py + _CALLOUT_MIN_GAP
+        placed.append((lx, ly))
+        ax.annotate(
+            text, xy=(x * _CALLOUT_ANCHOR_R, y * _CALLOUT_ANCHOR_R), xytext=(lx, ly),
+            ha="left" if x >= 0 else "right", va="center",
+            fontsize=9.0, fontweight="bold", color=ink, annotation_clip=False,
+            arrowprops=dict(arrowstyle="-", color=grid, linewidth=0.9,
+                            shrinkA=0, shrinkB=1),
+        )
+    # Deliberately no change to the axes limits. Widening them to fit the
+    # numbers shrinks the circle, and a reader looks at the circle: paying for a
+    # handful of small numbers with every pie being smaller is the wrong trade.
+    # `annotation_clip=False` lets them sit in the space around the panel, and
+    # `callout_overhang` measures what that space has to be.
+
+
+def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool,
+                  ink: str, grid: str):
     """Draw a single pie onto `ax`. Returns its wedge artists."""
     total = sum(v or 0.0 for v in vals) or 1.0
     fracs = [(v or 0.0) / total * 100.0 for v in vals]
 
     floor = label_floor(fmt, default_pct=_MIN_WEDGE_PCT, axis_max=100.0)
 
+    #: The numbers too small to print inside, kept so they can be drawn beside
+    #: the circle instead of dropped. Indexed the same as `vals`.
+    called_out: list[str] = [""] * len(vals)
+    _seen = [0]
+
+    def _text_for(pct: float) -> str:
+        if statistic == "pct":
+            return format_value(pct, statistic, fmt, fracs)
+        return format_value(pct * total / 100.0, statistic, fmt, list(vals))
+
     def _autopct(pct: float) -> str:
-        if pct < floor:
+        _seen[0] += 1
+        # Nothing for a category nobody chose, and nothing under the author's
+        # cut-off: they said not to print it, and a number on a leader line is
+        # still printed. Whether the ones that remain FIT is decided after the
+        # circle is drawn — before that the axes have no scale to measure in.
+        if pct <= 0 or pct < floor:
             return ""
         if statistic == "pct":
             return format_value(pct, statistic, fmt, fracs)
@@ -229,6 +336,24 @@ def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool):
         t.set_fontsize(10.0)
         t.set_fontweight("bold")
         t.set_color(contrast_ink(wedge.get_facecolor()))
+    # Now that the circle has a scale, ask of each number whether the wedge can
+    # hold it. The ones that cannot move outside, on a line back to their wedge.
+    r = 0.80 if donut else 0.72
+    for wedge, t in zip(wedges, autotexts):
+        text = t.get_text()
+        if not text:
+            continue
+        # The chord at the label's radius is the room across the wedge — but
+        # only while the wedge is narrower than a half circle. Past that the
+        # chord starts SHRINKING again (the two radii come back together), which
+        # would say a 97 % wedge cannot hold its own number.
+        sweep = min(abs(wedge.theta2 - wedge.theta1), 180.0)
+        chord = 2.0 * r * np.sin(np.deg2rad(sweep) / 2.0)
+        if chord < _text_width(ax, text) * 1.05:
+            i = list(wedges).index(wedge)
+            called_out[i] = text
+            t.set_text("")
+    _callout_small_wedges(ax, wedges, called_out, ink, grid)
     return wedges
 
 
@@ -264,7 +389,8 @@ def _build_pie_figure(ctx, *, donut: bool):
         # not shift.
         fig, ax = _make_square_fig_ax(ctx, bg)
         seg = sel.labels[0]
-        wedges = _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg, donut)
+        wedges = _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg,
+                               donut, ink, grid)
         if sel.split and not sel.degraded:
             # One group survived: the reader must be told WHICH group this is,
             # and on what.
@@ -275,7 +401,8 @@ def _build_pie_figure(ctx, *, donut: bool):
 
     fig, axes = _make_panel_axes(ctx, bg, len(sel.labels))
     for ax, seg in zip(axes, sel.labels):
-        _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg, donut)
+        _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg,
+                      donut, ink, grid)
         _panel_heading(ax, _wrap_legend_label(seg), series.base_n.get(seg, 0), ink)
 
     if want_panel_legend:
@@ -296,7 +423,8 @@ def _build_pie_figure(ctx, *, donut: bool):
         # Measure it for real and, if it needs more room, shrink the panels
         # (keeping their top — and the titles above them — fixed) rather than let
         # the legend collide with the `n = …` labels or the circles.
-        needed = _legend_height_frac(fig, leg) + _PANEL_LEGEND_GAP_FRAC
+        needed = (_legend_height_frac(fig, leg) + _PANEL_LEGEND_GAP_FRAC
+                  + callout_overhang(fig, axes))
         if needed > _PANEL_LEGEND_FRAC:
             new_bottom = needed
             for ax in axes:

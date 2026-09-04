@@ -26,6 +26,10 @@ class NumberFormat:
     #: sooner. There is no one right cut-off: it depends on how wide the chart
     #: is drawn and how much of the scale's tail the author is willing to lose,
     #: so it is theirs to move. 0 draws every value the chart has.
+    #:
+    #: It decides what is printed AT ALL. Above it, whether a number goes inside
+    #: its piece or beside it on a leader line is measured, not set: it goes
+    #: outside when it will not fit.
     hide_below_pct: float | None = None
 
 

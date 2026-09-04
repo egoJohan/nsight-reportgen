@@ -1268,6 +1268,11 @@ def build_image_column_stacked(ctx) -> None:
             else np.ones(len(cats)))
     # "Too thin to label" — 1% of the value axis unless the author moved it.
     label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
+    col_ink, _col_muted, col_grid = chart_furniture(ctx)
+    # Measured against the scale the columns are drawn on — the caller sets the
+    # limits after this, and against matplotlib's default every label looks as
+    # though it fits.
+    ax.set_ylim(0, axis_max)
     bottoms = np.zeros(len(cats))
 
     for i, seg in enumerate(segs):
@@ -1278,14 +1283,27 @@ def build_image_column_stacked(ctx) -> None:
         bars = ax.bar(x, heights, bottom=bottoms, label=seg, color=bar_clrs,
                       edgecolor="none", zorder=3)
         for bar, ov, b, h in zip(bars, orig, bottoms, heights):
-            if h > label_min:   # skip label if segment is too thin
+            if h <= label_min:
+                # The author's cut-off: not printed, and not printed beside the
+                # column either — a number called out is still on the chart.
+                continue
+            text = format_value(ov, ctx.series.statistic, ctx.spec.number_format,
+                                flat_vals)
+            x_mid = bar.get_x() + bar.get_width() / 2
+            _w, _h = text_size_in_data(ax, text, fontsize=9.0)
+            if h >= _h * 1.15 and bar.get_width() >= _w * 1.06:
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2, b + h / 2,
-                    format_value(ov, ctx.series.statistic, ctx.spec.number_format, flat_vals),
-                    ha="center", va="center",
+                    x_mid, b + h / 2, text, ha="center", va="center",
                     fontsize=9.0, fontweight="bold",
                     color=contrast_ink(bar.get_facecolor()), zorder=5,
                 )
+            else:
+                # Too short to hold its number: beside the column, on a line
+                # back to the segment it belongs to.
+                callout_value(ax, text,
+                              at=(bar.get_x() + bar.get_width() * 1.25, b + h / 2),
+                              to=(bar.get_x() + bar.get_width(), b + h / 2),
+                              ink=col_ink, grid=col_grid, ha="left")
         bottoms = bottoms + heights
 
     ax.set_xticks(x)
@@ -1317,6 +1335,68 @@ def build_image_column_stacked(ctx) -> None:
 # build_image_bar_stacked
 # ---------------------------------------------------------------------------
 
+def text_size_in_data(ax, text: str, *, fontsize: float,
+                      weight: str = "bold") -> tuple[float, float]:
+    """(width, height) of `text` in the axes' own units."""
+    art = ax.text(0, 0, text, fontsize=fontsize, fontweight=weight, alpha=0.0)
+    try:
+        ax.figure.canvas.draw()
+        box = art.get_window_extent(ax.figure.canvas.get_renderer())
+        inv = ax.transData.inverted()
+        (x0, y0), (x1, y1) = inv.transform([(0, 0), (box.width, box.height)])
+        return abs(x1 - x0), abs(y1 - y0)
+    finally:
+        art.remove()
+
+
+def text_width_in_data(ax, text: str, *, fontsize: float, weight: str = "bold") -> float:
+    """How wide `text` would be, in the axes' own x units.
+
+    "Too small to hold its number" is a question about the NUMBER, not about a
+    percentage of the axis: "2 %" needs the same room whatever the chart is
+    scaled to, and a fixed cut-off either drops values that would have fitted or
+    prints ones that collide with their neighbour — which is what a reader saw
+    as a smear of digits at the foot of a scale.
+    """
+    art = ax.text(0, 0, text, fontsize=fontsize, fontweight=weight, alpha=0.0)
+    try:
+        ax.figure.canvas.draw()
+        box = art.get_window_extent(ax.figure.canvas.get_renderer())
+        x0, x1 = ax.transData.inverted().transform([(0, 0), (box.width, 0)])[:, 0]
+        return abs(x1 - x0)
+    finally:
+        art.remove()
+
+
+#: A stacked bar's row is drawn thinner when some of its numbers have to sit
+#: outside it, so there is a gap for them to sit in. Only then: a chart whose
+#: every segment holds its own number keeps the fuller bar.
+_STACK_BAR_H: float = 0.8
+_STACK_BAR_H_CALLOUT: float = 0.62
+#: How far a called-out number sits from the bar's edge, and the least two of
+#: them may be apart along the bar — the slivers of a scale sit together, and
+#: their numbers would land on each other.
+#:
+#: Kept well inside the gap between rows: at the midpoint a number is as near
+#: the bar above it as the one it belongs to, and the eye goes to the nearer.
+_CALLOUT_OFFSET: float = 0.14
+_CALLOUT_MIN_GAP_FRAC: float = 0.055
+
+
+def callout_value(ax, text: str, *, at, to, ink: str, grid: str,
+                  ha: str = "center", va: str = "center") -> None:
+    """One number that would not fit inside its own piece, drawn beside it.
+
+    `at` is where the text goes, `to` the point on the piece it describes. The
+    line between them is the whole point: without it a number floating near a
+    stack of slivers belongs to any of them.
+    """
+    ax.annotate(text, xy=to, xytext=at, ha=ha, va=va, fontsize=8.5,
+                fontweight="bold", color=ink, annotation_clip=False, zorder=6,
+                arrowprops=dict(arrowstyle="-", color=grid, linewidth=0.9,
+                                shrinkA=1, shrinkB=1))
+
+
 def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
                         normalise: bool = True, axis_max: float = 100.0) -> None:
     """Draw ONE stacked horizontal panel onto `ax`.
@@ -1342,21 +1422,72 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
     # the author's own cut-off when they set one — a 100%-stacked scale puts its
     # whole tail into slivers narrower than the numbers that belong in them.
     label_min = label_floor(ctx.spec.number_format, default_pct=1.0, axis_max=axis_max)
+    # A number that does not fit inside its own segment is drawn BESIDE the bar
+    # on a line back to it, rather than dropped — the tail of a scale is exactly
+    # where a reader of the finished deck cannot look the number up.
+    ink, _muted, grid = chart_furniture(ctx)
+    # What each cell would say, and whether its own segment can hold it. The
+    # author's cut-off still applies — a segment under it is called out however
+    # well the number would have fitted — but the DEFAULT test is the honest
+    # one: measure the number.
+    said = {(seg, j): format_value(data[seg][j] or 0.0, ctx.series.statistic,
+                                   ctx.spec.number_format, flat_vals)
+            for seg in stack for j in range(n_bars)}
+    # Measured against the scale the bars are actually drawn on. The caller
+    # applies the x limits AFTER this, so without pinning them here every
+    # measurement is taken against matplotlib's default 0..1 and every label
+    # looks as though it fits — which is how a row of digits came to be printed
+    # on top of each other at the foot of a scale.
+    ax.set_xlim(0, axis_max)
+    room = {t: text_width_in_data(ax, t, fontsize=9.0) * 1.06 for t in set(said.values())}
+
+    def _width(seg, j) -> float:
+        return (data[seg][j] or 0.0) * norm[j]
+
+    def _fits(seg, j) -> bool:
+        return _width(seg, j) >= room[said[(seg, j)]]
+
+    def _hidden(seg, j) -> bool:
+        """Under the author's cut-off. They said not to print it, so it is not
+        printed anywhere — a number called out beside the chart is still on the
+        chart."""
+        return _width(seg, j) <= label_min
+
+    any_callout = any(
+        _width(seg, j) > 0 and not _hidden(seg, j) and not _fits(seg, j)
+        for seg in stack for j in range(n_bars))
+    bar_h = _STACK_BAR_H_CALLOUT if any_callout else _STACK_BAR_H
+    # Where the last callout on each bar went, so the next one clears it.
+    last_x: dict[float, float] = {}
     lefts = np.zeros(n_bars)
     for i, seg in enumerate(stack):
         orig = np.array([data[seg][j] or 0.0 for j in range(n_bars)])
         widths = orig * norm
         # R4.2: "Not answered" category bars get MUTED grey.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in bars]
-        ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs,
+        ax.barh(y, widths, left=lefts, label=seg, color=bar_clrs, height=bar_h,
                 edgecolor="none", zorder=3)
-        for yi, ov, l, w, bc in zip(y, orig, lefts, widths, bar_clrs):
-            if w > label_min:
-                ax.text(l + w / 2, yi,
-                        format_value(ov, ctx.series.statistic, ctx.spec.number_format,
-                                     flat_vals),
+        for j, (yi, ov, l, w, bc) in enumerate(zip(y, orig, lefts, widths, bar_clrs)):
+            text = said[(seg, j)]
+            if _hidden(seg, j):
+                pass                       # the author's cut-off: nothing at all
+            elif _fits(seg, j):
+                ax.text(l + w / 2, yi, text,
                         ha="center", va="center", fontsize=9.0, fontweight="bold",
                         color=contrast_ink(bc), zorder=5)
+            elif w > 0:
+                # ABOVE its own bar, never below: the gap under a bar belongs to
+                # the next one down, and a number sitting in it reads as that
+                # bar's however carefully the line is drawn.
+                mid = l + w / 2
+                gap = axis_max * _CALLOUT_MIN_GAP_FRAC
+                prev = last_x.get(float(yi))
+                if prev is not None and mid - prev < gap:
+                    mid = prev + gap
+                last_x[float(yi)] = mid
+                callout_value(ax, text, at=(mid, yi + bar_h / 2 + _CALLOUT_OFFSET),
+                              to=(l + w / 2, yi + bar_h / 2), ink=ink, grid=grid,
+                              va="bottom")
         lefts = lefts + widths
 
 
