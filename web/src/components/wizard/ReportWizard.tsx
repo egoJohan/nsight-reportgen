@@ -230,10 +230,18 @@ export default function ReportWizard({
   // the Preview grid can click a slide and jump to Design showing it).
   const [active, setActive] = useState<string | null>(null);
   // Keep `active` valid as the deck changes: default to the first slide, and drop a
-  // stale ref (its slide was removed or a group absorbed its variable).
+  // stale ref (its slide was removed, hidden, or a group absorbed its variable).
+  //
+  // Judged against the slides Design can SHOW, not against every chart in the
+  // document. A hidden slide counted as valid, so Design — which is given the
+  // included list — had no row for it, fell back to displaying the first slide,
+  // and sent every edit to index -1: dropped without a word, and the report
+  // marked dirty for a change that never happened.
   useEffect(() => {
-    const cs = draft?.charts;
-    if (!cs || cs.length === 0) return;
+    // Computed here rather than reusing `includedCharts`, which is declared
+    // further down — this effect runs before it exists.
+    const cs = (draft?.charts ?? []).filter((c) => !c.excluded);
+    if (!cs.length) return;
     if (!active || !cs.some((c) => c.slide_id === active)) {
       setActive(cs[0].slide_id ?? null);
     }
@@ -1455,7 +1463,7 @@ export default function ReportWizard({
             aiPending={aiPending}
             active={active}
             setActive={setActive}
-            onCopyChart={copyChart}
+            onCopyChart={(i) => copyChart(includedToFull[i] ?? i)}
             onRemoveChart={(i) => removeChart(includedToFull[i] ?? i)}
             onReorder={(from, to) =>
               reorderCharts(includedToFull[from] ?? from, includedToFull[to] ?? to)

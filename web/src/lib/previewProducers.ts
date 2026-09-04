@@ -142,9 +142,11 @@ const chart: Producer = {
   fingerprint: (c) => imageFingerprint(c.chart, c.ctx),
 
   // The client cache IS the record of what has been rendered, so an evicted
-  // image is simply missing and gets made again.
+  // image is simply missing and gets made again — and under `force` it does not
+  // get to answer at all: the author (or the screen) is saying the picture on
+  // display is wrong, which the cache cannot know.
   storedFingerprint: (c: ProducerCtx) =>
-    env?.hasImage(c.fingerprint) ? c.fingerprint : null,
+    !c.force && env?.hasImage(c.fingerprint) ? c.fingerprint : null,
 
   run: async (c) => {
     // Not "nothing to do": recording a render that never happened would leave

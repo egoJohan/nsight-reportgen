@@ -906,11 +906,13 @@ describe("a slide on screen with no picture must never stay that way", () => {
       put("s1");
       let runs = 0;
       // A producer that insists its work is already stored — the shape of every
-      // path above. Enqueueing alone takes the "nothing-to-do" branch.
+      // path above. Enqueueing alone takes the "nothing-to-do" branch. Like the
+      // real chart producer, its store does not answer on a forced pass: that
+      // is what "the screen says there is no picture" overrides.
       q.__setProducersForTest([
         producer("chart", {
           fingerprint: () => "fp-1",
-          storedFingerprint: () => "fp-1",
+          storedFingerprint: (c) => (c.force ? null : "fp-1"),
           run: async () => {
             runs += 1;
           },
@@ -993,7 +995,7 @@ describe("redrawing a slide the author asks to try again", () => {
       q.__setProducersForTest([
         producer("chart", {
           fingerprint: () => "fp-1",
-          storedFingerprint: () => "fp-1",
+          storedFingerprint: (c) => (c.force ? null : "fp-1"),
           run: async () => {
             runs += 1;
           },
@@ -1062,12 +1064,39 @@ describe("drawing a slide again, on the author's say-so", () => {
     const forced: (boolean | undefined)[] = [];
     q.__setProducersForTest([
       producer("chart", {
-        storedFingerprint: (c) => c.fingerprint,   // "already have it"
+        storedFingerprint: (c) => (c.force ? null : c.fingerprint),
         run: async (c) => { forced.push(c.force); },
       }),
     ]);
     q.redraw("s1");
     await q.__drainForTest();
     expect(forced).toEqual([true]);
+  });
+});
+
+describe("what a forced pass may and may not overwrite", () => {
+  it("leaves a producer's own 'not mine to touch' rule standing", async () => {
+    // The author typed a headline, or edited the themes bullets by hand. Both
+    // rules live in storedFingerprint ("already up to date, leave it alone"),
+    // and force used to skip storedFingerprint for every producer — so a slide
+    // that merely scrolled back in after its picture was evicted had its words
+    // rewritten by a model, with nobody clicking anything.
+    put("s1", { slide_title: "Typed by a person" } as never);
+    const ran: string[] = [];
+    q.__setProducersForTest([
+      producer("title", {
+        storedFingerprint: (c) => c.fingerprint,   // "the author's own words"
+        run: async () => { ran.push("title"); },
+      }),
+      producer("chart", {
+        // The picture is the one thing force is about: it asks the cache, and
+        // under force the cache does not get to answer.
+        storedFingerprint: (c) => (c.force ? null : c.fingerprint),
+        run: async () => { ran.push("chart"); },
+      }),
+    ]);
+    q.redraw("s1");
+    await q.__drainForTest();
+    expect(ran).toEqual(["chart"]);
   });
 });

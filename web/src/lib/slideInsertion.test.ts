@@ -99,3 +99,26 @@ describe("unticking a question in the catalog", () => {
     expect(out).toHaveLength(5);
   });
 });
+
+describe("slides that are not questions but are not 'special' either", () => {
+  const grid = {
+    chart_type: "demographics_grid",
+    question_ref: "sp_demographics_grid_x",
+  };
+
+  it("a demographics grid is not something to insert a question before", () => {
+    // It is a slide of its own — a grid of small charts — but it is not in
+    // SPECIAL_SLIDE_LABELS, so the scan read it as a question of unknown rank
+    // (Infinity) and stopped there. A report with a Demographics section, which
+    // sits at the front, took every newly ticked question above it.
+    const deck = [{ chart_type: "special_demographics", question_ref: "sp_d" },
+                  grid, q("b"), q("c")];
+    expect(insertionIndex(deck, rankOf("a"), rankOf)).toBe(2);
+    expect(insertionIndex(deck, rankOf("d"), rankOf)).toBe(4);
+  });
+
+  it("a themes slide is not one either", () => {
+    const deck = [{ chart_type: "themes", question_ref: "open1" }, q("c")];
+    expect(insertionIndex(deck, rankOf("d"), rankOf)).toBe(2);
+  });
+});

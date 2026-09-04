@@ -690,9 +690,17 @@ function needed(p: Producer, base: Omit<ProducerCtx, "fingerprint">,
   const fingerprint = p.fingerprint(base);
   const c: ProducerCtx = { ...base, fingerprint, force };
   // `force` is the screen contradicting the bookkeeping: a component is showing
-  // this slide and has no picture for it. Whatever a producer believes it has
-  // already stored, the only evidence that counts is on screen, and it says no.
-  if (force) return c;
+  // this slide and has no picture for it. That is a statement about the
+  // PICTURE, so it is passed to the producers and the one that owns the picture
+  // acts on it (its cache does not get to answer under force).
+  //
+  // It used to short-circuit here, for every producer. But "already stored" is
+  // where the rules that protect the AUTHOR live — never regenerate over a
+  // headline somebody typed, never rewrite themes they edited by hand — and
+  // force is not only the button: the queue sets it itself whenever the screen
+  // reports a slide blank, which happens when an image is evicted from the
+  // cache and scrolls back into view. Their words were being replaced by a
+  // model with nobody clicking anything.
   const stored = p.storedFingerprint(c);
   return stored === null || stored !== fingerprint ? c : null;
 }

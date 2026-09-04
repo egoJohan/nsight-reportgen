@@ -197,7 +197,12 @@ export function insertionIndex(
 ): number {
   let lastQuestion = -1;
   for (let i = 0; i < charts.length; i++) {
-    if (isSpecialSlide(charts[i])) continue;
+    // Anything that is not a question slide is left where it is. Not only the
+    // SPECIAL slides: a demographics grid and a themes summary are slides of
+    // their own with a synthetic ref, and reading one as a question of unknown
+    // rank made the scan stop at it — a report with a Demographics section,
+    // which sits at the front, took every newly ticked question above it.
+    if (isSpecialSlide(charts[i]) || rendersFullSlide(charts[i])) continue;
     if (rankOf(charts[i].question_ref) > newRank) return i;
     lastQuestion = i;
   }
@@ -648,6 +653,11 @@ export function makeDemographicsGrid(
     slide_title: opts?.slide_title ?? "Respondents",
     slide_description: null,
     footer_note: null,
+    // Every other slide factory mints one, and the preview queue is keyed by
+    // it: without an id the deck registration drops the slide and nothing ever
+    // asks for its picture, so a demographics grid stayed blank until the
+    // report was saved and reopened (the load path backfills ids).
+    slide_id: newSlideId(),
     options: { charts: cells, ...(opts?.group ? { group: opts.group } : {}) },
   };
 }
