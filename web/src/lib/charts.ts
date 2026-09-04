@@ -62,6 +62,77 @@ export const SPECIAL_SLIDE_LABELS: Record<string, string> = {
   special_blank: "Empty slide",
 };
 
+/** Tick or untick a question in the catalog, without ever moving a slide.
+ *
+ *  Unticking used to DELETE every slide showing the question, so ticking it
+ *  again built a new slide and had to guess where it went — reported as "when I
+ *  untick and tick a question it jumps as first. It should not relocate, it
+ *  should appear to its natural location." Nothing can guess it: the deck's
+ *  order is the author's, not the file's, and the only thing that knows where
+ *  the slide was is the slide.
+ *
+ *  So unticking hides it where it stands and ticking shows it again — position
+ *  intact, and with it the headline, the subtitle and every other edit that
+ *  used to be thrown away by a mis-click. Only a question with no slide at all
+ *  is inserted, and that one goes to its place in SAV order.
+ */
+export function toggleQuestionInDeck<C extends {
+  chart_type: string;
+  question_ref: string;
+  excluded?: boolean;
+}>(
+  charts: readonly C[],
+  qid: string,
+  makeNew: () => C,
+  rankOf: (ref: string) => number
+): C[] {
+  const own = charts.filter((c) => c.question_ref === qid);
+  if (own.length) {
+    // Every slide showing it, comparison slides included: leaving one behind
+    // orphans a slide for a question the list says is not in the report.
+    const hide = own.some((c) => !c.excluded);
+    return charts.map((c) =>
+      c.question_ref === qid ? { ...c, excluded: hide } : c
+    );
+  }
+  const out = [...charts];
+  out.splice(insertionIndex(out, rankOf(qid), rankOf), 0, makeNew());
+  return out;
+}
+
+/** Where a question slide belongs in a deck, by SAV order.
+ *
+ *  Among the QUESTION slides only: it goes before the first one that comes
+ *  after it in the file, and after the last one otherwise. Special slides are
+ *  left exactly where the author put them, which is the whole point.
+ *
+ *  The scan this replaced looked for a conclusion slide to insert before,
+ *  because a conclusion trails a deck. In a deck that OPENS with its
+ *  conclusions it found one at index 0, so every re-ticked question landed
+ *  first — reported as "when I untick and tick a question it jumps as first".
+ *  Where the author put a special slide is not a fact this needs to know.
+ */
+export function insertionIndex(
+  charts: readonly { chart_type: string; question_ref: string }[],
+  newRank: number,
+  rankOf: (ref: string) => number
+): number {
+  let lastQuestion = -1;
+  for (let i = 0; i < charts.length; i++) {
+    if (isSpecialSlide(charts[i])) continue;
+    if (rankOf(charts[i].question_ref) > newRank) return i;
+    lastQuestion = i;
+  }
+  // After every question slide there is. With none, the deck is all special
+  // slides: go to the end, unless a conclusion is sitting there — a deck that
+  // ENDS with its conclusions keeps them last.
+  if (lastQuestion >= 0) return lastQuestion + 1;
+  const last = charts[charts.length - 1];
+  return last && last.chart_type === "special_conclusion"
+    ? charts.length - 1
+    : charts.length;
+}
+
 export function isSpecialSlide(chart: { chart_type: string }): boolean {
   return chart.chart_type in SPECIAL_SLIDE_LABELS;
 }

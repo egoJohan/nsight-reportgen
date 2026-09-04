@@ -17,7 +17,7 @@ import tempfile
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 import dataclasses
 import json
@@ -1193,6 +1193,7 @@ def question_panels(
     qid: str,
     classifying_var: str,
     grouping: str | None = None,
+    classifying_values: list[str] | None = Query(None),
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_material),
 ) -> dict:
@@ -1228,7 +1229,14 @@ def question_panels(
     empty = {"drawn": [], "thin": [], "capped": [], "degraded": False,
              "split": False, "max_panels": 0}
     try:
-        spec = replace(_summary_spec(q.qid), classifying_var=classifying_var)
+        # The groups the SLIDE draws, not the ones the variable has. Answering
+        # for the whole variable while the slide is drawn on part of it makes
+        # the warning and the slide disagree about what is on the slide — which
+        # is the one thing `render/panels.py` exists to prevent. Reported as a
+        # five-group classifier that kept warning after the author had picked
+        # three, and named three of its own choosing.
+        spec = replace(_summary_spec(q.qid), classifying_var=classifying_var,
+                       classifying_values=tuple(classifying_values or ()))
         sel = panel_segments(compute(q, spec, df, model))
     except Exception:  # noqa: BLE001 — see the docstring
         return empty

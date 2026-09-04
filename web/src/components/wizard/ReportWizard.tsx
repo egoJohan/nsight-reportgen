@@ -49,6 +49,8 @@ import {
   buildDemographicsGrids,
   buildSpecialPages,
   isSpecialSlide,
+  insertionIndex,
+  toggleQuestionInDeck,
   isThemes,
   makeChart,
   makeComparisonSlide,
@@ -285,8 +287,12 @@ export default function ReportWizard({
   // "Is this question in the report?" — ANY slide showing it counts, comparison
   // slides included. Counting only primaries left a question that has comparison
   // slides looking un-added, which emptied the Compare groups question list.
+  // What the catalog shows as ticked. Hidden slides are not in the report as
+  // far as the reader of the deck is concerned, so their question reads as
+  // unticked — and ticking it again un-hides the slide it still has.
   const addedRefs = useMemo(
-    () => new Set((draft?.charts ?? []).map((c) => c.question_ref)),
+    () => new Set((draft?.charts ?? []).filter((c) => !c.excluded)
+                    .map((c) => c.question_ref)),
     [draft]
   );
 
@@ -357,44 +363,20 @@ export default function ReportWizard({
   // selected" step).
   const toggleQuestion = useCallback(
     (q: Question) => {
-      mutate((d) => {
-        const exists = d.charts.some((c) => c.question_ref === q.qid);
-        if (exists) {
-          return {
-            ...d,
-            charts: normalizeSlots(
-              // Unticking a question removes EVERY slide showing it, comparison
-              // slides included. Sparing them orphans slides for a question the
-              // list says is not in the report — and leaves the deck in a state
-              // the user cannot get back out of from Step 1.
-              d.charts.filter((c) => c.question_ref !== q.qid)
-            ),
-          };
-        }
-        // Insert the new chart in SAV order: after any front special slides and
-        // earlier-ranked question slides, before higher-ranked ones and a
-        // trailing conclusion slide.
-        const newRank = qRank.get(q.qid) ?? Number.POSITIVE_INFINITY;
-        const charts = [...d.charts];
-        let pos = charts.length;
-        for (let i = 0; i < charts.length; i++) {
-          const c = charts[i];
-          if (isSpecialSlide(c)) {
-            if (c.chart_type === "special_conclusion") {
-              pos = i;
-              break;
-            }
-            continue; // front special slide → insert after it
-          }
-          const r = qRank.get(c.question_ref) ?? Number.POSITIVE_INFINITY;
-          if (r > newRank) {
-            pos = i;
-            break;
-          }
-        }
-        charts.splice(pos, 0, makeChart(q.qid, q.suggested_chart_type));
-        return { ...d, charts: normalizeSlots(charts) };
-      });
+      mutate((d) => ({
+        ...d,
+        // Hidden where it stands, not deleted — see toggleQuestionInDeck. A
+        // slide that comes back somewhere else has moved, and a mis-click used
+        // to cost the headline and every other edit on it.
+        charts: normalizeSlots(
+          toggleQuestionInDeck(
+            d.charts,
+            q.qid,
+            () => makeChart(q.qid, q.suggested_chart_type),
+            (ref) => qRank.get(ref) ?? Number.POSITIVE_INFINITY
+          )
+        ),
+      }));
     },
     [mutate, qRank]
   );
@@ -405,40 +387,28 @@ export default function ReportWizard({
     (questions: Question[], select: boolean) => {
       const qids = new Set(questions.map((q) => q.qid));
       mutate((d) => {
-        if (!select) {
-          // Drop these questions' charts; special slides (overview/conclusion) stay.
-          return {
-            ...d,
-            charts: normalizeSlots(
-              d.charts.filter(
-                (c) => isSpecialSlide(c) || !qids.has(c.question_ref)
-              )
-            ),
-          };
-        }
-        const present = new Set(
-          d.charts
-            .filter((c) => !isSpecialSlide(c) && !c.compare_group)
-            .map((c) => c.question_ref)
+        const rank = (ref: string) => qRank.get(ref) ?? Number.POSITIVE_INFINITY;
+        // Hide, never delete — the same promise the single tick makes. Special
+        // slides are not questions and are left alone.
+        const charts = d.charts.map((c) =>
+          !isSpecialSlide(c) && qids.has(c.question_ref)
+            ? { ...c, excluded: !select }
+            : c
         );
-        const additions = questions
-          .filter((q) => !present.has(q.qid))
-          .map((q) => makeChart(q.qid, q.suggested_chart_type));
-        if (additions.length === 0) return d;
-        // Rebuild: front special slides, then all question charts in SAV rank order,
-        // then a trailing conclusion slide — matching single-toggle insertion.
-        const front: ChartSpec[] = [];
-        const conclusion: ChartSpec[] = [];
-        const qCharts: ChartSpec[] = [];
-        for (const c of d.charts) {
-          if (isSpecialSlide(c)) {
-            (c.chart_type === "special_conclusion" ? conclusion : front).push(c);
-          } else qCharts.push(c);
+        if (!select) return { ...d, charts: normalizeSlots(charts) };
+        // Then add the ones that have no slide at all, each at its own place in
+        // SAV order, with everything already in the deck left where it is.
+        const present = new Set(
+          charts.filter((c) => !isSpecialSlide(c) && !c.compare_group)
+                .map((c) => c.question_ref)
+        );
+        for (const q of questions) {
+          if (present.has(q.qid)) continue;
+          const add = makeChart(q.qid, q.suggested_chart_type);
+          charts.splice(insertionIndex(charts, rank(q.qid), rank), 0, add);
+          present.add(q.qid);
         }
-        const rank = (c: ChartSpec) =>
-          qRank.get(c.question_ref) ?? Number.POSITIVE_INFINITY;
-        const ordered = [...qCharts, ...additions].sort((a, b) => rank(a) - rank(b));
-        return { ...d, charts: normalizeSlots([...front, ...ordered, ...conclusion]) };
+        return { ...d, charts: normalizeSlots(charts) };
       });
     },
     [mutate, qRank]

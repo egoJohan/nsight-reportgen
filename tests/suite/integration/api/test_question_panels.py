@@ -91,3 +91,66 @@ def test_a_nonsense_classifier_does_not_500(case_with_data):
     # "split, and everything was dropped", which would be alarming and false.
     assert r.json()["split"] is False
     assert r.json()["capped"] == []
+
+
+# ── the warning must describe THIS slide ─────────────────────────────────────
+
+@pytest.fixture
+def five_group_case(client_memory, tmp_path):
+    """A classifier with five well-populated groups — the shared fixture has
+    five ROWS, so every group there is under the reporting base and no chart
+    ever splits into panels."""
+    import pandas as pd
+    import pyreadstat
+
+    rows = 250
+    df = pd.DataFrame({
+        "q1": [1.0 if i % 5 else 2.0 for i in range(rows)],
+        "g": [float(i % 5 + 1) for i in range(rows)],
+    })
+    path = tmp_path / "five.sav"
+    pyreadstat.write_sav(
+        df, str(path),
+        column_labels={"q1": "Suositteletko?", "g": "Ryhmä"},
+        variable_value_labels={
+            "q1": {1: "Kyllä", 2: "Ei"},
+            "g": {1: "A", 2: "B", 3: "C", 4: "D", 5: "E"},
+        },
+        variable_measure={"q1": "nominal", "g": "nominal"},
+    )
+    c = client_memory
+    cid = c.post("/customers", json={"name": "Asiakas"}).json()["id"]
+    kid = c.post(f"/customers/{cid}/cases", json={"name": "Tutkimus"}).json()["id"]
+    mid = c.post(f"/cases/{kid}/materials",
+                 files={"file": ("five.sav", path.read_bytes(),
+                                 "application/octet-stream")}).json()["material_id"]
+    qid = next(q["qid"] for q in c.get(f"/materials/{mid}/questions").json()["questions"]
+               if q["qid"] == "q1")
+    return c, mid, qid
+
+
+def test_five_groups_are_capped_to_three(five_group_case):
+    client, mid, qid = five_group_case
+    body = client.get(f"/materials/{mid}/questions/{qid}/panels",
+                      params={"classifying_var": "g"}).json()
+    assert body["split"] is True, body
+    assert len(body["drawn"]) == 3, body
+    assert len(body["capped"]) == 2, body
+
+
+def test_the_warning_answers_for_the_GROUPS_THE_SLIDE_DRAWS(five_group_case):
+    """Reported: a five-group classifier warns that only three panels fit, which
+    is true; the author then picks three, and the warning stays — naming a
+    selection of its own, not theirs. The warning was computed on the whole
+    variable while the slide was computed on part of it, so the two disagreed
+    about what the slide contains, which `render/panels.py` exists to prevent.
+    """
+    client, mid, qid = five_group_case
+    body = client.get(f"/materials/{mid}/questions/{qid}/panels",
+                      params={"classifying_var": "g",
+                              "classifying_values": ["A", "C", "E"]}).json()
+    assert body["drawn"] == ["A", "C", "E"], body
+    assert body["capped"] == [], body
+    assert body["thin"] == [], body
+
+

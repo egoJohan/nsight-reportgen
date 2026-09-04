@@ -912,17 +912,10 @@ function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetPr
   // also what the chart does.
   const on = (g: string) => picked.length === 0 || picked.includes(g);
 
-  // A field that vanishes teaches nothing; say why it cannot be used yet.
-  if (!clf) {
-    return (
-      <Field label={field.label}>
-        <p className="text-xs text-muted-foreground">
-          Choose a classifying variable first — this picks which of its groups
-          the slide is drawn on.
-        </p>
-      </Field>
-    );
-  }
+  // Nothing to pick from without a classifying variable, and an explanation of
+  // why an empty control is empty is still an empty control: the field appears
+  // when choosing the variable gives it something to say. (author's call)
+  if (!clf) return null;
   if (isPending) {
     return (
       <Field label={field.label}>
@@ -951,11 +944,12 @@ function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetPr
           </label>
         ))}
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {picked.length === 0
-          ? "All groups — the slide covers the whole sample."
-          : `Only ${picked.join(", ")} — N and every percentage on the slide count those respondents.`}
-      </p>
+      {picked.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Only {picked.join(", ")} — N and every percentage on the slide count
+          those respondents.
+        </p>
+      )}
     </Field>
   );
 }
@@ -1902,9 +1896,14 @@ function usePanelSelection(
   const applies =
     !!chart && PANEL_CHART_TYPES.includes(chart.chart_type) && !!chart.classifying_var;
   return useQuery({
-    queryKey: ["panels", materialId, chart?.question_ref, chart?.classifying_var],
+    // The selection is in the key: pick three of five groups and the warning
+    // about the other two has to go, rather than sit there describing the chart
+    // this slide no longer is.
+    queryKey: ["panels", materialId, chart?.question_ref, chart?.classifying_var,
+               (chart?.classifying_values ?? []).join("|")],
     queryFn: () =>
-      api.panels(materialId, chart!.question_ref, chart!.classifying_var!, grouping),
+      api.panels(materialId, chart!.question_ref, chart!.classifying_var!, grouping,
+                 chart!.classifying_values),
     enabled: applies && !!materialId,
     // The answer changes only when the data or the classifier does, and a
     // warning is not worth re-fetching on every focus.

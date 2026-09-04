@@ -1687,9 +1687,14 @@ export const api = {
    *  and because `render/panels.py` is the one place that decides it, so the
    *  warning and the slide cannot disagree about what was dropped. */
   panels: (materialId: string, qid: string, classifyingVar: string,
-           grouping?: GroupingOverride): Promise<PanelSelection> => {
+           grouping?: GroupingOverride,
+           /** The groups the SLIDE draws. Answering for the whole variable while
+            *  the slide is drawn on part of it makes the warning describe a
+            *  different chart than the one on screen. */
+           classifyingValues?: string[]): Promise<PanelSelection> => {
     const q = new URLSearchParams({ classifying_var: classifyingVar });
     if (grouping && Object.keys(grouping).length) q.set("grouping", JSON.stringify(grouping));
+    for (const v of classifyingValues ?? []) q.append("classifying_values", v);
     return fetch(
       `${API_BASE}/materials/${materialId}/questions/${encodeURIComponent(qid)}/panels?${q}`
     ).then((r) => json<PanelSelection>(r));
