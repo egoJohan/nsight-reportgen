@@ -10,7 +10,7 @@ from reportbuilder.model.report import (
 )
 from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
-from reportbuilder.render.deck import render_report, render_to_file, RenderCancelled
+from reportbuilder.render.deck import series_key, render_report, render_to_file, RenderCancelled
 from reportbuilder.stats.engine import compute
 from reportbuilder.stats.series import SeriesResult
 
@@ -84,9 +84,9 @@ def _build(report: Report, model: QuestionModel, data, style, cancel_check,
         # must not crash the whole deck — fall back to an empty series, which
         # render_report draws as a "no data" placeholder.
         try:
-            series_by_ref[spec.question_ref] = compute(q, spec, data, model)
+            series_by_ref[series_key(spec)] = compute(q, spec, data, model)
         except Exception:
-            series_by_ref[spec.question_ref] = _empty_series(spec.statistic)
+            series_by_ref[series_key(spec)] = _empty_series(spec.statistic)
         titles[spec.question_ref] = q.text
     if out_path is None:
         return render_report(report, series_by_ref, style, titles=titles,

@@ -402,9 +402,22 @@ def _footer_pt(style) -> float:
         return _FOOTER_PT
 
 
+def ink_colour(hex_or_none: str, fallback):
+    """An author's colour as an RGBColor, or *fallback*.
+
+    python-pptx assigns `font.color.rgb` and accepts nothing but an RGBColor.
+    Every default branch here returns one; the override branches returned the
+    STRING "#112233" instead, so setting a title, subtitle or footer colour in
+    the template editor did not tint the text — it raised `ValueError: assigned
+    value must be type RGBColor` and took the whole deck render down on its
+    first slide.
+    """
+    return _rgb((hex_or_none or "").strip().lstrip("#")) or fallback
+
+
 def _footer_ink(style, fallback):
     chosen = getattr(style, "footer_colour", "")
-    return f"#{chosen}" if chosen else fallback
+    return ink_colour(chosen, fallback)
 
 
 def footer_top(slide, sh: int, sw: int) -> int:
@@ -679,7 +692,7 @@ def title_colour_for(st, style):
     # colour somebody picked with the slide in front of them.
     chosen = (getattr(style, "title_colour", "") or "").strip().lstrip("#")
     if chosen:
-        return f"#{chosen}"
+        return ink_colour(chosen, PX_INK)
     harvested = _rgb(getattr(st, "colour", "") or "")
     bg = (getattr(style, "background", "") or "").strip()
     if harvested is None or not bg:
@@ -962,8 +975,8 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
                 [(secondary, s_size,
-                  f"#{getattr(ctx.style, 'subtitle_colour', '')}"
-                  if getattr(ctx.style, "subtitle_colour", "") else _muted, False)],
+                  ink_colour(getattr(ctx.style, "subtitle_colour", ""), _muted),
+                  False)],
                 anchor=anchor,
                 font=s_font,
             )

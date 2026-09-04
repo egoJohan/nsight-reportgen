@@ -160,6 +160,22 @@ class RenderCancelled(Exception):
     (hundreds of slides) stops promptly instead of grinding to the end."""
 
 
+def series_key(spec) -> str:
+    """Which computed series belongs to this slide.
+
+    The SLIDE, not the question. A question can appear on several slides on
+    purpose — a total-level one and one split by region ("Extra slide"), or the
+    same battery through design 1 and through design 2 — and keying the computed
+    series by question let each spec overwrite the last, so every slide of that
+    question rendered the final one's numbers. The editor looked right, because
+    a preview computes one spec at a time; only the exported deck was wrong.
+
+    Falls back to the question for a caller that keyed its own map that way, and
+    for a demographics grid's cells, which are questions rather than slides.
+    """
+    return getattr(spec, "slide_id", None) or spec.question_ref
+
+
 def render_report(
     report: Report,
     series_by_ref: dict,
@@ -242,7 +258,9 @@ def render_report(
             continue
 
         # --- Build context ---
-        series = series_by_ref[spec.question_ref]
+        series = series_by_ref.get(series_key(spec))
+        if series is None:                      # keyed by question by the caller
+            series = series_by_ref[spec.question_ref]
         title = _titles.get(spec.question_ref, "")
         ctx = RenderContext(
             slide=slide,
