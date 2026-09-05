@@ -211,6 +211,9 @@ export interface ChartSpec {
   show_not_answered: boolean;
   // When false, categories that are 0% across all segments are dropped.
   show_empty_categories: boolean;
+  /** Whether each PANEL of a split pie/doughnut/funnel states its own base.
+   *  The slide's own N is in the footer either way. */
+  show_panel_base: boolean;
   // null = use SAV-detected missing set; an explicit list overrides it.
   not_answered_codes: number[] | null;
   // Ordered [full_label, short_label] display overrides.

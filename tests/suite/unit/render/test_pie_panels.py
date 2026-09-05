@@ -166,3 +166,58 @@ def test_panel_row_legend_follows_the_legend_toggle_alone():
                                     data_labels=True, axis_names=axis_names))
         fig = _build_pie_figure(ctx, donut=False)
         assert len(fig.legends) == want, (legend, axis_names)
+
+
+# --- the base under each panel title is optional ----------------------------
+# It was moved there because a row of three printed its bases straight under the
+# circles, where the shared legend landed on top of them. Some slides do not want
+# a per-panel base at all — the footer already states the slide's own N — so it
+# is a switch rather than a fixed part of the heading. (Johan, 2026-09-05)
+
+def test_panel_bases_are_drawn_by_default():
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex")
+    axes = _pie_axes(_build_pie_figure(ctx, donut=False))
+    assert _bases(axes) == ["n = 512", "n = 486"]
+
+
+def test_panel_bases_can_be_switched_off():
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
+                                        show_panel_base=False)
+    axes = _pie_axes(_build_pie_figure(ctx, donut=False))
+    assert _bases(axes) == ["", ""], "a base line is still drawn"
+    assert _names(axes) == ["Naiset", "Miehet"], "the group names must stay"
+    assert not any("n = " in t.get_text() for ax in axes for t in ax.texts)
+
+
+def test_switching_the_base_off_moves_nothing_else():
+    """The switch hides a label and does no layout. The panel keeps its padding,
+    so the circles sit exactly where they did with the number showing — a slide
+    does not reflow because somebody ticked a box."""
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+
+    def _geometry(**overrides):
+        _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
+                                            **overrides)
+        fig = _build_pie_figure(ctx, donut=False)
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        return [(tuple(ax.get_window_extent().bounds),
+                 tuple(ax.title.get_window_extent(r).bounds))
+                for ax in _pie_axes(fig)]
+
+    assert _geometry(show_panel_base=False) == _geometry()
+
+
+def test_the_single_surviving_group_honours_the_switch():
+    """One group survives the panel rules — it is still a heading, and the
+    switch still governs its base."""
+    series = _series(("Naiset", "Total"), {"Naiset": 512, "Total": 998})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
+                                        show_panel_base=False)
+    axes = _pie_axes(_build_pie_figure(ctx, donut=False))
+    assert not any("n = " in t.get_text() for ax in axes for t in ax.texts)

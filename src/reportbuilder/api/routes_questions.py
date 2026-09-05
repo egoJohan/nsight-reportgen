@@ -1413,6 +1413,7 @@ class ChartSpecBody(BaseModel):
     scatter_xy: list[str] | None = None
     show_not_answered: bool = False
     show_empty_categories: bool = True
+    show_panel_base: bool = True
     not_answered_codes: list[float] | None = None
     percent_base: str = "classifier"
     show_total: str = "auto"
@@ -1509,6 +1510,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         scatter_xy=tuple(body.scatter_xy) if body.scatter_xy is not None else None,
         show_not_answered=body.show_not_answered,
         show_empty_categories=body.show_empty_categories,
+        show_panel_base=body.show_panel_base,
         not_answered_codes=(
             tuple(float(c) for c in body.not_answered_codes)
             if body.not_answered_codes is not None

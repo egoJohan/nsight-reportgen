@@ -132,6 +132,20 @@ def empty_categories_field() -> ConfigField:
                        default=True)
 
 
+def panel_base_field() -> ConfigField:
+    """Whether each panel states its own base.
+
+    Only meaningful once a classifying variable splits the chart into panels;
+    the frontend hides the switch until then, as it does the Total column.
+    """
+    return ConfigField(
+        "show_panel_base", "switch", "Show each panel's base (n)",
+        help=("Print \u201cn = \u2026\u201d under each group\u2019s name. The slide\u2019s own N "
+              "stays in the footer either way."),
+        default=True,
+    )
+
+
 def not_answered_field() -> ConfigField:
     return ConfigField("not_answered_codes", "not_answered", '"Not answered" values')
 
@@ -334,7 +348,8 @@ def single_series_schema() -> tuple[ConfigField, ...]:
     `resolve_percent_base` always answers "classifier", so each panel already sums
     to 100% within its own group. (spec 2026-08-22-multi-pie-panels-design)
     """
-    return (statistic_field(), classifying_var_field(), classifying_values_field(), *_common_tail())
+    return (statistic_field(), classifying_var_field(), classifying_values_field(),
+            panel_base_field(), *_common_tail())
 
 
 def combo_schema() -> tuple[ConfigField, ...]:

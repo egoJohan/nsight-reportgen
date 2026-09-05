@@ -192,7 +192,8 @@ _PANEL_TITLE_PT: float = 12.5
 _PANEL_BASE_PT: float = 10.0
 
 
-def _panel_heading(ax, name: str, base: int, ink: str, *, x: float = 0.5) -> None:
+def _panel_heading(ax, name: str, base: int | None, ink: str, *,
+                   x: float = 0.5) -> None:
     """A panel's name, with its base on a quieter second line beneath it.
 
     Both ABOVE the circle. The base used to sit under it, which is below the
@@ -201,9 +202,14 @@ def _panel_heading(ax, name: str, base: int, ink: str, *, x: float = 0.5) -> Non
 
     Two artists rather than a two-line title because a title carries one style,
     and the base is not a heading: it is neither bold nor the same size.
+
+    `base=None` is the switched-off slide: the name alone. The title keeps the
+    SAME padding either way, so switching the number off moves nothing else on
+    the slide — the circles stay exactly where they were. (Johan, 2026-09-05)
     """
-    ax.text(x, 1.0, f"n = {base}", transform=ax.transAxes, ha="center",
-            va="bottom", fontsize=_PANEL_BASE_PT, color=ink)
+    if base is not None:
+        ax.text(x, 1.0, f"n = {base}", transform=ax.transAxes, ha="center",
+                va="bottom", fontsize=_PANEL_BASE_PT, color=ink)
     # Cleared above the base line: `pad` is in points, so this is the base's own
     # line box plus the gap the title had before.
     ax.set_title(name, fontsize=_PANEL_TITLE_PT, fontweight="bold", color=ink,
@@ -373,6 +379,12 @@ def _build_pie_figure(ctx, *, donut: bool):
     def _values(seg):
         return [float(series.cell(c, seg).value(statistic) or 0.0) for c in cats]
 
+    def _panel_base(seg) -> int | None:
+        """This panel's base, or None when the author asked for no per-panel n."""
+        if not getattr(ctx.spec, "show_panel_base", True):
+            return None
+        return series.base_n.get(seg, 0)
+
     if not sel.split or len(sel.labels) == 1:
         # One circle: the un-split slide, or a split that degraded to one panel.
         # Kept on the ORIGINAL layout (legend to the right) so existing slides do
@@ -384,7 +396,7 @@ def _build_pie_figure(ctx, *, donut: bool):
         if sel.split and not sel.degraded:
             # One group survived: the reader must be told WHICH group this is,
             # and on what.
-            _panel_heading(ax, _wrap_legend_label(seg), series.base_n.get(seg, 0), ink)
+            _panel_heading(ax, _wrap_legend_label(seg), _panel_base(seg), ink)
         _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
                               bg, ink, grid)
         return fig
@@ -393,7 +405,7 @@ def _build_pie_figure(ctx, *, donut: bool):
     for ax, seg in zip(axes, sel.labels):
         _draw_one_pie(ax, cats, _values(seg), clrs, statistic, fmt, bg,
                       donut, ink, grid)
-        _panel_heading(ax, _wrap_legend_label(seg), series.base_n.get(seg, 0), ink)
+        _panel_heading(ax, _wrap_legend_label(seg), _panel_base(seg), ink)
 
     if want_panel_legend:
         # ONE legend for the row: the categories are identical in every panel, so a

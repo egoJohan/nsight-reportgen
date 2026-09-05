@@ -211,3 +211,38 @@ def test_unsplit_funnel_still_draws_every_stage_label():
     panels = _panels(_split({}))
     for cat in ("Tuntee", "Harkitsee", "Ostanut"):
         assert any(cat in t for t in panels[0].texts)
+
+
+# --- the base under each panel title is optional ----------------------------
+# The funnel carries its group's base on the title's second line (`ax.axis("off")`
+# leaves nowhere else to put it). The same switch governs it as governs the pie's,
+# so a slide is not left with the number on one chart type and not the other.
+# (Johan, 2026-09-05)
+
+def _panel_titles(ctx, monkeypatch) -> list[str]:
+    """Every panel title of a rendered funnel, caught on the way to the PNG."""
+    import reportbuilder.render.image.funnel as mod
+
+    seen: list[str] = []
+
+    def _spy(fig):
+        seen.extend(ax.get_title() for ax in fig.axes)
+        return b"\x89PNG\r\n\x1a\n"
+
+    monkeypatch.setattr(mod, "render_png", _spy)
+    monkeypatch.setattr(mod, "place_picture", lambda *a, **k: None)
+    build_image_funnel(ctx)
+    return seen
+
+
+def test_funnel_panel_titles_carry_the_base_by_default(monkeypatch):
+    _prs, _slide, _slot, ctx = make_ctx("funnel", _descending_split(),
+                                        classifying_var="sex")
+    assert _panel_titles(ctx, monkeypatch) == ["Naiset\nn = 100", "Miehet\nn = 100"]
+
+
+def test_funnel_panel_bases_can_be_switched_off(monkeypatch):
+    _prs, _slide, _slot, ctx = make_ctx("funnel", _descending_split(),
+                                        classifying_var="sex",
+                                        show_panel_base=False)
+    assert _panel_titles(ctx, monkeypatch) == ["Naiset", "Miehet"]

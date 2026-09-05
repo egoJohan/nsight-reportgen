@@ -484,6 +484,7 @@ export function makeChart(
     show_not_answered: false,
     // Hide 0% rows by default — the user's expectation.
     show_empty_categories: false,
+    show_panel_base: true,
     // null = use SAV-detected missing set until the user edits the picker.
     not_answered_codes: null,
     category_label_overrides: [],
@@ -591,6 +592,7 @@ export function makeSpecialSlide(
     scatter_xy: null,
     show_not_answered: false,
     show_empty_categories: false,
+    show_panel_base: true,
     not_answered_codes: null,
     category_label_overrides: [],
     slide_title: opts?.slide_title ?? null,
@@ -673,6 +675,7 @@ export function makeDemographicsGrid(
     scatter_xy: null,
     show_not_answered: false,
     show_empty_categories: false,
+    show_panel_base: true,
     not_answered_codes: null,
     category_label_overrides: [],
     slide_title: opts?.slide_title ?? "Respondents",

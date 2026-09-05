@@ -88,6 +88,14 @@ class ChartSpec:
     axis_x_title: str = ""
     axis_y_title: str = ""
     show_empty_categories: bool = True           # when False, drop categories that are 0 across all segments
+    #: Whether each PANEL states its own base under its group name.
+    #:
+    #: Only a split pie/doughnut/funnel has panels, so this is inert elsewhere.
+    #: The base moved under the title because a row of three printed it beneath
+    #: the circles, where the shared legend landed on top of it — but a slide
+    #: whose groups are of a size the reader already knows does not want the
+    #: number at all, and the footer still states the slide's own N either way.
+    show_panel_base: bool = True
     not_answered_codes: tuple[float, ...] | None = None  # explicit "Not answered" code set; None = SAV-detected
     # Cross-tab percentage DIRECTION for a classified chart:
     #   "auto"       — resolve deterministically from variable roles (default)
@@ -288,6 +296,7 @@ def report_from_json(data: dict | str) -> Report:
             axis_x_title=c.get("axis_x_title", "") or "",
             axis_y_title=c.get("axis_y_title", "") or "",
             show_empty_categories=c.get("show_empty_categories", True),
+            show_panel_base=c.get("show_panel_base", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
             percent_base=c.get("percent_base", "auto"),

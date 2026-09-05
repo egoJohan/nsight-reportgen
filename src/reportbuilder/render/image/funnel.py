@@ -162,8 +162,12 @@ def build_image_funnel(ctx) -> None:
 
     def _label(seg) -> str:
         # `ax.axis("off")` hides the x-axis label, so the base rides in the title's
-        # second line rather than under the funnel as it does on a pie.
-        return f"{wrap_label(seg, 20)}\nn = {ctx.series.base_n.get(seg, 0)}"
+        # second line rather than under the funnel as it does on a pie. The author
+        # can switch that line off; the group's name is not optional.
+        name = wrap_label(seg, 20)
+        if not getattr(ctx.spec, "show_panel_base", True):
+            return name
+        return f"{name}\nn = {ctx.series.base_n.get(seg, 0)}"
 
     if not sel.split or len(sel.labels) == 1:
         fig, ax = new_figure(ctx)

@@ -1067,11 +1067,15 @@ function ChartControls({
   chart,
   materialId,
   question,
+  panels,
   onChange,
 }: {
   chart: ChartSpec;
   materialId: string;
   question: Question | undefined;
+  /** How this slide actually splits — the backend's own panel decision, already
+   *  fetched for the slide warnings. Undefined while it is in flight. */
+  panels: PanelSelection | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
   const { data: variables } = useVariables(materialId);
@@ -1134,6 +1138,16 @@ function ChartControls({
   // placeholder so the "Statistic" row keeps its layout.) (spec 2026-08-04)
   if (!chart.classifying_var) {
     schema = schema.filter((f) => f.key !== "show_total");
+  }
+  // The per-panel base only exists on a slide that actually draws a ROW of
+  // charts. A classifier is not enough: one whose groups all but one are too
+  // thin to report degrades to a single ordinary pie, and there is no
+  // per-panel "n = …" on it to hide. Ask the backend's own panel decision —
+  // the same answer the slide warnings are built from — rather than guess from
+  // the classifier's group count, which does not know what will be dropped.
+  const drawsPanels = !!panels?.split && panels.drawn.length > 1;
+  if (!drawsPanels) {
+    schema = schema.filter((f) => f.key !== "show_panel_base");
   }
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {
@@ -2418,6 +2432,7 @@ function StepConfigureInner({
               chart={activeChart}
               materialId={materialId}
               question={questionMap.get(activeChart.question_ref)}
+              panels={activePanels}
               onChange={handleChange}
             />
           )}
