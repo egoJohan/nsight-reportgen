@@ -1,15 +1,17 @@
-"""Deterministic resolution of a classified chart's percentage DIRECTION.
+"""What a classified chart's percentages are OF, and whether its Total is drawn.
 
 A cross-tab of a base variable B (the question) by a classifier C can be
-percentaged in two directions. The natural denominator is whichever variable is
-the stronger *segmenter* — the conditioning sub-population an analyst reads "of
-X, this many are Y" over. We score both and put the denominator on the stronger
-one; the base wins only when it strictly outranks the classifier (ties keep the
-legacy "classifier" direction). The manual `percent_base` override always wins;
-this is only consulted for `percent_base == "auto"`.
+percentaged in two directions, and they are different numbers about different
+things: "of women, 64% are in group 0" against "of group 0, 44% are women".
+nSight does not guess which one an author means. The direction is a setting on
+the slide, defaulting to the classifier — each classifying group summing to
+100% — and `resolve_percent_base` exists only to answer for documents saved
+before that was so.
 
-The role heuristics mirror the questions API (`api.routes_questions`) so the
-"which variables are segmenters" judgement is consistent across the app.
+`segmenter_score` lives here for a different question, asked elsewhere: which
+variables are worth OFFERING as classifiers (the questions API). It has not
+decided a percentage direction since 2026-07-10, and the docstring that said it
+did outlived the code by long enough to mislead a reader of this module.
 """
 from __future__ import annotations
 
@@ -101,10 +103,16 @@ def resolve_show_total(spec, has_real_classifier: bool) -> bool:
 
 
 def resolve_percent_base(question, spec, model) -> str:
-    """Resolve `percent_base == "auto"`. Default: percentages OF THE MAIN CLASSIFICATION
-    — each classifying-variable group sums to 100 % (the "classifier" direction, i.e.
-    "% of <group> who …"). Johan's call (2026-07-10): the old role-based heuristic
-    (base wins when it outranks the classifier) guessed the wrong direction too often;
-    the manual "Percentages of" control ("% within each <base>") is the override for the
-    reverse reading. `segmenter_score` is kept for the questions API / callers."""
+    """What `percent_base == "auto"` meant, for the documents that still say it.
+
+    "Automatic" was an option in the editor until it was dropped: it resolved to
+    "classifier" every time, whichever way round the variables were, because the
+    role-based heuristic behind it (the base wins when it outranks the
+    classifier) guessed the wrong direction too often and was removed
+    (2026-07-10). The name stayed on the control for a while and told authors
+    that something had been worked out about their variables.
+
+    Every report written in that time carries "auto", and each must keep
+    rendering the numbers it rendered then — which is what this returns.
+    """
     return "classifier"

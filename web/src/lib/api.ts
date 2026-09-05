@@ -241,6 +241,8 @@ export interface ChartSpec {
   // Cross-tab percentage direction: "auto" (resolve from variable roles),
   // "classifier" (within each segment), "question" (within each base category),
   // "total" (over the grand total).
+  /** Which sub-population each percentage is OF. "auto" is accepted for reports
+   *  saved before the option was dropped and means "classifier". */
   percent_base?: "auto" | "classifier" | "question" | "total";
   // Whether the cross-tab "Total" reference series is drawn ("auto" hides it in
   // within-category % directions; "on"/"off" force it).

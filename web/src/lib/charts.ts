@@ -486,7 +486,7 @@ export function makeChart(
     slide_description: null,
     footer_note: null,
     // Auto-detect the cross-tab percentage direction from the variables' roles.
-    percent_base: "auto",
+    percent_base: "classifier",
     show_total: "auto",
     // Present from the start so the config form patches the FIELD, not options.
     row_summary_fn: "none",
@@ -543,7 +543,7 @@ export function makeComparisonSlide(
     compare_group: classifyingVar,
     classifying_var: classifyingVar,
     classifying_var_2: null,
-    percent_base: "auto",
+    percent_base: "classifier",
     chart_type: supportsMultiSeries(source.chart_type)
       ? source.chart_type
       : "horizontal_bar",

@@ -329,11 +329,14 @@ function PercentBaseWidget({ field, chart, question, variables, onChange }: Widg
   // classifier makes the "classifier" side a combination, so keep static labels there.
   const useNamed =
     (variables?.length ?? 0) > 0 && !!baseVar && !!clfVar && !chart.classifying_var_2;
+  // No "Automatic": it decided nothing — it resolved to the classifier
+  // direction every time — while telling the author the tool had worked
+  // something out about their variables. The two readings are different numbers
+  // about different things, so the slide says which one it is showing.
   const opts: [string, string][] = useNamed
     ? [
-        ["auto", "Automatic"],
-        ["question", `% within each ${shortVarLabel(baseVar!.label, baseVar!.name)}`],
         ["classifier", `% within each ${shortVarLabel(clfVar!.label, clfVar!.name)}`],
+        ["question", `% within each ${shortVarLabel(baseVar!.label, baseVar!.name)}`],
         ["total", "% of the total"],
       ]
     : (field.options ?? []).map((o) => [o.value, o.label]);
@@ -341,7 +344,10 @@ function PercentBaseWidget({ field, chart, question, variables, onChange }: Widg
   // within a category — drop that direction rather than offer nonsense.
   const banner = usesBannerClassifier(chart, variables);
   const shown = banner ? opts.filter(([v]) => v !== "question") : opts;
-  const value = String(chart.percent_base ?? field.default ?? "auto");
+  // A report saved before the option was dropped still says "auto"; it always
+  // meant this direction, so that is what the control shows for it.
+  const saved = String(chart.percent_base ?? field.default ?? "classifier");
+  const value = saved === "auto" ? "classifier" : saved;
   const items = Object.fromEntries(opts);
   return (
     <Field label={field.label} hint={useNamed ? PCT_DIRECTION_HINT : field.help}>

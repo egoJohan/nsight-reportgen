@@ -94,7 +94,12 @@ class ChartSpec:
     #   "classifier" — distribute the base var within each classifier segment (legacy)
     #   "question"   — distribute the classifier within each base category
     #   "total"      — every cell over the grand total
-    percent_base: str = "auto"
+    # Which sub-population a cross-tab percentage is OF: "classifier" (each
+    # classifying group sums to 100%), "question" (each of this question's
+    # categories does), or "total". "auto" is still accepted — every report
+    # written before the option was dropped carries it — and means "classifier",
+    # which is what it always resolved to.
+    percent_base: str = "classifier"
     # Whether the cross-tab "Total" reference series is drawn:
     #   "auto" — hide it in a within-category % distribution (where it sits on a
     #            different denominator and can't be read alongside the segments);

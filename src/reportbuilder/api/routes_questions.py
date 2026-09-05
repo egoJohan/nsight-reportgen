@@ -1384,7 +1384,7 @@ class ChartSpecBody(BaseModel):
     show_not_answered: bool = False
     show_empty_categories: bool = True
     not_answered_codes: list[float] | None = None
-    percent_base: str = "auto"
+    percent_base: str = "classifier"
     show_total: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
     # Right-hand per-row summary column (stacked_horizontal_bar only).

@@ -85,19 +85,25 @@ def classifying_var_field(*, required: bool = False) -> ConfigField:
 
 def percent_base_field() -> ConfigField:
     # The cross-tab percentage DIRECTION. Only meaningful with a classifying
-    # variable (the frontend self-hides it otherwise). "Automatic" resolves the
-    # natural direction from the variables' roles; the others force it.
+    # variable (the frontend self-hides it otherwise).
+    #
+    # There is no "Automatic". It was an option that decided nothing — it
+    # resolved to "classifier" every time, whichever way round the variables
+    # were, the role-scoring behind it having been removed as guessing wrong too
+    # often. The name outlived the behaviour, so an author reading "Automatic"
+    # believed the tool had worked something out about their variables. The
+    # direction it always landed on is the default; the choice is now stated.
     return ConfigField(
         "percent_base", "select", "Percentages of",
-        options=(("auto", "Automatic"),
-                 ("classifier", "Each segment (the classifying variable)"),
+        options=(("classifier", "Each segment (the classifying variable)"),
                  ("question", "Each category (this question)"),
                  ("total", "Total")),
-        default="auto",
-        help=("Which sub-population each percentage is OF. 'Automatic' picks the "
-              "natural direction (usually within each segment). 'Each category' "
-              "instead distributes the segments within each of this question's "
-              "categories — e.g. '% of men who fall in each group'."),
+        default="classifier",
+        help=("Which sub-population each percentage is OF. 'Each segment' makes "
+              "every classifying-variable group sum to 100% — '% of women who …'. "
+              "'Each category' distributes the segments within each of this "
+              "question's categories instead — '% of the people who answered X "
+              "who are women'."),
     )
 
 
