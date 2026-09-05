@@ -370,8 +370,16 @@ export default function ReportsSection({
     // Pre-select every question by default, in the material's own SAV/SPSS order
     // (the same order the survey uses) so the user doesn't have to hunt for the
     // right sequence. They remove the ones they don't want in the Select step.
+    //
+    // Every question the study ASKED. A computed measure — an index, a score —
+    // is not one: one file carries thirteen rescaled recodes beside its six
+    // indices, and a new report opening with all twenty on it is the clutter
+    // the browser's hold-back exists to prevent. They are one click away in
+    // Select, and each starts on the statistic that suits it.
     const charts = normalizeSlots(
-      (questions ?? []).map((q) => makeChart(q.qid, q.suggested_chart_type))
+      (questions ?? [])
+        .filter((q) => q.offered_by_default !== false)
+        .map((q) => makeChart(q.qid, q.suggested_chart_type, q.suggested_statistic))
     );
     createReport.mutate(
       { name, render_mode: "image", template_ref: "", charts },
