@@ -48,7 +48,6 @@ import {
   SORT_DIRECTIONS,
   isDemographicsGrid,
   isDuplicateSlide,
-  isStacked,
   isThemes,
   rendersAsBullets,
   rendersFullSlide,
@@ -1194,7 +1193,6 @@ function ChartControls({
       <SubtitleField
         chart={chart}
         questionText={question?.text ?? chart.question_ref}
-        scaleGloss={question?.scale_gloss ?? ""}
         onChange={onChange}
       />
       <AxisTitleFields chart={chart} onChange={onChange} />
@@ -1291,20 +1289,17 @@ function AxisTitleFields({
 function SubtitleField({
   chart,
   questionText,
-  scaleGloss,
   onChange,
 }: {
   chart: ChartSpec;
   questionText: string;
-  scaleGloss: string;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
-  // A stacked bar shows the scale as bare numbers, so the renderer appends the endpoint
-  // gloss ("1 = … · 5 = …") to the DEFAULT subtitle. Prefill it here so the box holds the
-  // exact line that renders — a battery's gloss is taken from its first member's scale
-  // and usually needs rewording once several questions are merged into one battery.
-  const gloss = isStacked(chart.chart_type) ? scaleGloss : "";
-  const fallback = gloss ? `${questionText}   ${gloss}` : questionText;
+  // The question, and nothing else. The scale's endpoint wording ("1 = … · 5 =
+  // …") used to be prefilled here to match what the renderer appended; neither
+  // happens now — the subtitle is the author's line, and the scale's meaning
+  // belongs in the legend, where every point can be named.
+  const fallback = questionText;
   const shown = chart.elements?.subtitle !== false;
   return (
     <Field label="Subtitle">
@@ -1329,9 +1324,9 @@ function SubtitleField({
         Show a subtitle on this slide
       </label>
       <p className="text-xs text-muted-foreground">
-        The question line shown just above the chart. Defaults to the question text
-        {gloss ? " plus the scale legend" : ""}; edits are saved to this report only — they
-        don’t rename the question. Clear the box to restore the default.
+        The question line shown just above the chart. Defaults to the question text;
+        edits are saved to this report only — they don’t rename the question. Clear
+        the box to restore the default.
       </p>
     </Field>
   );

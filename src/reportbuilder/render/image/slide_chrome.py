@@ -89,19 +89,11 @@ def _theme_colours(ctx):
     return theme_colours(getattr(ctx, "style", None))
 
 
-from reportbuilder.stats.engine import scale_endpoint_gloss
-
 _FONT = "Liberation Sans"
 # One fixed title size for EVERY slide (chart + special) so titles never vary in
 # size between slides. (Shared by special_slide's heading.)
 TITLE_PT = 18
 _IN = Inches(1)
-
-_STACKED_BAR_TYPES = frozenset({"stacked_horizontal_bar", "stacked_vertical_bar"})
-
-
-# `scale_endpoint_gloss` lives in stats.engine so the questions API can offer the SAME
-# default text to the frontend's Subtitle box (the subtitle owns the whole line).
 
 # Statistic → Finnish methodology label (generic; no question-specific text)
 _STAT_FOOTER: dict[str, str] = {
@@ -847,17 +839,14 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         wants_subtitle = getattr(getattr(ctx.spec, "elements", None), "subtitle", True)
         secondary = (slide_description or (question if has_distinct_title else "")
                      ) if wants_subtitle else ""
-        # On a STACKED bar the scale sits in the legend as bare numbers; move the endpoint
-        # wording (1 = … · 7 = …) into the subtitle so the meaning isn't lost. (customer)
-        # Only as the DEFAULT: an authored slide_description owns the whole line, so the
-        # author can reword or drop a gloss that fits only one battery member (the levels
-        # come from the first member with a parseable scale). The frontend prefills its
-        # Subtitle box with this same default, so what you edit is what renders.
-        if (wants_subtitle and not slide_description
-                and getattr(ctx.spec, "chart_type", "") in _STACKED_BAR_TYPES):
-            gloss = scale_endpoint_gloss(ctx.series.categories)
-            if gloss:
-                secondary = f"{secondary}   {gloss}" if secondary else gloss
+        # The subtitle is the AUTHOR'S line and nothing is appended to it.
+        #
+        # A stacked bar's endpoint wording ("1 = … · 7 = …") used to be added
+        # here so a legend of bare numbers still read. Nothing is lost by
+        # stopping: a scale whose points carry their own text shows exactly that
+        # in the legend, a scale labelled only at its ends is captioned above the
+        # footer, and an author can now name every point in the label editor —
+        # which is where the meaning belongs. (Johan, 2026-09-05)
         # One fixed title size for every slide, from the template spec (the
         # house style is a template too, and is sized the same way).
         t_size = _spec_title_pt(ctx.style,

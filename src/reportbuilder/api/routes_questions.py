@@ -69,7 +69,7 @@ def _rs(body, key: str, default):
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.engine import (
     _partial_scale,
-    compute, scale_levels, battery_scale_levels, scale_endpoint_gloss, _wordcloud,
+    compute, scale_levels, battery_scale_levels, _wordcloud,
 )
 from reportbuilder.stats.series import Cell, SeriesResult
 from reportbuilder.store.datahive_client import DataHiveClient
@@ -571,24 +571,6 @@ def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
 
 
-def _scale_gloss(model: QuestionModel, q) -> str:
-    """The endpoint gloss a STACKED bar of this question appends to its subtitle
-    ("1 = En lainkaan houkuttelevana · 5 = Erittäin houkuttelevana"), or "".
-
-    The frontend prefills its Subtitle box with question text + this gloss so the
-    author edits the exact line that renders — a battery's levels come from the FIRST
-    member with a parseable scale, so the wording often needs rewording by hand.
-    Mirrors what the render layer would derive from the chart's categories."""
-    if q.kind == "battery":
-        levels = [lbl for _p, lbl in
-                  battery_scale_levels([model.variables[v] for v in q.variables])]
-    elif q.kind == "multi":
-        return ""
-    else:
-        levels = _category_labels(model, q)
-    return scale_endpoint_gloss(levels)
-
-
 def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
     """Fetch the material's raw bytes from the store and return the QuestionModel as produced
     directly by read_sav (all single questions, no auto-grouping). Used by the stateless grouping
@@ -747,9 +729,6 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             "missing_values": _missing_value_list(model, q.qid),
             "values": _value_list(model, q),
             "category_labels": _category_labels(model, q, _df_or_none()),
-            # Endpoint gloss a stacked bar appends to its subtitle by default ("" when
-            # the question has no such scale) — the Subtitle box prefills with it.
-            "scale_gloss": _scale_gloss(model, q),
             # Respondent-background question (age/gender/region/…) → floated to
             # the front of a new report (demographics-first convention).
             "is_demographic": _is_demographic(model, q),
@@ -804,7 +783,6 @@ def question_summary(
         "value_labels": _value_list(model, q),
         "missing_values": _missing_value_list(model, q.qid),
         "category_labels": _category_labels(model, q, df),
-        "scale_gloss": _scale_gloss(model, q),
         "chartable": chartable,
         "non_chartable_reason": reason,
         "respondent_total": int(len(df)),

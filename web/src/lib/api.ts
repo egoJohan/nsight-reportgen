@@ -55,7 +55,6 @@ export interface Question {
   category_labels: string[];
   // Endpoint gloss a stacked bar appends to its subtitle by default
   // ("1 = … · 5 = …"); "" when the question has no such rating scale.
-  scale_gloss?: string;
   // Respondent-background question (age/gender/region/…) — floated to the front
   // of a new report (demographics-first convention).
   is_demographic?: boolean;
@@ -122,7 +121,6 @@ export interface QuestionSummary {
   value_labels: ValueLabel[];
   missing_values: MissingValue[];
   category_labels: string[];
-  scale_gloss?: string;
   chartable: boolean;
   non_chartable_reason: string | null;
   respondent_total: number;

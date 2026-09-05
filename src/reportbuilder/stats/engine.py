@@ -1531,25 +1531,6 @@ def battery_scale_levels(vars_: list[Variable]) -> list[tuple[float, str]]:
     return [(p, level_label[p]) for p in sorted(level_label)]
 
 
-def scale_endpoint_gloss(categories) -> str:
-    """For a numeric rating scale whose levels read '1 - Täysin eri mieltä' … '7 - Täysin
-    samaa mieltä' (bare numbers in the middle), return the endpoint gloss
-    '1 = Täysin eri mieltä · 7 = Täysin samaa mieltä' — the wording that moves off the
-    (numbers-only) stacked-bar legend into the subtitle. Empty when the categories
-    aren't such a scale, or neither endpoint carries a description."""
-    cats = [str(c) for c in categories]
-    if len(cats) < 3:
-        return ""
-    parsed = []
-    for c in cats:
-        m = re.match(r"\s*(\d+)\s*[-–:.)]?\s*(.*)", c)
-        if not m:
-            return ""  # a non-numeric level → not a numeric scale
-        parsed.append((m.group(1), m.group(2).strip()))
-    ends = [f"{n} = {desc}" for n, desc in (parsed[0], parsed[-1]) if desc]
-    return " · ".join(ends)
-
-
 def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
     """Remove segments in which NOBODY answered this battery.
 
