@@ -36,6 +36,15 @@ export interface Question {
   chartable: boolean;
   // Human-readable reason when chartable === false (e.g. "Open-ended text answers").
   non_chartable_reason: string | null;
+  /** A computed measure — an index, a score — rather than a question the study
+   *  asked. It has no answer categories, so it is charted as a mean, and it is
+   *  kept out of the default browser list: a file can carry dozens and they
+   *  would bury the real questions. */
+  is_measure?: boolean;
+  offered_by_default?: boolean;
+  held_back_because?: string;
+  /** Where a slide on this question starts — "mean" for a measure. */
+  suggested_statistic?: string;
   suggested_chart_type: string;
   // Chart-type ids whose plugin suitability applies to this question.
   compatible_chart_types: string[];

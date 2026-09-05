@@ -184,11 +184,12 @@ class TestUnlabeledHelper:
         v = _var("Perusomistajat", "Perusomistajat")
         assert _is_unlabeled_helper("Perusomistajat", v) is True
 
-    def test_scale_aggregate_is_helper(self):
+    def test_scale_aggregate_is_a_measure_not_a_helper(self):
         """A derived RATING aggregate (Inhimilli: scale, label==name, no value
-        labels) is an analyst working column that just duplicates a battery's
-        statements → helper (excluded from the question browser, kept as a
-        variable)."""
+        labels) is a MEASURE: no answer categories to draw a distribution from,
+        but a mean that is a finding. Excluding these on the way in is what hid
+        a customer's indices, so the question browser holds them back instead —
+        the reader no longer drops them."""
         v = Variable(
             name="Inhimilli",
             label="Inhimilli",
@@ -196,7 +197,7 @@ class TestUnlabeledHelper:
             value_labels=(),
             missing_values=frozenset(),
         )
-        assert _is_unlabeled_helper("Inhimilli", v) is True
+        assert _is_unlabeled_helper("Inhimilli", v) is False
 
     def test_labelled_scale_var_is_not_helper(self):
         """A scale variable WITH a real descriptive label is a real question."""
@@ -573,15 +574,23 @@ def test_holidayclub_paradata_and_segments_excluded():
 
 
 @pytest.mark.integration
-def test_attendo_unlabeled_recodes_excluded_from_questions_kept_as_variables():
-    """Attendo: derived recodes — both RATING aggregates (Inhimilli, Luotettava:
-    scale, label==name) and unlabeled nominal flags (Kokemusta) — are excluded
-    from the question browser (they just duplicate the rating battery / are
-    working columns) but remain in the variables dict for use as classifying /
-    combo-secondary variables."""
+def test_attendo_unlabeled_flags_excluded_but_scale_measures_are_questions():
+    """Attendo's derived columns, split by what they are.
+
+    An unlabeled NOMINAL flag (Kokemusta) is a working column: its mean says
+    nothing, so it is not a question — it stays in the variables dict for use as
+    a classifying / combo-secondary variable.
+
+    A scale recode with no value labels (Inhimilli, Luotettava) is a MEASURE.
+    Excluding those is what hid a customer's six indices — "you cannot draw a
+    distribution from it, but it is excellent for mean charts" — so they are
+    questions now, held back from the default browser list rather than dropped
+    on the way in (see `_is_measure` in the questions API)."""
     _, model = _corpus_model("attendo")
     q_vars = {q.variables[0] for q in model.questions if q.kind == "single"}
 
+    assert "Kokemusta" not in q_vars, "an unlabeled nominal flag is not a question"
+    for nm in ("Inhimilli", "Luotettava"):
+        assert nm in q_vars, f"scale measure '{nm}' should be chartable as a mean"
     for nm in ("Inhimilli", "Luotettava", "Kokemusta"):
-        assert nm not in q_vars, f"derived recode '{nm}' must not be a question"
         assert nm in model.variables, f"'{nm}' must stay available as a variable"

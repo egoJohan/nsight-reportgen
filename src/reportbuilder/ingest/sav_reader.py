@@ -336,8 +336,16 @@ def _is_unlabeled_helper(name: str, var: "Variable") -> bool:
     they remain available as classifying / combo-secondary variables (nothing is
     lost). Free text (``measurement == "text"``) is untouched — those are real
     open-ended questions.
+
+    Neither is a continuous MEASURE. A scale-typed column with no value labels is
+    an index, a score, a weightless number a survey computed — "it can take a
+    huge number of values that mean nothing individually, so it has no value
+    labels; you cannot draw a distribution from it, but it is excellent for mean
+    charts" (the customer whose indices this used to hide). Its mean IS a
+    finding, so it is a question. An unlabelled CATEGORICAL flag is not: the mean
+    of a 0/1 working column says nothing.
     """
-    if var.value_labels or var.measurement == "text":
+    if var.value_labels or var.measurement in ("text", "scale"):
         return False
     return (var.label or "").strip() == name
 

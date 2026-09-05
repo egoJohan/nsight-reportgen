@@ -20,13 +20,19 @@ def roots(tmp_path, monkeypatch):
     profiles = tmp_path / "nsight-lo-profiles"
     templates = tmp_path / "nsight-preview-templates"
     ground = tmp_path / "nsight-preview-ground"
-    for d in (render, preview, profiles, templates, ground):
+    # The scratch root is redirected too. Left pointing at the real one, a sweep
+    # counted whatever ANY other test in the run had left there, so
+    # `total == 3` held or failed depending on which tests ran first — and
+    # adding a test elsewhere in the suite was enough to break this one.
+    scratch = tmp_path / "nsight-scratch"
+    for d in (render, preview, profiles, templates, ground, scratch):
         d.mkdir()
     monkeypatch.setattr(cleanup, "RENDER_ROOT", render)
     monkeypatch.setattr(cleanup, "PREVIEW_ROOT", preview)
     monkeypatch.setattr(cleanup, "PROFILE_ROOT", profiles)
     monkeypatch.setattr(cleanup, "TEMPLATE_ROOT", templates)
     monkeypatch.setattr(cleanup, "GROUND_ROOT", ground)
+    monkeypatch.setattr(cleanup, "SCRATCH_ROOT", scratch)
     return render, preview, profiles
 
 

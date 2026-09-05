@@ -382,7 +382,7 @@ export default function ReportWizard({
           toggleQuestionInDeck(
             d.charts,
             q.qid,
-            () => makeChart(q.qid, q.suggested_chart_type),
+            () => makeChart(q.qid, q.suggested_chart_type, q.suggested_statistic),
             (ref) => qRank.get(ref) ?? Number.POSITIVE_INFINITY
           )
         ),
@@ -414,7 +414,7 @@ export default function ReportWizard({
         );
         for (const q of questions) {
           if (present.has(q.qid)) continue;
-          const add = makeChart(q.qid, q.suggested_chart_type);
+          const add = makeChart(q.qid, q.suggested_chart_type, q.suggested_statistic);
           charts.splice(insertionIndex(charts, rank(q.qid), rank), 0, add);
           present.add(q.qid);
         }

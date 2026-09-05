@@ -138,6 +138,8 @@ export default function StepSelect({
   const [detailQid, setDetailQid] = useState<string | null>(null);
   const [specialInfoChart, setSpecialInfoChart] = useState<ChartSpec | null>(null);
   const [addSpecialOpen, setAddSpecialOpen] = useState(false);
+  // Computed measures start hidden; the link below the list reveals them.
+  const [showMeasures, setShowMeasures] = useState(false);
 
   // Every slide showing each question, with its index in the FULL chart list —
   // a question may hold a total-level slide AND the same result split by another
@@ -280,6 +282,16 @@ export default function StepSelect({
   }
 
   // Select all / Unselect all check/uncheck every question. Special slides stay.
+  // A measure the author has already put in the report is never hidden from
+  // them — the row has to be there to untick.
+  const heldBack = (questions ?? []).filter(
+    (q) => q.offered_by_default === false && !addedRefs.has(q.qid)
+  );
+  const shownQuestions = showMeasures
+    ? (questions ?? [])
+    : (questions ?? []).filter(
+        (q) => q.offered_by_default !== false || addedRefs.has(q.qid)
+      );
   const allChartable = (questions ?? []).filter((q) => q.chartable !== false);
   const addedQuestions = (questions ?? []).filter((q) => addedRefs.has(q.qid));
 
@@ -495,10 +507,26 @@ export default function StepSelect({
         </div>
       )}
 
+      {/* Computed MEASURES — indices, scores — are questions whose mean is a
+          finding, but a file can carry dozens of them (one study carries
+          thirteen rescaled recodes beside its six indices) and they would bury
+          the questions the study actually asked. Held back, said out loud, one
+          click away: the same bargain the classifying-variable picker makes. */}
+      {heldBack.length > 0 && !showMeasures && (
+        <button
+          type="button"
+          onClick={() => setShowMeasures(true)}
+          className="mb-1.5 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          {heldBack.length} computed {heldBack.length === 1 ? "measure" : "measures"}{" "}
+          (index or score, charted as a mean) — show {heldBack.length === 1 ? "it" : "them"}
+        </button>
+      )}
+
       {/* All questions — a checkbox each; checked = in the report. Search FADES the
           non-matching ones (they stay in place). Nothing is removed or reordered. */}
       <div className="space-y-1.5">
-        {(questions ?? []).map((q) => {
+        {shownQuestions.map((q) => {
           const isAdded = addedRefs.has(q.qid);
           const isChartable = q.chartable !== false;
           const justCreated = highlightQids.has(q.qid);

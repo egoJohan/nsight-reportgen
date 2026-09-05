@@ -609,6 +609,31 @@ def _question_measurement(model: QuestionModel, q) -> str:
     return var.measurement or "categorical"
 
 
+def _is_measure(model: QuestionModel, q) -> bool:
+    """A continuous MEASURE — an index, a score, a computed number.
+
+    Scale-typed with no value labels: "it can take a huge number of values that
+    mean nothing individually, so it has no value labels; you cannot draw a
+    distribution from it, but it is excellent for mean charts". Its mean is the
+    finding, so it IS a question — but not one the study asked, and a file can
+    carry dozens of them, so the browser is told which ones they are.
+
+    Shape, never naming: `index_…` and `rcd_…` are one customer's conventions
+    and the next export will not share them.
+    """
+    if q.kind in ("multi", "battery", "comparison"):
+        return False
+    var = model.variables.get(q.variables[0]) if q.variables else None
+    return bool(var) and var.measurement == "scale" and not var.value_labels
+
+
+def _suggested_statistic(model: QuestionModel, q) -> str:
+    """Where a slide on this question starts. A measure's distribution is one
+    bar per distinct value — an empty slide, in effect — while its mean is what
+    it is for."""
+    return "mean" if _is_measure(model, q) else "pct"
+
+
 def _summary_spec(qid: str) -> ChartSpec:
     """Minimal spec to compute a question's overall distribution."""
     return ChartSpec(
@@ -690,6 +715,16 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             "text": q.text,
             "chartable": chartable,
             "non_chartable_reason": reason,
+            # A computed measure rather than a question the study asked. Charted
+            # as a mean; kept out of the default browser list because a file can
+            # carry dozens (this customer's carries thirteen rescaled recodes
+            # beside its six indices) and they would bury the real questions.
+            "is_measure": _is_measure(model, q),
+            "offered_by_default": not _is_measure(model, q),
+            "held_back_because": ("A computed measure (no answer categories) — "
+                                  "charted as a mean"
+                                  if _is_measure(model, q) else ""),
+            "suggested_statistic": _suggested_statistic(model, q),
             "suggested_chart_type": suggested,
             "compatible_chart_types": compatible,
             "missing_values": _missing_value_list(model, q.qid),

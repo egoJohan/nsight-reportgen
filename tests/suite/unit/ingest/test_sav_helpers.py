@@ -269,10 +269,14 @@ def test_unlabeled_helper_true_when_label_equals_name_and_no_labels():
     assert _is_unlabeled_helper("Inhimilli", var) is True
 
 
-def test_unlabeled_helper_true_for_scale_aggregate():
-    # Scale recode aggregates (varying data) are still unlabeled helpers.
+def test_unlabeled_helper_false_for_a_scale_measure():
+    """A scale column with no value labels is a MEASURE — an index, a score, a
+    recode — and its mean is a finding, so it is a question rather than a
+    helper. It used to be excluded here, which is what hid a customer's six
+    indices; the browser holds measures back instead of the reader dropping
+    them (see `_is_measure` in the questions API)."""
     var = _var("MahdHyvaAr", "MahdHyvaAr", measurement="scale")
-    assert _is_unlabeled_helper("MahdHyvaAr", var) is True
+    assert _is_unlabeled_helper("MahdHyvaAr", var) is False
 
 
 def test_unlabeled_helper_false_when_labeled():

@@ -459,13 +459,19 @@ export function defaultRowSummaryLabel(fn?: string): string {
  */
 export function makeChart(
   questionRef: string,
-  suggestedChartType: string
+  suggestedChartType: string,
+  /** Where this question's slide starts. A continuous measure — an index, a
+   *  score — has no answer categories, so a distribution of it is an empty
+   *  slide while its mean is the finding. The backend says which is which
+   *  (`suggested_statistic`); percentages remain the default for everything
+   *  else. */
+  suggestedStatistic: ChartSpec["statistic"] | string = "pct"
 ): ChartSpec {
   const chartType = suggestedChartType || "vertical_bar";
   return {
     question_ref: questionRef,
     chart_type: chartType,
-    statistic: "pct",
+    statistic: (suggestedStatistic || "pct") as ChartSpec["statistic"],
     classifying_var: null,
     number_format: { ...DEFAULT_NUMBER_FORMAT },
     // Survey order, stacked bars included: "always", per Johan. A battery used
