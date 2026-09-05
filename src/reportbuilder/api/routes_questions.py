@@ -68,6 +68,7 @@ def _rs(body, key: str, default):
                                dict(getattr(body, "options", None) or {}), key, default)
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.engine import (
+    _partial_scale,
     compute, scale_levels, battery_scale_levels, scale_endpoint_gloss, _wordcloud,
 )
 from reportbuilder.stats.series import Cell, SeriesResult
@@ -545,10 +546,26 @@ def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
 
     Single: non-missing value labels of the primary variable — or, for a LABEL-LESS
     string categorical, its distinct values. Multi: member-variable labels.
+
+    A scale labelled only at its ENDPOINTS is the exception, and it is the one
+    that sent an author to the subtitle: 1..7 with words on 1 and 7 is charted as
+    seven NUMBERED categories, the wording moved to a caption. Listing the value
+    labels there offered two rows for a legend of seven — the middle five could
+    not be named at all, and a short text typed against "Täysin eri mieltä" was
+    stored under a name no category has, so nothing changed on the slide.
+
+    Asked of the engine's own `_partial_scale`, not re-derived here: the editor
+    has to offer what the chart draws, and two implementations of "what are the
+    categories" would answer differently the day either moved.
     """
     if q.kind in ("multi", "battery"):
         return [model.variables[v].label for v in q.variables]
     var = model.variables[q.variables[0]]
+    if df is not None and var.name in getattr(df, "columns", []):
+        entries, _caption = _partial_scale(var, df, set(var.missing_values))
+        if entries:
+            return [display for _code, display, _order
+                    in sorted(entries, key=lambda e: e[2])]
     if not var.value_labels:
         return list(_string_cats(var, df))
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
