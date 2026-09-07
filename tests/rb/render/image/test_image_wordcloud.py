@@ -6,6 +6,8 @@ non-empty, has a cream-ish background, and that the layout is deterministic
 """
 from __future__ import annotations
 
+import io
+
 import pytest
 from PIL import Image
 from pptx import Presentation
@@ -14,7 +16,6 @@ from pptx.util import Inches
 
 from reportbuilder.model.report import ChartSpec, ElementToggles, NumberFormat, SortSpec
 from reportbuilder.render.base import RenderContext, Slot, StyleSpec
-from reportbuilder.render.house_style import CREAM
 from reportbuilder.render.image import IMAGE_BUILDERS
 from reportbuilder.render.image.wordcloud import (
     build_image_wordcloud,
@@ -80,48 +81,30 @@ def test_resolve_font_path_returns_existing_ttf():
     assert fp.lower().endswith(".ttf")
 
 
-def test_wordcloud_png_is_cream_background(tmp_path):
-    from reportbuilder.render.image.wordcloud import _TEAL_CLOUD
-    from wordcloud import WordCloud
-
-    sr = _series()
-    freqs = {c: float(sr.cell(c, "Total").count) for c in sr.categories}
-    ranked = sorted(freqs, key=lambda w: -freqs[w])
-    rank = {w: i for i, w in enumerate(ranked)}
-    n = len(ranked)
-
-    def cf(word, **kw):
-        r = rank.get(word, 0)
-        idx = 0 if n <= 1 else int(round(r / (n - 1) * (len(_TEAL_CLOUD) - 1)))
-        return _TEAL_CLOUD[idx]
-
-    wc = WordCloud(background_color=CREAM, color_func=cf,
-                   font_path=_resolve_font_path(), random_state=42,
-                   prefer_horizontal=0.9, max_words=len(freqs),
-                   width=800, height=500)
-    wc.generate_from_frequencies(freqs)
-    out = tmp_path / "wc.png"
-    wc.to_file(str(out))
-    assert out.stat().st_size > 0
-    with Image.open(out) as im:
-        im = im.convert("RGB")
-        # A corner pixel should be the cream background colour (#F7F3EC).
-        assert im.getpixel((1, 1)) == (0xF7, 0xF3, 0xEC)
+def _placed_png(slide) -> bytes:
+    pics = [sh for sh in slide.shapes if sh.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert len(pics) == 1
+    return pics[0].image.blob
 
 
-def test_wordcloud_layout_is_deterministic(tmp_path):
-    from reportbuilder.render.image.wordcloud import _TEAL_CLOUD
-    from wordcloud import WordCloud
+def test_the_cloud_lets_the_slide_show_through():
+    """It used to paint cream into its own raster. `transparent=True` on the
+    figure never covered that — an imshow'd array is not a figure patch — so on
+    any deck that is not cream the cloud sat in a pale box. Colour and
+    transparency in depth: tests/suite/unit/render/test_wordcloud_colours.py."""
+    _prs, slide, ctx = _ctx()
+    build_image_wordcloud(ctx)
+    with Image.open(io.BytesIO(_placed_png(slide))) as im:
+        im = im.convert("RGBA")
+        assert im.getpixel((0, 0))[3] == 0
 
-    sr = _series()
-    freqs = {c: float(sr.cell(c, "Total").count) for c in sr.categories}
 
-    def build():
-        wc = WordCloud(background_color=CREAM, color_func=lambda *a, **k: _TEAL_CLOUD[0],
-                       font_path=_resolve_font_path(), random_state=42,
-                       prefer_horizontal=0.9, max_words=len(freqs),
-                       width=800, height=500)
-        wc.generate_from_frequencies(freqs)
-        return wc.to_array().tobytes()
-
-    assert build() == build()
+def test_wordcloud_layout_is_deterministic():
+    """The BUILDER, twice — not a hand-rolled WordCloud with the same seed. The
+    previous version of this test built its own cloud and compared it to itself,
+    which held whatever the builder did."""
+    _p1, slide_a, ctx_a = _ctx()
+    build_image_wordcloud(ctx_a)
+    _p2, slide_b, ctx_b = _ctx()
+    build_image_wordcloud(ctx_b)
+    assert _placed_png(slide_a) == _placed_png(slide_b)

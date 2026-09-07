@@ -7,9 +7,11 @@ Word frequencies come from the SeriesResult built by ``stats.engine._wordcloud``
 (categories = words, each cell's ``count`` = the word frequency).
 
 House style:
-- Cream figure + cloud background (CREAM).
-- Teal-ramp word colours: the most frequent words render in the darkest teal,
-  rarer words in lighter tints (``color_func`` keyed on each word's frequency rank).
+- TRANSPARENT: the slide's own background shows through, like every other chart.
+- Word colours ramped from the TEMPLATE's accent — darkest for the most frequent
+  word, lighter tints down the tail (``color_func`` keyed on frequency rank).
+  House teal is what a template that states no colour produces, not a fixed
+  decision imposed on one that does.
 - A usable TTF font: the registered house font (Liberation Sans) when locatable,
   else matplotlib's bundled DejaVuSans.ttf.
 - ``random_state=42`` so the layout is deterministic across runs.
@@ -30,20 +32,25 @@ from matplotlib import font_manager as _fm  # noqa: E402
 from wordcloud import WordCloud  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
-    new_figure, place_picture, render_png, chart_background,
+    new_figure, place_picture, render_png, chart_accent,
 )
-from reportbuilder.render.house_style import register_fonts, _LIBERATION_PATHS
+from reportbuilder.render.house_style import (
+    register_fonts, ramp_from, _LIBERATION_PATHS,
+)
 
-# Teal ramp ordered darkest → lightest. The top-frequency word gets the darkest
-# (most prominent) teal; the long tail fades to lighter tints.
-_TEAL_CLOUD: list[str] = [
-    "#13615E",   # darkest — highest frequency
-    "#235F5B",
-    "#3E938C",
-    "#5E9C9A",
-    "#7DB8A6",
-    "#9CC6C4",
-]
+#: How many tints the cloud ramps through, darkest (most frequent) to lightest.
+_CLOUD_STEPS = 6
+
+
+def _cloud_ramp(accent: str) -> list[str]:
+    """Darkest → lightest tints of the deck's own colour.
+
+    `ramp_from` is the same construction every other chart's series ramp uses —
+    the accent blended toward white — so a word cloud belongs to the same deck
+    as the bars beside it. It runs light→dark, and prominence reads the other
+    way round here: the most frequent word wants the strongest colour.
+    """
+    return list(reversed(ramp_from(accent, steps=_CLOUD_STEPS)))
 
 
 def _resolve_font_path() -> str:
@@ -82,10 +89,12 @@ def build_image_wordcloud(ctx) -> None:
     rank = {w: i for i, w in enumerate(ranked)}
     n = len(ranked)
 
+    ramp = _cloud_ramp(chart_accent(ctx))
+
     def _color_func(word, *args, **kwargs):  # noqa: ANN001
         r = rank.get(word, 0)
-        idx = 0 if n <= 1 else int(round(r / (n - 1) * (len(_TEAL_CLOUD) - 1)))
-        return _TEAL_CLOUD[idx]
+        idx = 0 if n <= 1 else int(round(r / (n - 1) * (len(ramp) - 1)))
+        return ramp[idx]
 
     # Pixel canvas matched to the slot aspect ratio so words fill the slot without
     # being stretched when placed.
@@ -93,15 +102,14 @@ def build_image_wordcloud(ctx) -> None:
     width_px = 1600
     height_px = max(400, int(round(width_px / aspect)))
 
-    # The template's own background (house cream when none applies) — baked
-    # straight into the cloud's pixel raster by the wordcloud library itself,
-    # which is NOT covered by render_png's transparent=True save (that only
-    # blanks the matplotlib figure/axes patches, not an imshow'd array), so
-    # this is the one builder where painting the real background is not
-    # optional cosmetics: without it a cream rectangle would sit under every
-    # word on a dark slide regardless of what the figure/axes are set to.
+    # No background at all. `render_png` saves with transparent=True, but that
+    # blanks the matplotlib figure/axes patches and NOT an imshow'd array — so a
+    # colour painted here would survive as a rectangle under every word,
+    # whatever the slide beneath it looks like. RGBA + background_color=None is
+    # what makes `to_array` carry an alpha channel for the gaps to be gaps.
     wc = WordCloud(
-        background_color=chart_background(ctx),
+        mode="RGBA",
+        background_color=None,
         color_func=_color_func,
         font_path=_resolve_font_path(),
         random_state=42,            # deterministic layout
