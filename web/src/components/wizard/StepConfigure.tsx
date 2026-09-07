@@ -18,6 +18,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -176,23 +181,96 @@ function ChartPreview({
 function Field({
   label,
   required,
+  hint,
+  action,
   children,
 }: {
   label: string;
   required?: boolean;
-  // Accepted for call-site compatibility but no longer rendered — the orange
-  // per-field "tips" were removed from the config section.
-  hint?: string;
+  /** What this control does. Shown on hover behind an info icon beside the
+   *  label, never as a paragraph under the control: a settings panel of twenty
+   *  fields, each with two lines of prose under it, is a wall to scroll past
+   *  rather than a form to fill in. The text is still one keystroke away for
+   *  anyone who wants it. (Johan, 2026-09-07) */
+  hint?: React.ReactNode;
+  /** A control that belongs to the setting rather than to its value — the
+   *  "Show" tick. It sits at the RIGHT END of the label row, so the row reads
+   *  "what this is … whether it is drawn" and the field below it is only ever
+   *  the value. (Johan, 2026-09-07) */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs font-medium text-muted-foreground">
-        {label}
-        {required && <span className="ml-1 text-destructive">*</span>}
-      </Label>
+      <div className="flex min-h-5 items-center justify-between gap-2">
+        <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+          {label}
+          {required && <span className="ml-0.5 text-destructive">*</span>}
+          {hint ? <FieldHint>{hint}</FieldHint> : null}
+        </Label>
+        {action}
+      </div>
       {children}
     </div>
+  );
+}
+
+/** The "Show" tick in a field's label row. */
+function ShowToggle({
+  checked,
+  onChange,
+  label = "Show",
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+}) {
+  return (
+    <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
+/** The info icon beside a field's label, and the help behind it.
+ *
+ *  A button, not a bare icon: hover alone reaches nobody on a touch screen and
+ *  nobody using a keyboard, and the tooltip primitive opens on focus and tap as
+ *  well as hover once it has something focusable to hang on.
+ */
+function FieldHint({ children }: { children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            // Not a form control: inside a <label>, a plain button would still
+            // forward its click to the input the label names.
+            onClick={(e) => e.preventDefault()}
+            aria-label="What this setting does"
+            className="inline-flex text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+          />
+        }
+      >
+        <InfoIcon className="size-3.5" />
+      </TooltipTrigger>
+      {/* The popup is an `inline-flex … items-center gap-1.5` row by default —
+          built for a one-line label. Prose with a <code> or two in it becomes
+          several flex items and lays itself out in narrow columns, so this one
+          is a block, and the help is wrapped so the popup holds exactly one
+          child whatever the hint is made of. */}
+      <TooltipContent side="top" className="block max-w-xs">
+        <span className="block text-xs font-normal leading-snug">
+          {children}
+        </span>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -502,7 +580,7 @@ function ClassifyingVarWidget({
     <Field
       label={field.label}
       required={required}
-      hint={reason ?? (missing ? "This chart needs a dimension to split by" : undefined)}
+      hint={field.help}
     >
       <Select
         items={items}
@@ -583,8 +661,12 @@ function ClassifyingVarWidget({
           ⇄ Swap — make the other variable the primary (outer) grouping
         </button>
       )}
-      {(reason ?? field.help) && (
-        <p className="text-xs leading-snug text-muted-foreground">{reason ?? field.help}</p>
+      {/* The REASON stays in the panel: it says why the control above it is
+          disabled or empty, which is not help text somebody goes looking for —
+          it is the answer to "why can I not use this". The field's own help
+          moved to the info icon in the label row. */}
+      {reason && (
+        <p className="text-xs leading-snug text-muted-foreground">{reason}</p>
       )}
     </Field>
   );
@@ -691,7 +773,10 @@ function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
       </Field>
 
       {floorDefault !== undefined && (
-        <Field label="Hide values below">
+        <Field
+          label="Hide values below"
+          hint={`A slice narrower than this is not labelled at all. Above it, a number too wide for its own slice is drawn beside the chart on a line back to it, rather than left to land on its neighbour. Leave blank for the default (${floorDefault} %); 0 labels every value.`}
+        >
           <div className="flex items-center gap-2">
             <Input
               type="number"
@@ -713,12 +798,6 @@ function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
             />
             <span className="text-sm text-muted-foreground">%</span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            A slice narrower than this is not labelled at all. Above it, a number
-            too wide for its own slice is drawn beside the chart on a line back to
-            it, rather than left to land on its neighbour. Leave blank for the
-            default ({floorDefault} %); 0 labels every value.
-          </p>
         </Field>
       )}
 
@@ -1235,7 +1314,10 @@ function SlideTitleField({
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
   return (
-    <Field label="Slide title">
+    <Field
+      label="Slide title"
+      hint="The headline shown on the slide. Leave blank to use the question text; press Enter to break it onto up to three lines. The preview updates live."
+    >
       <Textarea
         value={chart.slide_title ?? ""}
         placeholder={questionText}
@@ -1247,10 +1329,6 @@ function SlideTitleField({
           onChange({ slide_title: e.target.value, slide_title_key: null })
         }
       />
-      <p className="text-xs text-muted-foreground">
-        The headline shown on the slide. Leave blank to use the question text; press
-        Enter to break it onto up to three lines. The preview updates live.
-      </p>
     </Field>
   );
 }
@@ -1316,7 +1394,21 @@ function SubtitleField({
   const fallback = questionText;
   const shown = chart.elements?.subtitle !== false;
   return (
-    <Field label="Subtitle">
+    <Field
+      label="Subtitle"
+      hint="The question line shown just above the chart. Defaults to the question text; edits are saved to this report only — they don’t rename the question. Clear the box to restore the default."
+      /* Emptying the box means "use the question", which is the right default
+         and no way to say "none" — so "none" is a tick, not a magic value in a
+         text box. */
+      action={
+        <ShowToggle
+          checked={shown}
+          onChange={(v) =>
+            onChange({ elements: { ...chart.elements, subtitle: v } })
+          }
+        />
+      }
+    >
       <Textarea
         value={chart.slide_description ?? fallback}
         rows={2}
@@ -1324,24 +1416,6 @@ function SubtitleField({
         className="resize-y disabled:opacity-50"
         onChange={(e) => onChange({ slide_description: e.target.value || null })}
       />
-      {/* Emptying the box means "use the question", which is the right default
-          and no way to say "none" — so "none" is a switch, not a magic value in
-          a text box. */}
-      <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={shown}
-          onChange={(e) =>
-            onChange({ elements: { ...chart.elements, subtitle: e.target.checked } })
-          }
-        />
-        Show a subtitle on this slide
-      </label>
-      <p className="text-xs text-muted-foreground">
-        The question line shown just above the chart. Defaults to the question text;
-        edits are saved to this report only — they don’t rename the question. Clear
-        the box to restore the default.
-      </p>
     </Field>
   );
 }
@@ -1354,17 +1428,32 @@ function FooterNoteField({
   chart: ChartSpec;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
+  const shown = chart.elements?.n !== false;
   return (
-    <Field label="Footer / N notation">
+    <Field
+      label="Footer / N notation"
+      hint={
+        <>
+          The methodology line at the bottom-left of the slide.{" "}
+          <code>{"{n}"}</code> = the respondent count, <code>{"{stat}"}</code> ={" "}
+          the statistic label — e.g. <code>{"{stat} · n = {n}"}</code> → “Osuus
+          vastaajista (%) · n = 950”. Untick to draw no footer at all; a slide
+          that left groups out still discloses that.
+        </>
+      }
+      action={
+        <ShowToggle
+          checked={shown}
+          onChange={(v) => onChange({ elements: { ...chart.elements, n: v } })}
+        />
+      }
+    >
       <Input
         value={chart.footer_note ?? "N = {n}"}
+        disabled={!shown}
+        className="disabled:opacity-50"
         onChange={(e) => onChange({ footer_note: e.target.value || null })}
       />
-      <p className="text-xs text-muted-foreground">
-        The methodology line at the bottom-left of the slide. <code>{"{n}"}</code> = the
-        respondent count, <code>{"{stat}"}</code> = the statistic label — e.g.{" "}
-        <code>{"{stat} · n = {n}"}</code> → “Osuus vastaajista (%) · n = 950”.
-      </p>
     </Field>
   );
 }
@@ -1404,8 +1493,12 @@ function NotAnsweredPicker({
   return (
     <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs font-medium text-muted-foreground">
+        <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
           "Not answered" values
+          <FieldHint>
+            Choose which answers count as “Not answered”. Defaults to the values
+            flagged missing in the data.
+          </FieldHint>
         </Label>
         {!usingDetected && (
           <Button
@@ -1438,10 +1531,6 @@ function NotAnsweredPicker({
           </label>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Choose which answers count as "Not answered". Defaults to the values
-        flagged missing in the data.
-      </p>
     </div>
   );
 }
@@ -1609,8 +1698,13 @@ function CategoryLabelEditor({
   return (
     <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs font-medium text-muted-foreground">
+        <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
           Category labels
+          <FieldHint>
+            The label shown in the chart for each category — edit to shorten, or
+            let AI shorten them all. Restoring the full label removes the
+            override.
+          </FieldHint>
         </Label>
         <Button
           variant="outline"
@@ -1637,10 +1731,6 @@ function CategoryLabelEditor({
           />
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        The label shown in the chart for each category — edit to shorten, or let AI shorten
-        them all. Restoring the full label removes the override.
-      </p>
     </div>
   );
 }

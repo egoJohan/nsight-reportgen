@@ -105,6 +105,15 @@ _STAT_FOOTER: dict[str, str] = {
 }
 
 
+def _joined(line: str, addition: str) -> str:
+    """Append a footer clause, without a leading separator on an empty line.
+
+    The methodology text can be switched off (`elements.n`), and the disclosures
+    that ride the same line cannot — so the line may well start with one.
+    """
+    return f"{line}   ·   {addition}" if line else addition
+
+
 def _slide_dims(slide) -> tuple[int, int]:
     """Return (slide_width_emu, slide_height_emu) from the slide's parent presentation."""
     try:
@@ -982,10 +991,18 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     #     spec.footer_note; "{n}" expands to the base and "{stat}" to the statistic label
     #     (e.g. "{stat} · n = {n}" restores the verbose form), so "N = {n}" keeps the
     #     count live.
+    #     `elements.n` off draws NO methodology line — no N, and no authored
+    #     footer_note either, since the note is that line's template. The
+    #     disclosures below are appended regardless: they are not decoration,
+    #     and an author hiding the base does not thereby get to stop saying
+    #     which groups the slide left out or was drawn on. (Johan, 2026-09-07)
+    wants_footer = getattr(getattr(ctx.spec, "elements", None), "n", True)
     base_n = ctx.series.base_n.get("Total")
     stat_label = _STAT_FOOTER.get(ctx.series.statistic, ctx.series.statistic)
     override = (getattr(ctx.spec, "footer_note", None) or "").strip()
-    if override:
+    if not wants_footer:
+        footer_text = ""
+    elif override:
         footer_text = override.replace("{n}", str(base_n if base_n is not None else "")) \
                               .replace("{stat}", stat_label)
     elif base_n is not None:
@@ -1003,7 +1020,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     if getattr(ctx.spec, "classifying_var", None):
         omission = _omission_clause(ctx).removeprefix(" · ")
         if omission:
-            footer_text = f"{footer_text}   ·   {omission}"
+            footer_text = _joined(footer_text, omission)
     # A slide computed on SOME of the classifier's groups names them on the same
     # line, for the same reason: N counts those respondents and nobody else, and a
     # reader who is not told reads the slide as the whole study. The groups are
@@ -1019,7 +1036,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # names from the old variable and that is not an exotic path.
     picked = tuple(getattr(ctx.series, "applied_filter", ()) or ())
     if picked:
-        footer_text = f"{footer_text}   ·   {', '.join(picked)}"
+        footer_text = _joined(footer_text, ", ".join(picked))
     # Left margin follows the chart on a templated or harvested slide: those
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.
