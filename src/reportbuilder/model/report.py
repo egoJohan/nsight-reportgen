@@ -7,9 +7,21 @@ from typing import Any
 
 @dataclass(frozen=True)
 class SortSpec:
-    basis: str                                  # "data_order"|"pct"|"topbox_sum"|"top3_sum"|"bottom2_sum"|"bottom3_sum"|"mean"|"count" (REQ-S-01)
+    basis: str                                  # "data_order"|"manual"|"pct"|"topbox_sum"|"top3_sum"|"bottom2_sum"|"bottom3_sum"|"mean"|"count" (REQ-S-01)
     topbox_codes: tuple[float, ...] = ()        # for "topbox_sum" (REQ-S-02)
     descending: bool = True
+    #: The order the author dragged the legend items into, as FULL labels.
+    #:
+    #: Full rather than displayed, because it is an identity: the same key the
+    #: label overrides use, so shortening a category does not move it. Names the
+    #: data no longer has are ignored; categories this list does not mention are
+    #: drawn behind the ones it does, in their own data order — a re-imported
+    #: dataset with a new option must not lose it.
+    #:
+    #: Read only when `basis` is "manual". Dragging sets both, so the Sort
+    #: control always says why the chart is in the order it is in, and going
+    #: back to "Percentage" leaves the dragged list intact for later.
+    manual_order: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -282,6 +294,7 @@ def report_from_json(data: dict | str) -> Report:
                 basis=so["basis"],
                 topbox_codes=tuple(so.get("topbox_codes", ())),
                 descending=so.get("descending", True),
+                manual_order=tuple(so.get("manual_order", ()) or ()),
             ),
             template_slot=c["template_slot"],
             elements=ElementToggles(**el),

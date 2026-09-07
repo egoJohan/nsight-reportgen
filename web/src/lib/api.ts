@@ -53,6 +53,11 @@ export interface Question {
   values: ValueLabel[];
   // Base category label strings, in render order — the label-editor's list.
   category_labels: string[];
+  /** These categories are an endpoint-labelled scale: drawn in scale order on
+   *  every chart type, so the frequency sort bases cannot move them. */
+  fixed_category_order?: boolean;
+  /** An ordinary rating scale — order is fixed only on a stacked bar. */
+  rating_scale?: boolean;
   // Endpoint gloss a stacked bar appends to its subtitle by default
   // ("1 = … · 5 = …"); "" when the question has no such rating scale.
   // Respondent-background question (age/gender/region/…) — floated to the front
@@ -121,6 +126,11 @@ export interface QuestionSummary {
   value_labels: ValueLabel[];
   missing_values: MissingValue[];
   category_labels: string[];
+  /** These categories are an endpoint-labelled scale: drawn in scale order on
+   *  every chart type, so the frequency sort bases cannot move them. */
+  fixed_category_order?: boolean;
+  /** An ordinary rating scale — order is fixed only on a stacked bar. */
+  rating_scale?: boolean;
   chartable: boolean;
   non_chartable_reason: string | null;
   respondent_total: number;
@@ -156,9 +166,16 @@ export interface NumberFormat {
 export interface SortSpec {
   basis:
     | "data_order" | "pct" | "topbox_sum" | "top3_sum"
-    | "bottom2_sum" | "bottom3_sum" | "mean" | "count";
+    | "bottom2_sum" | "bottom3_sum" | "mean" | "count"
+    /** Set by dragging the Category labels rows, never chosen from the list. */
+    | "manual";
   topbox_codes: number[];
   descending: boolean;
+  /** The order the author dragged the categories into, as FULL labels — the
+   *  same key the label overrides use, so renaming one does not move it. Read
+   *  only when `basis` is "manual"; kept when it is not, so switching back to
+   *  "Manual (dragged)" restores the arrangement. */
+  manual_order: string[];
 }
 
 export interface ChartElements {

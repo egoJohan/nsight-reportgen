@@ -17,7 +17,7 @@ from reportbuilder.stats.base_rules import single_base, multi_base, segment_base
 from reportbuilder.stats.percent_base import resolve_percent_base, resolve_show_total
 from reportbuilder.stats.registry import statistic as get_statistic
 from reportbuilder.stats.series import Cell, SeriesResult
-from reportbuilder.stats.sorting import sort_categories
+from reportbuilder.stats.sorting import apply_manual_order, sort_categories
 from reportbuilder.stats.statistics import pct, count_value, summary_value, largest_remainder
 # Import statistics module to trigger built-in registrations
 import reportbuilder.stats.statistics  # noqa: F401
@@ -896,6 +896,11 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                                      "mean": 0.0, "data_index": data_index,
                                      "topbox": total_cell.pct}))
 
+    # The author's dragged order, keyed on the label they dragged — the FULL one,
+    # before `overrides` shortened it for the chart. Applied before the zero-row
+    # drop so a hidden category does not leave a hole in the ranking.
+    rows = apply_manual_order(rows, [labels.get(r[1], r[0]) for r in rows], spec.sort)
+
     # Hide categories whose DISPLAYED value rounds to 0 across ALL segments. (Task G.4)
     if not show_empty:
         rows = _drop_displayed_zero_rows(
@@ -1148,6 +1153,7 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
         cell = cells[(display, "Total")]
         rows.append((display, float(idx), {"pct": cell.pct, "count": cell.count,
                                            "mean": 0.0, "data_index": idx, "topbox": cell.pct}))
+    rows = apply_manual_order(rows, [v.label for v in vars_], spec.sort)
 
     # Hide members whose DISPLAYED value rounds to 0 when show_empty is False. (Task G.4)
     if not show_empty:
@@ -1590,6 +1596,7 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
         rows.append((display, float(idx),
                      {"pct": key, "count": tot.count, "mean": key,
                       "data_index": idx, "topbox": key}))
+    rows = apply_manual_order(rows, [v.label for v in vars_], spec.sort)
 
     for seg, mask in segs.items():
         base_by_seg[seg] = int((answered_any & mask).sum())
@@ -1903,6 +1910,23 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
             bars = [b for s in order for b in by_stmt[s]]
         else:
             bars = sorted(bars, key=_topbox, reverse=spec.sort.descending)
+
+    # A dragged order names the STATEMENTS — that is what the label editor lists
+    # for a battery. It reorders the bars and leaves the stack alone: the scale
+    # segments are a scale, and "Top 2" is only checkable by eye while the summed
+    # levels sit next to each other. (Johan, 2026-09-07)
+    if spec.sort.basis == "manual" and spec.sort.manual_order:
+        stmt_of = {b: segment_primary.get(b, b) for b in bars}
+        full_of = {overrides.get(v.label, v.label): v.label for v in vars_}
+        rank = {label: i for i, label in enumerate(spec.sort.manual_order)}
+
+        def _placed(i_bar):
+            i, bar = i_bar
+            full = full_of.get(stmt_of[bar], stmt_of[bar])
+            return (rank.get(full, len(rank)), i)
+
+        bars = [b for _k, b in sorted(((_placed((i, b)), b)
+                                       for i, b in enumerate(bars)))]
 
     base_n = {"Total": int(answered_any.sum()), **base_by_bar}
     return SeriesResult(

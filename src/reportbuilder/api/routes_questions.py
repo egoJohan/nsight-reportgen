@@ -69,6 +69,7 @@ def _rs(body, key: str, default):
 from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.engine import (
     _partial_scale,
+    _rating_scale,
     compute, scale_levels, battery_scale_levels, _wordcloud,
 )
 from reportbuilder.stats.series import Cell, SeriesResult
@@ -571,6 +572,42 @@ def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
 
 
+def _is_partial_scale(model: QuestionModel, q, df=None) -> bool:
+    """A scale labelled only at its ENDPOINTS — 1..7 with words on 1 and 7.
+
+    Drawn as numbered categories with the wording in a caption, and always in
+    scale order: `_single` swaps in "data_order" for it on EVERY chart type, so
+    the frequency bases (Percentage, Mean, Count) change nothing.
+    """
+    if q.kind != "single" or not q.variables or df is None:
+        return False
+    var = model.variables.get(q.variables[0])
+    if var is None or var.name not in getattr(df, "columns", []):
+        return False
+    entries, _caption = _partial_scale(var, df, set(var.missing_values))
+    return bool(entries)
+
+
+def _is_rating_scale(model: QuestionModel, q) -> bool:
+    """An ordinary rating scale — most labels carry a leading scale point.
+
+    Order is fixed only where a size sort would actually break it: on a STACKED
+    bar, whose row-summary column ("Top 2", net) is checkable by eye only while
+    the summed levels sit next to each other. The frontend combines this with
+    the chart type, exactly as `_single` does.
+    """
+    if q.kind != "single" or not q.variables:
+        return False
+    var = model.variables.get(q.variables[0])
+    if var is None:
+        return False
+    eff = set(var.missing_values)
+    labels = {vl.value: vl.label for vl in var.value_labels if vl.value not in eff}
+    if not labels:
+        return False
+    return len(_rating_scale(var)) >= max(3, len(labels) - 1)
+
+
 def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
     """Fetch the material's raw bytes from the store and return the QuestionModel as produced
     directly by read_sav (all single questions, no auto-grouping). Used by the stateless grouping
@@ -729,6 +766,11 @@ def _questions_payload(model: QuestionModel, material_id: str, client) -> list[d
             "missing_values": _missing_value_list(model, q.qid),
             "values": _value_list(model, q),
             "category_labels": _category_labels(model, q, _df_or_none()),
+            # Whether the frequency sort bases can move these categories at
+            # all — the editor drops the ones that cannot. Two rules, because
+            # they have different reach: see the helpers.
+            "fixed_category_order": _is_partial_scale(model, q, _df_or_none()),
+            "rating_scale": _is_rating_scale(model, q),
             # Respondent-background question (age/gender/region/…) → floated to
             # the front of a new report (demographics-first convention).
             "is_demographic": _is_demographic(model, q),
@@ -783,6 +825,8 @@ def question_summary(
         "value_labels": _value_list(model, q),
         "missing_values": _missing_value_list(model, q.qid),
         "category_labels": _category_labels(model, q, df),
+        "fixed_category_order": _is_partial_scale(model, q, df),
+        "rating_scale": _is_rating_scale(model, q),
         "chartable": chartable,
         "non_chartable_reason": reason,
         "respondent_total": int(len(df)),
@@ -1378,6 +1422,7 @@ class _SortSpecBody(BaseModel):
     basis: str = "data_order"
     topbox_codes: list[float] = []
     descending: bool = True
+    manual_order: list[str] = []
 
 
 class _ElementTogglesBody(BaseModel):
@@ -1486,6 +1531,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             basis=body.sort.basis,
             topbox_codes=tuple(body.sort.topbox_codes),
             descending=body.sort.descending,
+            manual_order=tuple(body.sort.manual_order),
         ),
         template_slot="preview",
         elements=ElementToggles(

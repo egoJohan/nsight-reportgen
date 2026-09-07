@@ -433,6 +433,7 @@ export const DEFAULT_SORT: SortSpec = {
   basis: "data_order",
   topbox_codes: [],
   descending: true,
+  manual_order: [],
 };
 
 /**
@@ -477,7 +478,7 @@ export function makeChart(
     // Survey order, stacked bars included: "always", per Johan. A battery used
     // to default to Top-2-sum so the most-agree statement led; that is now a
     // choice the author makes rather than one we make for them.
-    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    sort: { ...DEFAULT_SORT, topbox_codes: [], manual_order: [] },
     template_slot: "s1",
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,
@@ -586,7 +587,7 @@ export function makeSpecialSlide(
     statistic: "pct",
     classifying_var: null,
     number_format: { ...DEFAULT_NUMBER_FORMAT },
-    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    sort: { ...DEFAULT_SORT, topbox_codes: [], manual_order: [] },
     template_slot: "s1",
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,
@@ -669,7 +670,7 @@ export function makeDemographicsGrid(
     statistic: "pct",
     classifying_var: null,
     number_format: { ...DEFAULT_NUMBER_FORMAT },
-    sort: { ...DEFAULT_SORT, topbox_codes: [] },
+    sort: { ...DEFAULT_SORT, topbox_codes: [], manual_order: [] },
     template_slot: "s1",
     elements: { ...DEFAULT_ELEMENTS },
     scatter_xy: null,

@@ -154,9 +154,11 @@ def test_standard_schema_field_set():
     assert keys == [
         "statistic", "percent_base", "show_total", "classifying_var",
         # which of the classifier's groups THIS SLIDE is drawn on
-        "classifying_values", "sort",
+        # The label editor IS the manual sort — its rows are dragged into the
+        # order the chart draws — so it sits directly after Sort.
+        "classifying_values", "sort", "category_label_overrides",
         "number_format", "show_not_answered", "show_empty_categories",
-        "not_answered_codes", "category_label_overrides",
+        "not_answered_codes",
     ]
 
 
@@ -177,8 +179,9 @@ def test_stacked_schema_fields():
     assert _keys(stacked_schema()) == [
         "statistic", "percent_base", "classifying_var", "classifying_values",
         "classifying_var_2",
-        "xtab_layout", "show_total", "sort", "number_format", "show_not_answered",
-        "show_empty_categories", "not_answered_codes", "category_label_overrides",
+        "xtab_layout", "show_total", "sort", "category_label_overrides",
+        "number_format", "show_not_answered",
+        "show_empty_categories", "not_answered_codes",
     ]
 
 
@@ -189,9 +192,8 @@ def test_single_series_schema_has_classifying_var_but_no_crosstab_controls():
     keys = _keys(single_series_schema())
     assert keys == [
         "statistic", "classifying_var", "classifying_values", "show_panel_base",
-        "sort", "number_format",
+        "sort", "category_label_overrides", "number_format",
         "show_not_answered", "show_empty_categories", "not_answered_codes",
-        "category_label_overrides",
     ]
     # The per-panel base sits with the classifier controls: it is a property of
     # the split, and it is the only schema these three types share that the

@@ -53,6 +53,7 @@ import {
   SORT_DIRECTIONS,
   isDemographicsGrid,
   isDuplicateSlide,
+  isStacked,
   isThemes,
   rendersAsBullets,
   rendersFullSlide,
@@ -672,10 +673,29 @@ function ClassifyingVarWidget({
   );
 }
 
-function SortWidget({ field, chart, onChange }: WidgetProps) {
-  const opts = field.options ?? [];
+function SortWidget({ field, chart, question, onChange }: WidgetProps) {
+  // A scale keeps its order whatever the basis says — `_single` swaps in
+  // "data_order" for a partially-labelled scale, for a stacked bar split by a
+  // classifier, and for a stacked bar of a rating scale, because a size sort
+  // scatters a scale and leaves "Top 2" summing two bands that are no longer
+  // adjacent. Offering Percentage / Mean / Count there is a control that
+  // changes nothing, so those are dropped rather than shown inert.
+  //
+  // The two that remain are the two that WORK: survey order, and the order the
+  // author dragged — a drag is an instruction, not a sort, so it wins over the
+  // scale rule in the engine too. (mirrors stats/engine.py `_single`)
+  const stacked = isStacked(chart.chart_type);
+  const orderIsFixed =
+    // an endpoint-labelled scale is drawn in scale order on every chart type…
+    (question?.fixed_category_order ?? false) ||
+    // …an ordinary rating scale, and a split, only where the stack would break
+    (stacked && ((question?.rating_scale ?? false) || !!chart.classifying_var));
+  const opts = (field.options ?? []).filter(
+    (o) => !orderIsFixed || o.value === "data_order" || o.value === "manual"
+  );
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
-  const dirDisabled = chart.sort.basis === "data_order";
+  const dirDisabled =
+    chart.sort.basis === "data_order" || chart.sort.basis === "manual";
   return (
     <>
       <Field label={field.label}>
@@ -1491,7 +1511,7 @@ function NotAnsweredPicker({
   if (values.length === 0) return null;
 
   return (
-    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
           "Not answered" values
@@ -1670,6 +1690,31 @@ function CategoryLabelEditor({
     onChange({ category_label_overrides: pairs });
   };
 
+  // What the list SHOWS: the author's arrangement when there is one, otherwise
+  // the order the data came in. Categories the stored order does not name go
+  // behind the ones it does — a re-imported dataset with a new option must
+  // still offer it — and names the data no longer has simply drop out. The
+  // engine applies the identical rule (stats/sorting.apply_manual_order), so
+  // this list is what the slide draws rather than a second opinion about it.
+  const base = question.category_labels ?? [];
+  const ordered = useMemo(() => {
+    const wanted = chart.sort.basis === "manual" ? chart.sort.manual_order : [];
+    if (!wanted.length) return base;
+    const named = wanted.filter((f) => base.includes(f));
+    return [...named, ...base.filter((f) => !named.includes(f))];
+  }, [base, chart.sort.basis, chart.sort.manual_order]);
+
+  // Dragging IS the sort: there is one order, and the basis says which rule
+  // produced it. Anything else lets the panel claim "Percentage" while drawing
+  // the arrangement somebody dragged.
+  const reorder = (from: number, to: number) => {
+    const next = [...ordered];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange({ sort: { ...chart.sort, basis: "manual", manual_order: next } });
+  };
+  const { dragIndex, overIndex, containerRef, itemProps } = useDragReorder(reorder);
+
   const shortenWithAI = async () => {
     setShortening(true);
     try {
@@ -1696,7 +1741,7 @@ function CategoryLabelEditor({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+    <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
           Category labels
@@ -1721,14 +1766,37 @@ function CategoryLabelEditor({
           {shortening ? "Shortening…" : "Shorten with AI"}
         </Button>
       </div>
-      <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
-        {(question.category_labels ?? []).map((full, i) => (
-          <LabelOverrideInput
+      <div
+        ref={containerRef as React.RefObject<HTMLDivElement>}
+        className="max-h-64 space-y-1.5 overflow-y-auto pr-1"
+      >
+        {ordered.map((full, i) => (
+          <div
             key={`${full}-${i}`}
-            full={full}
-            value={overrideMap.get(full) ?? full}
-            onCommit={(v) => setOverride(full, v)}
-          />
+            {...itemProps(i)}
+            className={cn(
+              "flex items-center gap-1 rounded-md",
+              dragIndex === i && "opacity-40",
+              dragIndex !== null &&
+                overIndex === i &&
+                dragIndex !== i &&
+                "ring-2 ring-inset ring-primary"
+            )}
+          >
+            <span
+              className="shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground"
+              title="Drag to reorder — sets Sort to Manual"
+            >
+              <GripVerticalIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <LabelOverrideInput
+                full={full}
+                value={overrideMap.get(full) ?? full}
+                onCommit={(v) => setOverride(full, v)}
+              />
+            </div>
+          </div>
         ))}
       </div>
     </div>

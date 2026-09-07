@@ -59,6 +59,11 @@ SORT_BASIS_OPTIONS = (
     ("data_order", "Survey order"),
     ("mean", "Mean"),
     ("count", "Count"),
+    # Set by dragging the rows of the Category labels editor, not chosen from
+    # this list — but it has to BE in the list, or a dragged chart would show a
+    # basis it is not using. Picking another basis leaves the dragged order
+    # stored, so it comes back by choosing this one again.
+    ("manual", "Manual (dragged)"),
 )
 
 
@@ -191,11 +196,14 @@ def _common_tail(*, sort_stacked: bool = False) -> tuple[ConfigField, ...]:
     """Knobs every data chart shares (after the classifying variable)."""
     return (
         sort_field(stacked=sort_stacked),
+        # Directly after Sort: this editor IS the manual sort — its rows are
+        # dragged into the order the chart draws — so the two belong together
+        # rather than at opposite ends of the panel.
+        category_labels_field(),
         number_format_field(),
         show_not_answered_field(),
         empty_categories_field(),
         not_answered_field(),
-        category_labels_field(),
     )
 
 
