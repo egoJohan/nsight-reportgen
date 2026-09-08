@@ -202,6 +202,22 @@ def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
     return "\n".join(out)
 
 
+def _category_ticks(cats, wrap) -> list[str]:
+    """The category axis labels — blank when there is only ONE category.
+
+    A mean chart of a scale measure has exactly one: the variable itself. Every
+    bar stands over that same tick, so it tells no bar from another, and it
+    repeats the question the subtitle already carries — printed rotated under
+    the axis, where it reads as an axis title nobody asked for. (Reported
+    2026-09-08: "vaaka-akselille tulee otsikko vaikka ei pitäisi"; the axis
+    title field was empty, and this was never an axis title.)
+
+    Two or more categories keep their labels: there the tick is the only thing
+    saying which bar is which.
+    """
+    return [""] if len(cats) <= 1 else [wrap(c) for c in cats]
+
+
 def _wrap_xtick_label(text: str) -> str:
     """Wrap a vertical-bar x-axis label (narrower wrap; rotation handles the rest)."""
     return _wrap_label(text, width=_XLABEL_WRAP_WIDTH)
@@ -523,7 +539,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                        edgecolor="none", zorder=3)
             ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_xticks(x)
-            ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
+            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
             _apply_column_style(ax, ctx, max_val, series.statistic)
@@ -544,7 +560,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
             # y-axis is SHARED (sharey) → set the category labels ONCE, then hide their
             # DISPLAY on the other panels (clearing them would clear the shared axis).
             if k == 0:
-                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=ink)
+                ax.set_yticklabels(_category_ticks(cats, _wrap_label), fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=(k == 0))
 
     if ctx.spec.elements.legend:
@@ -795,7 +811,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
             ax.set_xticks(x)
-            ax.set_xticklabels([_wrap_xtick_label(c) for c in cats], fontsize=8.5,
+            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
             _apply_column_style(ax, ctx, max_val, series.statistic)
@@ -823,7 +839,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
             # variable is ever added and cols > 1 while rows > 1.
             first_in_row = (k == 0) if rows == 1 else True
             if k == 0:
-                ax.set_yticklabels([_wrap_label(c) for c in cats], fontsize=9, color=ink)
+                ax.set_yticklabels(_category_ticks(cats, _wrap_label), fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=first_in_row)
         # Each panel is titled with its VARIABLE, not with a group of the first one.
         ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
@@ -915,7 +931,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                 )
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-    display_cats = [_wrap_xtick_label(c) for c in cats]
+    display_cats = _category_ticks(cats, _wrap_xtick_label)
     ax.set_xticks(x)
     ax.set_xticklabels(
         display_cats, fontsize=10.5, color=ink,
@@ -1027,9 +1043,8 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
                 )
 
     # Wrap y-axis labels; cap to the lines that fit the band (ellipsis last resort).
-    display_cats = [
-        wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines) for c in cats
-    ]
+    display_cats = _category_ticks(
+        cats, lambda c: wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines))
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=ink)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
