@@ -717,6 +717,23 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # No labels at all: chart the codes rather than nothing. See `code_labels`.
     if not labels:
         labels = code_labels(var, data, eff)
+    # WHICH CODES THIS CHART WILL DRAW — settled before the base is counted,
+    # because the base has to be the respondents who can appear in a category.
+    # An endpoint-labelled scale draws every point (1..7, words on 1 and 7
+    # only), so it is asked here rather than inferred from the labels; the same
+    # read is reused below for the categories themselves.
+    #
+    # `code_labels` names every present code when a variable carries no labels,
+    # so `labels` is already the whole set there and nothing is excluded.
+    # Otherwise a present-but-unlabelled code is drawn nowhere: counting it
+    # would put respondents in the denominator of categories none of them can be
+    # in, which is how an all-countries export — one code block per country,
+    # only the home block labelled — made a 100 % stack reach 33 %.
+    # (Johan, 2026-09-08)
+    scale_entries, scale_caption = _partial_scale(var, data, eff)
+    drawn_codes: set[float] = ({float(c) for c, _l, _o in scale_entries}
+                               if scale_entries is not None
+                               else {float(c) for c in labels})
     separate = _separate_masks(spec, data, model)
     banner = None if separate is not None else _banner_masks(spec, data, model)
     seg_series, ordered = ((None, None) if (banner or separate is not None)
@@ -728,21 +745,22 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if separate is not None:                         # two classifiers SIDE BY SIDE
         sep_masks, sep_primary = separate
         act_masks = sep_masks
-        bases = segment_bases(data, var, missing_override=eff, seg_masks=sep_masks)
+        bases = segment_bases(data, var, missing_override=eff, seg_masks=sep_masks, drawn_codes=drawn_codes)
         counts = aggregate_counts(data, var.name, seg_masks=sep_masks)
         segments = tuple(sep_masks)                  # no bare "Total": it is no panel
     elif banner is not None:                         # banner: indicator columns
         act_masks = banner
-        bases = segment_bases(data, var, missing_override=eff, seg_masks=banner)
+        bases = segment_bases(data, var, missing_override=eff, seg_masks=banner, drawn_codes=drawn_codes)
         counts = aggregate_counts(data, var.name, seg_masks=banner)
         segments = (*banner.keys(), "Total")
     elif seg_series is not None:                     # cross-tab: two classifiers
-        bases = segment_bases(data, var, missing_override=eff, seg_series=seg_series)
+        bases = segment_bases(data, var, missing_override=eff, seg_series=seg_series, drawn_codes=drawn_codes)
         counts = aggregate_counts(data, var.name, seg_series=seg_series)
         segments = (*ordered, "Total")
     elif spec.classifying_var and spec.classifying_var in data.columns:
         bases = segment_bases(data, var, spec.classifying_var, missing_override=eff,
-                              classifier_var=model.variables.get(spec.classifying_var))
+                              classifier_var=model.variables.get(spec.classifying_var),
+                              drawn_codes=drawn_codes)
         counts = aggregate_counts(data, var.name, spec.classifying_var)
         segments = tuple(s for s in bases if s != "Total")
         segments = (*segments, "Total") if segments else ("Total",)
@@ -750,7 +768,8 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # No usable classifier — including a stored qid that no longer resolves to a
         # near-partition banner (the data changed). Degrade to a single Total series
         # rather than failing, matching the lenient handling of stale groupings.
-        bases = {"Total": single_base(data, var, missing_override=eff)}
+        bases = {"Total": single_base(data, var, missing_override=eff,
+                                      drawn_codes=drawn_codes)}
         counts = aggregate_counts(data, var.name)
         segments = ("Total",)
 
@@ -779,7 +798,6 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # endpoints) is charted with ALL points as numbers (never dropping the unlabelled
     # 2..6), ordered high→low, and the text labels moved to a caption. Otherwise the
     # normal path: categories are the labelled codes, rating scales ordered by point.
-    scale_entries, scale_caption = _partial_scale(var, data, eff)
     if scale_entries is not None:
         entries = scale_entries
         is_rating = False  # scale_entries is not None already forces data_order below

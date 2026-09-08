@@ -11,21 +11,44 @@ from reportbuilder.model.question import Variable
 
 
 def _valid_mask(data: pd.DataFrame, var: Variable,
-                missing_override: set[float] | None = None) -> pd.Series:
+                missing_override: set[float] | None = None,
+                drawn_codes: set[float] | None = None) -> pd.Series:
+    """Respondents whose answer this chart can actually report.
+
+    Not NaN, not user-missing, and — when the caller says which codes the chart
+    DRAWS — carrying one of those. The last clause is the same judgement
+    `_classifier_keep` makes about the classifying variable: a code that appears
+    in no category cannot be in the denominator of the categories that do,
+    because the percentages then do not add up.
+
+    Reported as a stacked bar reaching 33 % instead of 100 %. The study was an
+    all-countries export whose variable holds each country's own code block —
+    Finland 1–5, others at 16–20 and 26–30 — with only Finland's labelled in
+    that SAV. Two thirds of the base could not appear in any bar.
+
+    DRAWN, not "labelled": an endpoint-labelled scale (1..7 with words on 1 and
+    7 only) is charted with every point as a numbered category, so 2–6 are drawn
+    and belong in the base though they carry no label. Only `_single` knows
+    which codes it ended up drawing, so only `_single` can say. Left None, every
+    non-missing code counts, which is what a variable with no labels at all
+    wants — `code_labels` charts its raw codes. (Johan, 2026-09-08)
+    """
     s = pd.to_numeric(data[var.name], errors="coerce")
     missing = var.missing_values if missing_override is None else missing_override
-    return s.notna() & ~s.isin(missing)
+    ok = s.notna() & ~s.isin(missing)
+    return (ok & s.isin(drawn_codes)) if drawn_codes else ok
 
 
 def single_base(data: pd.DataFrame, var: Variable, segment_filter=None,
-                missing_override: set[float] | None = None) -> int:
+                missing_override: set[float] | None = None,
+                drawn_codes: set[float] | None = None) -> int:
     """Valid responses excluding the variable's user-missing set and NaN (Sysmis). (REQ-C-16, MV-01/02)
 
     When `missing_override` is provided it replaces `var.missing_values` for the
     "is this code missing" test — keeping the base consistent with an
     effective "Not answered" set (e.g. ChartSpec.not_answered_codes).
     """
-    mask = _valid_mask(data, var, missing_override)
+    mask = _valid_mask(data, var, missing_override, drawn_codes)
     if segment_filter is not None:
         mask = mask & segment_filter
     return int(mask.sum())
@@ -59,7 +82,8 @@ def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None
                   missing_override: set[float] | None = None,
                   *, seg_series: pd.Series | None = None,
                   seg_masks: dict[str, pd.Series] | None = None,
-                  classifier_var: Variable | None = None) -> dict[str, int]:
+                  classifier_var: Variable | None = None,
+                  drawn_codes: set[float] | None = None) -> dict[str, int]:
     """Per-segment base + a "Total", each excluding missing in the reported var and
     the classifier. (REQ-C-14)
 
@@ -79,7 +103,7 @@ def segment_bases(data: pd.DataFrame, var: Variable, classifying_var: str | None
     codes that are its missing values — or that carry no value label when it has any —
     are dropped, so a bare unlabelled sentinel (e.g. 99) never appears as a group.
     """
-    valid = _valid_mask(data, var, missing_override)
+    valid = _valid_mask(data, var, missing_override, drawn_codes)
     if seg_masks is not None:
         any_seg = pd.Series(False, index=data.index)
         for m in seg_masks.values():
