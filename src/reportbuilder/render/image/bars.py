@@ -202,20 +202,34 @@ def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
     return "\n".join(out)
 
 
-def _category_ticks(cats, wrap) -> list[str]:
-    """The category axis labels — blank when there is only ONE category.
+#: Statistics whose chart is ONE value per group rather than a distribution —
+#: `stats.registry` calls them the "summary" family, and `_summary` is the
+#: builder they route to. Named here rather than imported so the renderer keeps
+#: no dependency on the stats registry; `test_single_category_tick` pins the two
+#: lists together.
+_SUMMARY_STATISTICS = frozenset({"mean", "median", "sum"})
 
-    A mean chart of a scale measure has exactly one: the variable itself. Every
-    bar stands over that same tick, so it tells no bar from another, and it
-    repeats the question the subtitle already carries — printed rotated under
-    the axis, where it reads as an axis title nobody asked for. (Reported
-    2026-09-08: "vaaka-akselille tulee otsikko vaikka ei pitäisi"; the axis
-    title field was empty, and this was never an axis title.)
 
-    Two or more categories keep their labels: there the tick is the only thing
-    saying which bar is which.
+def _category_ticks(cats, wrap, statistic: str = "") -> list[str]:
+    """The category axis labels — blank for a lone SUMMARY category.
+
+    `_summary` builds one category × segments, and that category is the question
+    itself (`question.text or var.label`). Its bars are the classifier's groups,
+    named in the legend, so the tick stands under every one of them, tells none
+    apart, and repeats the question the subtitle already carries — printed
+    rotated under the axis where it reads as an axis title nobody asked for.
+    (Reported 2026-09-08: "vaaka-akselille tulee otsikko vaikka ei pitäisi"; the
+    axis-title field was empty, and this was never an axis title.)
+
+    The statistic is what separates that from a DISTRIBUTION that happens to
+    have one category left — a question whose other options were empty and
+    hidden. There the lone category is an ANSWER ("Attendo"), the subtitle is
+    the question ("Mitä merkkiä käytät?"), and blanking the tick would leave an
+    unnamed bar. It keeps its label. (Johan, 2026-09-08)
     """
-    return [""] if len(cats) <= 1 else [wrap(c) for c in cats]
+    if len(cats) <= 1 and statistic in _SUMMARY_STATISTICS:
+        return [""]
+    return [wrap(c) for c in cats]
 
 
 def _wrap_xtick_label(text: str) -> str:
@@ -539,7 +553,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                        edgecolor="none", zorder=3)
             ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_xticks(x)
-            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label), fontsize=8.5,
+            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
             _apply_column_style(ax, ctx, max_val, series.statistic)
@@ -560,7 +574,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
             # y-axis is SHARED (sharey) → set the category labels ONCE, then hide their
             # DISPLAY on the other panels (clearing them would clear the shared axis).
             if k == 0:
-                ax.set_yticklabels(_category_ticks(cats, _wrap_label), fontsize=9, color=ink)
+                ax.set_yticklabels(_category_ticks(cats, _wrap_label, series.statistic), fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=(k == 0))
 
     if ctx.spec.elements.legend:
@@ -811,7 +825,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
             ax.set_xticks(x)
-            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label), fontsize=8.5,
+            ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
                                rotation_mode="anchor")
             _apply_column_style(ax, ctx, max_val, series.statistic)
@@ -839,7 +853,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
             # variable is ever added and cols > 1 while rows > 1.
             first_in_row = (k == 0) if rows == 1 else True
             if k == 0:
-                ax.set_yticklabels(_category_ticks(cats, _wrap_label), fontsize=9, color=ink)
+                ax.set_yticklabels(_category_ticks(cats, _wrap_label, series.statistic), fontsize=9, color=ink)
             ax.tick_params(axis="y", labelleft=first_in_row)
         # Each panel is titled with its VARIABLE, not with a group of the first one.
         ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
@@ -931,7 +945,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                 )
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-    display_cats = _category_ticks(cats, _wrap_xtick_label)
+    display_cats = _category_ticks(cats, _wrap_xtick_label, ctx.series.statistic)
     ax.set_xticks(x)
     ax.set_xticklabels(
         display_cats, fontsize=10.5, color=ink,
@@ -1044,7 +1058,8 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
 
     # Wrap y-axis labels; cap to the lines that fit the band (ellipsis last resort).
     display_cats = _category_ticks(
-        cats, lambda c: wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines))
+        cats, lambda c: wrap_label_capped(c, _HBAR_LABEL_WRAP_WIDTH, max_lines),
+        ctx.series.statistic)
     ax.set_yticks(y)
     ax.set_yticklabels(display_cats, fontsize=ylabel_fs, color=ink)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)

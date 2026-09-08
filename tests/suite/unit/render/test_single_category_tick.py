@@ -29,7 +29,8 @@ import reportbuilder.render.image.bars as B
 _GROUPS = ["Suuressa", "Keskisuuressa", "Pienessä"]
 
 
-def _axis_text(*, categories: int, chart_type="vertical_bar") -> dict:
+def _axis_text(*, categories: int, chart_type="vertical_bar",
+               statistic: str | None = None, hide_empty=False) -> dict:
     """Render and report what the category axis ended up carrying."""
     measure = Variable(name="TulonlähteidenMuutos", label="TulonlähteidenMuutos",
                        measurement="scale", value_labels=[], missing_values=[])
@@ -46,6 +47,8 @@ def _axis_text(*, categories: int, chart_type="vertical_bar") -> dict:
              "koko": float(i % len(_GROUPS) + 1)} for i in range(300)]
     # one category -> the scale measure charted as a mean; several -> a normal question
     qid, stat = ("tlm", "mean") if categories == 1 else ("mielipide", "pct")
+    if statistic is not None:
+        qid, stat = "mielipide", statistic
     model = QuestionModel(
         variables={"TulonlähteidenMuutos": measure, "mielipide": opts, "koko": koko},
         questions=[Question(qid="tlm", text="TulonlähteidenMuutos", kind="single",
@@ -57,7 +60,8 @@ def _axis_text(*, categories: int, chart_type="vertical_bar") -> dict:
     spec = ChartSpec(question_ref=qid, chart_type=chart_type, statistic=stat,
                      classifying_var="koko", number_format=NumberFormat(),
                      sort=SortSpec(basis="data_order"), template_slot="s1",
-                     elements=ElementToggles())
+                     elements=ElementToggles(),
+                     show_empty_categories=not hide_empty)
     series = compute(model.question(qid), spec, pd.DataFrame(rows), model)
     prs = Presentation()
     ctx = RenderContext(slide=prs.slides.add_slide(prs.slide_layouts[6]),
@@ -102,3 +106,32 @@ def test_several_categories_keep_their_labels():
 def test_the_horizontal_form_behaves_the_same_way():
     got = _axis_text(categories=1, chart_type="horizontal_bar")
     assert "TulonlähteidenMuutos" not in got["yticks"], got["yticks"]
+
+
+# --- the case the first version of this fix broke ---------------------------
+def test_a_distribution_left_with_one_category_keeps_its_name():
+    """A question whose other options were empty and hidden still draws ONE bar,
+    and that bar's tick is an ANSWER ("Vaihtoehto 1"), not the question. The
+    subtitle carries the question, so blanking this would leave a nameless bar.
+
+    The first attempt at this fix keyed on the category count alone and did
+    exactly that. The statistic is what tells the two apart.
+    """
+    got = _axis_text(categories=1, statistic="pct", hide_empty=True)
+    assert got["n_categories"] == 1
+    assert any("Vaihtoehto" in t for t in got["xticks"]), got["xticks"]
+
+
+def test_the_renderer_and_the_registry_agree_on_what_a_summary_is():
+    """`_SUMMARY_STATISTICS` is written out in the renderer so it needs no
+    dependency on the stats registry. This is what keeps the copy honest."""
+    import reportbuilder.stats.engine  # noqa: F401 — registers the statistics
+    from reportbuilder.stats import registry
+
+    from reportbuilder.render.image.bars import _SUMMARY_STATISTICS
+
+    for name in _SUMMARY_STATISTICS:
+        assert registry.statistic(name).family == "summary", name
+    for name in ("pct", "count"):
+        assert name not in _SUMMARY_STATISTICS
+        assert registry.statistic(name).family == "distribution"
