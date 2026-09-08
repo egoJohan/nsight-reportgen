@@ -300,6 +300,12 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
     if profile is not None and getattr(profile, "title", None) is not None:
         _apply_text(profile.title, title)
         _apply_box(profile.title, title)
+        # Remember that a PERSON placed it. The renderer writes the headline
+        # into the layout's title placeholder when there is one, so without
+        # this the corrected box was stored, shown back in the editor, and
+        # never drawn — the placeholder kept the position the template had.
+        if any(_num(title.get(k)) is not None for k in ("x", "y", "w", "h")):
+            profile.title.authored = True
     # AND the font role, which is where the drawn title actually gets its size:
     # `build_spec` reads `fonts["title"]`, not the profile, so setting only the
     # profile stored the number, showed it back in the editor, and left the

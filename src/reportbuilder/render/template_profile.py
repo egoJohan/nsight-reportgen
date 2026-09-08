@@ -89,6 +89,14 @@ class TextStyle:
     #: it so the frontend's DOM overlay — which DOES draw the title — lands text
     #: the way the template set it.
     align: str = ""
+    #: True when an AUTHOR placed this box in the layout editor, rather than the
+    #: harvester reading it off the template. The difference decides who wins
+    #: against the layout's own title placeholder: a harvested box describes
+    #: that placeholder, so following it changes nothing, but a corrected one is
+    #: somebody saying the harvester got it wrong — and it has to move the
+    #: placeholder, or the text stays where the template put it and the editor
+    #: appears to do nothing. (Johan, 2026-09-08)
+    authored: bool = False
 
     @property
     def positioned(self) -> bool:

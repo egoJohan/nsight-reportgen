@@ -711,6 +711,23 @@ def title_colour_for(st, style):
     return harvested
 
 
+def _authored_title_box(style) -> tuple[int, int, int, int] | None:
+    """(left, top, width, height) when a PERSON placed the title, else None.
+
+    Harvested boxes are not authored: a harvested box describes the layout's own
+    placeholder, so imposing it would change nothing on a template nobody has
+    touched — and would quietly overrule the inheritance chain the placeholder
+    exists to provide. `apply_template_overrides` sets the flag.
+    """
+    profile = getattr(style, "profile", None) if style is not None else None
+    title = getattr(profile, "title", None) if profile is not None else None
+    if title is None or not getattr(title, "authored", False):
+        return None
+    if not (int(title.width or 0) > 0 and int(title.height or 0) > 0):
+        return None
+    return int(title.left), int(title.top), int(title.width), int(title.height)
+
+
 def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     """Put *title* in the layout's title placeholder. False if there isn't one.
 
@@ -742,15 +759,34 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     tf.vertical_anchor = MSO_ANCHOR.TOP
     tf.text = title
 
+    # An AUTHOR'S box wins over the placeholder's own geometry. The layout
+    # editor's whole purpose is saying where the harvester got it wrong, and
+    # every other reader of the title consults this placeholder first — so
+    # unless the correction is written onto it here, the box moves in the
+    # editor and the headline does not move on the slide. All four values, for
+    # the reason the next comment gives. (Johan, 2026-09-08)
+    _authored = _authored_title_box(style)
+    if _authored is not None:
+        a_left, a_top, a_width, a_height = _authored
+        try:
+            ph.left, ph.top = a_left, a_top
+            ph.width, ph.height = a_width, max(a_height, int(ph.height or 0) or a_height)
+        except (AttributeError, TypeError):
+            pass
+
     # Pull the headline up into the top margin, and give the space it gains to
     # the box. Templates commonly park the title a third of the way down the
     # slide, which wastes the band above it AND leaves a long headline nowhere
     # to wrap but over the subtitle. Raising the box does both jobs at once and
     # costs nothing: the space above the title is empty by definition.
+    #
+    # NOT when somebody placed the box themselves: they were watching the slide
+    # when they dragged it there, and moving it again under them is the same
+    # defect in the other direction.
     try:
         left, top = int(ph.left or 0), int(ph.top or 0)
         width, height = int(ph.width or 0), int(ph.height or 0)
-        if top > _MIN_TITLE_TOP and width and height:
+        if _authored is None and top > _MIN_TITLE_TOP and width and height:
             # All FOUR, explicitly. A placeholder inherits its position and size
             # from the layout, and writing one of them makes python-pptx emit an
             # <a:xfrm> carrying only that value — the others stop resolving and
