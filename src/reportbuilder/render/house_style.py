@@ -67,7 +67,6 @@ _FONTS_LOCK = _threading.Lock()
 # labels — letting an admin pick a narrower face buys legible labels that would
 # otherwise be truncated or rotated. Empty means the house default.
 _DEFAULT_CHART_FONT = "Liberation Sans"
-_configured_family = ""
 _applied_family = ""
 
 
@@ -94,28 +93,6 @@ def available_chart_fonts() -> list[str]:
     return sorted({f.name for f in _fm.fontManager.ttflist})
 
 
-def use_chart_font(family: str) -> str:
-    """Choose the family for chart text. Returns the one actually applied.
-
-    A configured font that matplotlib cannot find falls back to the house
-    default rather than to matplotlib's own DejaVu, so an unavailable setting
-    degrades to a deliberate choice instead of an accidental one.
-    """
-    global _configured_family, _applied_family
-    wanted = (family or "").strip()
-    if wanted == _configured_family and _applied_family:
-        # Already active. Called on EVERY render and preview, so the unchanged
-        # case must cost nothing: re-registering meant rescanning the font
-        # directory and rebuilding matplotlib's 244-family list per chart,
-        # which is what made previews slow.
-        return _applied_family
-    with _FONTS_LOCK:
-        _configured_family = wanted
-    _applied_family = ""      # a real change: re-apply on the next figure
-    register_fonts()
-    return _applied_family
-
-
 def current_chart_font() -> str:
     """The family charts are drawing with right now."""
     register_fonts()
@@ -131,7 +108,10 @@ def register_fonts() -> None:
     case stays a single comparison. REQ-C-25 (consistent typography).
     """
     global _FONTS_REGISTERED, _applied_family
-    wanted = _configured_family or _DEFAULT_CHART_FONT
+    # The house default is all rcParams needs now: the FACE a chart draws in
+    # comes from its template, applied per figure in `_mpl.render_png`, because
+    # rcParams is process-global and these renders run on a threadpool.
+    wanted = _DEFAULT_CHART_FONT
     if _FONTS_REGISTERED and _applied_family == wanted:
         return
     with _FONTS_LOCK:

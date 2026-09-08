@@ -209,52 +209,10 @@ def test_sync_on_an_empty_hive_is_a_no_op(client_store, host, store_repo, auth):
 
 
 # --- chart font -------------------------------------------------------------
-#
-# Deliberately NOT the template's font. A brand display face is often wide and
-# chart text is mostly long category labels, so the admin can pick a narrower
-# one and fit more of a label before it truncates.
-
-def test_chart_font_defaults_to_the_house_face(client_store, host):
-    body = client_store.get("/settings/chart-font").json()
-
-    assert body["family"] == ""                     # nothing chosen
-    assert body["effective"] == body["default"]     # so the house face applies
-    assert body["available"]                        # and there is a list to pick from
-
-
-def test_setting_a_chart_font_sticks(client_store, host):
-    available = client_store.get("/settings/chart-font").json()["available"]
-    choice = next(f for f in available if f != "Liberation Sans")
-
-    resp = client_store.put("/settings/chart-font", json={"family": choice})
-
-    assert resp.status_code == 200
-    assert resp.json()["effective"] == choice
-    assert client_store.get("/settings/chart-font").json()["family"] == choice
-
-
-def test_clearing_it_restores_the_house_face(client_store, host):
-    available = client_store.get("/settings/chart-font").json()["available"]
-    client_store.put("/settings/chart-font",
-                     json={"family": next(f for f in available
-                                          if f != "Liberation Sans")})
-
-    client_store.put("/settings/chart-font", json={"family": ""})
-
-    body = client_store.get("/settings/chart-font").json()
-    assert body["family"] == ""
-    assert body["effective"] == body["default"]
-
-
-def test_a_font_this_host_lacks_is_refused(client_store, host):
-    """Accepting it would leave charts silently drawn in something else."""
-    resp = client_store.put("/settings/chart-font",
-                            json={"family": "Definitely Not Installed"})
-
-    assert resp.status_code == 422
-    assert "is not installed" in resp.json()["detail"]
-    assert client_store.get("/settings/chart-font").json()["family"] == ""
-
+# The admin-wide "chart font" setting was REMOVED on 2026-09-08. A chart's face
+# now comes from its own template's CONTENT area, so one customer's deck can no
+# longer set the face another's charts draw in. What a host can draw with is
+# still reported — by /settings/fonts, for the substitution picker.
 
 # --- substitutions ----------------------------------------------------------
 #
@@ -270,7 +228,7 @@ def subs(tmp_path, monkeypatch):
 
 
 def test_substitution_writes_a_fontconfig_rule(client_store, subs):
-    available = client_store.get("/settings/chart-font").json()["available"]
+    available = client_store.get("/settings/fonts").json()["available"]
     stand_in = available[0]
 
     resp = client_store.put("/settings/font-substitutions",
@@ -283,7 +241,7 @@ def test_substitution_writes_a_fontconfig_rule(client_store, subs):
 
 
 def test_substitution_survives_a_reread(client_store, subs):
-    available = client_store.get("/settings/chart-font").json()["available"]
+    available = client_store.get("/settings/fonts").json()["available"]
     client_store.put("/settings/font-substitutions",
                      json={"map": {"Century Gothic": available[0]}})
 
@@ -293,7 +251,7 @@ def test_substitution_survives_a_reread(client_store, subs):
 
 
 def test_clearing_substitutions_removes_the_rule_file(client_store, subs):
-    available = client_store.get("/settings/chart-font").json()["available"]
+    available = client_store.get("/settings/fonts").json()["available"]
     client_store.put("/settings/font-substitutions",
                      json={"map": {"Century Gothic": available[0]}})
 

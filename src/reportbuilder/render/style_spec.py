@@ -86,7 +86,16 @@ class TemplateStyleSpec(StyleSpec):
     subtitle_font: str = ""
     subtitle_size_pt: float = 0.0
     subtitle_colour: str = ""
+    #: The methodology line's own face. It IS a font role ("n_annotation"), but
+    #: the textbox that draws it asks for `body_font` — so setting only the role
+    #: stored the choice and drew the old face. (Johan, 2026-09-08)
+    footer_font: str = ""
     footer_colour: str = ""
+    #: The colour a chart's own text is drawn in — tick labels, legend, data
+    #: labels outside a bar. Stated by the CONTENT area of the layout editor,
+    #: whose colour was kept by the API and read by nothing. Blank means the
+    #: contrast-derived ink `furniture_colors` picks for the slide's ground.
+    chart_text_colour: str = ""
 
     def __init__(self, slide_width, slide_height, slots, fonts, palette, spec_source="generic"):
         self.slide_width = slide_width
@@ -293,6 +302,13 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
         spec.title_size_pt = _num(title["size"])
     if _hex(overrides.get("accent")):
         spec.accent = _hex(overrides["accent"])
+        # And the harvested BRAND palette goes. `template_palette` prefers a
+        # template's own brand colours over any accent, which is right until an
+        # author states one — at which point the palette is the very answer they
+        # are correcting, and leaving it in place made the accent field change
+        # nothing on a template that had one. The ramp is rebuilt from their
+        # colour. (Johan, 2026-09-08)
+        spec.brand_palette = []
     if _hex(overrides.get("background")):
         spec.background = _hex(overrides["background"])
 
@@ -300,12 +316,17 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
     if profile is not None and getattr(profile, "title", None) is not None:
         _apply_text(profile.title, title)
         _apply_box(profile.title, title)
-        # Remember that a PERSON placed it. The renderer writes the headline
-        # into the layout's title placeholder when there is one, so without
-        # this the corrected box was stored, shown back in the editor, and
-        # never drawn — the placeholder kept the position the template had.
+        # Remember that a PERSON stated it. The renderer writes the headline
+        # into the layout's title placeholder when there is one and lets the
+        # placeholder's own inheritance supply position, font and colour — which
+        # is right for a template nobody has corrected, and is exactly why a
+        # correction was stored, shown back in the editor, and never drawn.
         if any(_num(title.get(k)) is not None for k in ("x", "y", "w", "h")):
             profile.title.authored = True
+        if _hex(title.get("colour")):
+            profile.title.colour = _hex(title["colour"]).lstrip("#")
+        if title.get("font") or _hex(title.get("colour")) or _num(title.get("size")):
+            profile.title.authored_text = True
     # AND the font role, which is where the drawn title actually gets its size:
     # `build_spec` reads `fonts["title"]`, not the profile, so setting only the
     # profile stored the number, showed it back in the editor, and left the
@@ -332,6 +353,8 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
         _set_fonts(spec, {"n_annotation": (
             str(footer.get("font") or had_family),
             int(_num(footer.get("size")) or had_size))})
+    if footer.get("font"):
+        spec.footer_font = str(footer["font"])
     if _hex(footer.get("colour")):
         spec.footer_colour = _hex(footer["colour"])
 
@@ -364,6 +387,9 @@ def _set_fonts(spec, changes: dict[str, tuple[str, int]]) -> None:
 
 
 def _apply_chart_text(spec, given: dict) -> None:
+    colour = _hex(given.get("colour"))
+    if colour:
+        spec.chart_text_colour = colour
     family = str(given.get("font") or "").strip()
     size = _num(given.get("size"))
     if not family and not size:

@@ -28,7 +28,6 @@ from reportbuilder.store.seam import AuthContext, ConsentRequired, NotFound
 
 settings_router = APIRouter(tags=["settings"])
 
-CHART_FONT_KEY = "chart-font"
 SUBSTITUTIONS_KEY = "font-substitutions"
 ACCESS_KEY = "access.json"
 
@@ -38,27 +37,6 @@ ACCESS_KEY = "access.json"
 # make six round trips to datahive.
 _CACHE_SECONDS = 20.0
 _cached: tuple[float, str] | None = None
-
-
-def chart_font_for(repo: Repository, auth: AuthContext) -> str:
-    """The configured chart font family ("" = house default). Never raises."""
-    global _cached
-    now = time.monotonic()
-    if _cached is not None and now - _cached[0] < _CACHE_SECONDS:
-        return _cached[1]
-    family = ""
-    try:
-        stored = repo.get_setting(auth, CHART_FONT_KEY) or {}
-        family = (stored.get("family") or "").strip()
-    except Exception:  # noqa: BLE001 — styling must not break a render
-        family = _cached[1] if _cached else ""
-    _cached = (now, family)
-    return family
-
-
-def apply_chart_font(repo: Repository, auth: AuthContext) -> str:
-    """Make charts draw in the configured family. Returns what was applied."""
-    return H.use_chart_font(chart_font_for(repo, auth))
 
 
 def _font_dict(f, *, on_host: bool) -> dict:
@@ -105,6 +83,11 @@ def list_fonts(auth: AuthContext = Depends(get_auth),
         "fonts": [_font_dict(f, on_host=f.family.strip().lower() in installed)
                   for f in stored],
         "missing": _missing_families(repo, auth),
+        # Every family this host can draw with. It used to hang off the
+        # chart-font setting, which is gone — a chart's face now comes from its
+        # TEMPLATE — but the substitution picker still needs to know what a
+        # missing family may be mapped TO. (Johan, 2026-09-08)
+        "available": H.available_chart_fonts(),
     }
 
 
@@ -209,41 +192,6 @@ def put_access(payload: dict = Body(...),
     value = {"allowed_domains": domains, "default_grants": grants}
     repo.set_setting(auth, ACCESS_KEY, value)
     return value
-
-
-@settings_router.get("/settings/chart-font")
-def get_chart_font(auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository),
-                   user: User = Depends(current_user)) -> dict:
-    """Which font charts draw in, and every family this host could use.
-
-    Separate from the template's font on purpose: a brand display face is
-    often wide, and chart text is mostly long category labels, so an admin may
-    want a narrower one to fit more of a label before it is truncated.
-    """
-    family = chart_font_for(repo, auth)
-    return {"family": family,
-            "effective": H.use_chart_font(family),
-            "default": H._DEFAULT_CHART_FONT,
-            "available": H.available_chart_fonts()}
-
-
-@settings_router.put("/settings/chart-font")
-def set_chart_font(payload: dict = Body(...),
-                   auth: AuthContext = Depends(get_auth),
-                   repo: Repository = Depends(get_repository),
-                   user: User = Depends(require_admin)) -> dict:
-    """Set the chart font. An empty family restores the house default."""
-    global _cached
-
-    family = (payload.get("family") or "").strip()
-    available = set(H.available_chart_fonts())
-    if family and family not in available:
-        raise HTTPException(
-            422, f"The font '{family}' is not installed on this server.")
-    repo.set_setting(auth, CHART_FONT_KEY, {"family": family})
-    _cached = None                       # the next render must see the change
-    return {"family": family, "effective": H.use_chart_font(family)}
 
 
 @settings_router.post("/settings/fonts", status_code=201)
@@ -382,7 +330,7 @@ def put_email_settings(payload: dict = Body(...),
             "configured": mailer.config_from_settings(value) is not None}
 
 
-__all__ = ["settings_router", "sync_fonts_to_host", "apply_chart_font"]
+__all__ = ["settings_router", "sync_fonts_to_host"]
 
 
 # ── The default template ─────────────────────────────────────────────────────

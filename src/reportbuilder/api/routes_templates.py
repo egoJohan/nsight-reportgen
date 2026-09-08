@@ -525,6 +525,12 @@ class TemplateLayoutBody(BaseModel):
     layout_index: int | None = None
     title: dict = {}
     content: dict = {}
+    #: The editor has offered these two panels all along and the render side has
+    #: read them all along; the body in between declared neither, so every
+    #: subtitle and footer correction was dropped on the way to being stored.
+    #: (Johan, 2026-09-08)
+    subtitle: dict = {}
+    footer: dict = {}
     accent: str = ""
     background: str = ""
 
@@ -554,6 +560,8 @@ def set_template_layout(customer_id: str, template_id: str,
         "layout_index": body.layout_index,
         "title": kept(body.title or {}),
         "content": kept(body.content or {}),
+        "subtitle": kept(body.subtitle or {}),
+        "footer": kept(body.footer or {}),
         "accent": str(body.accent or "").strip(),
         "background": str(body.background or "").strip(),
     }.items() if v not in (None, "", {})}

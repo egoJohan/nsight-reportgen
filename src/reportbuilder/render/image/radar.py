@@ -25,7 +25,8 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
-from reportbuilder.render.image._mpl import (chart_accent,
+from reportbuilder.render.image._mpl import (
+    _remember_font,chart_accent,
     render_png, place_picture_square, series_values, style_legend, wrap_label,
     chart_background, chart_furniture,
 )
@@ -55,6 +56,7 @@ def build_image_radar(ctx) -> None:
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
     fig = Figure(figsize=(sq, sq), dpi=200)
+    _remember_font(fig, ctx)
     FigureCanvasAgg(fig)
     fig.patch.set_facecolor(bg)
     ax = fig.add_subplot(111, polar=True)

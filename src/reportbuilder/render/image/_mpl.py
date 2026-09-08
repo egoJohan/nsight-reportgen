@@ -29,6 +29,41 @@ def _new_agg_figure(w_in: float, h_in: float, dpi: int = 200) -> Figure:
     FigureCanvasAgg(fig)
     return fig
 
+def chart_text_font(style) -> str:
+    """The face a chart's own text is drawn in.
+
+    The TEMPLATE's content font when it states one, else the house default.
+    There is no third source: the admin-wide "chart font" setting this replaced
+    could not tell one customer's deck from another's, and a font is a property
+    of the template the deck is drawn on. (Johan, 2026-09-08)
+    """
+    from reportbuilder.render.house_style import (
+        _DEFAULT_CHART_FONT, available_chart_fonts,
+    )
+
+    stated = (getattr(style, "body_font", "") or "").strip()
+    if not stated:
+        return _DEFAULT_CHART_FONT
+    # A face this host cannot draw degrades to the HOUSE default, not to
+    # matplotlib's DejaVu — an unavailable setting should land on a deliberate
+    # choice rather than an accidental one. (The same rule the admin-wide
+    # setting this replaced applied to its own picker.)
+    return stated if stated in set(available_chart_fonts()) else _DEFAULT_CHART_FONT
+
+
+def _remember_font(fig, ctx) -> None:
+    """Stash this figure's face on the figure itself.
+
+    Not on matplotlib's rcParams: those are process-global, and FastAPI runs
+    these endpoints on a threadpool, so two previews of two templates build
+    figures at the same time. A global family was safe only while every deck
+    shared one; the moment it comes from the template, one report's font would
+    land on another's chart. `render_png` reads it back.
+    """
+    style = getattr(ctx, "style", None) if ctx is not None else None
+    fig._nsight_chart_font = chart_text_font(style)
+
+
 _EMU_PER_IN = 914400.0
 
 
@@ -121,6 +156,7 @@ def new_figure(ctx):
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
+    _remember_font(fig, ctx)
     ax = fig.subplots()
     # The template's own background, so the chart does not sit on a cream
     # rectangle in the middle of a white deck. Falls back to house cream when no
@@ -161,6 +197,7 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
+    _remember_font(fig, ctx)
     cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
     gridspec_kw = {"width_ratios": list(width_ratios)} if width_ratios else None
     axes = fig.subplots(max(1, rows), cols, sharey=sharey, sharex=False,
@@ -195,6 +232,7 @@ def new_tall_figure(ctx, h_in: float):
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(h_in, ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
+    _remember_font(fig, ctx)
     ax = fig.subplots()
     # The template's own background, so the chart does not sit on a cream
     # rectangle in the middle of a white deck. Falls back to house cream when no
@@ -220,6 +258,18 @@ def render_png(fig) -> str:
     # Attendo's off-white, for one. Letting the slide show through is what
     # "use the template as is" means for the chart, and it is correct for the
     # house default too, which now paints its cream in the layout.
+    # The template's face, applied per FIGURE. Tick labels and legend text are
+    # created during a draw, so the figure is drawn once first and every Text
+    # artist is then set — family only, never size or colour, which each
+    # builder has already decided for good reasons (a white number inside a
+    # bar, a muted tick).
+    family = getattr(fig, "_nsight_chart_font", "")
+    if family:
+        from matplotlib.text import Text
+
+        fig.canvas.draw()
+        for artist in fig.findobj(Text):
+            artist.set_fontfamily(family)
     fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04,
                 transparent=True)
     fig.clear()
@@ -326,8 +376,21 @@ def chart_furniture(ctx) -> tuple[str, str, str]:
 
     One call per builder instead of re-deriving contrast against
     chart_background(ctx) piecemeal in eight files — see house_style.py for why
-    a light background is untouched and only a dark one gets a derived set."""
-    return furniture_colors(chart_background(ctx))
+    a light background is untouched and only a dark one gets a derived set.
+
+    An author's CONTENT colour replaces the derived ink. The derivation exists
+    to keep text legible on a ground nobody told us about; somebody who states
+    the colour has looked at the slide, and their answer wins. `muted` and
+    `grid` stay derived — they are contrast furniture, not text.
+    (Johan, 2026-09-08)
+    """
+    ink, muted, grid = furniture_colors(chart_background(ctx))
+    stated = (getattr(getattr(ctx, "style", None), "chart_text_colour", "") or "").strip()
+    if stated:
+        # Stored bare ("B3005E") the way every other colour on the style is;
+        # matplotlib wants the hash.
+        ink = stated if stated.startswith("#") else f"#{stated}"
+    return ink, muted, grid
 
 
 def chart_accent(ctx) -> str:
@@ -498,6 +561,7 @@ def new_square_figure(ctx):
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
     fig = _new_agg_figure(sq, sq)
+    _remember_font(fig, ctx)
     ax = fig.subplots()
     bg = chart_background(ctx)
     fig.patch.set_facecolor(bg)

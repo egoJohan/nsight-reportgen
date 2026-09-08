@@ -37,7 +37,8 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
-from reportbuilder.render.image._mpl import (chart_accent,
+from reportbuilder.render.image._mpl import (
+    _remember_font,chart_accent,
     render_png, place_picture_square, format_value, label_floor,
     LABEL_FLOOR_DEFAULT_PCT,
     chart_background, chart_furniture,
@@ -80,6 +81,7 @@ def _make_square_fig_ax(ctx, bg: str):
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     fig = Figure(figsize=(w_in, h_in), dpi=200)
+    _remember_font(fig, ctx)
     FigureCanvasAgg(fig)
     fig.patch.set_facecolor(bg)
     # Pie axes: left ~62% of the width, full height — the circle fills the height.
@@ -136,6 +138,7 @@ def _make_panel_axes(ctx, bg: str, n_panels: int):
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
     h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
     fig = Figure(figsize=(w_in, h_in), dpi=200)
+    _remember_font(fig, ctx)
     FigureCanvasAgg(fig)
     fig.patch.set_facecolor(bg)
 

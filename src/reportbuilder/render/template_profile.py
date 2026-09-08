@@ -97,6 +97,12 @@ class TextStyle:
     #: placeholder, or the text stays where the template put it and the editor
     #: appears to do nothing. (Johan, 2026-09-08)
     authored: bool = False
+    #: True when an author stated the FONT, SIZE or COLOUR. Same reasoning as
+    #: `authored`, for the properties the placeholder inherits rather than the
+    #: box it occupies: `_fill_title_placeholder` deliberately writes only the
+    #: text so the template's own chain supplies the rest, and a correction has
+    #: to override that chain or it does nothing at all.
+    authored_text: bool = False
 
     @property
     def positioned(self) -> bool:

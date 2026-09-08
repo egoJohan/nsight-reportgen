@@ -246,28 +246,6 @@ export function useClearPreviewCache(materialId: string | undefined) {
   });
 }
 
-export function useChartFont() {
-  return useQuery({
-    queryKey: ["settings", "chart-font"],
-    queryFn: api.settings.chartFont,
-  });
-}
-
-export function useSetChartFont() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.settings.setChartFont,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["settings", "chart-font"] });
-      // Every rendered thumbnail was drawn with the previous font. The font is
-      // not part of the image fingerprint — it is a server-side setting, not a
-      // property of the slide — so the pictures have to be dropped and made
-      // again, and the queue has to be told, or it will consider them done.
-      qc.removeQueries({ queryKey: ["chart-preview"] });
-      previewQueue.restartDeck("the chart font changed");
-    },
-  });
-}
 
 export function useFontActions() {
   const qc = useQueryClient();

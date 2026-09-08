@@ -416,6 +416,13 @@ def ink_colour(hex_or_none: str, fallback):
     return _rgb((hex_or_none or "").strip().lstrip("#")) or fallback
 
 
+def _footer_font(ctx) -> str:
+    """The face the methodology line is drawn in: its own when an author stated
+    one, otherwise the body font every other piece of slide text uses."""
+    style = getattr(ctx, "style", None)
+    return (getattr(style, "footer_font", "") or "").strip() or body_font(style)
+
+
 def _footer_ink(style, fallback):
     chosen = getattr(style, "footer_colour", "")
     return ink_colour(chosen, fallback)
@@ -820,6 +827,23 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     except Exception:  # noqa: BLE001 — a title must never fail a render
         logging.getLogger(__name__).warning("could not size the title",
                                             exc_info=True)
+
+    # An AUTHOR'S font and colour, for the same reason as their box: everything
+    # above deliberately leaves the placeholder's inheritance alone, which is
+    # right until somebody says the inherited answer is wrong. Written only
+    # then, so an untouched template still renders in the face and colour its
+    # own layout states. (Johan, 2026-09-08)
+    _st = getattr(getattr(style, "profile", None), "title", None)
+    if _st is not None and getattr(_st, "authored_text", False):
+        try:
+            run = tf.paragraphs[0].runs[0]
+            if _st.font:
+                run.font.name = _st.font
+            if _st.colour:
+                run.font.color.rgb = _rgb(_st.colour)
+        except Exception:  # noqa: BLE001 — a title must never fail a render
+            logging.getLogger(__name__).warning("could not style the title",
+                                                exc_info=True)
     return True
 
 
@@ -1091,7 +1115,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         sw - Inches(4.0), Inches(0.40),
         [(footer_text, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
         align=PP_ALIGN.LEFT,
-        font=_body_font(ctx),
+        font=_footer_font(ctx),
     )
     # Scale endpoint legend for a partially-labelled numeric scale (e.g. "1 = täysin
     # eri mieltä · 7 = täysin samaa mieltä") — a small caption just above the footer,
@@ -1106,7 +1130,7 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             Inches(6.0), Inches(0.40),
             [(caption, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
             align=PP_ALIGN.RIGHT,
-            font=_body_font(ctx),
+            font=_footer_font(ctx),
         )
     # n is shown once, in the methodology footer above (it already reads
     # "<stat label> · n = N"). The previous separate bottom-right "n = N"

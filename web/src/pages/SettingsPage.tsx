@@ -30,7 +30,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EMPTY, PAGE, PAGE_TITLE, PANEL_PADDED, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
-  useFontSettings, useFontActions, useChartFont, useSetChartFont,
+  useFontSettings, useFontActions,
   useUsers, useUserActions,
   useAccessRequests, useAccessRequestActions,
 } from "@/lib/queries";
@@ -131,54 +131,6 @@ function FontRow({ font }: { font: InstalledFont }) {
  *  before it truncates or rotates, so this is a separate choice rather than
  *  something inherited from the pohja.
  */
-function ChartFontSetting() {
-  const { data } = useChartFont();
-  const set = useSetChartFont();
-
-  if (!data) return null;
-  const fellBack = data.family !== "" && data.effective !== data.family;
-
-  return (
-    <div className={PANEL_PADDED}>
-      <h3 className={PANEL_TITLE}>Chart font</h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Chart text is drawn in this font. It is deliberately separate from the
-        template's own: a narrower face fits more of a long answer option before
-        it is truncated.
-      </p>
-
-      <div className="mt-3 flex items-center gap-2">
-        <select
-          className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-surface px-2.5 text-sm"
-          value={data.family}
-          disabled={set.isPending}
-          onChange={(e) =>
-            set.mutate(e.target.value, {
-              onError: (err) => toast.error(err.message),
-            })
-          }
-        >
-          <option value="">Default ({data.default})</option>
-          {data.available.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        {set.isPending && (
-          <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-        )}
-      </div>
-
-      {fellBack && (
-        <p className="mt-2 text-xs text-amber-600">
-          The chosen font was not found, so {data.effective} is in use.
-        </p>
-      )}
-    </div>
-  );
-}
-
 function FontsTab() {
   const { data, isLoading } = useFontSettings();
   const actions = useFontActions();
@@ -198,7 +150,6 @@ function FontsTab() {
     <div className="space-y-6">
       {data && <MissingFonts missing={data.missing} />}
 
-      <ChartFontSetting />
 
       <div className={PANEL_PADDED}>
         <h3 className={PANEL_TITLE}>Installed fonts</h3>

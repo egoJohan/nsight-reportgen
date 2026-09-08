@@ -405,8 +405,6 @@ async def render_report(
             repo, auth, case_id, report_id, out_dir)
         # Chart text uses the configured font, which is deliberately independent of
         # the template's: brand faces are often too wide for category labels.
-        from reportbuilder.api.routes_settings import apply_chart_font
-        apply_chart_font(repo, auth)
 
         try:
             result = await asyncio.get_event_loop().run_in_executor(
