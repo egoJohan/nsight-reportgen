@@ -494,11 +494,24 @@ export function useChartPreview(
   // 25-field allow-list this replaced had to be remembered every time ChartSpec
   // gained a field, and forgetting meant the preview silently kept showing the
   // previous image.
+  // The QUEUE's own context, not one rebuilt from props. Both used to be
+  // assembled here and there from the same ingredients, which held only while
+  // the ingredient list was identical in both places — and the day the queue's
+  // context gained `templateRevision` and this one did not, the queue stored
+  // every image under a key this lookup never asked for. The backend answered
+  // 200 to every request and not one picture appeared. (Johan, 2026-09-09)
+  //
+  // Borrowed only when it describes the same template this caller names, so a
+  // component for one report can never read another's revision.
+  const queued = previewQueue.currentRenderContext();
+  const templateRef = opts?.templateRef ?? "";
   const queryKey = [
     "chart-preview",
     materialId,
     imageFingerprint(chart, {
-      templateRef: opts?.templateRef ?? "",
+      templateRef,
+      templateRevision:
+        queued.templateRef === templateRef ? queued.templateRevision : undefined,
       reportId: opts?.reportId ?? "",
       groupingKey,
       renderTitle,

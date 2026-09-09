@@ -107,6 +107,21 @@ export function setPatchSink(fn: PatchSink) {
  *  fingerprint nobody is asking for any more. */
 let contextGeneration = 0;
 
+/** The context the queue is CURRENTLY keying pictures on.
+ *
+ *  Exists so a component that reads a picture asks the queue what the key was
+ *  built from instead of rebuilding it from its own props. Both used to be
+ *  assembled from the same ingredients, which held only while the two
+ *  ingredient lists stayed identical — and the day this one gained
+ *  `templateRevision` and the reader did not, every image was stored under a
+ *  key nothing asked for. The backend answered 200 to every request and the
+ *  screen stayed blank. (Johan, 2026-09-09)
+ */
+export function currentRenderContext(): RenderContext {
+  return renderContext;
+}
+
+
 export function setRenderContext(ctx: RenderContext) {
   if (JSON.stringify(ctx) === JSON.stringify(renderContext)) return;
   const before = renderContext;
