@@ -189,6 +189,9 @@ export function useSubstitutions() {
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["template-detail"] });
       qc.invalidateQueries({ queryKey: ["templates"] });
+      // The resolution too: it carries each template's revision, and a stale
+      // one leaves every preview looking current.
+      qc.invalidateQueries({ queryKey: ["template"] });
       // A stand-in font is not part of the fingerprint either: same reasoning
       // as the chart font above.
       qc.removeQueries({ queryKey: ["chart-preview"] });

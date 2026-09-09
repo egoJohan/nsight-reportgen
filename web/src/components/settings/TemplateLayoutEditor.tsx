@@ -85,6 +85,14 @@ export function useTemplateLayout(customerId: string, templateId: string) {
       toast.success("Layout saved");
       setDraft(sent ?? {});
       void qc.invalidateQueries({ queryKey: ["template-layout", customerId, templateId] });
+      // …and the RESOLUTION, which is what carries this template's revision to
+      // the wizard. Without this the report kept the revision it was opened
+      // with, every fingerprint stayed the same, and a corrected template
+      // re-drew nothing — the invalidation was in place and the number feeding
+      // it was stale. Binding a template already invalidated this key, which is
+      // why switching templates worked and EDITING one did not.
+      // (Johan, 2026-09-09)
+      void qc.invalidateQueries({ queryKey: ["template"] });
       // Every preview drawn on this template is now stale.
       void qc.removeQueries({ queryKey: ["chart-preview"] });
     },
