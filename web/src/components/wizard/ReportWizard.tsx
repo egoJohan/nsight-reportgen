@@ -34,6 +34,7 @@ import {
   useResolvedCase,
   useRenderCapacity,
   useCaseTemplate,
+  useReportTemplate,
   useTemplateActions,
   fetchChartPreviewInto,
   qk,
@@ -217,6 +218,12 @@ export default function ReportWizard({
   useRenderCapacity();
   const { data: resolvedCase } = useResolvedCase(caseId);
   const { data: caseTemplate } = useCaseTemplate(resolvedCase?.customer_id, caseId);
+  // The REPORT's own resolution, which is what it is actually drawn on when it
+  // overrides or is pinned. The case-level answer is right only for a report
+  // that inherits — pairing this report's template REF with the case
+  // template's revision would watch the wrong file for changes.
+  const { data: reportTemplate } = useReportTemplate(
+    resolvedCase?.customer_id, caseId, reportId);
   const bindReport = useTemplateActions(resolvedCase?.customer_id).bindReport;
   const updateReport = useUpdateReport(caseId);
   const { workspace, renameReport } = useWorkspace(caseId);
@@ -782,7 +789,15 @@ export default function ReportWizard({
   // fingerprint and its stale picture. The layout editor dropped its own
   // react-query cache on save, which fixed the tab it was saved in and no
   // other tab, user or session. (Johan, 2026-09-09)
-  const templateRevision = caseTemplate?.revision ?? "";
+  // Paired with the ref above: the report's own resolution when there is one,
+  // the case's otherwise, so the revision always describes the file that
+  // `effectiveTemplateRef` names.
+  const templateRevision =
+    (reportTemplate?.template_id === effectiveTemplateRef
+      ? reportTemplate?.revision
+      : caseTemplate?.template_id === effectiveTemplateRef
+        ? caseTemplate?.revision
+        : "") ?? "";
   useEffect(() => {
     const ctx = {
       // The RESOLVED template, falling back to the report's own choice while
