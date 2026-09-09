@@ -28,7 +28,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   useCases,
   useCustomers,
-  useCustomerNames,
   useCustomerCases,
   useResolvedCase,
   useCaseMaterials,
@@ -60,7 +59,6 @@ import { reportCopyName } from "@/lib/reportCopyName";
 import { Button } from "@/components/ui/button";
 import TiledBackdrop from "@/components/layout/TiledBackdrop";
 import { useSession, signOut, type Me } from "@/lib/session";
-import type { Customer } from "@/lib/api";
 
 /** One customer's cases, fetched only while the group is open so opening the
  *  sidebar does not fan out a request per customer. */
@@ -121,20 +119,18 @@ function CustomerCases({ customerId, canEdit }: { customerId: string; canEdit: b
  *  reachable through the customer that owns it. */
 function CustomersNav() {
   const { data: customers } = useCustomers();
-  const { data: allNames } = useCustomerNames();
 
-  // ONE alphabetical list, not "the ones you can open" followed by "the rest".
-  // Split into two blocks the order broke at the seam — Attendo, Synsam, then
-  // Holiday Club — and a reader looking for a name has to know which half it
-  // lives in before they can find it.
-  const merged = [
-    ...(customers ?? []).map((c) => ({ customer: c, accessible: true })),
-    ...(allNames ?? [])
-      .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
-      .map((n) => ({ customer: { ...n, template_id: "", can_edit: false } as Customer, accessible: false })),
-  ].sort((a, b) =>
-    a.customer.name.localeCompare(b.customer.name, undefined, { numeric: true, sensitivity: "base" })
-  );
+  // Only the customers this caller may open. The menu used to list the others
+  // too, greyed out behind a padlock, so there was something to click into and
+  // request access to — which handed every signed-in user the full client
+  // roster. A customer you hold no grant on is now simply not there.
+  // (Johan, 2026-09-09)
+  const merged = (customers ?? [])
+    .map((c) => ({ customer: c, accessible: true }))
+    .sort((a, b) =>
+      a.customer.name.localeCompare(b.customer.name, undefined,
+                                    { numeric: true, sensitivity: "base" })
+    );
   const { customerId: routeCustomerId } = useParams();
   const [openIds, setOpenIds] = useState<Record<string, boolean>>({});
 

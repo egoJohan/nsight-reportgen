@@ -84,42 +84,44 @@ class TestCustomerNameRoute:
 
 
 # ---------------------------------------------------------------------------
-# GET /customers/names -- the list form, so the sidebar has something to
-# offer for a customer the caller cannot yet open.
+# The roster is NOT public. It used to be: `GET /customers/names` returned every
+# customer id and name to any signed-in user, so the sidebar could list the ones
+# you cannot open behind a padlock and offer to request access to them.
+#
+# That listing is gone (Johan, 2026-09-09): a customer you hold no grant on is
+# not shown at all. Which removes the reason for the roster — and the roster was
+# the widest thing this product told a signed-in stranger, since for a research
+# agency the client list is the commercially sensitive part. Requesting access
+# still works for someone who was SENT a link: see NoAccessCustomer, which asks
+# by id and needs no roster.
 # ---------------------------------------------------------------------------
 
-class TestCustomerNamesList:
-    def test_lists_every_customer_id_and_name_regardless_of_grant(self, client, repo, auth):
-        a = repo.create_customer(auth, "Attendo").id
-        b = repo.create_customer(auth, "Holiday Club").id
-        sign_in(client, repo, auth, "viewer@egoiq.com")  # no grants at all
-
-        rows = client.get("/customers/names").json()
-        assert {r["id"] for r in rows} == {a, b}
-        assert {r["name"] for r in rows} == {"Attendo", "Holiday Club"}
-        assert all(set(r.keys()) == {"id", "name"} for r in rows)
-
-    def test_401s_for_a_signed_out_caller(self, client, repo, auth):
+class TestTheRosterIsNotPublic:
+    def test_the_roster_route_is_gone(self, client, repo, auth):
         repo.create_customer(auth, "Attendo")
-        assert client.get("/customers/names").status_code == 401
-
-    def test_an_admin_with_no_grants_still_sees_the_full_roster(self, client, repo, auth):
-        """is_admin plays no part in this decision either way -- an admin
-        with no grants gets [] from GET /customers (spec §5), but the SAME
-        admin gets every name from this route, same as anyone else signed
-        in."""
-        repo.create_customer(auth, "Attendo")
-        sign_in(client, repo, auth, "admin@egoiq.com", admin=True)
-        assert client.get("/customers").json() == []
-        assert len(client.get("/customers/names").json()) == 1
-
-    def test_the_literal_path_is_not_shadowed_by_the_customer_id_route(self, client, repo, auth):
-        """Regression guard for the FastAPI route-ordering trap this route's
-        docstring warns about: if `/customers/{customer_id}` were matched
-        first, "names" would be treated as a customer id and this would
-        404 instead of listing."""
         sign_in(client, repo, auth, "viewer@egoiq.com")
-        assert client.get("/customers/names").status_code == 200
+        assert client.get("/customers/names").status_code == 404
+
+    def test_a_user_with_no_grants_sees_no_customers_at_all(self, client, repo, auth):
+        repo.create_customer(auth, "Attendo")
+        repo.create_customer(auth, "Holiday Club")
+        sign_in(client, repo, auth, "viewer@egoiq.com")
+        assert client.get("/customers").json() == []
+
+    def test_a_user_sees_only_the_customer_they_hold(self, client, repo, auth):
+        a = repo.create_customer(auth, "Attendo").id
+        repo.create_customer(auth, "Holiday Club")
+        sign_in(client, repo, auth, "viewer@egoiq.com", (a, "view"))
+        rows = client.get("/customers").json()
+        assert [r["name"] for r in rows] == ["Attendo"]
+
+    def test_naming_ONE_customer_by_id_still_works(self, client, repo, auth):
+        """The request-access page is reached by link and names the customer it
+        is about; that is one id the caller already had."""
+        a = repo.create_customer(auth, "Attendo").id
+        sign_in(client, repo, auth, "viewer@egoiq.com")
+        r = client.get(f"/customers/{a}/name")
+        assert r.status_code == 200 and r.json()["name"] == "Attendo"
 
 
 # ---------------------------------------------------------------------------

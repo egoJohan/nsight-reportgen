@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { PlusIcon, Building2Icon, ArrowRightIcon, LockIcon } from "lucide-react";
+import { PlusIcon, Building2Icon, ArrowRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { useCustomers, useCustomerNames, useCreateCustomer } from "@/lib/queries";
+import { useCustomers, useCreateCustomer } from "@/lib/queries";
 import type { Customer } from "@/lib/api";
 import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces";
 
@@ -35,20 +35,15 @@ function customerSubtitle(c: Customer): string {
 export default function CustomersPage() {
   const navigate = useNavigate();
   const { data: customers, isLoading, isError } = useCustomers();
-  const { data: allNames } = useCustomerNames();
 
-  // The same one-list rule the sidebar follows: customers you cannot open are
-  // listed here too, in their alphabetical place, so this page and the menu
-  // agree about what exists. Without them the request flow is unreachable from
-  // this page — you can only ask about a customer you can already see.
-  const merged = [
-    // The full row, stats and owners included, rides along for every
-    // customer this caller can actually open.
-    ...(customers ?? []).map((c) => ({ id: c.id, name: c.name, accessible: true, customer: c })),
-    ...(allNames ?? [])
-      .filter((n) => !(customers ?? []).some((c) => c.id === n.id))
-      .map((n) => ({ id: n.id, name: n.name, accessible: false, customer: null as Customer | null })),
-  ].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  // Only what this caller may open. Customers they hold no grant on used to be
+  // listed here behind a padlock, so the request-access flow had somewhere to
+  // start from — but that told every signed-in user the whole client roster,
+  // which for a research agency is the commercially sensitive part. Being sent
+  // a link still reaches the request page. (Johan, 2026-09-09)
+  const merged = (customers ?? []).map((c) => ({
+    id: c.id, name: c.name, accessible: true, customer: c,
+  }));
   const createCustomer = useCreateCustomer();
   const [searchParams, setSearchParams] = useSearchParams();
   const [name, setName] = useState("");
@@ -108,13 +103,7 @@ export default function CustomersPage() {
         )}
 
         {merged.map((c) => {
-          // Stats only exist for a row this caller can open (see `merged`
-          // above). A locked one gets a line too, saying what to do about
-          // it — the lock icon alone shows the door is shut without saying
-          // it can be opened.
-          const subtitle = c.customer
-            ? customerSubtitle(c.customer)
-            : "Open to request access";
+          const subtitle = c.customer ? customerSubtitle(c.customer) : "";
           return (
             <button
               key={c.id}
@@ -122,17 +111,10 @@ export default function CustomersPage() {
               className={ROW}
             >
               <span className="flex min-w-0 items-center gap-3">
-                {c.accessible ? (
-                  <Building2Icon className="size-5 shrink-0 text-muted-foreground" />
-                ) : (
-                  <LockIcon className="size-4 shrink-0 text-muted-foreground opacity-70" />
-                )}
+                <Building2Icon className="size-5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 text-left">
                   <span
-                    className={
-                      "block truncate " +
-                      (c.accessible ? "font-medium" : "font-medium text-muted-foreground")
-                    }
+                    className="block truncate font-medium"
                   >
                     {c.name}
                   </span>
