@@ -35,6 +35,7 @@ import textwrap
 import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
+    series_label,
     place_picture_square, series_values, format_value, label_floor, default_label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     _new_agg_figure, _EMU_PER_IN,
@@ -952,7 +953,8 @@ def _render_column_v(ctx, cats, segs, data) -> None:
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         bars = ax.bar(
             x + offset, vals, width=bwidth,
-            label=seg, color=bar_clrs, edgecolor="none", zorder=3,
+            label=series_label(ctx, seg), color=bar_clrs,
+            edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
         # Per-bar value labels collide once columns get narrow (many segments) —
@@ -1041,7 +1043,8 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         ax.barh(
             ys, vals, height=height,
-            label=seg, color=bar_clrs, edgecolor="none", zorder=3,
+            label=series_label(ctx, seg), color=bar_clrs,
+            edgecolor="none", zorder=3,
         )
     # The figure is sized so each row fits `label_lines` wrapped lines; size the
     # font to that band (kept below the title size). Ellipsis is a true last

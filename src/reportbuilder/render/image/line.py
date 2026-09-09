@@ -14,7 +14,7 @@ from __future__ import annotations
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
-    format_value, style_legend, wrap_label,
+    format_value, series_label, style_legend, wrap_label,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
@@ -45,7 +45,7 @@ def build_image_line(ctx) -> None:
         vals = data[seg]
         ax.plot(
             x, vals,
-            marker="o", label=seg, color=clrs[i],
+            marker="o", label=series_label(ctx, seg), color=clrs[i],
             linewidth=2.5, markersize=6,
             markeredgecolor=bg, markeredgewidth=1.2,
             zorder=3,

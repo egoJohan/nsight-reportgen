@@ -27,7 +27,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
     _remember_font,chart_accent,
-    render_png, place_picture_square, series_values, style_legend, wrap_label,
+    render_png, place_picture_square, series_label, series_values,
+    style_legend, wrap_label,
     chart_background, chart_furniture,
 )
 from reportbuilder.render.house_style import register_fonts, series_colors
@@ -76,7 +77,7 @@ def build_image_radar(ctx) -> None:
         closed_vals = list(vals) + [vals[0]]
         ax.plot(
             closed_angles, closed_vals,
-            label=seg, color=clrs[i],
+            label=series_label(ctx, seg), color=clrs[i],
             linewidth=2.4 if len(segs) == 1 else 2.0,
             zorder=4,
         )

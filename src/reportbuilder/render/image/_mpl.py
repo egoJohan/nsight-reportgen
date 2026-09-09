@@ -29,6 +29,28 @@ def _new_agg_figure(w_in: float, h_in: float, dpi: int = 200) -> Figure:
     FigureCanvasAgg(fig)
     return fig
 
+def series_label(ctx, seg: str) -> str:
+    """A series' name with the number of people behind it: "Naiset (n=501)".
+
+    A slide comparing groups gave the reader two percentages and no way to know
+    one was 501 people and the other 502; the footer's N is the whole slide's
+    base, which is neither group's. (customer, 2026-09-09)
+
+    For a series that IS a group. A stacked bar's legend names answer
+    categories — its bars are the groups — so those labels are built without
+    this, and a category has no base of its own to state.
+
+    Falls back to the bare name when the base is unknown, which is what a
+    segment carrying no count means.
+    """
+    base = (getattr(getattr(ctx, "series", None), "base_n", None) or {}).get(seg)
+    try:
+        n = int(base)
+    except (TypeError, ValueError):
+        return seg
+    return f"{seg} (n={n})" if n > 0 else seg
+
+
 def chart_text_font(style) -> str:
     """The face a chart's own text is drawn in.
 
