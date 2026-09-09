@@ -133,3 +133,55 @@ def test_a_line_chart_names_its_groups_bases_too():
     finally:
         L.render_png = original
     assert any(l.startswith("Naiset (n=") for l in caught["labels"]), caught["labels"]
+
+
+def test_age_bands_keep_their_names_and_bases():
+    """`_legend_below` shortens a numeric SCALE to bare numbers, which is right
+    for a stacked bar's 1..7 legend and wrong for groups: Finnish age bands all
+    start with a digit, so the legend drew "18", "25", "35", "45" — no names,
+    and no room for the base this feature adds."""
+    import pandas as pd
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    from reportbuilder.ingest.sav_reader import ValueLabel, Variable
+    from reportbuilder.model.question import Question, QuestionModel
+    from reportbuilder.render.base import RenderContext, Slot, StyleSpec
+
+    bands = ["18-24 vuotias", "25-34 vuotias", "35-44 vuotias", "45-54 vuotias"]
+    q = Variable(name="q", label="Q", measurement="nominal", missing_values=[],
+                 value_labels=[ValueLabel(value=float(i + 1), label=f"V{i+1}")
+                               for i in range(3)])
+    g = Variable(name="g", label="Ikä", measurement="nominal", missing_values=[],
+                 value_labels=[ValueLabel(value=float(i + 1), label=b)
+                               for i, b in enumerate(bands)])
+    rows = [{"q": float(i % 3 + 1), "g": float(i % 4 + 1)} for i in range(400)]
+    model = QuestionModel(
+        variables={"q": q, "g": g},
+        questions=[Question(qid="q", text="Q", kind="single", variables=("q",)),
+                   Question(qid="g", text="Ikä", kind="single", variables=("g",))])
+    spec = ChartSpec(question_ref="q", chart_type="vertical_bar", statistic="pct",
+                     classifying_var="g", number_format=NumberFormat(),
+                     sort=SortSpec(basis="data_order"), template_slot="s1",
+                     elements=ElementToggles())
+    series = compute(model.question("q"), spec, pd.DataFrame(rows), model)
+    prs = Presentation()
+    ctx = RenderContext(slide=prs.slides.add_slide(prs.slide_layouts[6]),
+                        slot=Slot(slide_index=0, left=Inches(1), top=Inches(1),
+                                  width=Inches(9), height=Inches(4.5), name="s1"),
+                        style=StyleSpec(), spec=spec, series=series,
+                        fmt=spec.number_format)
+    drawn: dict = {}
+    original = B.render_png
+
+    def _spy(fig):
+        leg = fig.axes[0].get_legend()
+        drawn["texts"] = [t.get_text() for t in leg.get_texts()] if leg else []
+        return original(fig)
+
+    B.render_png = _spy
+    try:
+        B.build_image_column(ctx)
+    finally:
+        B.render_png = original
+    assert any("18-24 vuotias (n=" in t for t in drawn["texts"]), drawn["texts"]

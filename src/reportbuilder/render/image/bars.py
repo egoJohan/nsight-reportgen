@@ -290,7 +290,8 @@ def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
     its height instead of being squeezed by a wide multi-row legend below."""
     n = len(segs)
     if n <= _LEGEND_BELOW_MAX:
-        _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08)
+        _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08,
+                      shorten_numeric=False)
         return
     # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
     # so long combo labels (e.g. gender × a long life-situation label) can't balloon
@@ -338,7 +339,8 @@ def _leading_number(label: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _legend_below(ax, n_segs: int, ctx, y: float = -0.08) -> None:
+def _legend_below(ax, n_segs: int, ctx, y: float = -0.08, *,
+                  shorten_numeric: bool = True) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
@@ -348,8 +350,15 @@ def _legend_below(ax, n_segs: int, ctx, y: float = -0.08) -> None:
     # eri mieltä", "2", … "7 - …") shows JUST the numbers in the legend — the endpoint
     # wording moves to the subtitle. Keeps the legend short and even (no ragged gaps from
     # long endpoint labels stacking under bare numbers).
+    # …and ONLY for a scale. `shorten_numeric=False` is passed by the SERIES
+    # legend, whose labels are the classifier's groups: Finnish age bands all
+    # begin with a digit, so this fired on them and drew "18", "25", "35", "45"
+    # — losing the band names, and with them the "(n=…)" each group now
+    # carries. A group list is not a scale, whatever its labels start with.
+    # (Johan, 2026-09-09)
     nums = [_leading_number(l) for l in labels]
-    numeric_scale = len(nums) >= 3 and all(n is not None for n in nums)
+    numeric_scale = (shorten_numeric and len(nums) >= 3
+                     and all(n is not None for n in nums))
     if numeric_scale:
         labels = [str(n) for n in nums]
     # ≤7 short items go on ONE row; larger sets wrap into ≤5 columns (row-major).
