@@ -19,6 +19,18 @@ def _transport(handler):
     return httpx.MockTransport(handler)
 
 
+def _echo_policy(monkeypatch, terms):
+    """Stub the read-back `register_sensitive_terms` now does, answering with
+    *terms* as though the PUT landed."""
+    def handler(request):
+        return httpx.Response(200, json={
+            "policy": {"deny_terms": {ENTITY_TYPE: list(terms)}}})
+    monkeypatch.setattr(httpx, "get",
+                        lambda url, **kw: httpx.Client(transport=_transport(handler))
+                        .get(url, **{k: v for k, v in kw.items()
+                                     if k not in ("timeout", "params")}))
+
+
 def test_it_sends_the_terms_as_stored_policy(monkeypatch):
     seen = {}
 
@@ -31,6 +43,7 @@ def test_it_sends_the_terms_as_stored_policy(monkeypatch):
     monkeypatch.setattr(httpx, "put",
                         lambda url, **kw: httpx.Client(transport=_transport(handler))
                         .put(url, **{k: v for k, v in kw.items() if k != "timeout"}))
+    _echo_policy(monkeypatch, ["Attendo", "Esperi"])
     register_sensitive_terms("http://hive:7891", "tok", ["Attendo", "Esperi"])
 
     assert seen["url"].endswith("/api/v1/pii/policy")
@@ -73,6 +86,7 @@ def test_registering_replaces_rather_than_merges(monkeypatch):
     monkeypatch.setattr(httpx, "put",
                         lambda url, **kw: httpx.Client(transport=_transport(handler))
                         .put(url, **{k: v for k, v in kw.items() if k != "timeout"}))
+    _echo_policy(monkeypatch, ["Only", "These"])
     register_sensitive_terms("http://hive:7891", "tok", ["Only", "These"])
     assert sent["terms"][ENTITY_TYPE] == ["Only", "These"]
 
@@ -88,3 +102,20 @@ def test_it_can_read_back_what_the_hive_actually_holds(monkeypatch):
                         .get(url, **{k: v for k, v in kw.items()
                                      if k not in ("timeout", "params")}))
     assert registered_terms("http://hive:7891", "tok") == ["Attendo", "Esperi"]
+
+
+def test_a_write_the_hive_did_not_keep_is_a_failure(monkeypatch):
+    """A 2xx says the request was accepted, not that the policy now holds the
+    terms — and nothing downstream can tell the difference: `/llm/ask` answers
+    `pseudonymized: true` with an EMPTY deny list, because the flag means the
+    pseudonymiser ran. So the read-back is the only place the claim is checked.
+    """
+    monkeypatch.setattr(httpx, "put",
+                        lambda url, **kw: httpx.Client(transport=_transport(
+                            lambda r: httpx.Response(200, json={"saved": True})))
+                        .put(url, **{k: v for k, v in kw.items() if k != "timeout"}))
+    _echo_policy(monkeypatch, [])            # ...but it kept nothing
+
+    with pytest.raises(RegistrationFailed) as exc:
+        register_sensitive_terms("http://hive:7891", "tok", ["Attendo"])
+    assert "not in its policy" in str(exc.value)

@@ -2136,8 +2136,29 @@ def accept_sensitive_terms(
     that does the masking would open the report gate while nothing is masked,
     and nothing would look wrong.
     """
-    _register_with_datahive(auth, body.terms)
+    # The UNION of every study's accepted terms, not just this one's.
+    # datahive holds one deny list per tenant and `register_sensitive_terms`
+    # replaces it, so registering this study alone erases every other study's
+    # protection — which is exactly what happened on 2026-09-09, when a study
+    # accepting none followed one accepting fourteen brand names and left the
+    # tenant masking nothing.
+    _register_with_datahive(auth, _tenant_terms(client, material_id, body.terms))
     return client.accept_sensitive_terms(material_id, body.terms)
+
+
+def _tenant_terms(client, material_id: str, accepting: list[str]) -> list[str]:
+    """Every accepted term in the tenant, with *accepting* replacing this
+    material's own stored list — the state the policy must hold once this
+    acceptance is recorded. Computed BEFORE the acceptance is stored, because
+    the registration has to succeed first."""
+    # By MATERIAL, not by term: subtracting this study's own terms would also
+    # drop a name another study still accepts.
+    others: dict[str, None] = {
+        t: None for t in client.all_accepted_terms(exclude=material_id)}
+    for t in accepting:
+        if isinstance(t, str) and t.strip():
+            others[t.strip()] = None
+    return sorted(others, key=lambda t: (-len(t), t.lower()))
 
 
 def _register_with_datahive(auth: AuthContext, terms: list[str]) -> None:
@@ -2162,8 +2183,11 @@ def _register_with_datahive(auth: AuthContext, terms: list[str]) -> None:
     # `-nen` name changes stem, and `Mehiläinen` did not match `Mehiläisestä`
     # at all. What the ANALYST sees and accepts stays the plain names; the
     # stems are an implementation detail of matching, not a decision to make.
+    from reportbuilder.store.datahive_pii import forget_policy_cache
     try:
         register_sensitive_terms(url, auth.token, expand_terms(terms))
+        # What the guard on the AI routes believes is now stale by definition.
+        forget_policy_cache()
     except RegistrationFailed as exc:
         log.warning("pii: refusing to accept terms that did not register: %s", exc)
         raise HTTPException(

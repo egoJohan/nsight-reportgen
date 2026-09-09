@@ -227,6 +227,47 @@ class RepositoryClient:
             "accepted_by": stored.get("accepted_by", ""),
         }
 
+    def all_accepted_terms(self, *, exclude: str = "") -> list[str]:
+        """Every term accepted anywhere this caller can see, as one set.
+
+        datahive holds ONE deny list per tenant — `/api/v1/llm/ask` resolves the
+        tenant-global policy and has no workspace to scope by — so registering
+        only the study being accepted replaces every other study's terms with
+        it. On 2026-09-08 a study accepting 14 brand names was followed the next
+        morning by one accepting none, and the second acceptance left the tenant
+        masking nothing at all, with thirteen studies still showing terms
+        accepted in the UI.
+
+        The union is therefore the only correct thing to register. It also means
+        a term REMOVED from one study keeps being masked while another study
+        still accepts it, which is right: the list says what must never reach a
+        model, and one study's decision cannot un-say another's.
+        `exclude` drops ONE material, for a caller that is replacing that
+        material's list: its terms must come from what is being accepted, not
+        from what it used to hold. Excluding by MATERIAL rather than by term
+        matters — subtracting this study's terms from the union would also drop
+        a name another study still accepts.
+
+        (Johan, 2026-09-09)
+        """
+        seen: dict[str, None] = {}
+        for cust in self.repo.list_customers(self.auth):
+            for case in self.repo.list_cases(self.auth, cust.id):
+                for m in self.repo.list_materials(self.auth, cust.id, case.id):
+                    if exclude and m.id == exclude:
+                        continue          # the caller is replacing this one
+                    cfg = self.repo.load_material_config(
+                        self.auth, cust.id, case.id, m.id)
+                    stored = cfg.get(self.SENSITIVE_TERMS_KEY)
+                    if not isinstance(stored, dict):
+                        continue
+                    for t in stored.get("accepted") or []:
+                        if isinstance(t, str) and t.strip():
+                            seen[t.strip()] = None
+        # Longest first, for the same reason accept_sensitive_terms sorts:
+        # "Esperi Care Oy" must substitute before "Esperi".
+        return sorted(seen, key=lambda t: (-len(t), t.lower()))
+
     def accept_sensitive_terms(self, material_id: str, terms: list[str]) -> dict:
         """Record the terms an analyst confirmed, with who and when.
 

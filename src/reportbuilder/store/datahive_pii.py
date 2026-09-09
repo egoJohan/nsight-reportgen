@@ -91,6 +91,21 @@ def register_sensitive_terms(base_url: str, token: str, terms: list[str],
     if resp.status_code >= 400:
         raise RegistrationFailed(
             f"datahive refused the terms ({resp.status_code}): {resp.text[:200]}")
+
+    # READ IT BACK. A 2xx says the request was accepted, not that the policy
+    # now contains these terms — and the difference is the whole protection.
+    # Nothing catches it downstream either: `/llm/ask` answers
+    # `pseudonymized: true` when the deny list is EMPTY, because the flag means
+    # "the pseudonymiser ran", not "your terms were masked". So this is the only
+    # place the claim can be checked. (Johan, 2026-09-09)
+    live = set(registered_terms(base_url, token, workspace_id=workspace_id,
+                                timeout=timeout))
+    missing = [t for t in terms if t not in live]
+    if missing:
+        raise RegistrationFailed(
+            f"datahive accepted the request but {len(missing)} term(s) are not "
+            f"in its policy afterwards (e.g. {missing[:3]}); nothing would be "
+            "masked for them")
     log.info("pii: registered %s sensitive term(s) with datahive", len(terms))
     return {"registered": len(terms)}
 
@@ -110,3 +125,29 @@ def registered_terms(base_url: str, token: str, *,
     except (httpx.HTTPError, ValueError) as exc:
         raise RegistrationFailed(f"could not read datahive's policy: {exc}") from exc
     return [str(t) for t in (policy.get("deny_terms") or {}).get(ENTITY_TYPE, [])]
+
+
+#: How long a policy read is trusted before it is asked again. The list changes
+#: only when somebody accepts terms, and the check below runs once per AI call —
+#: a Design step asks for a headline per chart, so re-reading the policy sixty
+#: times in a minute buys nothing.
+_POLICY_TTL_S = 30.0
+_policy_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+def live_terms(base_url: str, token: str, *, now: float,
+               workspace_id: str | None = None) -> frozenset[str]:
+    """What datahive is masking on right now, cached for `_POLICY_TTL_S`."""
+    key = f"{base_url}|{workspace_id or ''}"
+    hit = _policy_cache.get(key)
+    if hit is not None and now - hit[0] < _POLICY_TTL_S:
+        return hit[1]
+    terms = frozenset(registered_terms(base_url, token, workspace_id=workspace_id))
+    _policy_cache[key] = (now, terms)
+    return terms
+
+
+def forget_policy_cache() -> None:
+    """Drop what we believe datahive holds. Called after a write, so the next
+    check reads the new truth rather than the 30 seconds either side of it."""
+    _policy_cache.clear()

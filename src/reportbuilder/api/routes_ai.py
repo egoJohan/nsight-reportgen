@@ -32,7 +32,7 @@ from reportbuilder.ai.text import (
     pick_demographic_questions,
     shorten_labels
 )
-from reportbuilder.api.deps import get_client
+from reportbuilder.api.deps import get_auth, get_client
 from reportbuilder.api.deps_auth import require_material
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.auth.permissions import User
@@ -64,6 +64,65 @@ _AI_UNAVAILABLE = "AI service (egoHive) is unavailable"
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+def require_masking_ready(
+    material_id: str,
+    client: DataHiveClient = Depends(get_client),
+    auth=Depends(get_auth),
+) -> None:
+    """Refuse to write prose unless this study's terms are actually masked.
+
+    datahive answers `pseudonymized: true` whenever its pseudonymiser ran —
+    including when the deny list is EMPTY and nothing matched — so
+    `masked_chat`'s assertion cannot tell "your names were masked" from "there
+    was nothing to mask with". That gap was not theoretical: on 2026-09-09 the
+    tenant policy held no terms at all while thirteen studies showed terms
+    accepted, because registration replaces the whole list and the last study
+    to accept had none.
+
+    So the claim is checked where it can be: this study's accepted terms
+    against the policy datahive is actually holding. Missing terms mean no AI
+    text — a lost headline is a visibly worse deck, and a leaked client name is
+    a different kind of problem.
+
+    Silent in two cases, both correct: no hive configured (there is no model to
+    reach either — `masked_chat` refuses), and a study that accepted an EMPTY
+    list, which is somebody saying "I looked, this study names no companies".
+    (Johan, 2026-09-09)
+    """
+    import os
+    import time
+
+    from reportbuilder.store.datahive_pii import RegistrationFailed, live_terms
+
+    url = os.environ.get("NSIGHT_DATAHIVE_URL")
+    if not url:
+        return
+    accepted = (client.sensitive_terms(material_id) or {}).get("accepted")
+    if not accepted:
+        # None = never reviewed, which the report gate already refuses on;
+        # [] = reviewed and there are none. Neither has a term to check.
+        return
+    try:
+        live = live_terms(url, auth.token, now=time.monotonic())
+    except RegistrationFailed as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=("Could not confirm with the data store which names are "
+                    "being masked, so no text was generated."),
+        ) from exc
+    missing = [t for t in accepted if t not in live]
+    if missing:
+        log.error("pii: %s accepted term(s) are NOT in datahive's policy "
+                  "(e.g. %s) — refusing to generate text for %s",
+                  len(missing), missing[:3], material_id)
+        raise HTTPException(
+            status_code=503,
+            detail=(f"{len(missing)} of this study's accepted names are not "
+                    "registered for masking, so no text was generated. "
+                    "Re-accept the sensitive terms and try again."),
+        )
+
+
 def _reference_paths() -> list[Path]:
     """Originating reference decks used as the short-label corpus."""
     return sorted((_REPO_ROOT / "input").glob("*.pptx"))
@@ -246,7 +305,8 @@ def ai_slide_title(
     material_id: str,
     body: SlideTitleBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Generate a descriptive slide title for a chart. Returns {"title": "..."}.
 
@@ -321,7 +381,8 @@ def ai_short_labels(
     material_id: str,
     body: ShortLabelsBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Shorten category labels. Returns {"overrides": [["full","short"], ...]}.
 
@@ -395,7 +456,8 @@ def ai_themes(
     material_id: str,
     body: ThemesBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Summarise an open-ended question's answers into key themes (bullets)."""
     try:
@@ -446,7 +508,8 @@ def ai_overview(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Background/overview bullets about the research. Returns {"bullets": [...]}."""
     try:
@@ -471,7 +534,8 @@ def ai_conclusion(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Conclusion bullets summarising findings across the report's questions."""
     try:
@@ -499,7 +563,8 @@ def ai_demographics(
     material_id: str,
     body: SpecialSlideBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Pick demographic questions and write 'about the respondents' bullets.
 
@@ -557,7 +622,8 @@ def ai_chat(
     material_id: str,
     body: ChatBody,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_material)
+    user: User = Depends(require_material),
+    _masked = Depends(require_masking_ready)
 ) -> dict:
     """Answer a question about the material's survey DATA, grounded in the
     per-question findings (a data-aware assistant). Returns {"reply": "..."}.
