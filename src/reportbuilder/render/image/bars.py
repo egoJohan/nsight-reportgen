@@ -900,8 +900,31 @@ def build_image_column(ctx) -> None:
     _render_column_v(ctx, cats, segs, data)
 
 
+def _as_one_series_per_group(ctx, cats, segs, data):
+    """A summary chart, transposed: the GROUPS become the categories.
+
+    `_summary` reports one value per group as one category (the measure itself)
+    × N segments, which is true but is not how the chart reads. Drawn literally,
+    the segments split a single category slot: at four groups that is four bars
+    of 0.175 flush against each other, filling most of an axis that has one slot
+    to fill — the "tosi leveitä ja kiinni toisissaan" of the report.
+
+    Transposing hands it to the ordinary path as what it actually is: one series
+    over N categories. Bar width, spacing, the single series colour, the names
+    on the axis and the absent legend all follow from there rather than being
+    special-cased here. (Johan, 2026-09-09)
+    """
+    if len(cats) != 1 or len(segs) < 2:
+        return cats, segs, data
+    if getattr(ctx.series, "statistic", "") not in _SUMMARY_STATISTICS:
+        return cats, segs, data
+    lone = cats[0]
+    return list(segs), [lone], {lone: [data[seg][0] for seg in segs]}
+
+
 def _render_column_v(ctx, cats, segs, data) -> None:
     """Internal vertical-bar renderer."""
+    cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
     fig, ax = new_figure(ctx)
     clrs = series_colors(len(segs), palette=template_palette(ctx),
                           accent=chart_accent(ctx))
@@ -979,6 +1002,9 @@ def build_image_bar(ctx) -> None:
 
 def _render_bar_h(ctx, cats, segs, data) -> None:
     """Internal horizontal-bar renderer shared by bar + auto-orient column."""
+    # Same transposition as the vertical form: one value per group is a chart
+    # of GROUPS, whichever way its bars run.
+    cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
     n_cats = len(cats)
     # Reserve as many label lines as the LONGEST label actually needs (2..3), so
     # normal long labels wrap in full and are never truncated. Only a pathological
