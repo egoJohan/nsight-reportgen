@@ -1895,6 +1895,49 @@ class Repository:
                 continue
         return sorted(out, key=lambda t: t.name.lower())
 
+    def template_revision(self, auth: AuthContext, customer_id: str,
+                          template_id: str) -> str:
+        """A short string that changes whenever this template DRAWS differently.
+
+        Two things change how a template draws: its file, and the layout
+        corrections stored against it. Both are folded in here so a caller has
+        one value to compare — and it is DERIVED, not stored, so nothing has to
+        remember to bump it when a new way of editing a template is added.
+
+        The file half is the store's own etag, read from a listing: listings
+        never carry bytes, so this costs no download of a multi-megabyte .pptx
+        on a page load.
+
+        Empty for "no template" (the house default) and for one that is gone —
+        an id that resolves to nothing must not read as a template that keeps
+        changing, or every preview would re-render on every load.
+        (Johan, 2026-09-09)
+        """
+        if not template_id:
+            return ""
+        import hashlib
+        import json as _json
+
+        want = P.template_path(customer_id, template_id)
+        etag = ""
+        for info in self.store.list(auth, P.templates_prefix(customer_id)):
+            if info.path == want:
+                etag = info.etag or str(info.size)
+                break
+        if not etag:
+            return ""
+        try:
+            layout = self.template_layout(auth, customer_id, template_id)
+        except Exception:  # noqa: BLE001 — a template with no corrections is normal
+            layout = {}
+        blob = _json.dumps(layout, sort_keys=True, ensure_ascii=False)
+        # The id is folded in as well. A content-addressed store gives two
+        # templates uploaded from the same file the same etag, and a revision
+        # that cannot tell them apart would be one a caller could not use on its
+        # own — it would only work while something else also hashed the id.
+        digest = hashlib.sha256(f"{template_id}|{etag}|{blob}".encode()).hexdigest()
+        return digest[:16]
+
     def get_template_bytes(self, auth: AuthContext, customer_id: str,
                            template_id: str) -> bytes:
         return self.store.get(auth, P.template_path(customer_id, template_id))

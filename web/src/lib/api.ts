@@ -622,6 +622,11 @@ export interface ResolvedTemplate {
   template_id: string;
   level: "report" | "pinned" | "case" | "customer" | "default";
   name: string;
+  /** Changes whenever this template's FILE or its layout corrections change —
+   *  which the id cannot say. Carried in the preview fingerprint so replacing a
+   *  .pptx or moving a box re-draws every slide of every report on it. Empty
+   *  for the house default (no template), which cannot change under us. */
+  revision?: string;
 }
 
 export interface RecentReport {

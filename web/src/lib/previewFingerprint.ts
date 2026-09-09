@@ -32,6 +32,12 @@ export interface RenderContext {
    *  then got one, kept every preview it had already drawn on the default. The
    *  report's setting had not changed; what "" MEANT had. */
   templateRef: string;
+  /** WHICH VERSION of that template. The ref answers "which template", never
+   *  "has it changed" — replacing the .pptx or moving a box in the layout
+   *  editor leaves the id alone, so every preview drawn on it kept its
+   *  fingerprint and its stale picture. Empty for the house default, which
+   *  cannot change under a report. (Johan, 2026-09-09) */
+  templateRevision?: string;
   /** Which report — the backend resolves a template through it. */
   reportId: string;
   /** The report's grouping override, already serialised. */
@@ -67,6 +73,9 @@ export function imageFingerprint(chart: ChartSpec, ctx: RenderContext): string {
   return JSON.stringify([
     rest,
     ctx.templateRef,
+    // Appended rather than folded into templateRef so an existing fingerprint
+    // changes shape once, here, rather than every ref changing meaning.
+    ctx.templateRevision ?? "",
     ctx.reportId,
     ctx.groupingKey,
     ctx.renderTitle,

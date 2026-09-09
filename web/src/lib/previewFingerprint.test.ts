@@ -163,3 +163,49 @@ describe("the template a slide is drawn on", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// A template that CHANGED must not look unchanged.
+//
+// The fingerprint carried the template's id, which answers "which template"
+// and never "has it changed". Replacing the .pptx, or moving a box in the
+// layout editor, leaves the id alone — so every preview in every report drawn
+// on that template kept its fingerprint and its stale picture. The layout
+// editor dropped its own react-query cache on save, which fixed the tab it was
+// saved in and not another tab, another user, or the next session.
+// (Johan, 2026-09-09)
+// ---------------------------------------------------------------------------
+describe("the template's revision", () => {
+  const base = {
+    templateRef: "tpl-1",
+    reportId: "rep-1",
+    groupingKey: "{}",
+    renderTitle: false,
+  };
+
+  it("changes the fingerprint when the template file is replaced", () => {
+    const before = imageFingerprint(chart(), { ...base, templateRevision: "aaa" });
+    const after = imageFingerprint(chart(), { ...base, templateRevision: "bbb" });
+    expect(after).not.toBe(before);
+  });
+
+  it("leaves it alone when the template did not change", () => {
+    const a = imageFingerprint(chart(), { ...base, templateRevision: "aaa" });
+    const b = imageFingerprint(chart(), { ...base, templateRevision: "aaa" });
+    expect(b).toBe(a);
+  });
+
+  it("treats a missing revision as the house default, not as a change", () => {
+    const a = imageFingerprint(chart(), base);
+    const b = imageFingerprint(chart(), { ...base, templateRevision: "" });
+    expect(b).toBe(a);
+  });
+
+  it("still distinguishes two different templates", () => {
+    const a = imageFingerprint(chart(), { ...base, templateRevision: "aaa" });
+    const b = imageFingerprint(chart(), {
+      ...base, templateRef: "tpl-2", templateRevision: "aaa",
+    });
+    expect(b).not.toBe(a);
+  });
+});

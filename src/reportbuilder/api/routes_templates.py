@@ -673,6 +673,7 @@ def case_template(customer_id: str, case_id: str,
         name = next((t.name for t in repo.list_templates(auth, customer_id)
                      if t.id == template_id), "")
     return {"template_id": template_id, "level": level,
+            "revision": repo.template_revision(auth, customer_id, template_id),
             "name": name or ("nSight default template" if not template_id else template_id)}
 
 
@@ -692,7 +693,13 @@ def report_template(customer_id: str, case_id: str, report_id: str,
     if template_id:
         name = next((t.name for t in repo.list_templates(auth, customer_id)
                      if t.id == template_id), "")
+    # `revision` changes whenever this template's FILE or its layout
+    # corrections change, which the id cannot say. The preview fingerprint
+    # carries it, so replacing a .pptx or moving a box re-renders every slide
+    # of every report drawn on it — in every session, not just the tab the
+    # change was made in. (Johan, 2026-09-09)
     return {"template_id": template_id, "level": level,
+            "revision": repo.template_revision(auth, customer_id, template_id),
             "name": name or ("nSight default template" if not template_id else template_id)}
 
 

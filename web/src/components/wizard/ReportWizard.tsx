@@ -776,6 +776,13 @@ export default function ReportWizard({
   // the report's own choice while the resolution is in flight.
   const effectiveTemplateRef =
     draft?.template_ref || caseTemplate?.template_id || "";
+  // …and WHICH VERSION of it. The id answers "which template", never "has it
+  // changed": replacing the .pptx or moving a box in the layout editor leaves
+  // the id alone, so every preview in every report drawn on it kept its
+  // fingerprint and its stale picture. The layout editor dropped its own
+  // react-query cache on save, which fixed the tab it was saved in and no
+  // other tab, user or session. (Johan, 2026-09-09)
+  const templateRevision = caseTemplate?.revision ?? "";
   useEffect(() => {
     const ctx = {
       // The RESOLVED template, falling back to the report's own choice while
@@ -783,6 +790,7 @@ export default function ReportWizard({
       // hashing the report's own setting means a customer gaining a template
       // changes every inheriting preview and busts none of them.
       templateRef: effectiveTemplateRef,
+      templateRevision,
       reportId,
       groupingKey,
       renderTitle: false,
@@ -809,7 +817,7 @@ export default function ReportWizard({
           force: runCtx.force,
         }),
     });
-  }, [materialId, reportId, effectiveTemplateRef, groupingKey, qc]);
+  }, [materialId, reportId, effectiveTemplateRef, templateRevision, groupingKey, qc]);
 
   // Warm the whole deck, and pick up slides added later. `enqueue` dedupes and
   // each producer decides for itself whether it is needed, so re-enqueueing a
