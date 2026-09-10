@@ -119,10 +119,6 @@ _HBAR_LABEL_WRAP_WIDTH: int = 42  # wider wrap for hbar y-labels → fewer lines
 _HBAR_ROW_IN: float = 0.52        # vertical inches reserved per category row (fits 2 label lines)
 _XLABEL_WRAP_WIDTH: int = 20  # chars per line for (rotated) vertical-bar x-axis labels
 _XTICK_ROTATION: int = 30     # rotation (deg) for vertical-bar x-axis tick labels
-# Beyond this many segments the per-bar value labels collide, so they are dropped
-# (axis grid + legend carry the read). Vertical columns get narrow sooner than the
-# horizontal layout, so its threshold is lower.
-_MAX_LABELED_SEGMENTS_V: int = 4
 # Horizontal clustered bars: label a bar only when it is at least this TALL (points).
 # Density (categories × segments), not a raw segment count, decides collision — a single
 # question split by a background group has tall bars that easily hold a label, whereas a
@@ -279,6 +275,46 @@ def _tick_text(v: float) -> str:
 # Up to this many series, a below-the-plot legend is compact enough; beyond it a
 # right-side vertical legend keeps the plot large (uses the spare horizontal space).
 _LEGEND_BELOW_MAX: int = 5
+
+
+#: Point size a column's value label is drawn at, and the smallest it may shrink
+#: to before turning on its side. Below ~7pt a number on a slide is decoration.
+_VALUE_LABEL_PT: float = 9.5
+_VALUE_LABEL_MIN_PT: float = 7.5
+
+
+def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
+                        widest: str) -> tuple[float, float] | None:
+    """(fontsize, rotation) for a column's value label, or None if it cannot fit.
+
+    Replaces a bare segment count. A count cannot tell a roomy chart from a
+    cramped one — the same five groups are comfortable on a wide slide with
+    three categories and hopeless on a narrow one with twelve — so it dropped
+    every number on a chart that had room for them all. Reported as "vertical
+    bar chartissa ei näy prosenttilukuja kun tarkastelee lukuja eri
+    taustaryhmissä". (Johan, 2026-09-10)
+
+    Three answers, in the order a person would try them: draw it flat if it
+    fits; turn it on its side if the column is too narrow but the number is
+    short enough to stand up in it; give up when neither works, because a wall
+    of overlapping text is worse than the grid and the legend alone.
+    """
+    # The room a label has is the spacing between ADJACENT bars, which is the
+    # bar's own width — not the plot divided by the bar count. Bars fill 0.7 of
+    # a category slot and the rest is the gap between categories, so dividing
+    # by the count over-states the room by about 40% and lets numbers overlap
+    # while the arithmetic says they fit. `bar_w` is in data units and one
+    # category slot is 1, so this converts exactly, and it is right for the
+    # cross-tab layout too, where the widths differ.
+    plot_w_in = ax.get_position().width * fig.get_size_inches()[0]
+    per_bar_in = bar_w * plot_w_in / max(n_cats, 1)
+    for pt in (_VALUE_LABEL_PT, _VALUE_LABEL_MIN_PT):
+        if _measure_max_label_width_in([widest], pt) <= per_bar_in * 0.92:
+            return pt, 0.0
+    # On its side the number needs only its LINE HEIGHT across the column.
+    if (_VALUE_LABEL_MIN_PT / 72.0) * 1.35 <= per_bar_in:
+        return _VALUE_LABEL_MIN_PT, 90.0
+    return None
 
 
 def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
@@ -950,6 +986,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
 
     # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
     grouped = _grouped_offsets(segs, ctx.series.segment_primary)
+    _value_fit: tuple[float, float] | tuple[()] | None = None
 
     for i, seg in enumerate(segs):
         vals = data[seg]
@@ -966,16 +1003,24 @@ def _render_column_v(ctx, cats, segs, data) -> None:
             edgecolor="none", zorder=3,
         )
         off = _label_offset(max_val)
-        # Per-bar value labels collide once columns get narrow (many segments) —
-        # suppress them past a threshold and rely on the axis grid + legend.
+        # Measured once for the whole chart, against the WIDEST number it will
+        # draw, so every column is labelled the same way or none is — a row
+        # where some carry a number and others do not reads as a fault.
+        if _value_fit is None:
+            _widest = max((format_value(v, ctx.series.statistic,
+                                        ctx.spec.number_format, all_vals)
+                           for v in all_vals), key=len, default="")
+            _value_fit = _value_label_layout(fig, ax, n_cats, bwidth, _widest) or ()
         for bar, v in zip(bars, vals):
-            if v is not None and n_segs <= _MAX_LABELED_SEGMENTS_V:
+            if v is not None and _value_fit:
+                _pt, _rot = _value_fit
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
-                    ha="center", va="bottom",
-                    fontsize=9.5, fontweight="bold", color=ink, zorder=5,
+                    ha="center", va="bottom", rotation=_rot,
+                    rotation_mode="anchor" if _rot else None,
+                    fontsize=_pt, fontweight="bold", color=ink, zorder=5,
                 )
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
