@@ -1374,6 +1374,8 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
         _legend_below(axes[-1], len(stack), ctx)
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
+    for _panel_ax in axes:
+        shrink_values_until_clear(fig, _panel_ax)
     place_picture(ctx, render_png(fig))
 
 
@@ -1494,6 +1496,11 @@ def build_image_column_stacked(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
 
+    # Last resort, and only if the numbers actually collide: shrink them until
+    # they do not. Changes type size and never a position, so a panel whose
+    # numbers already sit clear comes out unchanged.
+    shrink_values_until_clear(fig, ax)
+
     png = render_png(fig)
     place_picture(ctx, png)
 
@@ -1550,6 +1557,61 @@ _CALLOUT_OFFSET: float = 0.14
 _CALLOUT_MIN_GAP_FRAC: float = 0.055
 
 
+#: Marks a drawn VALUE label — a number inside a bar, or one called out beside
+#: it. Both carry it so one pass can find every number on a panel.
+_VALUE_GID = "nsight-value"
+#: The smallest a value label may be shrunk to before it stops being worth
+#: printing. Below this it is decoration on a slide, not a figure someone reads.
+_VALUE_MIN_PT: float = 6.5
+
+
+def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
+                              step: float = 0.85, tries: int = 5) -> float | None:
+    """Shrink this panel's value labels until none overlaps another.
+
+    A LAST resort, and deliberately a post-pass: it changes only type size,
+    never a position, so a panel whose numbers already sit clear is left
+    byte-identical. That property is why this is safe where moving them was
+    not — two attempts at nudging the callouts sideways made the overlap worse
+    (6 pairs became 15), because a callout pushed clear of an in-bar number
+    overflows the axis and the overflow correction drags the run back onto it.
+
+    The collision is mostly VERTICAL: a callout sits about 12px above its bar
+    and an in-bar number at the bar's centre, which clears at six rows and does
+    not at eighteen, where a row is 44px and 9pt text is 25px. Smaller type is
+    shorter as well as narrower, so it buys back the clearance directly.
+
+    Returns the size settled on, or None when nothing had to change.
+    (Johan, 2026-09-10)
+    """
+    labels = [t for t in ax.texts if t.get_gid() == _VALUE_GID]
+    if len(labels) < 2:
+        return None
+
+    def clashes() -> bool:
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        boxes = [t.get_window_extent(r) for t in labels]
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1:]:
+                if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
+                        and min(a.y1, b.y1) - max(a.y0, b.y0) > 0.5):
+                    return True
+        return False
+
+    if not clashes():
+        return None
+    for _ in range(tries):
+        sizes = [t.get_fontsize() for t in labels]
+        if min(sizes) * step < min_pt:
+            break
+        for t, pt in zip(labels, sizes):
+            t.set_fontsize(pt * step)
+        if not clashes():
+            return min(t.get_fontsize() for t in labels)
+    return min(t.get_fontsize() for t in labels)
+
+
 def callout_value(ax, text: str, *, at, to, ink: str, grid: str,
                   ha: str = "center", va: str = "center") -> None:
     """One number that would not fit inside its own piece, drawn beside it.
@@ -1560,6 +1622,7 @@ def callout_value(ax, text: str, *, at, to, ink: str, grid: str,
     """
     ax.annotate(text, xy=to, xytext=at, ha=ha, va=va, fontsize=8.5,
                 fontweight="bold", color=ink, annotation_clip=False, zorder=6,
+                gid=_VALUE_GID,
                 arrowprops=dict(arrowstyle="-", color=grid, linewidth=0.9,
                                 shrinkA=1, shrinkB=1))
 
@@ -1686,7 +1749,7 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
             elif _fits(seg, j):
                 ax.text(l + w / 2, yi, text,
                         ha="center", va="center", fontsize=9.0, fontweight="bold",
-                        color=contrast_ink(bc), zorder=5)
+                        color=contrast_ink(bc), zorder=5, gid=_VALUE_GID)
             elif w > 0:
                 pending.setdefault(float(yi), []).append((l + w / 2, w, text))
         lefts = lefts + widths
@@ -1763,6 +1826,9 @@ def build_image_bar_stacked(ctx) -> None:
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
+
+    # Last resort, and only if the numbers actually collide.
+    shrink_values_until_clear(fig, ax)
 
     png = render_png(fig)
     place_picture(ctx, png)
