@@ -670,6 +670,17 @@ _LABEL_PAD_IN: float = 0.12
 # figure's right edge (the rightmost panel's value-axis lives INSIDE its own
 # axes), so this only needs to clear the outermost tick mark, not a label.
 _RIGHT_MARGIN_IN: float = 0.15
+#: CLEAR air between two side-by-side panels, on top of whatever room the
+#: labels drawn into that gap need.
+#:
+#: The gap used to be exactly `label width + _LABEL_PAD_IN`, and matplotlib
+#: draws a panel's tick labels immediately left of its own axes — so the labels
+#: filled the gap and the only clear space was that 0.12" pad. Wide enough not
+#: to OVERLAP, which is what the arithmetic solved for, and far too tight to
+#: read as two separate charts: "kaaviot ovat tässä hieman liian lähekkäin".
+#: Added rather than substituted, so a wide label still gets its room.
+#: (Johan, 2026-09-10)
+_MIN_PANEL_GAP_IN: float = 0.45
 # Floor for the width actually left to DRAW bars once a horizontal panel's
 # label gutter/gap is subtracted from its side-by-side share. A 0-100% value
 # axis needs enough width for bar-length differences of a few points to read
@@ -728,8 +739,23 @@ def _side_by_side_layout(fig_w_in: float, n_panels: int,
     n_panels = max(n_panels, 1)
     left_frac = (left_label_w_in + _LABEL_PAD_IN) / fig_w_in
     right_frac = 1.0 - (_RIGHT_MARGIN_IN / fig_w_in)
-    gap_in = (gap_label_w_in + _LABEL_PAD_IN) if n_panels > 1 else 0.0
     span_in = max(0.0, (right_frac - left_frac) * fig_w_in)
+    base_gap_in = gap_label_w_in + _LABEL_PAD_IN      # room the labels need
+    if n_panels > 1:
+        # As much air as fits WITHOUT changing the side-by-side decision. This
+        # function answers both "how wide is the gap" and (through plot_w_in)
+        # "do these panels fit side by side at all", so simply adding the
+        # minimum would restack layouts that were fine — measured: three
+        # three-panel cases near the threshold flipped, a far bigger change
+        # than the one asked for. Where the air does not fit, the panels were
+        # already at their narrowest and the caller stacks them as it did
+        # before. (Johan, 2026-09-10)
+        affordable = ((span_in - n_panels * _MIN_HGUTTER_PLOT_IN) / (n_panels - 1)
+                      if span_in else base_gap_in)
+        gap_in = max(base_gap_in,
+                     min(base_gap_in + _MIN_PANEL_GAP_IN, affordable))
+    else:
+        gap_in = 0.0
     plot_w_in = (span_in - (n_panels - 1) * gap_in) / n_panels
     wspace_frac = (gap_in / plot_w_in) if (n_panels > 1 and plot_w_in > 0) else 0.12
     return left_frac, right_frac, wspace_frac, plot_w_in
