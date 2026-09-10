@@ -778,12 +778,13 @@ export function useQuestionWords(materialId: string, qid: string | null) {
 export function useSetWordMerges(materialId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ qid, merges }: { qid: string; merges: WordMerge[] }) =>
-      api.materials.setWordMerges(materialId, qid, merges),
+    mutationFn: ({ qid, merges, dropped }:
+                 { qid: string; merges: WordMerge[]; dropped?: string[] }) =>
+      api.materials.setWordMerges(materialId, qid, merges, dropped ?? []),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["question-words", materialId] });
       qc.removeQueries({ queryKey: ["chart-preview"] });
-      previewQueue.restartDeck("word merges changed");
+      previewQueue.restartDeck("word-cloud cleaning changed");
       qc.invalidateQueries({ queryKey: ["question-summary", materialId] });
     },
   });

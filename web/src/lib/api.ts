@@ -109,6 +109,14 @@ export interface WordMerge {
   words: string[];
 }
 
+/** What the word-cloud cleaning panel edits: the raw tokens, the merges folding
+ *  variants together, and the words taken out of the cloud entirely. */
+export interface WordCleaning {
+  words: { word: string; count: number }[];
+  merges: WordMerge[];
+  dropped: string[];
+}
+
 // ---- Question details (computed summary) ----
 export interface QuestionDistRow {
   category: string;
@@ -1130,20 +1138,21 @@ export const api = {
     questionWords: (
       materialId: string,
       qid: string
-    ): Promise<{ words: { word: string; count: number }[]; merges: WordMerge[] }> =>
+    ): Promise<WordCleaning> =>
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/words`).then((r) =>
-        json<{ words: { word: string; count: number }[]; merges: WordMerge[] }>(r)
+        json<WordCleaning>(r)
       ),
 
     setWordMerges: (
       materialId: string,
       qid: string,
-      merges: WordMerge[]
+      merges: WordMerge[],
+      dropped: string[] = []
     ): Promise<{ qid: string; merges: WordMerge[] }> =>
       fetch(`${API_BASE}/materials/${materialId}/questions/${qid}/word-merges`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ merges }),
+        body: JSON.stringify({ merges, dropped }),
       }).then((r) => json<{ qid: string; merges: WordMerge[] }>(r)),
 
     // Rename a question for this material (case-page edit). Blank reverts to the

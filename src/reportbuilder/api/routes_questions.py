@@ -48,6 +48,7 @@ from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
     material_config,
+    dropped_words,
     value_merges,
 )
 from reportbuilder.ingest.sav_reader import read_sav, string_categories, _is_metadata
@@ -1225,6 +1226,11 @@ class WordMergeGroup(BaseModel):
 
 class WordMergesBody(BaseModel):
     merges: list[WordMergeGroup] = []
+    #: Words to leave OUT of the cloud, by the label it shows. Sent with the
+    #: merges because they are one editing session and one Save: an author
+    #: folding variants together and throwing a stray word away is doing the
+    #: same job. (Johan, 2026-09-10)
+    dropped: list[str] = []
 
 
 @questions_router.get("/materials/{material_id}/questions/{qid}/segments")
@@ -1347,8 +1353,11 @@ def question_words(
         raise HTTPException(404, f"No question {qid} in this material.")
     words: list[dict] = []
     try:
-        # Strip merges so the editor sees the underlying variant tokens.
-        raw_q = dataclasses.replace(q, value_merges=())
+        # Strip merges AND removals so the editor sees the underlying tokens
+        # with their real counts. The panel marks which are merged or removed;
+        # hiding them here would leave an author unable to see what a word was
+        # worth before they took it out, or to weigh putting it back.
+        raw_q = dataclasses.replace(q, value_merges=(), dropped_words=())
         spec = dataclasses.replace(_summary_spec(qid), chart_type="wordcloud", statistic="count")
         series = _wordcloud(raw_q, spec, df, model)
         words = [
@@ -1361,6 +1370,7 @@ def question_words(
     return {
         "words": words,
         "merges": [{"label": lbl, "words": list(members)} for lbl, members in merges],
+        "dropped": list(dropped_words(material_id, client).get(qid, ())),
     }
 
 
@@ -1383,6 +1393,8 @@ def set_word_merges(
         if label and members:
             groups.append([label, *members])
 
+    gone = [w.strip() for w in body.dropped if w and w.strip()]
+
     def apply(cfg: dict) -> dict:
         vm = cfg.get("value_merges")
         if not isinstance(vm, dict):
@@ -1392,6 +1404,16 @@ def set_word_merges(
         else:
             vm.pop(qid, None)
         cfg["value_merges"] = vm
+        dw = cfg.get("dropped_words")
+        if not isinstance(dw, dict):
+            dw = {}
+        if gone:
+            dw[qid] = gone
+        else:
+            # Absence, not an empty list: "nothing removed" is the default and
+            # should not be a value every reader has to recognise.
+            dw.pop(qid, None)
+        cfg["dropped_words"] = dw
         return cfg
 
     # Read-modify-write of the whole config, serialised — a rename or a

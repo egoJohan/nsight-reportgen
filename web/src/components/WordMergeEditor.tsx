@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Layers2Icon, Undo2Icon } from "lucide-react";
+import { Layers2Icon, Undo2Icon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,9 @@ export default function WordMergeEditor({
   const { data } = useQuestionWords(materialId, qid);
   const save = useSetWordMerges(materialId);
   const [groups, setGroups] = useState<WordMerge[]>([]);
+  // Words taken OUT of the cloud. The other half of the same cleaning job as
+  // merging, so it lives in the same panel and rides the same Save.
+  const [dropped, setDropped] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [label, setLabel] = useState("");
   const [seeded, setSeeded] = useState(false);
@@ -38,13 +41,19 @@ export default function WordMergeEditor({
   useEffect(() => {
     if (seeded || !data) return;
     setGroups(data.merges.map((g) => ({ label: g.label, words: [...g.words] })));
+    setDropped([...(data.dropped ?? [])]);
     setSelected(new Set());
     setSeeded(true);
   }, [data, seeded]);
 
   const grouped = useMemo(() => new Set(groups.flatMap((g) => g.words)), [groups]);
-  const pool = (data?.words ?? []).filter((w) => !grouped.has(w.word));
-  const dirty = JSON.stringify(groups) !== JSON.stringify(data?.merges ?? []);
+  const gone = useMemo(
+    () => new Set(dropped.map((w) => w.toLowerCase())), [dropped]);
+  const pool = (data?.words ?? []).filter(
+    (w) => !grouped.has(w.word) && !gone.has(w.word.toLowerCase()));
+  const dirty =
+    JSON.stringify(groups) !== JSON.stringify(data?.merges ?? []) ||
+    JSON.stringify(dropped) !== JSON.stringify(data?.dropped ?? []);
 
   function toggle(word: string) {
     setSelected((prev) => {
@@ -63,11 +72,30 @@ export default function WordMergeEditor({
     setLabel("");
   }
 
+  function drop(word: string) {
+    setDropped((d) => (d.includes(word) ? d : [...d, word]));
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.delete(word);
+      return n;
+    });
+    // A merged group removed by its label goes as a group: the cloud shows the
+    // label, so that is the word being taken off it.
+    setGroups((gs) => gs.filter((g) => g.label !== word));
+  }
+
+  function dropSelected() {
+    const words = [...selected];
+    if (!words.length) return;
+    setDropped((d) => [...d, ...words.filter((w) => !d.includes(w))]);
+    setSelected(new Set());
+  }
+
   function persist() {
     save.mutate(
-      { qid, merges: groups },
+      { qid, merges: groups, dropped },
       {
-        onSuccess: () => toast.success("Word-cloud merges saved"),
+        onSuccess: () => toast.success("Word-cloud cleaning saved"),
         onError: (e) =>
           toast.error(`Save failed: ${e instanceof Error ? e.message : "unknown error"}`),
       }
@@ -78,7 +106,7 @@ export default function WordMergeEditor({
     return <p className="text-xs text-muted-foreground">Loading words…</p>;
   }
   if (data.words.length === 0 && groups.length === 0) {
-    return <p className="text-xs text-muted-foreground">No word-cloud answers to merge.</p>;
+    return <p className="text-xs text-muted-foreground">No word-cloud answers to clean.</p>;
   }
 
   return (
@@ -95,10 +123,19 @@ export default function WordMergeEditor({
               <button
                 type="button"
                 onClick={() => setGroups((gs) => gs.filter((x) => x !== g))}
-                className="text-muted-foreground hover:text-destructive"
+                className="text-muted-foreground hover:text-foreground"
                 title="Undo this merge"
               >
                 <Undo2Icon className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => drop(g.label)}
+                className="text-muted-foreground/60 hover:text-destructive"
+                title="Remove this word from the cloud"
+                aria-label={`Remove ${g.label}`}
+              >
+                <XIcon className="size-3.5" />
               </button>
             </span>
           ))}
@@ -108,7 +145,7 @@ export default function WordMergeEditor({
       <div className="max-h-52 overflow-y-auto rounded-lg border p-1.5">
         {pool.length === 0 ? (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            No more words to merge.
+            No words left.
           </p>
         ) : (
           pool.map((w) => (
@@ -132,11 +169,50 @@ export default function WordMergeEditor({
                 </span>
                 <span className="truncate">{w.word}</span>
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{w.count}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-xs tabular-nums text-muted-foreground">{w.count}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Remove this word from the cloud"
+                  aria-label={`Remove ${w.word}`}
+                  onClick={(e) => { e.stopPropagation(); drop(w.word); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault(); e.stopPropagation(); drop(w.word);
+                    }
+                  }}
+                  className="text-muted-foreground/60 hover:text-destructive"
+                >
+                  <XIcon className="size-3.5" />
+                </span>
+              </span>
             </button>
           ))
         )}
       </div>
+
+      {dropped.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            Removed from the cloud — click to put one back
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {dropped.map((w) => (
+              <button
+                key={w}
+                type="button"
+                onClick={() => setDropped((d) => d.filter((x) => x !== w))}
+                title="Put this word back"
+                className="inline-flex items-center gap-1.5 rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground line-through hover:text-foreground hover:no-underline"
+              >
+                {w}
+                <Undo2Icon className="size-3.5 no-underline" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <Input
@@ -148,12 +224,16 @@ export default function WordMergeEditor({
         <Button size="sm" variant="outline" disabled={selected.size < 2} onClick={mergeSelected}>
           <Layers2Icon className="size-4" /> Merge ({selected.size})
         </Button>
+        <Button size="sm" variant="outline" disabled={selected.size === 0}
+                onClick={dropSelected}>
+          <XIcon className="size-4" /> Remove ({selected.size})
+        </Button>
       </div>
 
       {dirty && (
         <div className="flex justify-end">
           <Button variant="outline" size="sm" disabled={save.isPending} onClick={persist}>
-            Save merges
+            Save
           </Button>
         </div>
       )}

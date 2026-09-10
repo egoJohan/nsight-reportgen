@@ -156,6 +156,37 @@ def _apply_labels(model: QuestionModel, labels: dict[str, str]) -> QuestionModel
     return QuestionModel(variables=model.variables, questions=questions)
 
 
+def dropped_words(material_id: str, client) -> dict[str, tuple[str, ...]]:
+    """Per-qid words left out of the cloud, {qid: (word, …)}."""
+    return _dropped_from_cfg(material_config(material_id, client))
+
+
+def _dropped_from_cfg(cfg: dict) -> dict[str, tuple[str, ...]]:
+    """Stored as {qid: [word, …]}. Blank entries are dropped, not stored as
+    empty strings, so "no words removed" stays the ABSENCE of an opinion."""
+    raw = cfg.get("dropped_words")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for qid, words in raw.items():
+        if not isinstance(words, list):
+            continue
+        clean = tuple(str(w).strip() for w in words if str(w).strip())
+        if clean:
+            out[str(qid)] = clean
+    return out
+
+
+def _apply_dropped(model: QuestionModel, dropped: dict) -> QuestionModel:
+    if not dropped:
+        return model
+    questions = [
+        dataclasses.replace(q, dropped_words=dropped[q.qid]) if q.qid in dropped else q
+        for q in model.questions
+    ]
+    return QuestionModel(variables=model.variables, questions=questions)
+
+
 def _apply_merges(model: QuestionModel, merges: dict) -> QuestionModel:
     if not merges:
         return model
@@ -178,7 +209,8 @@ def apply_curation(model: QuestionModel, material_id: str, client) -> QuestionMo
     """
     cfg = material_config(material_id, client)
     model = _apply_labels(model, _labels_from_cfg(cfg))
-    return _apply_merges(model, _merges_from_cfg(cfg))
+    model = _apply_merges(model, _merges_from_cfg(cfg))
+    return _apply_dropped(model, _dropped_from_cfg(cfg))
 
 
 def _finalize(model, material_id: str, client, override: dict | None, df=None):

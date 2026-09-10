@@ -372,6 +372,19 @@ def _wordcloud(question: Question, spec: ChartSpec, data: pd.DataFrame,
         if merged:
             counts[label] = counts.get(label, 0) + merged
 
+    # …and drop the words an author took out. AFTER the merge, so this works on
+    # what the editor SHOWS: a raw token in the pool, or a group's label —
+    # dropping a label removes the whole group, which is what "remove this word"
+    # means when the word on the cloud is that label. Matched case-insensitively
+    # because tokens are counted lowercased and an author types what they see.
+    dropped = {str(w).strip().lower()
+               for w in (getattr(question, "dropped_words", ()) or ()) if str(w).strip()}
+    if dropped:
+        counts = collections.Counter(
+            {w: n for w, n in counts.items() if w.lower() not in dropped})
+        if not counts:
+            raise ValueError("Every word was removed from this word cloud")
+
     respondents = int(answered_mask.sum())
     # Deterministic ordering: count desc, then word asc to break ties stably.
     top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:_WORDCLOUD_TOP_N]

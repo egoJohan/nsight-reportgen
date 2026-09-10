@@ -30,6 +30,15 @@ class Question:
     # a generic seam categorical recode can reuse later. Material-level, applied
     # via model_loader from the material config. (REQ-C-24b)
     value_merges: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    #: Words to leave OUT of this question's cloud, by the label the cloud shows.
+    #:
+    #: The other half of the same cleaning job as `value_merges`: open answers
+    #: are full of tokens that are not findings — the client's own name in every
+    #: sentence, a stray "kyllä", a word the stop list does not know. Without
+    #: this the only way to lose one was to merge it into something else, which
+    #: is a lie about the data. Material-level, applied via model_loader from
+    #: the material config, same as the merges. (Johan, 2026-09-10)
+    dropped_words: tuple[str, ...] = ()
     # Comparison groups (Tier 2): the QIDS of the parallel questions this comparison
     # overlays as series (radar / grouped-bar). Empty for every non-comparison question.
     members: tuple[str, ...] = ()
