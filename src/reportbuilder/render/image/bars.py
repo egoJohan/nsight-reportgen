@@ -681,6 +681,9 @@ _RIGHT_MARGIN_IN: float = 0.15
 #: Added rather than substituted, so a wide label still gets its room.
 #: (Johan, 2026-09-10)
 _MIN_PANEL_GAP_IN: float = 0.45
+#: Clear space between the secondary label block and the rotated primary group
+#: label standing to its left, so the two read as two columns and not one smudge.
+_GROUP_LABEL_PAD_IN: float = 0.18
 # Floor for the width actually left to DRAW bars once a horizontal panel's
 # label gutter/gap is subtracted from its side-by-side share. A 0-100% value
 # axis needs enough width for bar-length differences of a few points to read
@@ -1732,10 +1735,20 @@ def build_image_bar_stacked(ctx) -> None:
 
     ax.set_yticks(y)
     if grouped:
-        # Per-bar tick = the SECONDARY value; the primary is a group label to the left.
-        ax.set_yticklabels([_secondary_tick(c) for c in cats], fontsize=10.5, color=ink)
+        # Per-bar tick = the SECONDARY value; the primary is a group label to the
+        # left. Both RIGHT-aligned against the axis, so the secondary block ends
+        # in a straight edge and the primary stands clear of its widest line.
+        secondary = [_secondary_tick(c) for c in cats]
+        ax.set_yticklabels(secondary, fontsize=10.5, color=ink, ha="right")
+        # MEASURED, not a fixed -0.13. That constant is a fraction of the PLOT
+        # width, so it meant "13% of the plot" — enough for "Total", nowhere
+        # near enough for "hyvinvointialueen palveluksessa", which ran 205px
+        # straight through the country name beside it. (Johan, 2026-09-10)
+        plot_w_in = max(ax.get_position().width * fig.get_size_inches()[0], 0.1)
+        gutter_in = _measure_max_label_width_in(secondary, 10.5) + _LABEL_PAD_IN
+        group_x = -(gutter_in + _GROUP_LABEL_PAD_IN) / plot_w_in
         for glabel, gpos in grouped[1]:
-            ax.text(-0.13, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
+            ax.text(group_x, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
                     ha="center", va="center", rotation=90,
                     fontsize=11.5, fontweight="bold", color=ink)
     else:
