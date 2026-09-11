@@ -1484,6 +1484,7 @@ class ChartSpecBody(BaseModel):
     not_answered_codes: list[float] | None = None
     percent_base: str = "classifier"
     show_total: str = "auto"
+    total_position: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
     # Right-hand per-row summary column (stacked_horizontal_bar only).
     row_summary_fn: str = "none"
@@ -1589,6 +1590,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         percent_base=body.percent_base,
         show_total=body.show_total,
+        total_position=body.total_position,
         # Recover a setting the editor stranded in `options` — the PREVIEW builds
         # its spec from the body, so recovering only in report_from_json left the
         # on-screen chart without its summary column. (shared helper)

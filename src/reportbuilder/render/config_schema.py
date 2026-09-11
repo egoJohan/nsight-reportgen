@@ -243,7 +243,7 @@ def standard_schema() -> tuple[ConfigField, ...]:
     """Multi-series-capable charts: optional classifying variable."""
     # percent_base sits right after the statistic so the "Percentages of" direction
     # renders on the same row as "Statistic" (and self-hides for non-% statistics).
-    return (statistic_field(), percent_base_field(), show_total_field(),
+    return (statistic_field(), percent_base_field(), show_total_field(), total_position_field(),
             classifying_var_field(), classifying_values_field(), *_common_tail())
 
 
@@ -287,7 +287,7 @@ def xtab_layout_field(*, values: tuple[str, ...] = (
 def clustered_bar_schema() -> tuple[ConfigField, ...]:
     """Clustered bar charts (vertical/horizontal): support a SECOND classifying
     variable → cross-tab combos. Only these charts get it (stacked/line/radar don't)."""
-    return (statistic_field(), percent_base_field(), show_total_field(),
+    return (statistic_field(), percent_base_field(), show_total_field(), total_position_field(),
             classifying_var_field(), classifying_values_field(), classifying_var_2_field(), xtab_layout_field(),
             *_common_tail())
 
@@ -300,6 +300,20 @@ def show_total_field() -> ConfigField:
     return ConfigField(
         "show_total", "select", "Total column",
         options=(("auto", "Automatic"), ("on", "Show"), ("off", "Hide")),
+        default="auto",
+    )
+
+
+def total_position_field() -> ConfigField:
+    # Where the Total sits, as the reader meets it. "Default" keeps each chart
+    # type's own long-standing place, so no saved slide moves. The frontend shows
+    # this only while a Total is actually drawn. Not offered on a combo, whose
+    # first series is its bars and second its line — moving Total there would
+    # change what is drawn as which. (2026-09-11)
+    return ConfigField(
+        "total_position", "select", "Total position",
+        options=(("auto", "Default"), ("top", "Top (left on vertical charts)"),
+                 ("bottom", "Bottom (right on vertical charts)")),
         default="auto",
     )
 
@@ -342,6 +356,7 @@ def stacked_schema(*, with_row_summary: bool = False) -> tuple[ConfigField, ...]
             xtab_layout_field(values=("auto", "separate")),
             # Show/hide the overall "Total" reference bar (a 100% reference stack).
             show_total_field(),
+            total_position_field(),
             # Row-summary column up front (right after the data options) so it's easy
             # to find — it's the headline feature of a stacked Likert battery.
             *(row_summary_fields() if with_row_summary else ()),

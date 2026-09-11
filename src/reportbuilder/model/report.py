@@ -126,6 +126,11 @@ class ChartSpec:
     #            show it for counts/means, "% of total", and single-series charts.
     #   "on" / "off" — force it.
     show_total: str = "auto"
+    # Where the Total sits, as the reader meets it: "top" (the top row of a
+    # horizontal chart, the left column of a vertical one, first in a legend),
+    # "bottom" (last), or "auto" — wherever that chart type has always put it,
+    # which is what every report saved before this existed reads as.
+    total_position: str = "auto"
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
     # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
     # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
@@ -314,6 +319,7 @@ def report_from_json(data: dict | str) -> Report:
             category_label_overrides=_label_overrides(c),
             percent_base=c.get("percent_base", "auto"),
             show_total=c.get("show_total", "auto"),
+            total_position=c.get("total_position", "auto"),
             row_summary_fn=_rs(c, "row_summary_fn", "none"),
             row_summary_codes=tuple(float(x) for x in _rs(c, "row_summary_codes", ())),
             row_summary_pos_codes=tuple(float(x) for x in _rs(c, "row_summary_pos_codes", ())),

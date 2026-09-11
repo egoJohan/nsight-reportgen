@@ -150,9 +150,9 @@ def test_classifying_var_field_required_variant():
 def test_standard_schema_field_set():
     keys = _keys(standard_schema())
     # percent_base sits right after statistic (renders on the "Statistic" row);
-    # show_total (the "Total column" control) follows it.
+    # show_total (the "Total column" control) follows it, then where that Total sits.
     assert keys == [
-        "statistic", "percent_base", "show_total", "classifying_var",
+        "statistic", "percent_base", "show_total", "total_position", "classifying_var",
         # which of the classifier's groups THIS SLIDE is drawn on
         # The label editor IS the manual sort — its rows are dragged into the
         # order the chart draws — so it sits directly after Sort.
@@ -179,7 +179,7 @@ def test_stacked_schema_fields():
     assert _keys(stacked_schema()) == [
         "statistic", "percent_base", "classifying_var", "classifying_values",
         "classifying_var_2",
-        "xtab_layout", "show_total", "sort", "category_label_overrides",
+        "xtab_layout", "show_total", "total_position", "sort", "category_label_overrides",
         "number_format", "show_not_answered",
         "show_empty_categories", "not_answered_codes",
     ]

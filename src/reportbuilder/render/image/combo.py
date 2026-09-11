@@ -18,6 +18,8 @@ Returns None.
 """
 from __future__ import annotations
 
+from reportbuilder.render.image.label_fit import register_category_labels
+
 from reportbuilder.render.image._mpl import (
     apply_axis_titles, new_figure, render_png, place_picture, series_values,
     format_value, chart_background, chart_furniture,
@@ -92,6 +94,7 @@ def build_image_combo(ctx) -> None:
     ax.tick_params(axis="both", length=0)
     ax.set_xticks(x)
     ax.set_xticklabels(cats, fontsize=11.5, color=ink)
+    register_category_labels(ax, "x", cats)
     ax.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
     # Grid-tone gridlines

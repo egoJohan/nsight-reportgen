@@ -1973,4 +1973,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
                                              scale_levels=levels,
                                              scale_points=points),
         row_summary_keys=tuple(bars),
+        # Split by a group, each bar is "<statement> · <group>"; otherwise the
+        # bars are the statements themselves, which are not groups of people.
+        segments_are_groups=seg_items[0][0] is not None and not sole_group,
     )

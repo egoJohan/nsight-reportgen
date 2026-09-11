@@ -61,6 +61,7 @@ import {
   SLIDE_ASPECT,
   defaultRowSummaryLabel,
 } from "@/lib/charts";
+import { drawsTotal } from "@/lib/totalPosition";
 
 // The report's grouping override, shared with the leaf preview components so a
 // chart on a manually-grouped question previews the way it renders.
@@ -308,6 +309,7 @@ function readField(chart: ChartSpec, key: string): unknown {
 const FIRST_CLASS_KEYS = new Set([
   "percent_base",
   "show_total",
+  "total_position",
   "classifying_var_2",
   "row_summary_fn",
   "row_summary_codes",
@@ -1237,6 +1239,12 @@ function ChartControls({
   // placeholder so the "Statistic" row keeps its layout.) (spec 2026-08-04)
   if (!chart.classifying_var) {
     schema = schema.filter((f) => f.key !== "show_total");
+  }
+  // "Total position" only while a Total is actually drawn: a classifying
+  // variable, no crossed second one (combos carry no Total), and "Total column"
+  // resolving to shown. (2026-09-11)
+  if (!drawsTotal(chart)) {
+    schema = schema.filter((f) => f.key !== "total_position");
   }
   // The per-panel base only exists on a slide that actually draws a ROW of
   // charts. A classifier is not enough: one whose groups all but one are too

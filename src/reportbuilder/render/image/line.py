@@ -14,10 +14,12 @@ from __future__ import annotations
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
-    format_value, series_label, style_legend, wrap_label,
+    format_value, series_label, style_legend, wrap_label, place_total,
+    colours_by_series,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
+from reportbuilder.render.image.label_fit import register_category_labels
 
 
 def build_image_line(ctx) -> None:
@@ -30,11 +32,14 @@ def build_image_line(ctx) -> None:
     - No matplotlib title (handled by slide chrome, REQ-D-04)
     """
     cats, segs, data = series_values(ctx.series)
+    # A line has no top or bottom; its legend has a first and a last.
+    default_segs, segs = segs, place_total(segs, getattr(ctx.spec, "total_position", "auto"))
     fig, ax = new_figure(ctx)
     bg = chart_background(ctx)
     ink, muted, grid = chart_furniture(ctx)
-    clrs = series_colors(len(segs), palette=template_palette(ctx),
-                          accent=chart_accent(ctx))
+    clrs = colours_by_series(series_colors(len(segs), palette=template_palette(ctx),
+                                           accent=chart_accent(ctx)),
+                             default_segs, segs)
 
     x = list(range(len(cats)))
 
@@ -74,6 +79,7 @@ def build_image_line(ctx) -> None:
         ha="right" if rotate else "center",
         rotation_mode="anchor" if rotate else None,
     )
+    register_category_labels(ax, "x", cats, wrap=wrap_label, width=16)
     ax.tick_params(axis="both", length=0)
 
     # House-style spines: bottom spine only

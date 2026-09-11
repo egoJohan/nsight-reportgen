@@ -496,6 +496,7 @@ export function makeChart(
     // Auto-detect the cross-tab percentage direction from the variables' roles.
     percent_base: "classifier",
     show_total: "auto",
+    total_position: "auto",
     // Present from the start so the config form patches the FIELD, not options.
     row_summary_fn: "none",
     row_summary_codes: [],

@@ -44,11 +44,17 @@ def series_label(ctx, seg: str) -> str:
     segment carrying no count means.
     """
     base = (getattr(getattr(ctx, "series", None), "base_n", None) or {}).get(seg)
+    return with_base(seg, base)
+
+
+def with_base(name: str, base) -> str:
+    """A group's name with its base, "Naiset (n=501)" — the one wording every
+    chart uses for it. The bare name when the base is unknown or zero."""
     try:
         n = int(base)
     except (TypeError, ValueError):
-        return seg
-    return f"{seg} (n={n})" if n > 0 else seg
+        return name
+    return f"{name} (n={n})" if n > 0 else name
 
 
 def chart_text_font(style) -> str:
@@ -292,6 +298,10 @@ def render_png(fig) -> str:
         fig.canvas.draw()
         for artist in fig.findobj(Text):
             artist.set_fontfamily(family)
+    # Category names that would print over each other are set again until they
+    # do not — after the face, since the face decides how wide they are.
+    from reportbuilder.render.image import label_fit
+    label_fit.fit_category_labels(fig)
     fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04,
                 transparent=True)
     fig.clear()
@@ -347,6 +357,38 @@ def series_values(series):
         for seg in segs
     }
     return cats, segs, data
+
+
+def is_total(seg: str) -> bool:
+    """A Total series: the overall "Total", or a separate panel's "<variable> · Total"."""
+    return seg == "Total" or seg.endswith(" · Total")
+
+
+def place_total(segs, position: str, *, top_is_last: bool = False) -> list:
+    """`segs` with its Total(s) moved to where the author asked for them.
+
+    `position` is the chart's `total_position`: "top" puts Total first as the
+    reader meets it, "bottom" last, and anything else ("auto") leaves the order
+    exactly as it was. `top_is_last` is for a builder that draws its list from
+    the bottom up — a grouped horizontal bar stacks the series of each group
+    upwards, so the reader's top is the END of the list there. (2026-09-11)
+    """
+    segs = list(segs)
+    if position not in ("top", "bottom"):
+        return segs
+    totals = [s for s in segs if is_total(s)]
+    rest = [s for s in segs if not is_total(s)]
+    return totals + rest if (position == "top") != top_is_last else rest + totals
+
+
+def colours_by_series(clrs, default_order, drawn_order) -> list:
+    """`clrs`, dealt along `default_order`, handed to the same series in `drawn_order`.
+
+    Colours were given out by position, so putting Total on top gave "Naiset"
+    the colour Total had and moved every group along one. The author moved one
+    bar; a series keeps its colour wherever it is drawn. (2026-09-11)"""
+    at = dict(zip(default_order, clrs))
+    return [at.get(s, c) for s, c in zip(drawn_order, clrs)]
 
 
 def chart_background(ctx) -> str:

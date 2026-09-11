@@ -27,7 +27,8 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 
 from reportbuilder.render.image._mpl import (
     _remember_font,chart_accent,
-    render_png, place_picture_square, series_label, series_values,
+    render_png, place_picture_square, series_label, series_values, place_total,
+    colours_by_series,
     style_legend, wrap_label,
     chart_background, chart_furniture,
 )
@@ -47,8 +48,11 @@ def build_image_radar(ctx) -> None:
     """
     register_fonts()
     cats, segs, data = series_values(ctx.series)
-    clrs = series_colors(len(segs), palette=template_palette(ctx),
-                          accent=chart_accent(ctx))
+    # A radar's rings have no top or bottom; its legend has a first and a last.
+    default_segs, segs = segs, place_total(segs, getattr(ctx.spec, "total_position", "auto"))
+    clrs = colours_by_series(series_colors(len(segs), palette=template_palette(ctx),
+                                           accent=chart_accent(ctx)),
+                             default_segs, segs)
     bg = chart_background(ctx)
     ink, muted, grid = chart_furniture(ctx)
 

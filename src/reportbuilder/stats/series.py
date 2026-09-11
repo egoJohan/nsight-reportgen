@@ -66,6 +66,12 @@ class SeriesResult:
     # something untrue about itself. The renderer says what happened, not what
     # was asked for.
     applied_filter: tuple[str, ...] = ()
+    # Whether the segments are GROUPS of people — a classifier's values, or
+    # "Total" — as opposed to a battery's statements drawn as bars. Only the
+    # engine knows: a battery asked of one group names its bars by statement,
+    # though the chart names a classifier. A group is labelled with its base
+    # ("Naiset (n=501)"); a statement is not a group and is not. (2026-09-11)
+    segments_are_groups: bool = True
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

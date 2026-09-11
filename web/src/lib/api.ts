@@ -282,6 +282,9 @@ export interface ChartSpec {
   // Whether the cross-tab "Total" reference series is drawn ("auto" hides it in
   // within-category % directions; "on"/"off" force it).
   show_total?: "auto" | "on" | "off";
+  // Where the Total sits as the reader meets it; "auto" = where this chart type
+  // has always put it.
+  total_position?: "auto" | "top" | "bottom";
   // Right-hand per-row summary column (stacked_horizontal_bar only). Off when
   // row_summary_fn is "none"/absent.
   row_summary_fn?:
