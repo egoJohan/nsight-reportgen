@@ -627,6 +627,30 @@ export interface TemplateFont {
   ok: boolean;
 }
 
+/** An entry in the sign-in list. A bare string is the shape this list has
+ *  always had; the object form is what the screen that had ONE list wrote,
+ *  where the mode also granted access. Still read, never written. */
+export interface AllowedDomain {
+  domain: string;
+  mode?: "view" | "edit";
+}
+
+/** What a domain's people are owed, across every customer. */
+export interface DomainAccess {
+  domain: string;
+  mode: "view" | "edit";
+}
+
+/** Two independent lists. `allowed_domains` is who gets an account without an
+ *  invitation; `domain_access` is what a domain is owed. A domain may be in
+ *  either, both, or neither — access is not a way in, and being let in grants
+ *  nothing by itself. */
+export interface AccessSettings {
+  allowed_domains: (string | AllowedDomain)[];
+  domain_access: DomainAccess[];
+  default_grants: { scope: string; mode?: string }[];
+}
+
 /** Which template a report resolves to, and WHERE from — the level is what lets
  *  the UI say "inherited from the customer" instead of showing a bare id. */
 export interface ResolvedTemplate {
@@ -1540,6 +1564,31 @@ export const api = {
         throw new Error(detail);
       }
       return res.json() as Promise<Substitutions>;
+    },
+
+    /** Who may sign in without an invitation, and the access their domain
+     *  grants them. A domain with a mode grants that mode on the WHOLE tenant,
+     *  which is what removes naming every customer one by one. */
+    access: (): Promise<AccessSettings> =>
+      fetch(`${API_BASE}/settings/access`).then((r) => json<AccessSettings>(r)),
+
+    setAccess: async (value: AccessSettings): Promise<AccessSettings> => {
+      const res = await fetch(`${API_BASE}/settings/access`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(value),
+      });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep the status text
+        }
+        throw new Error(detail);
+      }
+      return res.json() as Promise<AccessSettings>;
     },
 
     /** The template every report renders on when nothing above it binds one. */

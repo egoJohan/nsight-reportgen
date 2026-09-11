@@ -18,6 +18,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 VIEW = "view"
+
+#: A grant on EVERYTHING this tenant holds.
+#:
+#: Access was per-customer, so "everyone who works here may see everything" had
+#: to be spelled out customer by customer and rewritten whenever a customer was
+#: added. This is the one scope that says it once. (Johan, 2026-09-10)
+#:
+#: `*` rather than "" — an empty scope covers everything too, which is exactly
+#: why it raises: it is what a bug produces, and it must stay indistinguishable
+#: from a mistake. This has to be typed on purpose.
+#:
+#: Its DEPTH is zero, which is what makes it safe to hand out: `_best` prefers
+#: the most specific grant covering a path, so any grant naming a real customer
+#: beats it. "Everyone edits, except read-only here" needs no deny rule.
+ALL_SCOPE = "*"
 EDIT = "edit"
 
 #: Objects under this prefix are app configuration — users, grants, fonts,
@@ -51,6 +66,8 @@ class Grant:
         if self.mode not in (VIEW, EDIT):
             raise ValueError(f"mode must be 'view' or 'edit', not {self.mode!r}")
 
+        if self.scope == ALL_SCOPE:
+            return                       # the whole tenant; nothing else to check
         segments = [s for s in self.scope.split("/") if s]
         if "." in segments or ".." in segments:
             raise ValueError("scope must not contain . or .. segments")
@@ -66,6 +83,11 @@ class Grant:
         have = [s for s in path.split("/") if s]
         if "." in have or ".." in have:
             return False
+        if self.scope == ALL_SCOPE:
+            # Every real path. The reserved heads are refused a level up, in
+            # `may_read`/`may_write`, so app configuration stays out of reach of
+            # a grant on tenant DATA.
+            return bool(have)
 
         want = [s for s in self.scope.split("/") if s]
         return len(have) >= len(want) and have[: len(want)] == want
@@ -83,6 +105,15 @@ class User:
     last_name: str = ""
     is_admin: bool = False
     grants: tuple[Grant, ...] = field(default_factory=tuple)
+    #: Grants this account does not own: at present the whole-tenant grant its
+    #: email domain currently carries, filled in per request by
+    #: `identity.effective_user`. A SEPARATE field on purpose -- every write of
+    #: a user persists `grants`, so a derived grant living there would be
+    #: written onto the account by something as innocent as renaming yourself,
+    #: outlive the setting it came from, and appear on the admin's Users screen
+    #: as a grant nobody gave. Permission questions read both (`all_grants`);
+    #: storage and the admin screens read `grants` alone.
+    tenant_grants: tuple[Grant, ...] = field(default_factory=tuple)
     #: When this account last minted a session, ISO-8601, or None for never.
     #: Written in one place — `Repository.record_sign_in`, called where a
     #: session is issued — and never by an ordinary save, so an admin toggling
@@ -91,8 +122,17 @@ class User:
     #: what a separate list of pending invitations used to be for.
     last_login_at: str | None = None
 
+    @property
+    def all_grants(self) -> tuple[Grant, ...]:
+        """Everything that answers a permission question for this user."""
+        return tuple(self.grants) + tuple(self.tenant_grants)
+
 
 def _depth(scope: str) -> int:
+    """How specific a scope is. The tenant grant is zero — the least specific
+    thing there is — so any grant naming a customer wins against it."""
+    if scope == ALL_SCOPE:
+        return 0
     return len([s for s in scope.split("/") if s])
 
 
@@ -133,7 +173,7 @@ def _best(user: User, path: str) -> Grant | None:
     security question is settled one level up — nothing here decides WHETHER
     somebody may hold a grant, only what the grants they hold mean together.
     """
-    covering = [g for g in user.grants if g.covers(path)]
+    covering = [g for g in user.all_grants if g.covers(path)]
     if not covering:
         return None
     return max(covering, key=lambda g: (_depth(g.scope), g.mode == EDIT))
@@ -159,4 +199,4 @@ def may_write(user: User, path: str) -> bool:
 
 def visible_scopes(user: User) -> tuple[str, ...]:
     """The scopes this user may see, for filtering a listing cheaply."""
-    return tuple(g.scope for g in user.grants)
+    return tuple(g.scope for g in user.all_grants)

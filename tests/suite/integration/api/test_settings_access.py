@@ -44,7 +44,11 @@ def viewer_client(repo, auth):
 def test_defaults_to_empty(admin_client):
     r = admin_client.get("/settings/access")
     assert r.status_code == 200
-    assert r.json() == {"allowed_domains": [], "default_grants": []}
+    # Three fields: who may sign in, who is owed what, and the older named
+    # default grants. Admission and access are separate questions -- see
+    # test_access_domains_api.py. (Johan, 2026-09-11)
+    assert r.json() == {"allowed_domains": [], "domain_access": [],
+                        "default_grants": []}
 
 
 def test_admin_can_set_it(admin_client):
@@ -52,7 +56,9 @@ def test_admin_can_set_it(admin_client):
            "default_grants": [{"scope": "attendo", "mode": "view"}]}
     r = admin_client.put("/settings/access", json=body)
     assert r.status_code == 200
-    assert admin_client.get("/settings/access").json() == body
+    # A body that names no `domain_access` stores none -- listing a domain to
+    # let people in must never grant them anything on its own.
+    assert admin_client.get("/settings/access").json() == {**body, "domain_access": []}
 
 
 def test_a_non_admin_cannot_set_it(viewer_client):

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   UploadIcon,
@@ -18,6 +18,7 @@ import {
   TypeIcon,
   DatabaseIcon,
   PresentationIcon,
+  GlobeIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ import {
 import { useSession } from "@/lib/session";
 import BackupTab from "@/components/settings/BackupTab";
 import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
+import DomainAccessTab from "@/components/settings/DomainAccessTab";
 import PendingUsersTab from "@/components/settings/PendingUsersTab";
 import ProfileTab from "@/components/settings/ProfileTab";
 import { useQuery } from "@tanstack/react-query";
@@ -238,13 +240,23 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
   const [email, setEmail] = useState("");
   const [result, setResult] = useState<{ link: string; emailed: boolean } | null>(null);
 
-  function reset() {
-    setEmail("");
-    setResult(null);
-  }
+  // Cleared when the dialog OPENS, not when it closes. Closing happens by four
+  // routes -- Done, the ×, Escape, a click outside -- and "Done" calls
+  // `onOpenChange` directly, so a reset hung off this component's close handler
+  // never ran for the one button an admin actually presses: the next Invite
+  // reopened onto the previous invitation's link with no way back to the form.
+  // Resetting on the way in is true for every route, and it also keeps the
+  // result on screen through the closing animation instead of flashing an
+  // empty form.
+  useEffect(() => {
+    if (open) {
+      setEmail("");
+      setResult(null);
+    }
+  }, [open]);
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Invite someone to nSight Studio</DialogTitle>
@@ -563,6 +575,14 @@ export default function SettingsPage() {
                 )}
               </TabsTrigger>
             )}
+            {/* Beside the people screens: it is the same question -- who may
+                see what -- asked once for a whole company instead of per
+                person. Admin-only, since it reaches every customer. */}
+            {me.is_admin && (
+              <TabsTrigger value="domains">
+                <GlobeIcon className="size-4" />Domains
+              </TabsTrigger>
+            )}
             {/* Unchanged: open to anyone signed in, not just an admin --
                 fonts are a server-wide resource, not customer access. */}
             <TabsTrigger value="fonts">
@@ -600,6 +620,11 @@ export default function SettingsPage() {
           {canSeePermissionRequests && (
             <TabsContent value="permission-requests" className="mt-4">
               <PermissionRequestsTab />
+            </TabsContent>
+          )}
+          {me.is_admin && (
+            <TabsContent value="domains" className="mt-4">
+              <DomainAccessTab />
             </TabsContent>
           )}
           <TabsContent value="fonts" className="mt-4">

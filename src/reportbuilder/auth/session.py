@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 
 import itsdangerous
 
+from reportbuilder.auth import identity as _identity
 from reportbuilder.auth.permissions import User
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
@@ -189,6 +190,13 @@ def resolve(repo: Repository, auth: AuthContext, session_id: str) -> User | None
     idle_since = (now - _parse(record.last_seen)).total_seconds()
     if idle_since > TOUCH_MIN_INTERVAL_SECONDS:
         repo.touch_session(auth, session_id, now.isoformat(timespec="seconds"))
+
+    # The domain's tenant grant is read here, not stored on the account, so
+    # it reaches colleagues who signed up long ago and disappears when an
+    # admin takes the domain away. It therefore rides the same 30 s window
+    # spec §7 already gives every other revocation, and costs one extra
+    # setting read per cache miss rather than one per request.
+    user = _identity.effective_user(repo, auth, user)
 
     _cache.put(session_id, user)
     return user

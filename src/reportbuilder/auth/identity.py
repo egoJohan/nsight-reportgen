@@ -19,7 +19,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 
-from reportbuilder.auth.permissions import Grant, User
+from reportbuilder.auth.permissions import (
+    ALL_SCOPE, EDIT, Grant, User, VIEW,
+)
 from reportbuilder.store.repository import Repository
 from reportbuilder.store.seam import AuthContext
 
@@ -44,6 +46,112 @@ def _any_admin(repo: Repository, auth: AuthContext) -> bool:
     must never block the break-glass path an operator needs after losing
     every admin."""
     return any(u.is_admin for u in repo.list_users(auth))
+
+
+def _clean(value) -> str:
+    return str(value or "").strip().lower()
+
+
+def _pairs(raw):
+    """(domain, mode|None) for each entry of a stored domain list.
+
+    Two shapes are read: a bare string, and `{"domain": ..., "mode": ...}`.
+    An unrecognised mode falls back to `view` rather than raising -- this runs
+    on the sign-in path, and a typo in configuration must not hand out write
+    access, nor lock everybody out. (Johan, 2026-09-10)
+    """
+    out: list[tuple[str, str | None]] = []
+    for entry in raw or ():
+        if isinstance(entry, str):
+            domain, raw_mode = entry, None
+        elif isinstance(entry, dict):
+            domain, raw_mode = entry.get("domain"), entry.get("mode")
+        else:
+            continue
+        domain = _clean(domain)
+        if not domain:
+            continue
+        mode = (raw_mode if raw_mode in (VIEW, EDIT) else VIEW) if raw_mode else None
+        out.append((domain, mode))
+    return out
+
+
+def admitted_domains(access: dict) -> frozenset[str]:
+    """Domains whose people get an account without being invited.
+
+    Admission only. Being owed access to everything is a SEPARATE setting and
+    deliberately not a way in: a partner whose people are all invited by hand
+    can still be owed access, and a domain allowed to sign itself in can be
+    owed nothing. (Johan, 2026-09-11)
+    """
+    return frozenset(d for d, _mode in _pairs(access.get("allowed_domains")))
+
+
+def domain_modes(access: dict) -> dict[str, str]:
+    """domain -> the tenant-wide mode it carries, for domains that carry one.
+
+    Reads `domain_access`, and also honours a mode left inside
+    `allowed_domains` by the screen that had a single list: there it meant
+    "admit AND grant", so it keeps meaning that rather than silently dropping
+    access somebody relies on. The dedicated list wins where both name a
+    domain -- it is the one the current screen writes.
+    """
+    modes = {d: m for d, m in _pairs(access.get("allowed_domains")) if m}
+    modes.update({d: m for d, m in _pairs(access.get("domain_access")) if m})
+    return modes
+
+
+def tenant_grant(email: str, access: dict) -> Grant | None:
+    """The whole-tenant grant *email*'s domain carries, or None.
+
+    Read on every session resolve rather than stamped onto the account at
+    sign-up. The setting has to reach the colleagues who already have
+    accounts -- that is what it is for -- and an admin who takes a domain
+    away must take the access with it, which a stored copy would not.
+    """
+    mode = domain_modes(access).get(_clean(email).rsplit("@", 1)[-1])
+    return Grant(ALL_SCOPE, mode) if mode else None
+
+
+def effective_user(repo: Repository, auth: AuthContext, user: User) -> User:
+    """*user* as the permission model should see them this request.
+
+    Their own grants plus whatever their email domain is currently
+    configured to carry. The account itself is untouched: an admin's Users
+    screen keeps showing the grants an admin gave.
+
+    A setting that cannot be read leaves the user exactly as they were --
+    this runs on every request, and the hive being briefly away must not
+    invent access nor take it away.
+    """
+    try:
+        access = repo.get_setting(auth, _ACCESS_KEY) or {}
+    except Exception:                              # pragma: no cover - defensive
+        return user
+    grant = tenant_grant(user.email, access)
+    if grant is None:
+        return user
+    return replace(user, tenant_grants=(grant,))
+
+
+def domain_grants(email: str, access: dict):
+    """The grants a NEW account gets from its domain, or None if the domain
+    may not sign itself in at all. An empty tuple means admitted with
+    nothing of its own.
+
+    Deliberately does NOT include the domain's tenant grant. That one is
+    read from the setting on every request (`effective_user`) so it reaches
+    colleagues who already have accounts and vanishes when an admin takes
+    the domain away; a copy stamped here would do neither.
+
+    `default_grants` is the older named-scope setting, kept so a deployment
+    relying on it does not silently lose it.
+    """
+    if _clean(email).rsplit("@", 1)[-1] not in admitted_domains(access):
+        return None
+    return tuple(Grant(g["scope"], g.get("mode", VIEW))
+                 for g in access.get("default_grants") or ()
+                 if isinstance(g, dict) and g.get("scope"))
 
 
 def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
@@ -158,11 +266,13 @@ def resolve_signed_in_user(repo: Repository, auth: AuthContext, email: str,
 
     domain = normalized.rsplit("@", 1)[-1]
     access = repo.get_setting(auth, _ACCESS_KEY) or {}
-    allowed = {d.strip().lower() for d in access.get("allowed_domains", []) if d.strip()}
-    if domain in allowed:
-        grants = tuple(Grant(g["scope"], g.get("mode", "view"))
-                       for g in access.get("default_grants", []) if g.get("scope"))
-        log.info("sign-in: '%s' auto-joins via domain '%s'", normalized, domain)
+    grants = domain_grants(normalized, access)
+    if grants is not None:
+        # The tenant mode is logged from the SETTING, not from `grants`: it is
+        # no longer stamped onto the account (see `domain_grants`).
+        tenant = tenant_grant(normalized, access)
+        log.info("sign-in: '%s' auto-joins via domain '%s' as %s", normalized, domain,
+                 tenant.mode if tenant else "no tenant access")
         return repo.save_user(auth, User(id="", email=normalized,
                                          name=normalized.split("@", 1)[0],
                                          is_admin=False, grants=grants))

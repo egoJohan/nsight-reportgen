@@ -18,7 +18,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps_auth import current_user, require_admin
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth import mailer
+from reportbuilder.auth import mailer, session
 from reportbuilder.auth.permissions import User
 from reportbuilder.render import fonts as F
 from reportbuilder.render import house_style as H
@@ -166,6 +166,7 @@ def get_access(auth: AuthContext = Depends(get_auth),
     domain auto-join). Admin only — this is app configuration, not data."""
     stored = repo.get_setting(auth, ACCESS_KEY) or {}
     return {"allowed_domains": stored.get("allowed_domains", []),
+            "domain_access": stored.get("domain_access", []),
             "default_grants": stored.get("default_grants", [])}
 
 
@@ -176,10 +177,34 @@ def put_access(payload: dict = Body(...),
               user: User = Depends(require_admin)) -> dict:
     from reportbuilder.auth.permissions import Grant  # noqa: PLC0415
 
+    # Two lists, because they answer two questions. `allowed_domains` is who
+    # gets an account without an invitation; `domain_access` is what a domain's
+    # people may do across every customer. A domain may be in either, both, or
+    # neither -- a partner whose people are all invited by hand can still be
+    # owed access, and access is deliberately not a way in. (Johan, 2026-09-11)
     domains = payload.get("allowed_domains", [])
+    access = payload.get("domain_access", [])
     grants = payload.get("default_grants", [])
-    if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
-        raise HTTPException(422, "allowed_domains must be a list of strings")
+    if not isinstance(domains, list):
+        raise HTTPException(422, "allowed_domains must be a list")
+    for d in domains:
+        # A bare string is the shape this list has always had. `{domain, mode}`
+        # is accepted too: the screen that had ONE list wrote it here, and
+        # refusing it now would make an existing settings file unsaveable.
+        if isinstance(d, str):
+            continue
+        if not isinstance(d, dict) or not str(d.get("domain") or "").strip():
+            raise HTTPException(
+                422, "each domain must be a string or {domain, mode}")
+        if d.get("mode") not in (None, "", "view", "edit"):
+            raise HTTPException(422, "domain mode must be 'view' or 'edit'")
+    if not isinstance(access, list):
+        raise HTTPException(422, "domain_access must be a list")
+    for a in access:
+        if not isinstance(a, dict) or not str(a.get("domain") or "").strip():
+            raise HTTPException(422, "each access entry needs a domain")
+        if a.get("mode") not in ("view", "edit"):
+            raise HTTPException(422, "domain mode must be 'view' or 'edit'")
     if not isinstance(grants, list):
         raise HTTPException(422, "default_grants must be a list")
     for g in grants:
@@ -189,8 +214,16 @@ def put_access(payload: dict = Body(...),
             Grant(g["scope"], g.get("mode", "view"))  # validates scope/mode
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-    value = {"allowed_domains": domains, "default_grants": grants}
+    value = {"allowed_domains": domains, "domain_access": access,
+             "default_grants": grants}
     repo.set_setting(auth, ACCESS_KEY, value)
+    # A domain's mode is read on each session resolve and cached with the
+    # identity for CACHE_TTL_SECONDS. Without this, an admin grants a domain
+    # `edit`, is told it is saved, and their colleagues see nothing for half a
+    # minute -- and, worse, a domain TAKEN AWAY keeps working just as long.
+    # `forget_all` rather than `forget_user`: the change is tenant-wide, and
+    # there is no list of who it touches.
+    session.forget_all()
     return value
 
 

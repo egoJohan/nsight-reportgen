@@ -257,16 +257,21 @@ def _issue_session(request: Request, response: Response, repo: Repository,
 
 def _user_out(user: User) -> dict:
     """The public shape of a User. `is_owner` is synthesised from
-    `user.grants` -- holds `edit` on at least one customer -- never the
+    `user.all_grants` -- holds `edit` on at least one customer -- never the
     grants themselves: it is the one cheap fact SettingsPage.tsx needs to
     decide whether to show the "Permission requests" tab to someone who is
     not an admin, without fetching every grant to find out (see
     routes_access_requests.py's `list_access_requests` for the matching
-    server-side rule)."""
+    server-side rule).
+
+    `all_grants`, not `grants`: whoever an allowed domain grants `edit` on
+    the whole tenant owns every customer in it, and that route already
+    serves them the queue. Reading the account's own grants alone left the
+    two disagreeing -- the route answered, the tab was never drawn."""
     return {"id": user.id, "email": user.email, "name": user.name,
            "first_name": user.first_name, "last_name": user.last_name,
            "is_admin": user.is_admin,
-           "is_owner": any(g.mode == EDIT for g in user.grants)}
+           "is_owner": any(g.mode == EDIT for g in user.all_grants)}
 
 
 @auth_router.post("/logout")

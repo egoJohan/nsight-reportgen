@@ -954,6 +954,30 @@ export function useMyAccessRequests() {
   return useQuery({ queryKey: ["access-requests", "mine"], queryFn: api.accessRequests.mine });
 }
 
+/** Which email domains sign in without an invitation, and what their people
+ *  get. Admin-only on the server, so Settings > Domains is the only caller. */
+export function useAccessSettings(enabled = true) {
+  return useQuery({
+    queryKey: ["settings", "access"],
+    queryFn: () => api.settings.access(),
+    enabled,
+  });
+}
+
+export function useSetAccessSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.settings.setAccess,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings", "access"] });
+      // The admin's own domain may be one of these, and the server drops every
+      // cached identity on this write -- so the sidebar can be wrong until
+      // something refetches it.
+      qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+  });
+}
+
 /** The queue: PENDING requests only, scoped server-side to what the caller
  *  may decide — every one for an admin, just their own customers' for an
  *  owner (see routes_access_requests.py's `list_access_requests`). Settings
