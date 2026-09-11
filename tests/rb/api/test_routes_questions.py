@@ -286,7 +286,11 @@ def test_regroup_combines_returns_reshaped_questions(rb_wire) -> None:
     (REQ-C-06, M-02) — the full contract is covered in the suite."""
     singles = _make_singles_model()
     tc = rb_wire(client=Mock())
-    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
+    # `(df, model)`: the route keeps the DataFrame so it can tell a tick-box
+    # from a single-choice when the export wrote no value labels. None here --
+    # this model's codes ARE labelled, so the answer comes from them.
+    with patch("reportbuilder.api.routes_questions._load_singles_with_data",
+               return_value=(None, singles)):
         response = tc.post(
             f"/materials/{tc.material_id}/regroup",
             json={"groups": [{"kind": "multi", "variables": ["q1_1", "q1_2"]}], "singles": []},
@@ -301,7 +305,11 @@ def test_regroup_invalid_groups_are_ignored(rb_wire) -> None:
     is silently skipped, still returning 200. (REQ-C-06)"""
     singles = _make_singles_model()
     tc = rb_wire(client=Mock())
-    with patch("reportbuilder.api.routes_questions._load_singles", return_value=singles):
+    # `(df, model)`: the route keeps the DataFrame so it can tell a tick-box
+    # from a single-choice when the export wrote no value labels. None here --
+    # this model's codes ARE labelled, so the answer comes from them.
+    with patch("reportbuilder.api.routes_questions._load_singles_with_data",
+               return_value=(None, singles)):
         scale = tc.post(f"/materials/{tc.material_id}/regroup",
                         json={"groups": [{"kind": "multi", "variables": ["q1_1", "age"]}]})
         too_few = tc.post(f"/materials/{tc.material_id}/regroup",

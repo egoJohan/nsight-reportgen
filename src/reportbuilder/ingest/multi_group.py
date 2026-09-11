@@ -84,6 +84,36 @@ def _is_binary(var: Variable) -> bool:
     return bool(codes) and codes <= {0.0, 1.0}
 
 
+def is_tickbox(var: Variable, df=None) -> bool:
+    """Is this variable one option of a multi-response question?
+
+    `_is_binary` reads the value labels, which is right whenever the export
+    wrote any. Some platforms write none: the Kaiutinboksi study arrived with
+    269 of its 272 variables unlabelled, 222 of them holding `1.0` for a tick
+    and nothing at all otherwise. Every one was invisible to the grouping
+    editor, which is the defect this answers -- "muuttujat eivät tule
+    näkyviin listaan". (Johan, 2026-09-11)
+
+    So when there are no labels, the DATA decides: nothing but 0/1, and at
+    least one tick. A column of pure zeroes is not evidence of a tick-box,
+    and a 1/2 single-choice or a 1..N rating is not one either.
+
+    Labels win where they exist -- a labelled 1..5 scale whose respondents all
+    answered 1 is still a scale. Without a DataFrame the answer is exactly the
+    one this had before, so no caller loses a variable by not having data.
+    """
+    if var.value_labels or df is None:
+        return _is_binary(var)
+    if var.name not in getattr(df, "columns", ()):
+        return False
+    try:
+        import pandas as pd  # noqa: PLC0415 - optional at import time
+        seen = set(pd.to_numeric(df[var.name], errors="coerce").dropna().unique().tolist())
+    except Exception:  # noqa: BLE001 - a column we cannot read is not a tick-box
+        return False
+    return bool(seen) and seen <= {0.0, 1.0} and 1.0 in seen
+
+
 def _group_text(model: QuestionModel, members: tuple[str, ...]) -> str:
     """Derive a question text from the member variable labels.
 

@@ -43,7 +43,7 @@ from reportbuilder.ingest.grouping_override import (
 )
 from reportbuilder.render.image.fast_preview import compose_from_slide, title_box_headers
 from reportbuilder.ingest.battery_group import suggest_scale_batteries
-from reportbuilder.ingest.multi_group import _is_binary
+from reportbuilder.ingest.multi_group import is_tickbox
 from reportbuilder.api.model_loader import (
     model_for_material,
     df_model_for_material,
@@ -609,19 +609,29 @@ def _is_rating_scale(model: QuestionModel, q) -> bool:
     return len(_rating_scale(var)) >= max(3, len(labels) - 1)
 
 
-def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
-    """Fetch the material's raw bytes from the store and return the QuestionModel as produced
-    directly by read_sav (all single questions, no auto-grouping). Used by the stateless grouping
-    endpoint so it can apply user-requested grouping from a clean slate."""
+def _load_singles_with_data(material_id: str, client: DataHiveClient):
+    """(DataFrame, QuestionModel) as produced directly by read_sav — all single
+    questions, no auto-grouping. Used by the stateless grouping endpoint so it can
+    apply user-requested grouping from a clean slate.
+
+    The DataFrame comes back rather than being dropped on the floor: whether a
+    variable is a tick-box cannot always be read off its value labels (an export
+    may write none), and this endpoint decides exactly that when it applies the
+    analyst's group. (Johan, 2026-09-11)"""
     raw = client.get_material(material_id)
     with tempfile.NamedTemporaryFile(suffix=".sav", delete=False) as tmp:
         tmp.write(raw)
         tmp_path = tmp.name
     try:
-        _df, model = read_sav(tmp_path)
+        df, model = read_sav(tmp_path)
     finally:
         os.unlink(tmp_path)
-    return model
+    return df, model
+
+
+def _load_singles(material_id: str, client: DataHiveClient) -> QuestionModel:
+    """The model alone, for callers with no use for the data."""
+    return _load_singles_with_data(material_id, client)[1]
 
 
 def load_model_for_material(material_id: str, client: DataHiveClient) -> QuestionModel:
@@ -979,8 +989,11 @@ def list_variables(
                     "" if (var.name in marked
                            or _classifier_tier(var, _df_or_none()) != CLASSIFIER_TIER_OTHER)
                     else _why_not_offered(var, _df_or_none())),
-                # A genuine multi-response tick-box (binary 0/1) — groupable into a multi.
-                "tickbox": _is_binary(var),
+                # A genuine multi-response tick-box — groupable into a multi.
+                # Data-aware: an export that wrote no value labels still has
+                # tick-boxes in it, and reading the labels alone left one
+                # customer's whole study un-groupable (see is_tickbox).
+                "tickbox": is_tickbox(var, _df_or_none()),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
                 "scale": bool(scale_levels(var)),
                 # Signature of the scale (its code→label map). Two variables can only
@@ -1131,7 +1144,7 @@ def regroup(
     (non-tick-box, stale, <2 members) are silently skipped so a stored-but-now-
     invalid grouping never breaks the wizard. Authoring is validated in the UI
     (the pool only offers tick-box variables). (REQ-C-06, M-02)"""
-    base = _load_singles(material_id, client)
+    base_df, base = _load_singles_with_data(material_id, client)
     override = {
         "groups": [
             {"kind": g.kind, "variables": list(g.variables),
@@ -1144,7 +1157,10 @@ def regroup(
             for c in body.comparisons
         ],
     }
-    model = apply_grouping_override(base, override)
+    # WITH the data: `is_tickbox` needs it to recognise a tick-box whose export
+    # wrote no value labels, and without it this endpoint silently dropped the
+    # group the analyst had just made -- the button did nothing.
+    model = apply_grouping_override(base, override, df=base_df)
     # The report's grouping is not the only thing that shapes this list. Without
     # this, a question renamed under Study came back with its original SAV label
     # the moment a report asked — the case reported from staging — and value

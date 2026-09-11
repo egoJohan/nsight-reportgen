@@ -16,7 +16,7 @@ import dataclasses
 
 from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.ingest.multi_group import (
-    _is_binary, _group_text, apply_groups, suggest_multi_groups,
+    _group_text, apply_groups, is_tickbox, suggest_multi_groups,
     suggest_indicator_families,
 )
 from reportbuilder.ingest.battery_group import _slug, apply_batteries, suggest_batteries
@@ -106,7 +106,11 @@ def apply_grouping_override(model: QuestionModel, override: dict | None,
         if (
             len(vs) >= 2
             and set(vs) <= known
-            and all(_is_binary(model.variables[v]) for v in vs)
+            # `is_tickbox`, not `_is_binary`: an export that wrote no value
+            # labels still has tick-boxes in it, and this is a group the
+            # analyst explicitly asked for. Without the df the answer is the
+            # label-based one, exactly as before.
+            and all(is_tickbox(model.variables[v], df) for v in vs)
         ):
             manual_groups.append(vs)
     manual_members = {v for g in manual_groups for v in g}

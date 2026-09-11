@@ -4,6 +4,7 @@ import json
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+import numpy as np
 import pandas as pd
 import pyreadstat
 from reportbuilder.model.question import ValueLabel, Variable, Question, QuestionModel
@@ -162,6 +163,48 @@ def synthetic_sav(tmp_path) -> str:
         variable_measure={"q1": "nominal", "m1": "nominal", "m2": "nominal", "age": "scale"},
     )
     return str(path)
+
+
+def unlabelled_tickbox_sav(tmp_path) -> str:
+    """A SAV shaped like the Kaiutinboksi study: a multi-response set whose
+    export wrote NO value labels, a tick stored as 1 and a non-tick left blank.
+
+    Its variables were invisible to the grouping editor because every
+    groupability test read value labels. Kept as a fixture because "the
+    platform wrote no labels" is a shape real files arrive in, not a one-off.
+    (Johan, 2026-09-11)
+    """
+    df = pd.DataFrame({
+        # Ticked or blank -- 222 of the study's variables look like this.
+        "Hyvatarjous":    [1.0, np.nan, 1.0, np.nan, 1.0],
+        "Myyjansuositus": [np.nan, 1.0, 1.0, np.nan, np.nan],
+        # A clean 0/1 -- 19 of them look like this.
+        "Akt_IPTV":       [0.0, 1.0, 1.0, 0.0, 1.0],
+        # Neither: a single-choice 1/2 and a continuous measure, both unlabelled.
+        "Gender":         [1.0, 2.0, 1.0, 2.0, 1.0],
+        "Age":            [41.0, 63.0, 22.0, 35.0, 58.0],
+    })
+    path = Path(tmp_path) / "unlabelled.sav"
+    pyreadstat.write_sav(
+        df, str(path),
+        # The tick-boxes carry the OPTION as their label, which is what makes
+        # them questions at all -- an unlabelled column whose label is its own
+        # name is an analyst working column and stays out of the browser.
+        # Gender/Age carry none, exactly as in the customer's file.
+        column_labels={"Hyvatarjous": "Hyva tarjous",
+                       "Myyjansuositus": "Myyjan suositus",
+                       "Akt_IPTV": "Akt IPTV",
+                       "Gender": "Gender", "Age": "Age"},
+        variable_measure={"Hyvatarjous": "nominal", "Myyjansuositus": "nominal",
+                          "Akt_IPTV": "nominal", "Gender": "nominal",
+                          "Age": "scale"},
+    )
+    return str(path)
+
+
+def unlabelled_tickbox_sav_bytes() -> bytes:
+    with tempfile.TemporaryDirectory() as d:
+        return Path(unlabelled_tickbox_sav(d)).read_bytes()
 
 
 def synthetic_sav_bytes() -> bytes:
