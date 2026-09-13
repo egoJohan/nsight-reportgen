@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Render one acceptance case, by name, and say what happened.
+
+    acceptance/run <case-id> [--index acceptance/index/*.jsonl] [--out DIR]
+
+The first thing built, because everything after it is debugged through it: when
+a rule fails on case 4,812 of a 15-minute run, the question is always "show me
+that one picture, now".
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import pathlib
+import sys
+
+_HERE = pathlib.Path(__file__).resolve()
+sys.path.insert(0, str(_HERE.parent))
+
+
+def _reexec_into_venv() -> None:
+    """Land the shebang somewhere the product is importable.
+
+    The documented command is `acceptance/run <case-id>`, so it goes through
+    `#!/usr/bin/env python3` — the SYSTEM interpreter, which has none of this
+    installed. Every test that invoked this file via `sys.executable` passed
+    while the documented command was broken, because that bypasses the shebang.
+
+    Inert in the acceptance image, where the dependencies ARE the system
+    python's and the first `find_spec` succeeds.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("fastapi") is not None:
+        return
+    if os.environ.get("_NSIGHT_ACCEPTANCE_REEXEC"):
+        return          # already tried: fall through and report honestly
+    venv = _HERE.parent.parent / ".venv" / "bin" / "python"
+    if venv.exists() and str(venv) != sys.executable:
+        os.environ["_NSIGHT_ACCEPTANCE_REEXEC"] = "1"
+        os.execv(str(venv), [str(venv), str(_HERE), *sys.argv[1:]])
+
+
+_reexec_into_venv()
+
+import harness  # noqa: E402 — after the path and interpreter are settled
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="acceptance/run", description=__doc__)
+    ap.add_argument("case_id", help="the id of a case in the index")
+    ap.add_argument("--index", default="acceptance/index/cases.jsonl",
+                    help="the *.jsonl case index to look in")
+    ap.add_argument("--out", default="acceptance/reports/one",
+                    help="directory the picture is written to")
+    args = ap.parse_args(argv)
+
+    index = pathlib.Path(args.index)
+    if not index.exists():
+        print(f"no such index: {index}", file=sys.stderr)
+        return 2
+    try:
+        case = harness.load_case(index, args.case_id)
+    except KeyError:
+        print(f"no case {args.case_id!r} in {index}", file=sys.stderr)
+        return 2
+
+    try:
+        got = harness.render_case(case, pathlib.Path(args.out))
+    except Exception as exc:  # noqa: BLE001 — the CLI reports, it does not raise
+        print(f"case {args.case_id}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"case {args.case_id}")
+    print(f"  study     {case['study']}  question {got['question_ref']}")
+    print(f"  template  {case['template']}  chart {case['spec'].get('chart_type')}")
+    print(f"  drawn by  {got['drawn_by']}")
+    overlaps = got["overlaps"]
+    if overlaps:
+        print(f"  overlaps  {len(overlaps)}")
+        for hit in overlaps[:8]:
+            print(f"              {hit}")
+        if len(overlaps) > 8:
+            print(f"              ... and {len(overlaps) - 8} more")
+    else:
+        print("  overlaps  none")
+    undersized = got["undersized"]
+    if undersized:
+        print(f"  legibility  {len(undersized)} below floor")
+        for hit in undersized[:8]:
+            print(f"              {hit}")
+        if len(undersized) > 8:
+            print(f"              ... and {len(undersized) - 8} more")
+    else:
+        # Said out loud even when clean: a rule that prints nothing when it
+        # passes cannot be told from a rule that never ran.
+        print("  legibility  ok")
+    for err in got["judge_errors"]:
+        print(f"  JUDGE FAILED  {err}")
+    print(f"  picture   {got['picture']} ({got['bytes']} bytes)")
+    if got["drawn_by"] != "composited":
+        # Not a failure of this command, but the gate treats it as one: a
+        # LibreOffice fallback is a different rasteriser and a different picture.
+        print("  NOTE: not composited — a ground build failed or a title was baked in")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
