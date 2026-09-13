@@ -1680,6 +1680,40 @@ _PREVIEW_CACHE_SALT = (
 )
 
 
+#: Names the rasteriser that drew an entry's PNG. One literal, because a typo
+#: in any one of the three sites would fail silently and in the worst way: the
+#: cache would report no path, which is indistinguishable from a fallback.
+_DRAWN_BY = "preview.path"
+
+
+def _record_drawn_by(out_dir: pathlib.Path, which: str) -> None:
+    """Record which program drew this entry's PNG.
+
+    Written BEFORE the PNG is published: a cache hit gates on the PNG existing,
+    so publishing the picture first would leave a window in which a cached
+    preview cannot say what drew it.
+    """
+    try:
+        (out_dir / _DRAWN_BY).write_text(which, encoding="utf-8")
+    except OSError:  # a preview that cannot be labelled is still a preview
+        pass
+
+
+def _drawn_by(out_dir: pathlib.Path) -> dict[str, str]:
+    """The `X-Preview-Path` header for a cached entry — or no header at all.
+
+    Absent for an entry cached before this marker existed. Saying nothing is
+    deliberate: the two rasterisers do not produce identical pixels, and the
+    acceptance gate asserts on this header, so a guessed path is worse than
+    none.
+    """
+    try:
+        which = (out_dir / _DRAWN_BY).read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    return {"X-Preview-Path": which} if which else {}
+
+
 def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
     """Return a per-(process, material, spec, host-rendering) temp directory.
 
@@ -1918,7 +1952,7 @@ def preview_chart(
     if cached_png.exists():
         log.info("preview %s %s: cached", material_id, body.chart_type)
         return Response(content=cached_png.read_bytes(), media_type="image/png",
-                         headers=fast_headers)
+                         headers={**fast_headers, **_drawn_by(out_dir)})
     started = time.monotonic()
 
     # 1. Load material data, through the SAME seam every other path uses.
@@ -1986,11 +2020,13 @@ def preview_chart(
                 png_bytes = buf.getvalue()
                 tmp_png = out_dir / f"preview.{uid}.png"
                 tmp_png.write_bytes(png_bytes)
+                _record_drawn_by(out_dir, "composited")
                 os.replace(tmp_png, cached_png)
                 log.info("preview %s %s: %.1fs (composited)", material_id,
                          body.chart_type, time.monotonic() - started)
                 return Response(content=png_bytes, media_type="image/png",
-                                 headers=fast_headers)
+                                 headers={**fast_headers,
+                                          "X-Preview-Path": "composited"})
             # compose_from_slide returns None when there is no cached ground to
             # draw on — a template it has not rendered yet, or one it could not
             # read. That is a silent 20x slowdown, so SAY so: without this line
@@ -2031,6 +2067,7 @@ def preview_chart(
     # then os.replace so concurrent readers see a complete file.
     tmp_png = out_dir / f"preview.{uid}.png"
     tmp_png.write_bytes(png_bytes)
+    _record_drawn_by(out_dir, "libreoffice")
     os.replace(tmp_png, cached_png)
     # The .pptx, the .pdf and the rasterized page were the road to that PNG, not
     # the destination: only the PNG is ever served. Keeping them made a cached
@@ -2047,7 +2084,8 @@ def preview_chart(
     log.info("preview %s %s: %.1fs (build %.1fs, pdf %.1fs, raster %.1fs)",
              material_id, body.chart_type, time.monotonic() - started,
              built - started, converted - built, rastered - converted)
-    return Response(content=png_bytes, media_type="image/png")
+    return Response(content=png_bytes, media_type="image/png",
+                    headers={"X-Preview-Path": "libreoffice"})
 
 
 @questions_router.post("/materials/{material_id}/preview-cache/clear")
