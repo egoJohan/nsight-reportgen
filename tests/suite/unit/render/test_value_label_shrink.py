@@ -76,6 +76,30 @@ def test_a_single_label_is_never_touched():
     assert _sizes(ax) == [9.0]
 
 
+def test_a_number_left_out_is_no_reason_to_shrink_the_rest():
+    """A called-out number with no clear place is left out (`clear_callouts`).
+    Still counted here, it shrank every number on the chart for a number that
+    is not even printed. (Johan, 2026-09-11)"""
+    fig, ax = _panel([(50, 5), (90, 5)])
+    ghost = ax.text(50, 5, "2 %", ha="center", va="center", fontsize=9.0,
+                    fontweight="bold", gid=_VALUE_GID)
+    ghost.set_visible(False)
+    assert shrink_values_until_clear(fig, ax) is None
+    assert set(_sizes(ax)) == {9.0}
+
+
+def test_a_callouts_line_is_not_its_number():
+    """A callout's window extent also wraps its leader line. The number sits
+    clear of every other; only the box around its line crossed one — and that
+    shrank the whole chart. (Johan, 2026-09-11)"""
+    fig, ax = _panel([(60, 5.5)])
+    ax.annotate("2 %", xy=(10, 5.0), xytext=(95, 8.5), ha="center", va="center",
+                fontsize=9.0, fontweight="bold", gid=_VALUE_GID,
+                arrowprops=dict(arrowstyle="-", linewidth=0.9))
+    assert shrink_values_until_clear(fig, ax) is None
+    assert set(_sizes(ax)) == {9.0}
+
+
 def test_it_stops_as_soon_as_they_are_clear():
     """Not shrunk to the floor regardless — one step is often enough, and the
     numbers should stay as large as they can."""

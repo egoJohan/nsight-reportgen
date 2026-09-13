@@ -47,7 +47,7 @@ from reportbuilder.render.house_style import (
     register_fonts, series_colors, contrast_ink, MUTED,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
-from reportbuilder.render.image._mpl import template_palette
+from reportbuilder.render.image._mpl import VALUE_GID, template_palette
 from reportbuilder.render.panels import panel_segments
 
 _EMU_PER_IN = 914400.0
@@ -335,6 +335,9 @@ def _draw_one_pie(ax, cats, vals, clrs, statistic, fmt, bg: str, donut: bool,
         t.set_fontsize(10.0)
         t.set_fontweight("bold")
         t.set_color(contrast_ink(wedge.get_facecolor()))
+        # matplotlib makes these, so they are tagged here rather than at a
+        # draw call of ours — they are still the numbers this chart states.
+        t.set_gid(VALUE_GID)
     # Now that the circle has a scale, ask of each number whether the wedge can
     # hold it. The ones that cannot move outside, on a line back to their wedge.
     r = 0.80 if donut else 0.72

@@ -203,7 +203,14 @@ def create_app(client=None) -> FastAPI:
         one per usable core less one for the server, affinity-aware, so a
         `taskset`-pinned process or a one-core container answers 1.
         """
-        return {"status": "ok", "render_concurrency": workers_for(4)}
+        # Which pictures this server draws: the namespace its preview cache is
+        # keyed on, a digest of its own source. An editor left open across a
+        # deploy kept showing the old server's pictures — it keys them on what
+        # the chart asks for and nothing about who drew it — so it re-checks
+        # this and draws again when it moves. (Johan, 2026-09-11)
+        import reportbuilder.api.routes_questions as _rq
+        return {"status": "ok", "render_concurrency": workers_for(4),
+                "render_identity": _rq._PREVIEW_CACHE_SALT}
 
     @app.exception_handler(httpx.TransportError)
     async def _hive_unreachable(_request, exc: httpx.TransportError):

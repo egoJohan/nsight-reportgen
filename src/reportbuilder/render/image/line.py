@@ -19,6 +19,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
+from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.image.label_fit import register_category_labels
 
 
@@ -65,6 +66,7 @@ def build_image_line(ctx) -> None:
                     textcoords="offset points",
                     ha="center", va="bottom",
                     fontsize=9.5, fontweight="bold", color=ink, zorder=5,
+                    gid=VALUE_GID,
                 )
 
     # Category labels — wrapped (and pathological long words force-broken), and

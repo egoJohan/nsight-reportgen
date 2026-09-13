@@ -1963,12 +1963,16 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     return SeriesResult(
         categories=tuple(levels), segments=tuple(bars),
         cells=cells, base_n=base_n, statistic="pct",
-        # NOT segment_primary: the cross-tab grouping draws the primary as a ROTATED
-        # label beside the axis, which assumes short values ("Mies"/"Nainen"). A
-        # battery's primary is a full statement, and rendering those rotated smears
-        # them together and crushes the plot. The statement-major ORDER already puts
-        # each statement's segments adjacent, and every bar keeps its own readable
-        # "<statement> · <segment>" tick. (spec 2026-08-02 §2.4)
+        # Grouped BY STATEMENT when split by a group: each statement is said once,
+        # beside its rows, and each row is named by its group and base. It used to
+        # be left out because the grouped layout drew the primary as a ROTATED
+        # label, and a full statement rotated smears (spec 2026-08-02 §2.4); that
+        # layout now writes a label too long to stand rotated out beside its rows.
+        # Left out, the bars were named "<statement> · <group>" — up to 241
+        # characters, cut to their first words on a crowded slide with the group
+        # lost, so three rows read the same. (Johan, 2026-09-11)
+        segment_primary=(segment_primary if seg_items[0][0] is not None and not sole_group
+                         else None),
         row_summaries=_compute_row_summaries(spec, bars, levels, codes, cells,
                                              scale_levels=levels,
                                              scale_points=points),

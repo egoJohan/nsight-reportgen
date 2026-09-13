@@ -525,6 +525,16 @@ LABEL_FLOOR_DEFAULT_PCT: dict[str, float] = {
 }
 LABEL_FLOOR_FALLBACK_PCT: float = 1.0
 
+#: Marks a text as a VALUE a chart drew, as opposed to a category name, a
+#: group name, a legend entry or a title. Two things need to tell them apart:
+#: "a number on its own bar" (expected) from "a number on ANOTHER bar" (a
+#: defect), and which of the five font floors applies to a given text.
+#:
+#: It lives here rather than in `bars.py` because every builder draws values
+#: and every builder already depends on this module; reaching into a peer
+#: builder for it would be a dependency pointing the wrong way.
+VALUE_GID: str = "nsight-value"
+
 
 def default_label_floor(chart_type: str) -> float:
     """The cut-off this chart type uses when the author has not set one."""

@@ -33,6 +33,7 @@ import {
   useRegroupedQuestions,
   useResolvedCase,
   useRenderCapacity,
+  useRenderEpoch,
   useCaseTemplate,
   useReportTemplate,
   useTemplateActions,
@@ -798,6 +799,10 @@ export default function ReportWizard({
       : caseTemplate?.template_id === effectiveTemplateRef
         ? caseTemplate?.revision
         : "") ?? "";
+  // Moves on when the server that draws the pictures is replaced, so an editor
+  // left open across a deploy draws its slides again instead of showing the
+  // old server's pictures. (renderEpoch.ts)
+  const renderEpoch = useRenderEpoch();
   useEffect(() => {
     const ctx = {
       // The RESOLVED template, falling back to the report's own choice while
@@ -809,6 +814,7 @@ export default function ReportWizard({
       reportId,
       groupingKey,
       renderTitle: false,
+      renderEpoch,
     };
     previewQueue.setRenderContext(ctx);
     setProducerEnv({
@@ -832,7 +838,7 @@ export default function ReportWizard({
           force: runCtx.force,
         }),
     });
-  }, [materialId, reportId, effectiveTemplateRef, templateRevision, groupingKey, qc]);
+  }, [materialId, reportId, effectiveTemplateRef, templateRevision, groupingKey, renderEpoch, qc]);
 
   // Warm the whole deck, and pick up slides added later. `enqueue` dedupes and
   // each producer decides for itself whether it is needed, so re-enqueueing a

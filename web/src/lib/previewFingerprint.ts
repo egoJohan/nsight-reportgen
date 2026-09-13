@@ -44,6 +44,9 @@ export interface RenderContext {
   groupingKey: string;
   /** Which renderer draws the slide: compositor or LibreOffice. */
   renderTitle: boolean;
+  /** Which drawing of the pictures this is — moves on when the server that
+   *  draws them is replaced (see renderEpoch.ts). Absent = 0. */
+  renderEpoch?: number;
 }
 
 /**
@@ -79,5 +82,6 @@ export function imageFingerprint(chart: ChartSpec, ctx: RenderContext): string {
     ctx.reportId,
     ctx.groupingKey,
     ctx.renderTitle,
+    ctx.renderEpoch ?? 0,
   ]);
 }

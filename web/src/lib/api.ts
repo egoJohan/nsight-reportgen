@@ -804,9 +804,10 @@ export const api = {
    *  it is actually scheduled on — the client cannot see that, and guessing
    *  high is the expensive mistake: it does not finish the deck any sooner and
    *  it multiplies the wait for the one slide the author is looking at. */
-  health: (): Promise<{ status: string; render_concurrency?: number }> =>
+  health: (): Promise<{ status: string; render_concurrency?: number;
+                        render_identity?: string }> =>
     fetch(`${API_BASE}/health`).then((r) =>
-      json<{ status: string; render_concurrency?: number }>(r)
+      json<{ status: string; render_concurrency?: number; render_identity?: string }>(r)
     ),
 
   /** Asiakas -> Case. The server filters these lists to what the caller may

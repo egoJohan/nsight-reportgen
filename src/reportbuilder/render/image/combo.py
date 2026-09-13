@@ -18,6 +18,7 @@ Returns None.
 """
 from __future__ import annotations
 
+from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.image.label_fit import register_category_labels
 
 from reportbuilder.render.image._mpl import (
@@ -83,6 +84,7 @@ def build_image_combo(ctx) -> None:
             format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
             ha="center", va="bottom",
             fontsize=9.5, fontweight="bold", color=ink, zorder=5,
+            gid=VALUE_GID,
         )
 
     # House-style spines for primary axis
@@ -143,6 +145,7 @@ def build_image_combo(ctx) -> None:
                 textcoords="offset points",
                 ha="center", va="bottom" if above else "top",
                 fontsize=9.5, fontweight="bold", color=ink, zorder=6,
+                gid=VALUE_GID,
                 # The line crosses the bars; a bare number over a dark bar is
                 # unreadable.
                 bbox={"boxstyle": "round,pad=0.18", "facecolor": bg,

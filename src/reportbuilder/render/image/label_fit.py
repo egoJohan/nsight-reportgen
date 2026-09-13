@@ -35,6 +35,7 @@ boxes overlap when the names do not.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Callable, Iterator, Sequence
 
@@ -178,14 +179,45 @@ def _settings(entries, sizes) -> Iterator[list[tuple[tuple[str, ...], float]]]:
                         pt(sz, scale)) for e, sz in zip(entries, sizes)]
             if fresh(setting):
                 yield setting
-    # Last resort: what there is room for, the rest cut with an ellipsis.
+    # Last resort: what there is room for, the rest cut with an ellipsis — but
+    # never the part that tells a row from its neighbours (cap_keeping_tail).
     for lines in (2, 1):
         for mult in _WIDTHS:
-            setting = [(tuple(wrap_label_capped(s, width(e, mult), lines) if s else ""
+            setting = [(tuple(cap_keeping_tail(s, width(e, mult), lines) if s else ""
                               for s in e.raw), pt(sz, scales[-1]))
                        for e, sz in zip(entries, sizes)]
             if fresh(setting):
                 yield setting
+
+
+#: What tells a row from its neighbours, at the END of its name: a combined
+#: name's group ("… · Suomi (n=1016)"), or a bare base ("… (n=97)").
+_TAIL = re.compile(r"( · .+| \(n=\d+\))$")
+
+
+def cap_keeping_tail(text: str, width: int, lines: int) -> str:
+    """`wrap_label_capped`, except that the cut never takes what tells a row apart.
+
+    Cutting from the end is right for an ordinary name and wrong for a combined
+    one: "Olen luottavainen, että saan työstä … · Suomi (n=1016)" cut to one line
+    was "Olen luottavainen, että saan…" — three rows reading the same, the
+    country gone. So a group or a base at the end is kept whole and the words
+    before it are the ones shortened; a name with neither is cut as before.
+    (Johan, 2026-09-11)"""
+    full = wrap_label(text, width)
+    if len(full.split("\n")) <= lines:
+        return full
+    m = _TAIL.search(text)
+    if not m:
+        return wrap_label_capped(text, width, lines)
+    tail, words = m.group(1), text[: m.start()].split()
+    while words:
+        candidate = wrap_label(" ".join(words) + "…" + tail, width)
+        if len(candidate.split("\n")) <= lines:
+            return candidate
+        words.pop()
+    room = max(1, width * lines - len(tail) - 1)
+    return wrap_label(text[: m.start()][:room].rstrip() + "…" + tail, width)
 
 
 # ── measuring ────────────────────────────────────────────────────────────────
@@ -259,6 +291,10 @@ def _clear_legends(fig, entries, r) -> None:
     from matplotlib.transforms import Bbox
 
     names = [(*_rect(t, r), e.ax) for e in entries for t in e.labels()]
+    # A primary group's name under its columns belongs to the same band: a
+    # legend lowered past the row names must clear it too.
+    names += [(*_rect(t, r), ax) for ax in fig.axes for t in ax.texts
+              if t.get_gid() == "nsight-group" and t.get_visible() and t.get_text().strip()]
     if not names:
         return
     legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]

@@ -153,19 +153,58 @@ def _stacked_annotations(pcts, chart_type="stacked_horizontal_bar"):
     return seen
 
 
-def test_a_sliver_of_a_stacked_bar_gets_its_number_beside_the_bar():
+def _numbers(pcts, chart_type="stacked_horizontal_bar"):
+    """Every number on the saved figure: (text, called out?, size, visible)."""
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    seen: list = []
+    original = Figure.savefig
+
+    def spy(self, *a, **k):
+        seen[:] = [(t.get_text(), hasattr(t, "xyann"), t.get_fontsize(), t.get_visible())
+                   for ax in self.axes for t in ax.texts if t.get_gid() == "nsight-value"]
+        return original(self, *a, **k)
+
+    Figure.savefig = spy
+    try:
+        from reportbuilder.render.image import IMAGE_BUILDERS
+
+        cats = [f"c{i}" for i in range(len(pcts))]
+        IMAGE_BUILDERS[chart_type](_ctx(cats, pcts, chart_type, segments=("Suomi",)))
+    finally:
+        Figure.savefig = original
+    return seen
+
+
+def test_a_sliver_of_a_stacked_bar_keeps_its_number():
     """Which segments count as slivers is the author's cut-off (`hide_below_pct`,
     1 % of the axis by default) — the same one that used to decide which numbers
-    were dropped. Nothing is dropped now: below it, the number goes outside."""
-    # 3 % holds "3 %" at this width; 2 % does not. Which is which is the
-    # measurement's business — what matters is that the one that does not fit
-    # is drawn rather than dropped.
-    out = _stacked_annotations([2.0, 3.0, 30.0, 65.0])
-    assert {t for t, _kw in out} == {"2 %"}
+    were dropped. Nothing above it is dropped: the reader of the finished deck
+    has to be able to read every small share.
+
+    Since 2026-09-11 a sliver's number is first set smaller INSIDE its own
+    segment, and called out beside the bar only when it cannot fit there even at
+    the floor for numbers: on a dense chart a called-out number landed over the
+    bar above, where it read as that bar's. So this asks that the 2 % be ON the
+    chart, readable — not where."""
+    shown = {t: (callout, size) for t, callout, size, visible in _numbers([2.0, 3.0, 30.0, 65.0])
+             if visible}
+    assert "2 %" in shown, shown
+    callout, size = shown["2 %"]
+    assert callout or size >= 6.5, shown
+
+
+def test_a_sliver_too_thin_even_for_small_type_is_called_out():
+    shown = [(t, callout) for t, callout, _size, visible in _numbers([1.5, 3.0, 30.0, 65.5])
+             if visible]
+    assert [c for _t, c in shown].count(True) == 1, shown
 
 
 def test_the_stacked_callout_is_drawn_with_a_line_to_its_segment():
-    for _text, kw in _stacked_annotations([2.0, 98.0]):
+    out = _stacked_annotations([1.5, 98.5])
+    assert out, "the sliver was not called out — the check would pass vacuously"
+    for _text, kw in out:
         assert kw.get("arrowprops"), "no leader line drawn"
         # the line ends ON the bar, the text sits off it
         assert kw["xy"][1] != kw["xytext"][1]
@@ -248,8 +287,11 @@ def test_two_callouts_on_one_column_do_not_share_a_line():
 
 
 def test_callouts_stay_inside_the_plot():
-    """Eight slivers in a row used to march the numbers off the right edge."""
-    out = _drawn("stacked_horizontal_bar", [2.0] * 8 + [84.0])
+    """Eight slivers in a row used to march the numbers off the right edge.
+
+    1.5 % each, thinner than any number at the floor: at 2 % they now hold their
+    own number inside, and nothing would be called out to check."""
+    out = _drawn("stacked_horizontal_bar", [1.5] * 8 + [88.0])
     assert out
     for _text, _xy, xytext, _ax, _cols in out:
         assert xytext[0] <= 100.0, xytext

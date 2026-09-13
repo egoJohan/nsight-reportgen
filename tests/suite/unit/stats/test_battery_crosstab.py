@@ -92,14 +92,19 @@ def test_stacked_battery_bars_are_statement_by_segment():
                           "Modernius · Polku 1", "Modernius · Polku 2")
 
 
-def test_stacked_battery_orders_statement_major_without_rotated_group_labels():
-    """The bar ORDER puts each statement's segments adjacent, but segment_primary is
-    deliberately NOT set: the cross-tab grouping renders the primary as a rotated
-    label beside the axis, which assumes short values. A battery's primary is a full
-    statement, and rotating those smears them together and crushes the plot."""
+def test_stacked_battery_is_grouped_by_statement():
+    """The bars are grouped BY STATEMENT, so the statement is said once beside its
+    rows and each row is named by its segment.
+
+    This used to be deliberately left unset, because the grouped layout drew the
+    primary as a rotated label and a full statement rotated smears. Unset, every
+    bar carried "<statement> · <segment>" as its own name — up to 241 characters on
+    a customer's slide, cut to the first words with the segment lost. The grouped
+    layout now writes a long primary out beside its rows instead of rotating it
+    (test_battery_split_by_group.py). (Johan, 2026-09-11)"""
     model, q, df = _setup()
     r = engine.compute(q, _spec("stacked_horizontal_bar"), df, model)
-    assert r.segment_primary is None
+    assert r.segment_primary == {s: s.split(" · ")[0] for s in r.segments}
     # statement-major: both segments of a statement sit together
     assert [s.split(" · ")[0] for s in r.segments] == [
         "Laadukkuus", "Laadukkuus", "Modernius", "Modernius"]

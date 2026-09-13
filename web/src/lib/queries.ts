@@ -5,7 +5,8 @@ import {
   keepPreviousData,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { nextRenderEpoch, type RenderEpoch } from "./renderEpoch";
 import { api, ApiError } from "./api";
 import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
@@ -212,6 +213,29 @@ export function useSubstitutions() {
  *  writes its headlines in parallel — which is where a first open spends most
  *  of its time — while the pictures are drawn at the pace the host can manage.
  */
+/** Which drawing of the pictures this editor holds — see renderEpoch.ts.
+ *
+ *  `/health` is asked again every two minutes and whenever the window comes
+ *  back into focus: an editor left open across a deploy has no other way to
+ *  learn that the server now draws differently, and went on showing the old
+ *  pictures until someone reloaded it. (Johan, 2026-09-11) */
+export function useRenderEpoch(): number {
+  const { data } = useQuery({
+    queryKey: ["render-capacity"],
+    queryFn: api.health,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
+  const [state, setState] = useState<RenderEpoch>({ epoch: 0 });
+  const identity = data?.render_identity;
+  useEffect(() => {
+    setState((prev) => nextRenderEpoch(prev, identity));
+  }, [identity]);
+  return state.epoch;
+}
+
 export function useRenderCapacity() {
   const query = useQuery({
     queryKey: ["render-capacity"],
@@ -518,6 +542,8 @@ export function useChartPreview(
       reportId: opts?.reportId ?? "",
       groupingKey,
       renderTitle,
+      // The queue's, always: the key it stored the picture under.
+      renderEpoch: queued.renderEpoch,
     }),
   ];
   const priority = opts?.priority ?? false;

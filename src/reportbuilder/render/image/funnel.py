@@ -27,6 +27,7 @@ from reportbuilder.render.image._mpl import (
     new_figure, new_figure_grid, render_png, place_picture, format_value, wrap_label,
     chart_background, chart_furniture,
 )
+from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.house_style import TEAL
 from reportbuilder.render.panels import panel_segments
 
@@ -75,7 +76,7 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
             left + v / 2, i, lbl,
             ha="center", va="center",
             fontsize=10.5, fontweight="bold", color="#FFFFFF",
-            zorder=5,
+            zorder=5, gid=VALUE_GID,
         )
         value_labels.append((text, left, v, i))
 

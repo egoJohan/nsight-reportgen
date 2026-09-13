@@ -40,6 +40,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     series_label, with_base, place_total, colours_by_series,
     place_picture_square, series_values, format_value, label_floor, default_label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
+    VALUE_GID,
     _new_agg_figure, _EMU_PER_IN,
 )
 from reportbuilder.render.house_style import (
@@ -560,6 +561,139 @@ def _bar_names(series, bars, *, short: bool) -> list[str]:
     return [with_base(name(b), series.base_n.get(b)) for b in bars]
 
 
+# ---------------------------------------------------------------------------
+# The primary group's label beside (or under) its rows
+# ---------------------------------------------------------------------------
+#
+# A cross-tab's "Suomi" stands rotated beside its rows. A split battery's
+# primary is a whole statement — up to 241 characters on a customer's slide —
+# and rotated it smears; left out, every bar carried "<statement> · <group>" and
+# was cut to its first words with the group lost. So a label too long to stand
+# rotated is written out horizontally, wrapped into a column of its own beside
+# its rows (under its columns on a vertical chart), and the rows are named by
+# their group alone. A label that fits is drawn exactly as it always was.
+# (Johan, 2026-09-11)
+
+#: Marks a drawn primary-group label so later passes can find it.
+_GROUP_GID = "nsight-group"
+_GROUP_FS: float = 11.5
+#: A written-out group label starts at this size and is never set below the floor.
+_GROUP_BLOCK_FS: float = 10.0
+_GROUP_BLOCK_MIN_FS: float = 7.5
+#: The column a written-out label may take beside its rows: this share of the
+#: figure, and never wider than this — past it the bars lose more than the
+#: reader gains.
+_GROUP_BLOCK_COL_FRAC: float = 0.28
+_GROUP_BLOCK_COL_IN: float = 3.4
+#: Lines a written-out label may take under its columns.
+_GROUP_UNDER_MAX_LINES: int = 5
+
+
+def _group_sizes(cats, segment_primary) -> dict[str, int]:
+    """How many bars each primary group holds."""
+    sizes: dict[str, int] = {}
+    for c in cats:
+        g = (segment_primary or {}).get(c, c)
+        sizes[g] = sizes.get(g, 0) + 1
+    return sizes
+
+
+def _text_extent_px(fig, text: str, fontsize: float, weight: str = "normal") -> tuple[float, float]:
+    """(width, height) in px of `text` as this figure will draw it — in the
+    template's face when it has one, since that is the face it is saved in."""
+    kw = {"fontsize": fontsize, "fontweight": weight}
+    family = getattr(fig, "_nsight_chart_font", "")
+    if family:
+        kw["fontfamily"] = family
+    art = fig.text(0, 0, text, **kw)
+    try:
+        box = art.get_window_extent(fig.canvas.get_renderer())
+        return box.width, box.height
+    finally:
+        art.remove()
+
+
+def _wrap_into(fig, text: str, width_px: float, height_px: float, *,
+               max_lines: int | None = None) -> tuple[str, float]:
+    """`text` wrapped to fit a `width_px` × `height_px` box: (wrapped text, size).
+
+    The largest size first, a step smaller at a time down to the floor; the full
+    text whenever it fits at all, and only at the floor as many lines as there
+    is room for, with an ellipsis."""
+    flat = " ".join(text.split())
+    sizes = [_GROUP_BLOCK_FS]
+    while sizes[-1] * 0.9 >= _GROUP_BLOCK_MIN_FS:
+        sizes.append(sizes[-1] * 0.9)
+    if sizes[-1] > _GROUP_BLOCK_MIN_FS:
+        sizes.append(_GROUP_BLOCK_MIN_FS)
+    for fs in sizes:
+        line_px = fs * 1.25 * fig.dpi / 72.0
+        allowed = max(1, int(height_px // line_px))
+        if max_lines:
+            allowed = min(allowed, max_lines)
+        per_char = _text_extent_px(fig, flat, fs)[0] / max(len(flat), 1)
+        chars = max(8, int(width_px / max(per_char, 0.1)))
+        wrapped = wrap_label(flat, chars)
+        # Characters only estimate width: measure, and narrow until it fits.
+        while _text_extent_px(fig, wrapped, fs)[0] > width_px and chars > 8:
+            chars = int(chars * 0.92)
+            wrapped = wrap_label(flat, chars)
+        if wrapped.count("\n") + 1 <= allowed:
+            return wrapped, fs
+        if fs == sizes[-1]:
+            return wrap_label_capped(flat, chars, allowed), fs
+    return flat, sizes[-1]                                   # pragma: no cover
+
+
+def _plan_group_labels_beside(fig, labels, sizes, pitch_px):
+    """("rotated", {}, 0) when every group name fits along its rows, as it always
+    has; else ("written", {name: (wrapped, size)}, column width in inches)."""
+    if all(_text_extent_px(fig, g, _GROUP_FS, "bold")[0] <= sizes.get(g, 1) * pitch_px
+           for g, _pos in labels):
+        return "rotated", {}, 0.0
+    fig_w_in = fig.get_size_inches()[0]
+    col_px = min(_GROUP_BLOCK_COL_IN, _GROUP_BLOCK_COL_FRAC * fig_w_in) * fig.dpi
+    blocks = {g: _wrap_into(fig, g, col_px, sizes.get(g, 1) * pitch_px)
+              for g, _pos in labels}
+    width_in = max(_text_extent_px(fig, t, fs)[0] for t, fs in blocks.values()) / fig.dpi
+    return "written", blocks, width_in
+
+
+def _draw_group_labels_under(fig, ax, labels, sizes, ink, *,
+                             names_depth_px: float | None = None) -> None:
+    """A vertical chart's primary group names, centred under their columns.
+
+    A name that fits its columns is drawn as it always was. One that does not is
+    wrapped to its columns' width and set below the row names — which may take
+    two lines — so it can neither run into its neighbour nor into them.
+
+    `names_depth_px` is how far ROTATED row names reach below the axis; given,
+    every group name is set below that band instead of at the fixed offset a
+    flat row of names leaves room for."""
+    x0, x1 = ax.get_xlim()
+    pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
+    h = max(ax.bbox.height, 1.0)
+    if names_depth_px is None:
+        top_fit = -0.075
+        top_written = -((2 * 9.5 * 1.25 + 8.0) * fig.dpi / 72.0) / h
+    else:
+        top_fit = top_written = -(names_depth_px + 4.0 * fig.dpi / 72.0) / h
+    if all(_text_extent_px(fig, g, _GROUP_FS, "bold")[0] <= sizes.get(g, 1) * pitch_px
+           for g, _gx in labels):
+        for glabel, gx in labels:
+            ax.text(gx, top_fit, glabel, transform=ax.get_xaxis_transform(),
+                    ha="center", va="top", fontsize=_GROUP_FS, fontweight="bold",
+                    color=ink, gid=_GROUP_GID)
+        return
+    top = top_written
+    for glabel, gx in labels:
+        wrapped, fs = _wrap_into(fig, glabel, sizes.get(glabel, 1) * pitch_px * 0.94,
+                                 1e9, max_lines=_GROUP_UNDER_MAX_LINES)
+        ax.text(gx, top, wrapped, transform=ax.get_xaxis_transform(), ha="center",
+                va="top", multialignment="center", fontsize=fs, color=ink,
+                gid=_GROUP_GID)
+
+
 def _resolve_xtab_layout(ctx):
     """For a cross-tab (segment_primary present), resolve the effective layout —
     'grouped', 'small_multiples', or 'separate' (explicit only — 'auto' never
@@ -570,6 +704,12 @@ def _resolve_xtab_layout(ctx):
     if not sp:
         return None
     mode = (getattr(ctx.spec, "options", None) or {}).get("xtab_layout", "auto")
+    # Separate panels are one per classifying VARIABLE, so they need two. A split
+    # battery is grouped too (by statement), and "Separate panels" left in its
+    # options from a second variable since removed must not start drawing one
+    # panel per statement. (2026-09-11)
+    if mode == "separate" and not getattr(ctx.spec, "classifying_var_2", None):
+        mode = "auto"
     if mode in ("grouped", "small_multiples", "separate"):
         return mode
     n_combos = len(ctx.series.segments)
@@ -1115,6 +1255,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                     ha="center", va="bottom", rotation=_rot,
                     rotation_mode="anchor" if _rot else None,
                     fontsize=_pt, fontweight="bold", color=ink, zorder=5,
+                    gid=VALUE_GID,
                 )
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
@@ -1239,6 +1380,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     va="center", ha="left",
                     fontsize=value_fs, fontweight="bold", color=ink, zorder=5,
+                    gid=VALUE_GID,
                 )
 
     # Wrap y-axis labels; cap to the lines that fit the band (ellipsis last resort).
@@ -1455,6 +1597,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
     for _panel_ax in axes:
+        clear_callouts(fig, _panel_ax, along="x")
         shrink_values_until_clear(fig, _panel_ax)
     place_picture(ctx, render_png(fig))
 
@@ -1525,11 +1668,15 @@ def build_image_column_stacked(ctx) -> None:
                                 flat_vals)
             x_mid = bar.get_x() + bar.get_width() / 2
             _w, _h = text_size_in_data(ax, text, fontsize=9.0)
-            if h >= _h * 1.15 and bar.get_width() >= _w * 1.06:
+            # Full size when it fits; a thin segment's number smaller INSIDE it
+            # before it is sent outside (see `_draw_stacked_panel._size`) — a
+            # number's width and height both scale with its size.
+            _scale = min(1.0, h / (_h * 1.15), bar.get_width() / (_w * 1.06))
+            if 9.0 * _scale >= _VALUE_MIN_PT:
                 ax.text(
                     x_mid, b + h / 2, text, ha="center", va="center",
-                    fontsize=9.0, fontweight="bold",
-                    color=contrast_ink(bar.get_facecolor()), zorder=5,
+                    fontsize=9.0 * _scale, fontweight="bold",
+                    color=contrast_ink(bar.get_facecolor()), zorder=5, gid=_VALUE_GID,
                 )
             else:
                 # Too short to hold its number: in the gap beside the column, on
@@ -1560,11 +1707,26 @@ def build_image_column_stacked(ctx) -> None:
         # Per-bar tick = the SECONDARY value; the primary is shown once as a group label
         # centred under each group, so both classifiers read clearly.
         secondary = _bar_names(ctx.series, cats, short=True)
-        ax.set_xticklabels(secondary, fontsize=9.5, color=ink)
+        # Flat under its column when it fits there, as it always was. Rotated,
+        # like an ungrouped column chart's names, when it does not: eighteen
+        # columns of "Suomi (n=1016)" printed flat ran into each other, and no
+        # size above the floor made them fit. (Johan, 2026-09-11)
+        x0, x1 = ax.get_xlim()
+        pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
+        widest_px = max((_text_extent_px(fig, s, 9.5)[0] for s in secondary), default=0.0)
+        depth_px = None
+        if widest_px <= pitch_px * 0.92:
+            ax.set_xticklabels(secondary, fontsize=9.5, color=ink)
+        else:
+            ax.set_xticklabels(secondary, fontsize=9.5, color=ink, rotation=_XTICK_ROTATION,
+                               ha="right", rotation_mode="anchor")
+            a = math.radians(_XTICK_ROTATION)
+            line_px = 9.5 * 1.25 * fig.dpi / 72.0
+            depth_px = widest_px * math.sin(a) + line_px * math.cos(a) + 6.0 * fig.dpi / 72.0
         register_category_labels(ax, "x", secondary, wrap=_wrap_label)
-        for glabel, gx in grouped[1]:
-            ax.text(gx, -0.075, glabel, transform=ax.get_xaxis_transform(),
-                    ha="center", va="top", fontsize=11.5, fontweight="bold", color=ink)
+        _draw_group_labels_under(fig, ax, grouped[1],
+                                 _group_sizes(cats, ctx.series.segment_primary), ink,
+                                 names_depth_px=depth_px)
     else:
         # Wrap + rotate x-axis labels so they are shown in full and never overlap.
         names = _bar_names(ctx.series, cats, short=False)
@@ -1580,9 +1742,11 @@ def build_image_column_stacked(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
 
-    # Last resort, and only if the numbers actually collide: shrink them until
+    # A called-out number on another moves up or down beside its column first.
+    # Last resort, and only if the numbers still collide: shrink them until
     # they do not. Changes type size and never a position, so a panel whose
     # numbers already sit clear comes out unchanged.
+    clear_callouts(fig, ax, along="y")
     shrink_values_until_clear(fig, ax)
 
     png = render_png(fig)
@@ -1643,7 +1807,9 @@ _CALLOUT_MIN_GAP_FRAC: float = 0.055
 
 #: Marks a drawn VALUE label — a number inside a bar, or one called out beside
 #: it. Both carry it so one pass can find every number on a panel.
-_VALUE_GID = "nsight-value"
+#: Kept as a module-local name: three test modules and the callout/shrink
+#: passes below import it from here.
+_VALUE_GID = VALUE_GID
 #: The smallest a value label may be shrunk to before it stops being worth
 #: printing. Below this it is decoration on a slide, not a figure someone reads.
 _VALUE_MIN_PT: float = 6.5
@@ -1668,14 +1834,21 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
     Returns the size settled on, or None when nothing had to change.
     (Johan, 2026-09-10)
     """
-    labels = [t for t in ax.texts if t.get_gid() == _VALUE_GID]
+    # Only numbers that are printed, each by its own box. A number left out
+    # (`clear_callouts`) is on nobody's way; and a callout's window extent also
+    # wraps its leader line, whose box covers ground the line never touches —
+    # either one alone shrank every number on a chart where none overlapped.
+    # (Johan, 2026-09-11)
+    from matplotlib.text import Text
+
+    labels = [t for t in ax.texts if t.get_gid() == _VALUE_GID and t.get_visible()]
     if len(labels) < 2:
         return None
 
     def clashes() -> bool:
         fig.canvas.draw()
         r = fig.canvas.get_renderer()
-        boxes = [t.get_window_extent(r) for t in labels]
+        boxes = [Text.get_window_extent(t, r) for t in labels]
         for i, a in enumerate(boxes):
             for b in boxes[i + 1:]:
                 if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
@@ -1694,6 +1867,97 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
         if not clashes():
             return min(t.get_fontsize() for t in labels)
     return min(t.get_fontsize() for t in labels)
+
+
+def clear_callouts(fig, ax, *, along: str) -> int:
+    """Move each called-out number that sits on another number to the nearest
+    clear place along its own row (`along="x"`) or column (`along="y"`).
+
+    The customer's country × sector slide printed four of its 2 % callouts
+    straight over the numbers inside the bar above — "4 %2 %" — and shrinking
+    both, the earlier last resort, took six such pairs to four and no further.
+    A callout already sits where its segment can be seen; what it lacked was
+    room. So it keeps its side of the bar (a horizontal bar's number stays ABOVE
+    its bar — below, it reads as the next bar's) and its line to its segment,
+    and slides along until it touches nothing.
+
+    It moves a short way only (a long line across other numbers is its own
+    confusion). A callout with no clear place within that is left out — never
+    printed over another number, and never the reason every number on the chart
+    is shrunk.
+
+    Works on the boxes as drawn, in the face the figure is saved in, so what it
+    clears is what the reader sees. A panel whose numbers already sit clear is
+    left exactly as it was. Returns how many moved or were left out.
+    (Johan, 2026-09-11)"""
+    values = [t for t in ax.texts if t.get_gid() == _VALUE_GID and t.get_visible()]
+    callouts = [t for t in values if hasattr(t, "xyann")]
+    if not callouts:
+        return 0
+    family = getattr(fig, "_nsight_chart_font", "")
+    if family:
+        for t in values:
+            t.set_fontfamily(family)
+    r = fig.canvas.get_renderer()
+    # The NUMBER's own box. An annotation's window extent also wraps its leader
+    # line, and once a callout has moved along, that line runs diagonally and
+    # its box covers ground the line never touches — steering around it moved
+    # callouts away from room that was free.
+    from matplotlib.text import Text
+
+    def text_box(t):
+        # A callout's on-screen position is worked out during a draw; measured
+        # before one, it was measured where it is not, and "cleared" onto a
+        # number that was there all along.
+        if hasattr(t, "update_positions"):
+            t.update_positions(r)
+        return Text.get_window_extent(t, r)
+
+    boxes = {id(t): text_box(t) for t in values}
+    area = ax.bbox
+
+    def touches(box, me) -> bool:
+        return any(o is not me
+                   and min(box.x1, boxes[id(o)].x1) - max(box.x0, boxes[id(o)].x0) > -1.0
+                   and min(box.y1, boxes[id(o)].y1) - max(box.y0, boxes[id(o)].y0) > -1.0
+                   for o in values)
+
+    moved, step = 0, 2.0
+    for t in callouts:
+        box = boxes[id(t)]
+        if not touches(box, t):
+            continue
+        # A short way only. Moved far, a callout pulls a long line across other
+        # numbers and ends up nearer another bar's segment than its own; past
+        # this, shrinking is the better last resort.
+        reach = 2.5 * (box.width if along == "x" else box.height)
+        shift, k = None, 1
+        while shift is None and k * step <= reach:
+            for s in (k * step, -k * step):
+                cand = box.translated(s, 0) if along == "x" else box.translated(0, s)
+                if along == "x" and (cand.x0 < area.x0 or cand.x1 > area.x1):
+                    continue
+                if along == "y" and (cand.y0 < area.y0 or cand.y1 > area.y1):
+                    continue
+                if not touches(cand, t):
+                    shift = s
+                    break
+            k += 1
+        if shift is None:
+            # Nowhere near its segment is clear: this one number is left out,
+            # rather than printed over another or every number on the chart
+            # shrunk to make room for it. Only a sliver's number reaches here —
+            # too thin to hold it even at the floor — and only on a chart
+            # crowded enough that the gap beside it is taken. (Johan, 2026-09-11)
+            t.set_visible(False)
+            moved += 1
+            continue
+        px, py = ax.transData.transform(t.xyann)
+        t.xyann = tuple(ax.transData.inverted().transform(
+            (px + shift, py) if along == "x" else (px, py + shift)))
+        boxes[id(t)] = text_box(t)
+        moved += 1
+    return moved
 
 
 def callout_value(ax, text: str, *, at, to, ink: str, grid: str,
@@ -1801,8 +2065,24 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
     def _width(seg, j) -> float:
         return (data[seg][j] or 0.0) * norm[j]
 
+    def _size(seg, j) -> float | None:
+        """The size this cell's number is printed INSIDE its segment at, or None
+        when it does not fit even at the floor and must be called out.
+
+        Full size when it fits. A thin segment's number is set smaller inside it
+        before it is sent outside: on a dense chart the gap between two bars is
+        thinner than a number, so a called-out "2 %" lands over the bar above —
+        on its numbers ("4 %2 %"), or, moved clear of them, on its fill, where it
+        reads as that bar's. Inside, it is only ever its own segment's.
+        (Johan, 2026-09-11)"""
+        w, need = _width(seg, j), room[said[(seg, j)]]
+        if w >= need:
+            return 9.0
+        size = 9.0 * w / need                # a number's width scales with its size
+        return size if size >= _VALUE_MIN_PT else None
+
     def _fits(seg, j) -> bool:
-        return _width(seg, j) >= room[said[(seg, j)]]
+        return _size(seg, j) is not None
 
     def _hidden(seg, j) -> bool:
         """Under the author's cut-off. They said not to print it, so it is not
@@ -1832,7 +2112,7 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
                 pass                       # the author's cut-off: nothing at all
             elif _fits(seg, j):
                 ax.text(l + w / 2, yi, text,
-                        ha="center", va="center", fontsize=9.0, fontweight="bold",
+                        ha="center", va="center", fontsize=_size(seg, j), fontweight="bold",
                         color=contrast_ink(bc), zorder=5, gid=_VALUE_GID)
             elif w > 0:
                 pending.setdefault(float(yi), []).append((l + w / 2, w, text))
@@ -1869,9 +2149,25 @@ def build_image_bar_stacked(ctx) -> None:
     n_cats = len(cats)
     # Cross-tab: group the stacked bars by primary classifier (gap + group label).
     grouped = _grouped_stacked_positions(cats, ctx.series.segment_primary)
+    plan = ("rotated", {}, 0.0)
     if grouped:
         maxp = max(grouped[0])
         y = np.array([maxp - p for p in grouped[0]])   # first cat at top
+        secondary = _bar_names(ctx.series, cats, short=True)
+        # Decided BEFORE the bars are drawn: a written-out group name takes a
+        # column of the figure, and the panel measures which numbers fit inside
+        # their segments against the plot as it is when it draws them.
+        has_summary = any(v is not None for v in _row_summary_by_bar(ctx.series, cats))
+        span = (max(y) + (1.2 if has_summary else 0.5)) - (min(y) - 0.7)
+        plan = _plan_group_labels_beside(
+            fig, grouped[1], _group_sizes(cats, ctx.series.segment_primary),
+            ax.bbox.height / max(span, 1e-6))
+        if plan[0] == "written":
+            gutter_in = _measure_max_label_width_in(secondary, 10.5) + _LABEL_PAD_IN
+            need = ((gutter_in + _GROUP_LABEL_PAD_IN + plan[2] + _LABEL_PAD_IN)
+                    / fig.get_size_inches()[0])
+            if need > ax.get_position().x0:
+                fig.subplots_adjust(left=min(need, 0.6))
     else:
         y = np.arange(n_cats)[::-1]
     flat_vals = [v for seg in segs for v in data[seg] if v is not None]
@@ -1885,7 +2181,6 @@ def build_image_bar_stacked(ctx) -> None:
         # Per-bar tick = the SECONDARY value; the primary is a group label to the
         # left. Both RIGHT-aligned against the axis, so the secondary block ends
         # in a straight edge and the primary stands clear of its widest line.
-        secondary = _bar_names(ctx.series, cats, short=True)
         ax.set_yticklabels(secondary, fontsize=10.5, color=ink, ha="right")
         # The rotated group names placed below are obstacles to the fit, so a
         # refitted name can never grow into them.
@@ -1898,9 +2193,16 @@ def build_image_bar_stacked(ctx) -> None:
         gutter_in = _measure_max_label_width_in(secondary, 10.5) + _LABEL_PAD_IN
         group_x = -(gutter_in + _GROUP_LABEL_PAD_IN) / plot_w_in
         for glabel, gpos in grouped[1]:
-            ax.text(group_x, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
-                    ha="center", va="center", rotation=90,
-                    fontsize=11.5, fontweight="bold", color=ink)
+            if plan[0] == "rotated":
+                ax.text(group_x, maxp - gpos, glabel, transform=ax.get_yaxis_transform(),
+                        ha="center", va="center", rotation=90,
+                        fontsize=_GROUP_FS, fontweight="bold", color=ink, gid=_GROUP_GID)
+            else:
+                # Written out, its right edge where a rotated name's centre stood.
+                wrapped, fs = plan[1][glabel]
+                ax.text(group_x, maxp - gpos, wrapped, transform=ax.get_yaxis_transform(),
+                        ha="right", va="center", multialignment="left",
+                        fontsize=fs, color=ink, gid=_GROUP_GID)
     else:
         # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
         names = _bar_names(ctx.series, cats, short=False)
@@ -1916,7 +2218,9 @@ def build_image_bar_stacked(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
 
-    # Last resort, and only if the numbers actually collide.
+    # A called-out number on another moves along its row first; shrinking is the
+    # last resort, and only if the numbers still collide.
+    clear_callouts(fig, ax, along="x")
     shrink_values_until_clear(fig, ax)
 
     png = render_png(fig)
