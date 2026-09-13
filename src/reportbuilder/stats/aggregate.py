@@ -1,4 +1,5 @@
 from __future__ import annotations
+import atexit
 import threading
 
 import duckdb
@@ -9,12 +10,38 @@ import pandas as pd
 # across threads, and a render is one thread.
 _local = threading.local()
 
+# Every connection handed out, so they can be closed before the interpreter
+# finalizes. `threading.local()` cannot enumerate its own values, which is why
+# nothing closed them: a connection still open at finalization ABORTS the
+# process — its C++ destructor calls back into the Python C-API
+# (`PyEval_RestoreThread`) from a thread that is already exiting, and
+# `pthread_exit`'s forced unwind cannot cross that frame, so std::terminate
+# aborts. Invisible in a server that never exits; fatal for anything batch
+# shaped, where a worker that finished its share is reported as crashed
+# whatever its results were. (tests/test_duckdb_exit.py)
+_open: list = []
+_open_lock = threading.Lock()
+
 
 def _connection():
     con = getattr(_local, "con", None)
     if con is None:
         con = _local.con = duckdb.connect()
+        with _open_lock:
+            _open.append(con)
     return con
+
+
+@atexit.register
+def _close_connections() -> None:
+    """Close every connection handed out, before the interpreter finalizes."""
+    with _open_lock:
+        cons, _open[:] = list(_open), []
+    for con in cons:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001 — a connection that will not close
+            pass           # must not abort the exit this exists to protect
 
 def aggregate_counts(data: pd.DataFrame, value_var: str,
                      classifying_var: str | None = None,
