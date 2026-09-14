@@ -706,13 +706,22 @@ def code_labels(var, data: pd.DataFrame, missing) -> dict[float, str]:
 
     Only for CODES: a continuous variable with no labels is a measurement, and
     one category per distinct value would be a chart of nothing.
+
+    The count cap tells an age from a code list, so it is asked only where the
+    file has not already said which this is. A variable declared CATEGORICAL is a
+    code list however long: a product list of twenty-nine ("minkä seuraavista…",
+    codes 1..29, no labels in the SAV) was over the cap, lost every category, and
+    drew "No data to show" under N = 1046. (Johan, 2026-09-14)
     """
     name = getattr(var, "name", None)
     if not name or name not in data.columns:
         return {}
     col = pd.to_numeric(data[name], errors="coerce").dropna()
     codes = sorted({float(v) for v in col.unique() if float(v) not in missing})
-    if not codes or len(codes) > _MAX_UNLABELLED_CODES:
+    if not codes:
+        return {}
+    if (getattr(var, "measurement", None) != "categorical"
+            and len(codes) > _MAX_UNLABELLED_CODES):
         return {}
     if any(float(c) != int(c) for c in codes):
         return {}                       # 3.7 is a measurement, not a code
@@ -1066,6 +1075,36 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
             # but a mean weighted by code prints 1.0 for a reverse-coded file
             # where everyone answered "5", and 13.0 for one coded 11..15.
             scale_points=[pt for _c, _d, pt in scale])
+
+        # …and the same for the bars of a stacked chart split by a classifier:
+        # "Percentage" orders them by the summary column they are showing. Only
+        # the plain basis — an explicit box basis has already sorted above, and
+        # "data_order"/"manual" are instructions not to. The values are keyed by
+        # bar (see SeriesResult.row_summary_keys), so only `segments` moves.
+        # (Johan, 2026-09-14)
+        if (_bars_are_segments and spec.sort.basis == "pct" and row_summaries):
+            by_bar = dict(zip(statements, row_summaries))
+            reals = [s for s in segments if s != "Total"]
+            if separate is not None:
+                # Within each panel, with that panel's own "· Total" pinned last —
+                # the structure the box sort above established. (2026-08-04)
+                _sp = separate[1]
+
+                def _is_panel_total(s: str) -> bool:
+                    return s == f"{_sp[s]} · Total"
+
+                order: list[str] = []
+                for panel in dict.fromkeys(_sp[s] for s in reals):
+                    panel_segs = [s for s in reals if _sp[s] == panel]
+                    groups = [s for s in panel_segs if not _is_panel_total(s)]
+                    totals = [s for s in panel_segs if _is_panel_total(s)]
+                    order += sorted(groups, key=lambda b: by_bar.get(b, 0.0),
+                                    reverse=spec.sort.descending)
+                    order += totals
+                reals = order
+            else:
+                reals.sort(key=lambda b: by_bar.get(b, 0.0), reverse=spec.sort.descending)
+            segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
     base_n = {s: denom.get(s, 0) for s in segments}
     base_n.setdefault("Total", denom_total)
@@ -1941,6 +1980,34 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
             bars = [b for s in order for b in by_stmt[s]]
         else:
             bars = sorted(bars, key=_topbox, reverse=spec.sort.descending)
+
+    # "Percentage", on a chart that carries a row-summary column, means THAT
+    # percentage. The two controls have always had different vocabularies — the
+    # Sort list stores `topbox_sum`, the Row summary list stores `top2_sum` — so
+    # an author who added a Top 2 column and left Sort on its default got no sort
+    # at all: a battery's bars are statements, and `sorting.py` orders categories,
+    # which leaves "pct" a silent no-op here. The one number per row the reader can
+    # see is the one the sort should be about. (Johan, 2026-09-14)
+    elif spec.sort.basis == "pct" and getattr(spec, "row_summary_fn", "none") != "none":
+        summaries = _compute_row_summaries(spec, bars, levels, codes, cells,
+                                           scale_levels=levels, scale_points=points)
+        if summaries:
+            by_bar = dict(zip(bars, summaries))
+
+            if segment_primary:
+                # Split by a group: rank each statement BLOCK by its mean, so the
+                # per-statement groups stay together — as the box sort above does.
+                by_stmt: dict[str, list[str]] = {}
+                for bar in bars:
+                    by_stmt.setdefault(segment_primary[bar], []).append(bar)
+                order = sorted(by_stmt,
+                               key=lambda s: (sum(by_bar.get(b, 0.0) for b in by_stmt[s])
+                                              / len(by_stmt[s])),
+                               reverse=spec.sort.descending)
+                bars = [b for s in order for b in by_stmt[s]]
+            else:
+                bars = sorted(bars, key=lambda b: by_bar.get(b, 0.0),
+                              reverse=spec.sort.descending)
 
     # A dragged order names the STATEMENTS — that is what the label editor lists
     # for a battery. It reorders the bars and leaves the stack alone: the scale

@@ -87,6 +87,29 @@ def test_a_continuous_variable_does_not_become_hundreds_of_categories():
     assert r.categories == ()
 
 
+def test_a_long_CATEGORICAL_code_list_is_still_a_code_list():
+    """"Slide 37 in Taffel report is still showing just 'No data'."
+
+    var108 — "Jos tämäkään valitsemasi tuote ei olisi ollut saatavilla, minkä
+    seuraavista…" — is a product list: `categorical`, 1046 answers, codes 1..29,
+    and no value labels in the file. Twenty-nine is over the cap that decides a
+    label-less variable is a measurement, so every category was dropped and the
+    slide drew the "no data" placeholder under N = 1046.
+
+    The cap is about telling an age from a code list, and the file already says
+    which this is. A variable declared CATEGORICAL is a code list however many
+    codes it has; a scale or a continuous measure keeps the cap (the test above).
+    (Johan, 2026-09-14)
+    """
+    model = _model(missing=())
+    df = _df([float(1 + i % 29) for i in range(1046)])
+    r = engine.compute(model.question("q1"), _spec(), df, model)
+    assert len(r.categories) == 29, r.categories
+    assert r.categories[:3] == ("1", "2", "3")
+    assert r.categories[-1] == "29"
+    assert r.base_n["Total"] == 1046
+
+
 def test_codes_come_out_in_numeric_order():
     model = _model(missing=())
     r = engine.compute(model.question("q1"), _spec(),
