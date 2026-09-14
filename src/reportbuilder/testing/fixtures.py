@@ -154,7 +154,17 @@ def synthetic_sav(tmp_path) -> str:
     path = Path(tmp_path) / "synthetic.sav"
     pyreadstat.write_sav(
         df, str(path),
-        column_labels={"q1": "Satisfaction", "m1": "Channel A", "m2": "Channel B", "age": "Age"},
+        # The multi-response options are lower-case phrases on purpose. This
+        # fixture's contract is that it NAMES NO COMPANIES -- the sensitive-term
+        # gate only fires on a study with something to review, so the gate test
+        # keeps its own brand-shaped SAV and this one must stay quiet. "Channel
+        # A"/"Channel B" read as enumerated proper nouns and broke that contract
+        # the moment the proposer learned to read multi-response options: the
+        # synthetic study started proposing them, and every test that creates a
+        # report was refused at the gate. An option a question puts the
+        # respondent inside cannot be mistaken for a brand. (Johan, 2026-09-14)
+        column_labels={"q1": "Satisfaction", "m1": "contacted by email",
+                       "m2": "contacted by phone", "age": "Age"},
         variable_value_labels={
             "q1": {1: "Yes", 2: "No"},
             "m1": {0: "Unchecked", 1: "Checked"},

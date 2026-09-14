@@ -137,8 +137,13 @@ _DESCRIPTION_OPENERS = frozenset({
 })
 
 
-def _candidate(text: str) -> str | None:
-    """The term this string contributes, or None if it cannot be a name."""
+def _candidate(text: str, *, inflected_ok: bool = False) -> str | None:
+    """The term this string contributes, or None if it cannot be a name.
+
+    `inflected_ok` for an ENUMERATED member — a battery's, or a multi-response
+    question's option. Those stand in the nominative, so the rule that drops an
+    inflected answer must not be asked about them.
+    """
     t = (text or "").strip().strip(":").strip()
     if not t or len(t) > MAX_TERM_CHARS:
         return None
@@ -154,7 +159,14 @@ def _candidate(text: str) -> str | None:
     if _COUNTED_INTERVAL.search(t):
         return None
     first = t.split()[0].strip("-,")
-    if _CASE_ENDING.search(first) or first.lower() in _DESCRIPTION_OPENERS:
+    # A case ending marks an OPTION the question puts the respondent inside
+    # ("Muualla", "Verkkokaupasta"), which is what the rule was written for. An
+    # enumerated member does not inflect, and reading its tail as a case dropped
+    # `Estrella` — a real brand, named 22 times on the Taffel study, and the one
+    # failure this module may not have. (Johan, 2026-09-14)
+    if not inflected_ok and _CASE_ENDING.search(first):
+        return None
+    if first.lower() in _DESCRIPTION_OPENERS:
         return None
     # Two words is a company ("Julkiset hoivapalvelut", "Esperi Care"); five is
     # a statement being rated.
@@ -199,8 +211,11 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
       are considered.
     * **Answer categories.** "Which of these do you use" carries its brands as
       value labels, repeated across the questions that ask about them.
+    * **Multi-response options.** SPSS writes one indicator variable per
+      option, with the OPTION as that variable's own label — bare, with no
+      colon. That is where a brand tracker actually enumerates its brands.
 
-    Repetition is the signal in both cases: a brand recurs because the study
+    Repetition is the signal in each case: a brand recurs because the study
     asks about it several times, while the study's own wording does not.
     """
     counts: Counter[str] = Counter()
@@ -227,9 +242,32 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
             if len(members) < 2:
                 continue        # not a battery, just one labelled variable
             for m in members:
-                term = _candidate(m)
+                term = _candidate(m, inflected_ok=True)
                 if term:
                     counts[term] += len(members)
+
+    # --- multi-response options -------------------------------------------
+    # SPSS writes a multi-response question as one indicator variable per
+    # option: the OPTION is that variable's label, and Checked/Unchecked its
+    # values. A brand tracker keeps its brands there — Taffel's `var12`
+    # enumerates nineteen — and a bare label carries no colon, so nothing above
+    # sees it. That study proposed nineteen product ATTRIBUTES from its single
+    # rating battery ("Hinta", "Maku", "Rapeus tai suutuntuma"), the model
+    # rightly judged none of them a company, and a study naming eight brands
+    # registered nothing and masked nothing. (Johan, 2026-09-14)
+    for question in getattr(model, "questions", ()) or ():
+        if getattr(question, "kind", "") != "multi":
+            continue
+        options = [(model.variables[v].label or "").strip()
+                   for v in getattr(question, "variables", ()) or ()
+                   if v in model.variables]
+        options = [o for o in options if o]
+        if len(options) < 2:
+            continue            # one indicator is not a list of options
+        for option in options:
+            term = _candidate(option, inflected_ok=True)
+            if term:
+                counts[term] += len(options)
 
     # --- answer categories ------------------------------------------------
     # "Which of these do you use" carries its brands as value labels. Here

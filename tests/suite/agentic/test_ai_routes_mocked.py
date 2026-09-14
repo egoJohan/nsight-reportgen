@@ -214,7 +214,7 @@ def test_overview_empty_refs_uses_all_questions(client_mock, monkeypatch):
     assert resp.status_code == 200, resp.text
     # With no refs the route feeds every question's text into the prompt.
     prompt = chat.prompts[0]
-    assert "Satisfaction" in prompt and "Channel" in prompt and "Age" in prompt
+    assert "Satisfaction" in prompt and "contacted by" in prompt and "Age" in prompt
 
 
 def test_overview_egohive_error_503(client_mock, monkeypatch):
