@@ -248,7 +248,11 @@ def standard_schema() -> tuple[ConfigField, ...]:
 
 
 _XTAB_LAYOUT_LABELS: dict[str, str] = {
-    "auto": "Automatic",
+    # "Automatic" named a mechanism, not a result: an author reading it could not
+    # tell what the slide would look like, and on a stacked chart it always draws
+    # the two variables crossed into ONE panel. The option is named for what it
+    # produces. (Johan, 2026-09-14)
+    "auto": "Combined panel",
     "grouped": "Grouped bars",
     "small_multiples": "Small multiples",
     "separate": "Separate panels (one per variable)",
@@ -271,13 +275,13 @@ def xtab_layout_field(*, values: tuple[str, ...] = (
                       "variable; 'Small multiples' draws one panel per value of the "
                       "first variable; ")
     help_text += ("'Separate panels' does NOT cross them — one panel per variable, "
-                  "each an ordinary split. 'Automatic' ")
+                  "each an ordinary split. 'Combined panel' ")
     help_text += ("groups when it fits, else panels, and never chooses Separate on "
                   "its own." if crossed else
                   "crosses the two variables into one set of grouped bars, and never "
                   "chooses Separate on its own.")
     return ConfigField(
-        "xtab_layout", "select", "Two-variable layout",
+        "xtab_layout", "select", "Variable layout",
         options=tuple((v, _XTAB_LAYOUT_LABELS[v]) for v in values),
         default="auto",
         help=help_text,

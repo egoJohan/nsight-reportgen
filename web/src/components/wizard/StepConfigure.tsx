@@ -337,7 +337,7 @@ function SelectWidget({ field, chart, variables, onChange }: WidgetProps) {
   );
   // A banner classifier's groups come from separate columns and can overlap, so
   // it cannot be CROSSED with a second variable — only the crossed layouts
-  // ("Automatic" / "Grouped bars" / "Small multiples") are disabled here;
+  // ("Combined panel" / "Grouped bars" / "Small multiples") are disabled here;
   // "Separate panels" does not cross them, so it stays selectable. (spec 2026-08-04)
   const bannerLocked = field.key === "xtab_layout" && usesBannerClassifier(chart, variables);
   const bannerLabel =
@@ -555,7 +555,7 @@ function ClassifyingVarWidget({
   // from separate columns and can overlap), but it can sit beside one. Whenever the
   // pair becomes banner + second, pin the layout to Separate panels so the chart is
   // never left in a state the engine rejects — and so the author is not sent to a
-  // control (Two-variable layout) that only appears once two classifiers exist.
+  // control (Variable layout) that only appears once two classifiers exist.
   // Applies to BOTH edit directions: picking a second var against a banner primary,
   // and switching the primary to a banner var while a second is already set.
   // (spec 2026-08-04)
@@ -1289,7 +1289,7 @@ function ChartControls({
       extra.classifying_var_2 = null;
     }
     // A stale `separate` (or any other pinned layout) must not survive onto a type
-    // with no second classifier — the "Two-variable layout" control disappears with
+    // with no second classifier — the "Variable layout" control disappears with
     // it, but the value would otherwise sit inert in options and resurface if the
     // type later regains a second classifier.
     if (
