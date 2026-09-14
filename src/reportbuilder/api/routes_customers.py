@@ -29,11 +29,55 @@ class NameBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class CustomerAccessBody(BaseModel):
+    """One person's access to ONE customer.
+
+    `mode` null removes it. Scoped deliberately: this never carries a list of
+    grants, so a caller who administers one customer cannot reach across to
+    another by sending an extra row — which `PUT /users/{id}/grants` would
+    allow, and is why that one is admin-only. (Johan, 2026-09-14)
+    """
+    user_id: str = Field(min_length=1)
+    mode: str | None = Field(default=None, pattern="^(view|edit)$")
+
+
+class PermissionModeBody(BaseModel):
+    """How a customer decides who may reach it.
+
+    "inherit" respects the Domains setting, as every customer always has.
+    "manual" takes nothing from it: only the people named on the customer
+    itself get in. (Johan, 2026-09-14)
+    """
+    mode: str = Field(pattern="^(inherit|manual)$")
+
+
 def _name(body: NameBody) -> str:
     name = body.name.strip()
     if not name:
         raise HTTPException(422, "Name cannot be empty")
     return name
+
+
+def _managing(repo: Repository, auth: AuthContext, customer_id: str, user: User):
+    """The customer, if *user* may administer who reaches it — else 404/403.
+
+    THE OWNER decides. Being an admin is the right to manage users, not a key
+    to a customer's data (spec §5): if it opened this, any admin could name
+    themselves on any customer, which is what the manual mode exists to stop.
+
+    A customer recorded before ownership existed has nobody to ask, and
+    refusing everybody would leave it unmanageable for ever with no way back
+    through the UI. Those fall back to an admin — narrow, and closed as soon as
+    such a customer is given an owner. (Johan, 2026-09-14)
+    """
+    customer = repo.find_customer(auth, customer_id)
+    if customer is None:
+        raise HTTPException(404, f"Customer '{customer_id}' not found")
+    allowed = (user.id == customer.owner_id) if customer.owner_id else bool(user.is_admin)
+    if not allowed:
+        raise HTTPException(
+            403, "Only this customer's owner can manage its permissions")
+    return customer
 
 
 def _report_stats(reports: list[ReportRef]) -> tuple[int, int]:
@@ -131,6 +175,8 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     """
     customers = repo.list_customers(auth, user=user)
     by_id = {u.id: u for u in repo.list_users(auth)}
+    # One read for the whole page, not one per row.
+    modes = repo.customer_modes(auth)
     out = []
     for c in customers:
         cases = repo.list_cases(auth, c.id, user=user)
@@ -139,6 +185,7 @@ def list_customers(auth: AuthContext = Depends(get_auth),
             "id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
             "case_count": len(cases),
+            "permission_mode": modes.get(c.id, "inherit"),
             "owner": ({"id": owner.id, "name": owner.name or owner.email}
                       if owner else None),
         })
@@ -168,7 +215,8 @@ def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
     return {"id": c.id, "name": c.name, "template_id": c.template_id,
-            "can_edit": may_write(user, c.id)}
+            "can_edit": may_write(user, c.id),
+            "permission_mode": repo.customer_modes(auth).get(c.id, "inherit")}
 
 
 @customers_router.get("/customers/{customer_id}/name")
@@ -213,6 +261,122 @@ def rename_customer(customer_id: str, body: NameBody,
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
     return {"id": c.id, "name": c.name}
+
+
+@customers_router.get("/customers/{customer_id}/access")
+def get_customer_access(customer_id: str, auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(current_user)) -> dict:
+    """Who reaches this customer, and who could be added.
+
+    Exists so the permissions dialog works for an OWNER who is not an admin.
+    It used to read `GET /users`, which is admin-only and tenant-wide, so an
+    owner opening the dialog got 403 and an empty list — able to close their
+    customer off but not to say who stays.
+
+    The roster it discloses is the same one an admin already sees, narrowed to
+    what a picker needs (id, name, email) and served only to someone who
+    administers THIS customer. That is deliberately not `GET /customers/names`,
+    which was removed for handing the whole client list to any signed-in
+    stranger: here the caller already owns the customer they are asking about.
+    """
+    customer = _managing(repo, auth, customer_id, user)
+    people, candidates = [], []
+    for u in repo.list_users(auth):
+        grant = next((g for g in u.grants if g.scope == customer_id), None)
+        row = {"id": u.id, "email": u.email, "name": u.name,
+               "is_owner": bool(customer.owner_id) and u.id == customer.owner_id}
+        if grant is None:
+            candidates.append(row)
+        else:
+            people.append({**row, "mode": grant.mode})
+    return {"id": customer_id,
+            "permission_mode": repo.customer_modes(auth).get(customer_id, "inherit"),
+            "owner_id": customer.owner_id or None,
+            "people": people, "candidates": candidates}
+
+
+@customers_router.put("/customers/{customer_id}/access")
+def set_customer_access(customer_id: str, body: CustomerAccessBody,
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(current_user)) -> dict:
+    """Give one person view/edit on this customer, or take it away.
+
+    Only this customer's entry in that person's grants is touched; every other
+    customer they hold is carried through untouched. That is the whole reason
+    this exists beside `PUT /users/{id}/grants`: the admin route replaces the
+    WHOLE list, so handing it to an owner would hand them every customer.
+
+    The owner's own edit grant cannot be removed or downgraded here. They keep
+    the customer they own — the same guarantee `set_permission_mode` enforces
+    when it switches to manual, made in both places so neither can undo it.
+    """
+    customer = _managing(repo, auth, customer_id, user)
+    target = repo.get_user(auth, body.user_id)
+    if target is None:
+        raise HTTPException(404, f"User '{body.user_id}' not found")
+
+    if customer.owner_id and body.user_id == customer.owner_id and body.mode != EDIT:
+        raise HTTPException(
+            409, "The owner always keeps edit access to their own customer")
+
+    rest = tuple(g for g in target.grants if g.scope != customer_id)
+    repo.set_grants(auth, target.id,
+                    rest + ((Grant(customer_id, body.mode),) if body.mode else ()))
+    # At once, not within the cache TTL -- taking access away is the direction
+    # that matters, the same reasoning as `PUT /users/{id}/grants`.
+    session.forget_user(target.id)
+    return {"id": customer_id, "user_id": target.id, "mode": body.mode}
+
+
+@customers_router.put("/customers/{customer_id}/permission-mode")
+def set_permission_mode(customer_id: str, body: PermissionModeBody,
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        user: User = Depends(current_user)) -> dict:
+    """Switch a customer between inheriting the domain policy and managing its
+    own access.
+
+    THE OWNER decides, not any admin. Being an admin is the right to manage
+    users, not a key to a customer's data (spec §5) — and if it opened this
+    control too, any admin could switch a customer to manual and name
+    themselves, which is the one thing the setting exists to prevent.
+
+    A customer created before ownership was recorded has no owner to ask, and
+    refusing everybody would leave it permanently unmanageable with no way back
+    through the UI. Those fall back to an admin, deliberately and narrowly: it
+    is the legacy path, and it closes as soon as such a customer is given an
+    owner. (Johan, 2026-09-14)
+
+    Turning a customer MANUAL withdraws the domain's grant from it, so whoever
+    reached it only through their domain loses it — including, on an ownerless
+    customer, the person making the change. Taffel is exactly that: no owner,
+    and an admin whose access came from `egoiq.com`, who switched it and locked
+    themselves out. So this ensures an explicit edit grant for the owner, or
+    for the caller when there is none, before the switch takes effect. A
+    customer must never become unreachable by everybody.
+    """
+    customer = _managing(repo, auth, customer_id, user)
+
+    if body.mode == "manual":
+        # Whoever must still be able to reach it afterwards: the owner when
+        # there is one, otherwise the admin making the decision.
+        keeper_id = customer.owner_id or user.id
+        keeper = repo.get_user(auth, keeper_id)
+        if keeper is not None and not any(g.scope == customer_id and g.mode == EDIT
+                                          for g in keeper.grants):
+            repo.set_grants(auth, keeper.id,
+                            tuple(keeper.grants) + (Grant(customer_id, EDIT),))
+
+    repo.set_customer_mode(auth, customer_id, body.mode)
+    # Every cached identity now describes a policy that no longer holds, and
+    # there is no list of who this touches -- the same reasoning as
+    # `PUT /settings/access`. Without it an admin closes a customer off, is
+    # told it is done, and the people it withdrew carry on reading it for
+    # another half minute.
+    session.forget_all()
+    return {"id": customer_id, "permission_mode": body.mode}
 
 
 @customers_router.post("/customers/{customer_id}/cases", status_code=201)

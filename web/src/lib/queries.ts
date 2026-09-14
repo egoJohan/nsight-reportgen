@@ -16,6 +16,7 @@ import type {
   AccessMode,
   ChartSpec,
   ChartPreviewTitleMeta,
+  PermissionMode,
   ReportDoc,
   GroupingOverride,
   WordMerge,
@@ -389,6 +390,52 @@ export function useCustomer(customerId: string | undefined) {
     // An ungranted customer 404s (spec §5) — expected for the no-access
     // page's caller, not worth retrying before it can show that page.
     retry: false,
+  });
+}
+
+/** Who reaches one customer, for the permissions dialog. Scoped to the
+ *  customer rather than read from the tenant-wide `GET /users`, so an owner
+ *  who is not an admin can open it at all. */
+export function useCustomerAccess(customerId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["customer", customerId, "access"],
+    queryFn: () => api.customers.access(customerId!),
+    enabled: !!customerId && enabled,
+    retry: false,
+  });
+}
+
+/** Give one person view/edit on this customer, or null to take it away. */
+export function useSetCustomerAccess(customerId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, mode }: { userId: string; mode: AccessMode | null }) =>
+      api.customers.setAccess(customerId!, userId, mode),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer", customerId, "access"] });
+      // Their own sidebar changes with it, and so does `can_edit` here.
+      qc.invalidateQueries({ queryKey: ["customer", customerId] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+  });
+}
+
+/** Switch a customer between inheriting the Domains policy and managing its
+ *  own access. Invalidates both the single customer and the listing: the
+ *  sidebar shows every customer this caller may reach, and the switch can
+ *  change that for other people as well as for this screen. */
+export function useSetPermissionMode(customerId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: PermissionMode) =>
+      api.customers.setPermissionMode(customerId!, mode),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["customer", customerId] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+      // Who may reach this customer has just changed, and the answer rides on
+      // each user's grants — the dialog lists them right beside the control.
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
   });
 }
 

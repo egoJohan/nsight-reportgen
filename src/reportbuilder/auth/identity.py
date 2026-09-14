@@ -29,6 +29,20 @@ log = logging.getLogger(__name__)
 
 _ACCESS_KEY = "access.json"
 
+#: Per-customer access policy: {"modes": {"<customer id>": "manual"}}.
+#:
+#: A tenant-wide object rather than a field on each customer, because the
+#: question "which customers manage their own access" is asked on EVERY request
+#: and must not cost one object read per customer to answer. Absent or unnamed
+#: means `INHERIT`, so every customer that existed before this keeps behaving
+#: exactly as it did.
+CUSTOMER_ACCESS_KEY = "customer-access.json"
+
+#: The customer respects the domain policy (the default).
+INHERIT = "inherit"
+#: Only the people named on the customer itself may reach it.
+MANUAL = "manual"
+
 
 @dataclass(frozen=True)
 class SignInRefused:
@@ -116,9 +130,14 @@ def tenant_grant(email: str, access: dict) -> Grant | None:
 def effective_user(repo: Repository, auth: AuthContext, user: User) -> User:
     """*user* as the permission model should see them this request.
 
-    Their own grants plus whatever their email domain is currently
-    configured to carry. The account itself is untouched: an admin's Users
-    screen keeps showing the grants an admin gave.
+    Their own grants, plus whatever their email domain is currently
+    configured to carry, minus the customers that manage their own access.
+    The account itself is untouched: an admin's Users screen keeps showing
+    the grants an admin gave.
+
+    The subtraction reaches only the DERIVED grant. A customer set to
+    `MANUAL` takes nothing from the domain policy, while a grant an admin
+    gave by name still admits — see `permissions._best`.
 
     A setting that cannot be read leaves the user exactly as they were --
     this runs on every request, and the hive being briefly away must not
@@ -131,7 +150,32 @@ def effective_user(repo: Repository, auth: AuthContext, user: User) -> User:
     grant = tenant_grant(user.email, access)
     if grant is None:
         return user
-    return replace(user, tenant_grants=(grant,))
+    # Customers that manage their own access. Read here, beside the domain
+    # setting and at the same cost, because it answers the same question: what
+    # does this person's DOMAIN reach this request. A customer listing would
+    # answer it too and cost one object read per customer on every request.
+    return replace(user, tenant_grants=(grant,),
+                   denied_scopes=manual_customers(repo, auth))
+
+
+def manual_customers(repo: Repository, auth: AuthContext) -> tuple[str, ...]:
+    """Customer ids whose access is managed by hand, or ().
+
+    A setting that cannot be read yields NOTHING rather than everything: this
+    runs on every request, and a hive briefly away must not silently widen a
+    domain grant across customers an admin has closed off. The cost of the
+    other direction is a customer that keeps working for thirty seconds; the
+    cost of this one is a leak. (Johan, 2026-09-14)
+    """
+    try:
+        stored = repo.get_setting(auth, CUSTOMER_ACCESS_KEY) or {}
+    except Exception:                              # pragma: no cover - defensive
+        return ()
+    modes = stored.get("modes") or {}
+    if not isinstance(modes, dict):
+        return ()
+    return tuple(sorted(cid for cid, mode in modes.items()
+                        if cid and mode == MANUAL))
 
 
 def domain_grants(email: str, access: dict):

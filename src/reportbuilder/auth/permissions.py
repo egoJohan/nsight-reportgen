@@ -114,6 +114,15 @@ class User:
     #: as a grant nobody gave. Permission questions read both (`all_grants`);
     #: storage and the admin screens read `grants` alone.
     tenant_grants: tuple[Grant, ...] = field(default_factory=tuple)
+    #: Customers whose access is managed BY HAND: scopes a derived grant must
+    #: not reach. Derived per request like `tenant_grants` and never persisted,
+    #: for the same reason -- it describes a setting, not the account.
+    #:
+    #: It suppresses only what the account does not own. A grant an admin
+    #: actually gave still admits, which is what makes "Manual" a narrowing of
+    #: the domain policy rather than a second, competing way to refuse someone.
+    #: (Johan, 2026-09-14)
+    denied_scopes: tuple[str, ...] = field(default_factory=tuple)
     #: When this account last minted a session, ISO-8601, or None for never.
     #: Written in one place — `Repository.record_sign_in`, called where a
     #: session is issued — and never by an ordinary save, so an admin toggling
@@ -173,10 +182,31 @@ def _best(user: User, path: str) -> Grant | None:
     security question is settled one level up — nothing here decides WHETHER
     somebody may hold a grant, only what the grants they hold mean together.
     """
-    covering = [g for g in user.all_grants if g.covers(path)]
+    owned = [g for g in user.grants if g.covers(path)]
+    # A customer set to manage its own access takes nothing from the domain.
+    # Only DERIVED grants are withheld: `owned` above is what an admin gave
+    # this person by name, and that is precisely the thing "Manual" is for.
+    derived = [g for g in user.tenant_grants
+               if g.covers(path) and not _denied(user, path)]
+    covering = owned + derived
     if not covering:
         return None
     return max(covering, key=lambda g: (_depth(g.scope), g.mode == EDIT))
+
+
+def _denied(user: User, path: str) -> bool:
+    """Does *path* fall under a customer that manages its own access?
+
+    Prefix-wise, so a study and a report inside a manual customer are covered
+    by the one entry naming it — the same segment-wise containment `covers`
+    uses, and for the same reason: "attendo" must not match "attendo-oy".
+    """
+    have = [s for s in path.split("/") if s]
+    for scope in user.denied_scopes:
+        want = [s for s in scope.split("/") if s]
+        if want and len(have) >= len(want) and have[: len(want)] == want:
+            return True
+    return False
 
 
 def _reserved(path: str) -> bool:

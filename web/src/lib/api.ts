@@ -715,6 +715,37 @@ export interface Customer {
    *  who can write to it. Null for customers created before ownership was
    *  recorded, and for those the UI says nothing rather than guessing. */
   owner: CustomerOwner | null;
+  /** How this customer decides who may reach it.
+   *
+   *  "inherit" respects the Domains setting, as every customer always has.
+   *  "manual" takes nothing from it: only the people named on the customer
+   *  itself get in. Absent on customers nobody has decided about, which reads
+   *  as "inherit". */
+  permission_mode?: PermissionMode;
+}
+
+export type PermissionMode = "inherit" | "manual";
+
+/** One person on a customer's access list. */
+export interface CustomerAccessPerson {
+  id: string;
+  email: string;
+  name: string;
+  /** The owner keeps edit and cannot be removed or downgraded — the server
+   *  refuses it, so the dialog does not offer it either. */
+  is_owner: boolean;
+  mode: AccessMode;
+}
+
+/** Who reaches one customer, and who could be added. Served only to whoever
+ *  administers that customer, so an owner who is not an admin can use the
+ *  permissions dialog — `GET /users` is admin-only. */
+export interface CustomerAccess {
+  id: string;
+  permission_mode: PermissionMode;
+  owner_id: string | null;
+  people: CustomerAccessPerson[];
+  candidates: Omit<CustomerAccessPerson, "mode">[];
 }
 
 /** A case now belongs to exactly one customer, so its id alone is no longer a
@@ -837,6 +868,33 @@ export const api = {
       fetch(`${API_BASE}/customers/${customerId}`, jsonPatch({ name })).then((r) =>
         json<Customer>(r)
       ),
+
+    /** Who reaches this customer, and who could be added. Served to whoever
+     *  administers THIS customer — the owner, or an admin for a customer
+     *  recorded before ownership existed. Exists so the permissions dialog
+     *  works for an owner who is not an admin: `GET /users` is admin-only. */
+    access: (customerId: string): Promise<CustomerAccess> =>
+      fetch(`${API_BASE}/customers/${customerId}/access`).then((r) =>
+        json<CustomerAccess>(r)
+      ),
+
+    /** Give one person view/edit on this customer, or `null` to take it away.
+     *  Touches only this customer's entry in their grants — every other
+     *  customer they hold is left alone. */
+    setAccess: (
+      customerId: string, userId: string, mode: AccessMode | null,
+    ): Promise<{ id: string; user_id: string; mode: AccessMode | null }> =>
+      fetch(`${API_BASE}/customers/${customerId}/access`,
+            jsonPut({ user_id: userId, mode }))
+        .then((r) => detailedJson<{ id: string; user_id: string; mode: AccessMode | null }>(r)),
+
+    /** Switch between inheriting the Domains policy and managing this
+     *  customer's access by hand. The OWNER's call, not any admin's. */
+    setPermissionMode: (
+      customerId: string, mode: PermissionMode,
+    ): Promise<{ id: string; permission_mode: PermissionMode }> =>
+      fetch(`${API_BASE}/customers/${customerId}/permission-mode`, jsonPut({ mode }))
+        .then((r) => detailedJson<{ id: string; permission_mode: PermissionMode }>(r)),
 
     listCases: (customerId: string): Promise<CustomerCase[]> =>
       fetch(`${API_BASE}/customers/${customerId}/cases`).then((r) =>

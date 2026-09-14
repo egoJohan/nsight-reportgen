@@ -141,6 +141,16 @@ export default function CustomerCasesPage() {
   // Fail closed while the answer is in flight — see CaseDetailPage.
   const canEdit = customer?.can_edit ?? false;
 
+  // Who may administer THIS customer's access. The owner, or — for a customer
+  // recorded before ownership was — an admin, which is the one path that keeps
+  // such a customer manageable at all. Fails closed while `customer` loads, so
+  // the button never flashes for somebody the server would refuse.
+  const canManagePermissions = !customer
+    ? false
+    : customer.owner
+      ? me?.id === customer.owner.id
+      : !!me?.is_admin;
+
   // What the "Request permissions" button offers, top right — the same slot
   // as "Manage permissions" (see PAGE_HEADER below), shown when the caller
   // is missing `edit` and hidden once they hold it. Reaching this component
@@ -202,9 +212,16 @@ export default function CustomerCasesPage() {
               <LockIcon className="mr-2 size-4" />Request permissions</Button>
           )}
           {/* Access to a customer is administered here, on the customer — not
-              per-user in Settings (see the Users screen's history). Admin-only:
-              a non-admin has no reason to know who else can see this customer. */}
-          {me?.is_admin && (
+              per-user in Settings (see the Users screen's history).
+              THE OWNER's, not any admin's: being an admin is the right to
+              manage users, not a key to a customer's data, and if it opened
+              this control too an admin could switch a customer to manual and
+              name themselves. Mirrors the server rule exactly
+              (routes_customers.set_permission_mode) so the page never offers a
+              control the API will refuse. A customer recorded before ownership
+              existed has nobody to ask, and falls back to an admin there for
+              the same reason the route does. (Johan, 2026-09-14) */}
+          {canManagePermissions && (
             <Button variant="outline" onClick={() => setManagingAccess(true)}>
               <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
           )}
@@ -317,7 +334,7 @@ export default function CustomerCasesPage() {
         />
       )}
 
-      {me?.is_admin && customerId && (
+      {canManagePermissions && customerId && (
         <ManagePermissionsDialog
           open={managingAccess}
           onOpenChange={setManagingAccess}

@@ -1252,6 +1252,28 @@ class Repository:
         except Exception:  # noqa: BLE001, S110 — a timestamp is never worth
             pass                # refusing somebody a session over
 
+    def customer_modes(self, auth: AuthContext) -> dict:
+        """{customer id: "inherit"|"manual"} for the customers given one.
+        A customer absent from the map inherits the domain policy."""
+        stored = self.get_setting(auth, "customer-access.json") or {}
+        modes = stored.get("modes")
+        return dict(modes) if isinstance(modes, dict) else {}
+
+    def set_customer_mode(self, auth: AuthContext, customer_id: str, mode: str) -> dict:
+        """Record how *customer_id* decides who may reach it.
+
+        Read-modify-write on ONE tenant object rather than a field on each
+        customer: the question is asked on every request (see
+        `identity.manual_customers`), and a per-customer field would cost one
+        object read per customer to answer it. "inherit" is stored rather than
+        dropped, so a customer deliberately returned to the domain policy reads
+        differently from one nobody has decided about. (Johan, 2026-09-14)
+        """
+        modes = self.customer_modes(auth)
+        modes[customer_id] = mode
+        self.set_setting(auth, "customer-access.json", {"modes": modes})
+        return modes
+
     def set_grants(self, auth: AuthContext, user_id: str, grants) -> None:
         self._write_json(auth, P.user_grants_path(user_id),
                          {"grants": [{"scope": g.scope, "mode": g.mode} for g in grants]},
