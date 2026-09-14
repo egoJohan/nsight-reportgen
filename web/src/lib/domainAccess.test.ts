@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { toRows, toStored } from "./domainAccess";
+import { saveBody, toRows, toStored } from "./domainAccess";
 
 const EMPTY = { allowed_domains: [], domain_access: [], default_grants: [] };
 
@@ -99,5 +99,46 @@ describe("toStored", () => {
     const out = toStored(toRows(saved));
     expect(out.allowed_domains).toEqual(saved.allowed_domains);
     expect(out.domain_access).toEqual(saved.domain_access);
+  });
+});
+
+// The endpoint REPLACES the stored setting, so the body has to be whole every
+// time: a list left out is a list emptied. `saveBody` is the one place it is
+// built, which is what stops a caller sending half of what the screen knows.
+describe("saveBody", () => {
+  it("sends both lists and the grants the screen does not edit", () => {
+    const current = {
+      allowed_domains: ["old.fi"],
+      domain_access: [{ domain: "old.fi", mode: "view" as const }],
+      default_grants: [{ scope: "cust-1", mode: "edit" }],
+    };
+    expect(saveBody([{ domain: "nsight.fi", signIn: true, mode: "edit" }], current))
+      .toEqual({
+        allowed_domains: ["nsight.fi"],
+        domain_access: [{ domain: "nsight.fi", mode: "edit" }],
+        default_grants: [{ scope: "cust-1", mode: "edit" }],
+      });
+  });
+
+  it("still names both lists when the screen has no rows", () => {
+    // Not an omission — "I looked, there are none" — and the shape must say so
+    // rather than leave the key out.
+    expect(saveBody([], EMPTY)).toEqual({
+      allowed_domains: [], domain_access: [], default_grants: [],
+    });
+  });
+
+  it("carries no grants when the server had none", () => {
+    expect(saveBody([{ domain: "a.fi", signIn: false, mode: "view" }], undefined))
+      .toEqual({
+        allowed_domains: [],
+        domain_access: [{ domain: "a.fi", mode: "view" }],
+        default_grants: [],
+      });
+  });
+
+  it("never invents a grant list of its own", () => {
+    const out = saveBody([], { ...EMPTY, default_grants: [] });
+    expect(out.default_grants).toEqual([]);
   });
 });

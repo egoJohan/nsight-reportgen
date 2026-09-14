@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import { EMPTY, PANEL_PADDED, PANEL_TITLE } from "@/lib/surfaces";
 import { useAccessSettings, useSetAccessSettings } from "@/lib/queries";
-import { toRows, toStored } from "@/lib/domainAccess";
+import { saveBody, toRows, toStored } from "@/lib/domainAccess";
 import type { DomainRow } from "@/lib/domainAccess";
 
 /** Base UI's SelectValue renders the raw value unless the Root is told the
@@ -33,25 +33,41 @@ export default function DomainAccessTab() {
     setSeeded(true);
   }, [data, seeded]);
 
+  /** Local only. Typing a domain must not send a request per keystroke, nor
+   *  store "nsig" on the way to "nsight.fi"; the field commits on blur. */
   function edit(i: number, change: Partial<DomainRow>) {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...change } : r)));
   }
 
-  // Compare through the same conversion, so a domain the server stored in
-  // another casing does not light Save up on a screen nobody touched.
-  const pending = toStored(rows);
-  const saved = toStored(toRows(data));
-  const dirty = JSON.stringify(pending) !== JSON.stringify(saved);
-
-  function persist() {
-    save.mutate(
-      { ...pending, default_grants: data?.default_grants ?? [] },
-      {
-        onSuccess: () => toast.success("Domains saved"),
-        onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save"),
-      }
-    );
+  /** Saved as it is changed, like the Admin switch a tab away.
+   *
+   *  It used to be saved only by a button that appeared once the screen was
+   *  dirty, below the rows and beside "Add domain". A Switch and a Select apply
+   *  themselves everywhere else in this app, so an admin who set a domain to
+   *  "Edit everything" and moved on had every reason to believe it was done —
+   *  and the change lived in React state and nowhere else. Reloading showed the
+   *  stored truth, which is nothing, and "No access" reads as a decision rather
+   *  than a loss. Measured on staging: 41 requests to /settings/* over two days,
+   *  every one a GET, and settings/access.json never created. (Johan, 2026-09-14)
+   *
+   *  The next rows are passed in rather than read back from state, because
+   *  `setRows` has not applied by the time this runs. */
+  function commit(next: DomainRow[]) {
+    setRows(next);
+    save.mutate(saveBody(next, data), {
+      onError: (e) => toast.error(e instanceof Error ? e.message : "Could not save"),
+    });
   }
+
+  function change(i: number, patch: Partial<DomainRow>) {
+    commit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  }
+
+  // Only ever true mid-typing now, since every other control commits itself.
+  // Kept as the text field's backstop: a domain typed and never blurred is the
+  // one edit that can still be sitting unsaved.
+  const dirty =
+    JSON.stringify(toStored(rows)) !== JSON.stringify(toStored(toRows(data)));
 
   return (
     <div className={PANEL_PADDED}>
@@ -89,21 +105,30 @@ export default function DomainAccessTab() {
                 aria-label="Email domain"
                 className="h-9 flex-1"
                 onChange={(e) => edit(i, { domain: e.target.value })}
+                // The one control that cannot save as it changes: a request per
+                // keystroke, and "nsig" stored on the way to "nsight.fi".
+                onBlur={() => commit(rows)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commit(rows);
+                }}
               />
               <div className="flex w-44 shrink-0 justify-center">
                 {/* A Switch, matching the Admin toggle a tab away -- one
-                    boolean per row is the same gesture in both places. */}
+                    boolean per row is the same gesture in both places, and it
+                    saves itself in both places too. */}
                 <Switch
                   size="sm"
                   checked={row.signIn}
+                  disabled={save.isPending}
                   aria-label={`${row.domain || "This domain"} may sign in without an invitation`}
-                  onCheckedChange={(v) => edit(i, { signIn: v })}
+                  onCheckedChange={(v) => change(i, { signIn: v })}
                 />
               </div>
               <Select
                 items={MODE_LABELS}
                 value={row.mode}
-                onValueChange={(v) => edit(i, { mode: v as DomainRow["mode"] })}
+                disabled={save.isPending}
+                onValueChange={(v) => change(i, { mode: v as DomainRow["mode"] })}
               >
                 <SelectTrigger className="h-9 w-52 shrink-0" aria-label="Access">
                   <SelectValue />
@@ -119,7 +144,7 @@ export default function DomainAccessTab() {
                 size="icon-sm"
                 title="Remove this domain"
                 className="text-muted-foreground hover:text-destructive"
-                onClick={() => setRows((rs) => rs.filter((_r, j) => j !== i))}
+                onClick={() => commit(rows.filter((_r, j) => j !== i))}
               >
                 <Trash2Icon className="size-4" />
               </Button>
@@ -139,7 +164,7 @@ export default function DomainAccessTab() {
           <PlusIcon className="size-4" />Add domain
         </Button>
         {dirty && (
-          <Button size="sm" disabled={save.isPending} onClick={persist}>
+          <Button size="sm" disabled={save.isPending} onClick={() => commit(rows)}>
             Save
           </Button>
         )}

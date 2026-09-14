@@ -532,9 +532,15 @@ export default function SettingsPage() {
   // tampered link falls back to the same default anyone else gets rather
   // than silently no-oping on a tab that was never rendered.
   const requestedTab = searchParams.get("tab");
+  // Every tab in the strip above, in the same order. A tab left out of this
+  // list is not "hidden" — it is silently unreachable by link: `visible.has()`
+  // says no, the parameter is discarded, and the caller lands on the fallback
+  // with nothing to say why. `domains` was missing, so ?tab=domains opened
+  // Users. (Johan, 2026-09-14)
   const visible = new Set(
     [me && "profile", me?.is_admin && "users", me?.is_admin && "pending-users",
      canSeePermissionRequests && "permission-requests",
+     me?.is_admin && "domains",
      me && "fonts", me?.is_admin && "default-template",
      me?.is_admin && "backup"].filter(Boolean)
   );

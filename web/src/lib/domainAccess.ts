@@ -56,6 +56,19 @@ export function toRows(value: AccessSettings | undefined): DomainRow[] {
   return rows;
 }
 
+/** The whole document a save must send.
+ *
+ *  Both lists every time, plus the grants this screen does not edit. The
+ *  endpoint REPLACES the stored setting rather than merging into it, so a body
+ *  that leaves a list out stores none of it. Building the body in one place,
+ *  from the rows as they are at that moment, is what stops a screen sending
+ *  half of what it knows. (Johan, 2026-09-14) */
+export function saveBody(
+  rows: DomainRow[], current: AccessSettings | undefined,
+): AccessSettings {
+  return { ...toStored(rows), default_grants: current?.default_grants ?? [] };
+}
+
 export function toStored(rows: DomainRow[]): Stored {
   const out: Stored = { allowed_domains: [], domain_access: [] };
   for (const row of rows) {
