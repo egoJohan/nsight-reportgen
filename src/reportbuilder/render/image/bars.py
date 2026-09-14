@@ -614,18 +614,27 @@ def _text_extent_px(fig, text: str, fontsize: float, weight: str = "normal") -> 
 
 
 def _wrap_into(fig, text: str, width_px: float, height_px: float, *,
-               max_lines: int | None = None) -> tuple[str, float]:
+               max_lines: int | None = None,
+               only_size: float | None = None) -> tuple[str, float]:
     """`text` wrapped to fit a `width_px` × `height_px` box: (wrapped text, size).
 
     The largest size first, a step smaller at a time down to the floor; the full
     text whenever it fits at all, and only at the floor as many lines as there
-    is room for, with an ellipsis."""
+    is room for, with an ellipsis.
+
+    `only_size` fixes the size instead of searching for one, so a block of
+    labels can be set at the one size that suits the worst of them rather than
+    each finding its own — which put 7.5pt beside 10pt in a single column.
+    """
     flat = " ".join(text.split())
-    sizes = [_GROUP_BLOCK_FS]
-    while sizes[-1] * 0.9 >= _GROUP_BLOCK_MIN_FS:
-        sizes.append(sizes[-1] * 0.9)
-    if sizes[-1] > _GROUP_BLOCK_MIN_FS:
-        sizes.append(_GROUP_BLOCK_MIN_FS)
+    if only_size is not None:
+        sizes = [only_size]
+    else:
+        sizes = [_GROUP_BLOCK_FS]
+        while sizes[-1] * 0.9 >= _GROUP_BLOCK_MIN_FS:
+            sizes.append(sizes[-1] * 0.9)
+        if sizes[-1] > _GROUP_BLOCK_MIN_FS:
+            sizes.append(_GROUP_BLOCK_MIN_FS)
     for fs in sizes:
         line_px = fs * 1.25 * fig.dpi / 72.0
         allowed = max(1, int(height_px // line_px))
@@ -653,7 +662,15 @@ def _plan_group_labels_beside(fig, labels, sizes, pitch_px):
         return "rotated", {}, 0.0
     fig_w_in = fig.get_size_inches()[0]
     col_px = min(_GROUP_BLOCK_COL_IN, _GROUP_BLOCK_COL_FRAC * fig_w_in) * fig.dpi
-    blocks = {g: _wrap_into(fig, g, col_px, sizes.get(g, 1) * pitch_px)
+    # One size for the whole block, not one per statement. Sized alone, a long
+    # statement dropped to the 7.5pt floor beside a neighbour still at 10pt —
+    # a 25% step down one column, which is what made the block look ragged.
+    # The smallest any of them needs is the size they all take.
+    first = {g: _wrap_into(fig, g, col_px, sizes.get(g, 1) * pitch_px)
+             for g, _pos in labels}
+    one_size = min(fs for _text, fs in first.values())
+    blocks = {g: (_wrap_into(fig, g, col_px, sizes.get(g, 1) * pitch_px,
+                             only_size=one_size)[0], one_size)
               for g, _pos in labels}
     width_in = max(_text_extent_px(fig, t, fs)[0] for t, fs in blocks.values()) / fig.dpi
     return "written", blocks, width_in
@@ -686,9 +703,15 @@ def _draw_group_labels_under(fig, ax, labels, sizes, ink, *,
                     color=ink, gid=_GROUP_GID)
         return
     top = top_written
+    # One size for every group name, for the same reason as the beside layout.
+    one_size = min(
+        _wrap_into(fig, g, sizes.get(g, 1) * pitch_px * 0.94, 1e9,
+                   max_lines=_GROUP_UNDER_MAX_LINES)[1]
+        for g, _gx in labels)
     for glabel, gx in labels:
         wrapped, fs = _wrap_into(fig, glabel, sizes.get(glabel, 1) * pitch_px * 0.94,
-                                 1e9, max_lines=_GROUP_UNDER_MAX_LINES)
+                                 1e9, max_lines=_GROUP_UNDER_MAX_LINES,
+                                 only_size=one_size)
         ax.text(gx, top, wrapped, transform=ax.get_xaxis_transform(), ha="center",
                 va="top", multialignment="center", fontsize=fs, color=ink,
                 gid=_GROUP_GID)
@@ -1742,10 +1765,9 @@ def build_image_column_stacked(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
 
-    # A called-out number on another moves up or down beside its column first.
-    # Last resort, and only if the numbers still collide: shrink them until
-    # they do not. Changes type size and never a position, so a panel whose
-    # numbers already sit clear comes out unchanged.
+    # A called-out number sitting on another moves beside its column first;
+    # anything still crowded is shrunk until it stands clear. Nothing is ever
+    # taken off the slide — a number with nowhere to go stays and gets smaller.
     clear_callouts(fig, ax, along="y")
     shrink_values_until_clear(fig, ax)
 
@@ -1813,6 +1835,11 @@ _VALUE_GID = VALUE_GID
 #: The smallest a value label may be shrunk to before it stops being worth
 #: printing. Below this it is decoration on a slide, not a figure someone reads.
 _VALUE_MIN_PT: float = 6.5
+#: Clear air two numbers on one row must keep between them, in ems of their own
+#: type. Not overlapping is not enough: "2 %2 %" on the customer's sector slide
+#: had its two boxes 0.108 em apart — touching, reading as one number, and
+#: passing every overlap test there was. Names already keep this much.
+_VALUE_GAP_EM: float = 0.2
 
 
 def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
@@ -1834,10 +1861,9 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
     Returns the size settled on, or None when nothing had to change.
     (Johan, 2026-09-10)
     """
-    # Only numbers that are printed, each by its own box. A number left out
-    # (`clear_callouts`) is on nobody's way; and a callout's window extent also
-    # wraps its leader line, whose box covers ground the line never touches —
-    # either one alone shrank every number on a chart where none overlapped.
+    # Each number by its own box: a callout's window extent also wraps its
+    # leader line, whose box covers ground the line never touches, and that
+    # alone shrank every number on a chart where none overlapped.
     # (Johan, 2026-09-11)
     from matplotlib.text import Text
 
@@ -1846,26 +1872,124 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
         return None
 
     def clashes() -> bool:
+        """Not merely "do they overlap" — do they stand APART.
+
+        Two numbers a hair's breadth apart read as one: "2 %2 %" on the
+        customer's sector slide had its boxes 2.27px apart, 0.108 em, not
+        overlapping by a single pixel. Judged clear by an overlap test, and
+        wrong to any reader. So numbers on one row must keep `_VALUE_GAP_EM`
+        of their own type size between them, which is the same rule names
+        already keep. (Johan, 2026-09-13)
+        """
         fig.canvas.draw()
         r = fig.canvas.get_renderer()
-        boxes = [Text.get_window_extent(t, r) for t in labels]
-        for i, a in enumerate(boxes):
-            for b in boxes[i + 1:]:
-                if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
-                        and min(a.y1, b.y1) - max(a.y0, b.y0) > 0.5):
+        boxed = [(t, Text.get_window_extent(t, r)) for t in labels]
+        for i, (ta, a) in enumerate(boxed):
+            for tb, b in boxed[i + 1:]:
+                share_a_row = min(a.y1, b.y1) - max(a.y0, b.y0) > 0.5
+                if not share_a_row:
+                    continue
+                # Negative when the boxes interpenetrate.
+                gap_px = max(a.x0, b.x0) - min(a.x1, b.x1)
+                em_px = max(ta.get_fontsize(), tb.get_fontsize()) * fig.dpi / 72.0
+                if gap_px < _VALUE_GAP_EM * em_px:
                     return True
         return False
 
-    if not clashes():
+    def crowded_pairs():
+        """The pairs that are too close, worst first — not a yes/no."""
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        boxed = [(t, Text.get_window_extent(t, r)) for t in labels]
+        out = []
+        for i, (ta, a) in enumerate(boxed):
+            for tb, b in boxed[i + 1:]:
+                if min(a.y1, b.y1) - max(a.y0, b.y0) <= 0.5:
+                    continue
+                gap_px = max(a.x0, b.x0) - min(a.x1, b.x1)
+                em_px = max(ta.get_fontsize(), tb.get_fontsize()) * fig.dpi / 72.0
+                short = _VALUE_GAP_EM * em_px - gap_px
+                if short > 0:
+                    out.append((short, ta, tb))
+        out.sort(key=lambda p: -p[0])
+        return out
+
+    def _overlap_area() -> float:
+        """How much ink actually sits on other ink, in square pixels.
+
+        A measure rather than a yes/no, because the two cases look identical to
+        a boolean and want opposite answers: two numbers printed at the SAME
+        point overlap however small they are, and shrinking is the only thing
+        that helps them; two numbers a row apart on a slot too narrow for them
+        overlap just as stubbornly, and shrinking buys nothing at all. The area
+        falling tells one from the other. (Johan, 2026-09-13)
+        """
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        boxed = [Text.get_window_extent(t, r) for t in labels]
+        total = 0.0
+        for i, a in enumerate(boxed):
+            for b in boxed[i + 1:]:
+                dx = min(a.x1, b.x1) - max(a.x0, b.x0)
+                dy = min(a.y1, b.y1) - max(a.y0, b.y0)
+                if dx > 0.5 and dy > 0.5:
+                    total += dx * dy
+        return total
+
+    def interpenetrating() -> bool:
+        return _overlap_area() > 0.0
+
+    crowded = crowded_pairs()
+    if not crowded:
         return None
+    before_area = _overlap_area()
+    was_overlapping = before_area > 0.0
+    restore = [(t, t.get_fontsize()) for t in labels]
+    # Only the numbers that are actually too close get smaller.
+    #
+    # Scaling the whole panel took every one of the customer's 121 numbers from
+    # 9pt to 7.5pt to buy room for a single pair — and still did not buy it,
+    # because the floor stopped the loop first. A chart where every figure is
+    # smaller for the sake of two of them reads worse than the crowding did.
+    # (Johan, 2026-09-13)
+    def yields(t) -> bool:
+        return t.get_fontsize() > min_pt + 1e-9
+
     for _ in range(tries):
-        sizes = [t.get_fontsize() for t in labels]
-        if min(sizes) * step < min_pt:
+        for _short, ta, tb in crowded:
+            # The narrower segment's number is the one with nowhere to go, so
+            # it yields first; its neighbour only follows if that is not enough.
+            for t in sorted((ta, tb), key=lambda x: x.get_fontsize()):
+                if not yields(t):
+                    continue
+                # Clamped to the floor, not refused at it. The customer's
+                # slivers sat at 7.58pt, one step from which is 6.44 — under
+                # the 6.5 floor — so refusing the step left them stuck 0.06pt
+                # above it, touching, for ever. Going to 6.5 exactly is 14%
+                # narrower, which is far more room than the pair needed.
+                t.set_fontsize(max(min_pt, t.get_fontsize() * step))
+                break
+        crowded = crowded_pairs()
+        if not crowded:
             break
-        for t, pt in zip(labels, sizes):
-            t.set_fontsize(pt * step)
-        if not clashes():
-            return min(t.get_fontsize() for t in labels)
+        # Stop only when nothing left in a crowded pair can give. Testing the
+        # SMALLER of each pair stopped the loop while the wider neighbour still
+        # had room, which is how two labels at one point ended up with only one
+        # of them shrunk. (Johan, 2026-09-13)
+        if not any(yields(ta) or yields(tb) for _s, ta, tb in crowded):
+            break
+    # A shrink that bought NOTHING is worse than no shrink: on the narrowest
+    # slot both numbers went 9pt -> 6.5pt and still sat on each other, so the
+    # chart paid a third of its type size for nothing. Put it back and leave
+    # the crowding visible rather than small AND crowded.
+    #
+    # Only when it bought nothing, though. Two numbers printed at the same
+    # point overlap however small they are, and there shrinking IS the answer —
+    # reverting it there undid the one thing that helps. (Johan, 2026-09-13)
+    if was_overlapping and interpenetrating() and _overlap_area() >= before_area:
+        for t, pt in restore:
+            t.set_fontsize(pt)
+        return None
     return min(t.get_fontsize() for t in labels)
 
 
@@ -1930,31 +2054,49 @@ def clear_callouts(fig, ax, *, along: str) -> int:
         # A short way only. Moved far, a callout pulls a long line across other
         # numbers and ends up nearer another bar's segment than its own; past
         # this, shrinking is the better last resort.
-        reach = 2.5 * (box.width if along == "x" else box.height)
-        shift, k = None, 1
-        while shift is None and k * step <= reach:
-            for s in (k * step, -k * step):
-                cand = box.translated(s, 0) if along == "x" else box.translated(0, s)
-                if along == "x" and (cand.x0 < area.x0 or cand.x1 > area.x1):
-                    continue
-                if along == "y" and (cand.y0 < area.y0 or cand.y1 > area.y1):
-                    continue
-                if not touches(cand, t):
-                    shift = s
-                    break
-            k += 1
+        # Along its own row first, then ACROSS it. On a crowded horizontal bar
+        # the collision is vertical — a callout sits ~12px above its bar and
+        # the number inside the bar above sits at that bar's centre — so
+        # searching sideways scans the one direction that cannot help, finds
+        # nothing, and hands a hopeless pair to the shrink, which then takes
+        # both numbers to the floor and still leaves them overlapping.
+        # At eighteen rows the pitch is ~38px against a 23px callout: the room
+        # is there, just not on the axis we were looking along.
+        # (Johan, 2026-09-13)
+        shift, moved_axis = None, along
+        for axis in (along, "y" if along == "x" else "x"):
+            reach = 2.5 * (box.width if axis == "x" else box.height)
+            # Across the row, a horizontal bar's number may only go UP. Below
+            # its bar it reads as the next bar's number, however carefully the
+            # line is drawn — so the downward candidate is not offered at all
+            # rather than tried and rejected. (Johan, 2026-09-13)
+            ups_only = axis == "y" and along == "x"
+            k = 1
+            while shift is None and k * step <= reach:
+                for s in ((k * step,) if ups_only else (k * step, -k * step)):
+                    cand = box.translated(s, 0) if axis == "x" else box.translated(0, s)
+                    if axis == "x" and (cand.x0 < area.x0 or cand.x1 > area.x1):
+                        continue
+                    if axis == "y" and (cand.y0 < area.y0 or cand.y1 > area.y1):
+                        continue
+                    if not touches(cand, t):
+                        shift, moved_axis = s, axis
+                        break
+                k += 1
+            if shift is not None:
+                break
         if shift is None:
-            # Nowhere near its segment is clear: this one number is left out,
-            # rather than printed over another or every number on the chart
-            # shrunk to make room for it. Only a sliver's number reaches here —
-            # too thin to hold it even at the floor — and only on a chart
-            # crowded enough that the gap beside it is taken. (Johan, 2026-09-11)
-            t.set_visible(False)
-            moved += 1
+            # Nowhere within reach is clear. It STAYS — left where it is, for
+            # `shrink_values_until_clear` to make room for by size. It used to
+            # be hidden here, which took a number the chart had computed off
+            # the slide altogether: a reader cannot tell a suppressed 2 % from
+            # a 2 % that was never there, and no amount of crowding justifies
+            # publishing a chart that is missing one of its own figures.
+            # (Johan, 2026-09-13)
             continue
         px, py = ax.transData.transform(t.xyann)
         t.xyann = tuple(ax.transData.inverted().transform(
-            (px + shift, py) if along == "x" else (px, py + shift)))
+            (px + shift, py) if moved_axis == "x" else (px, py + shift)))
         boxes[id(t)] = text_box(t)
         moved += 1
     return moved
@@ -2191,6 +2333,20 @@ def build_image_bar_stacked(ctx) -> None:
         # straight through the country name beside it. (Johan, 2026-09-10)
         plot_w_in = max(ax.get_position().width * fig.get_size_inches()[0], 0.1)
         gutter_in = _measure_max_label_width_in(secondary, 10.5) + _LABEL_PAD_IN
+        # Beside the names, not out at the edge of the room reserved for them.
+        #
+        # `gutter_in` is the width of the LONGEST secondary name, and the names
+        # are drawn ha="right", so only that one reaches back across the whole
+        # gutter — every other row's name ends well short of it. Pinning the
+        # group label at the gutter's outer edge therefore left a band of blank
+        # paper that no text ever occupies: measured on the customer's slide,
+        # 87px between "Suomi" and the nearest name it labels.
+        #
+        # A rotated label is only its own line-height wide, so it is placed a
+        # pad left of where the names actually BEGIN. The gutter itself is
+        # unchanged — the reservation still has to fit the longest name; this
+        # only stops the label floating at the far side of it.
+        # (Johan, 2026-09-13)
         group_x = -(gutter_in + _GROUP_LABEL_PAD_IN) / plot_w_in
         for glabel, gpos in grouped[1]:
             if plan[0] == "rotated":
@@ -2218,8 +2374,8 @@ def build_image_bar_stacked(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
 
-    # A called-out number on another moves along its row first; shrinking is the
-    # last resort, and only if the numbers still collide.
+    # A called-out number sitting on another moves along its row first;
+    # shrinking is the last resort. Nothing is ever taken off the slide.
     clear_callouts(fig, ax, along="x")
     shrink_values_until_clear(fig, ax)
 
