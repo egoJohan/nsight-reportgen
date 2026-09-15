@@ -70,20 +70,42 @@ function MissingFonts({ missing }: { missing: MissingFont[] }) {
         installed — but the preview and the PDF use a substitute. Upload the
         font below if you hold a licence for it.
       </p>
-      <ul className="mt-3 space-y-2">
+      <div className="mt-3 space-y-2">
         {missing.map((m) => (
-          <li key={m.family} className="text-sm">
-            <span className="font-medium">{m.family}</span>
-            <span className="text-muted-foreground">
-              {" "}
-              — {m.templates.join(", ")}
-            </span>
-            {m.reason && (
-              <p className="mt-0.5 text-xs text-muted-foreground">{m.reason}</p>
-            )}
-          </li>
+          <MissingFontRow key={m.family} font={m} />
         ))}
-      </ul>
+      </div>
+    </div>
+  );
+}
+
+/** One family a template asks for and this server cannot supply.
+ *
+ *  Same row shape as the installed fonts below it — mark, name, detail line —
+ *  so the two lists read as the same kind of thing.
+ *
+ *  No download button, deliberately. A family Google Fonts serves under an
+ *  open licence is already fetched and installed when the template is
+ *  uploaded (`check_template_fonts` -> `ensure_font`), so anything still
+ *  listed here is one we may not install: Century Gothic and Calibri are
+ *  Monotype's and Microsoft's, and offering a look-alike instead would be the
+ *  silent substitution this module exists to remove. The remedy is the upload
+ *  below, by someone holding a licence. (Johan, 2026-09-15) */
+function MissingFontRow({ font }: { font: MissingFont }) {
+  return (
+    <div className={`${ROW} gap-3`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <AlertTriangleIcon className="size-4 shrink-0 text-amber-600" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{font.family}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {font.templates.join(", ")}
+          </p>
+          {font.reason && (
+            <p className="mt-0.5 text-xs text-muted-foreground">{font.reason}</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

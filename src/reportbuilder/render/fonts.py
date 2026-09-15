@@ -231,18 +231,18 @@ def google_font_url(family: str, *, timeout: float = _TIMEOUT,
         body = fetch(_CSS_URL.format(family=quoted), timeout).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         if exc.code == 400:
-            return None, f"Google Fonts ei tunne fonttia '{family}'."
-        return None, f"Google Fonts vastasi virheellä {exc.code}."
+            return None, f"Google Fonts does not know the font '{family}'."
+        return None, f"Google Fonts answered with error {exc.code}."
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         return None, f"Could not reach Google Fonts ({exc.__class__.__name__})."
 
     if "@font-face" not in body:
-        return None, f"Google Fonts ei tarjoa fonttia '{family}'."
+        return None, f"Google Fonts does not serve the font '{family}'."
     # Prefer an explicitly TrueType source when the CSS offers several.
     truetype = re.search(r"url\((https://[^)]+)\)\s*format\('truetype'\)", body)
     m = truetype or re.search(r"url\((https://[^)]+)\)", body)
     if not m:
-        return None, f"Google Fontsin vastauksesta ei löytynyt tiedostoa fontille '{family}'."
+        return None, (f"Google Fonts' reply carried no font file for '{family}'.")
     # Both /s/<family>/<hash>.ttf and /l/font?kit=... are returned for open
     # families depending on the User-Agent; by here the licence is settled, so
     # whichever URL the API gave is the one to fetch.
