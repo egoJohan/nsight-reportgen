@@ -12,6 +12,8 @@ so reverting it to a plain write fails this.
 """
 from __future__ import annotations
 
+import hashlib
+
 import pathlib
 from dataclasses import dataclass
 
@@ -62,7 +64,8 @@ def test_the_published_path_never_holds_a_partial_file(temp_root, monkeypatch):
     instrumentation: it opens the path as soon as it exists.
     """
     published_mid_write: list[tuple[bool, int]] = []
-    target_name = rq._preview_template_filename("tpl-1", BLOB)
+    target_name = rq._preview_template_filename(
+        "tpl-1", identity=hashlib.sha256(BLOB).hexdigest())
     real_write_bytes = pathlib.Path.write_bytes
 
     def halfway(self: pathlib.Path, data: bytes):

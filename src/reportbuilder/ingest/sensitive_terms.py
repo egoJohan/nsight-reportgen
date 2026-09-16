@@ -42,6 +42,10 @@ MIN_OCCURRENCES = 2
 #: Longer than this and it is a sentence, not a name.
 MAX_TERM_CHARS = 40
 
+#: The `1=` an SPSS export writes in front of a value label. Stripped before
+#: anything else looks at the label; see `_candidate`.
+_CODE_PREFIX = re.compile(r"^\d+\s*=\s*")
+
 #: Openers that mark a non-answer, a scale point or an instruction rather than
 #: a name. Matched at the start, case-insensitively, on a word boundary.
 _NOT_A_NAME = re.compile(
@@ -98,22 +102,24 @@ _SCALE_POINTS = frozenset({
 })
 
 
-#: Finnish case endings a NAME does not carry in an answer list.
-#:
-#: A company stands in the nominative — `Attendo`, `Synsam`, `Mainio-kodit`. An
-#: option is inflected, because it is a phrase the question puts the respondent
-#: inside: `Muualla` (adessive), `Omassa rauhassa` (inessive), `Verkkokaupasta`
-#: (elative). Both of the first two were proposed as companies on a live study.
-#:
-#: Deliberately only the DOUBLED-consonant locatives and the plural obliques.
-#: Single `-la`, `-na`, `-ta` are ordinary endings of ordinary names — a rule
-#: that read them as inflection would start dropping companies, and dropping a
-#: company is the one failure this module may not have.
-_CASE_ENDING = re.compile(
-    r"(ss[aä]|st[aä]|ll[aä]|lt[aä]|lle|ks[ei]|tt[aä]|[aä]{2}n|hin|seen|"
-    r"ien|iden|itten)$",
-    re.IGNORECASE,
-)
+# REMOVED 2026-09-16: the Finnish case-ending rule.
+#
+# It refused a term whose first word carried a locative or plural-oblique
+# ending — `Muualla`, `Omassa rauhassa`, `Verkkokaupasta` — on the reasoning
+# that a company stands in the nominative while an option is a phrase the
+# question puts the respondent inside. It was measured on Attendo, Holiday Club
+# and Synsam and lost no company there.
+#
+# It cost one anyway, on a shape those three do not contain: a brand list asked
+# as a single-choice question. `Estrella` ends in `-lla` and was refused.
+# Exempting the enumerated sources one at a time left every caller passing
+# `inflected_ok=True`, which is the rule saying it has no case left to judge.
+#
+# Dropping it adds 29 candidates across those three studies, all demographics
+# and attribute phrases, and loses nothing. `ai.text.pick_company_terms` reads
+# them against the study's questions and drops them in a sentence; a company it
+# never sees reaches the vendor in clear. The DESCRIPTION-opener rule below is
+# untouched and is what removes most of the noise.
 
 #: Words a DESCRIPTION opens with and a company name does not.
 #:
@@ -137,18 +143,25 @@ _DESCRIPTION_OPENERS = frozenset({
 })
 
 
-def _candidate(text: str, *, inflected_ok: bool = False) -> str | None:
-    """The term this string contributes, or None if it cannot be a name.
-
-    `inflected_ok` for an ENUMERATED member — a battery's, or a multi-response
-    question's option. Those stand in the nominative, so the rule that drops an
-    inflected answer must not be asked about them.
-    """
+def _candidate(text: str) -> str | None:
+    """The term this string contributes, or None if it cannot be a name."""
     t = (text or "").strip().strip(":").strip()
+    # An SPSS export often writes the code into the label: `1=Amazon`,
+    # `7=Täysin samaa mieltä`. The code is not part of the name — proposing
+    # `1=Amazon` would mask a string the report's text never contains — and it
+    # hides the rest of the label from every rule below, which is how
+    # `1=Erittäin epätodennäköistä` got past the opener that already refuses
+    # `Erittäin`. Judge the label it carries. (Johan, 2026-09-15)
+    t = _CODE_PREFIX.sub("", t).strip()
     if not t or len(t) > MAX_TERM_CHARS:
         return None
-    if not t[:1].isupper():
-        return None            # a name is capitalised; a scale point rarely is
+    # A capital SOMEWHERE, not necessarily first. Requiring the first character
+    # refused `nSight`, `eBay`, `iPhone` and `3M` — every one of them written
+    # the way its owner writes it. A scale point or a stretch of the study's own
+    # prose still carries no capital at all, which is the signal that was
+    # actually wanted. (Johan, 2026-09-15)
+    if not any(c.isupper() for c in t):
+        return None
     if _NOT_A_NAME.match(t):
         return None
     if t.isdigit():
@@ -159,13 +172,6 @@ def _candidate(text: str, *, inflected_ok: bool = False) -> str | None:
     if _COUNTED_INTERVAL.search(t):
         return None
     first = t.split()[0].strip("-,")
-    # A case ending marks an OPTION the question puts the respondent inside
-    # ("Muualla", "Verkkokaupasta"), which is what the rule was written for. An
-    # enumerated member does not inflect, and reading its tail as a case dropped
-    # `Estrella` — a real brand, named 22 times on the Taffel study, and the one
-    # failure this module may not have. (Johan, 2026-09-14)
-    if not inflected_ok and _CASE_ENDING.search(first):
-        return None
     if first.lower() in _DESCRIPTION_OPENERS:
         return None
     # Two words is a company ("Julkiset hoivapalvelut", "Esperi Care"); five is
@@ -242,7 +248,7 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
             if len(members) < 2:
                 continue        # not a battery, just one labelled variable
             for m in members:
-                term = _candidate(m, inflected_ok=True)
+                term = _candidate(m)
                 if term:
                     counts[term] += len(members)
 
@@ -265,14 +271,25 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
         if len(options) < 2:
             continue            # one indicator is not a list of options
         for option in options:
-            term = _candidate(option, inflected_ok=True)
+            term = _candidate(option)
             if term:
                 counts[term] += len(options)
 
     # --- answer categories ------------------------------------------------
-    # "Which of these do you use" carries its brands as value labels. Here
-    # repetition IS the signal: a brand recurs across the questions that ask
-    # about it, while a one-off category is that question's own wording.
+    # "Which of these do you use" carries its brands as value labels, and ONE
+    # appearance is enough.
+    #
+    # This used to need two, on the reasoning that a brand recurs across the
+    # questions asking about it while a one-off category is that question's own
+    # wording. True of a tracker, and fatal to the ordinary study that asks
+    # "which of these companies do you know" exactly once: every option appeared
+    # a single time, so Amazon, Salesforce and Aramco were never offered and the
+    # screen said the study's structure named no companies at all.
+    #
+    # The judgement belongs to `ai.text.pick_company_terms`, which reads the
+    # candidates against the study's questions. An extra candidate costs it a
+    # sentence; a missing one costs the masking everything it is for.
+    # (Johan, 2026-09-15)
     value_counts: Counter[str] = Counter()
     for var in model.variables.values():
         for vl in var.value_labels:
@@ -280,8 +297,7 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
             if term:
                 value_counts[term] += 1
     for term, n in value_counts.items():
-        if n >= MIN_OCCURRENCES:
-            counts[term] += n
+        counts[term] += n
 
     proposed = list(counts)
     # Frequent first: the brand a tracker is ABOUT appears in every grid, so

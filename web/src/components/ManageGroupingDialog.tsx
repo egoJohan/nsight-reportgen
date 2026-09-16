@@ -36,6 +36,64 @@ type Change = {
 const setKey = (vars: string[]) => [...vars].sort().join(" ");
 
 /**
+ * What a panel says when it has no rows to draw.
+ *
+ * Three states, three sentences. They were one — "No ungrouped variables" —
+ * which reads as "your study has nothing to group" whether that is true, the
+ * request failed, or it never ran. An analyst cannot tell those apart, retries
+ * nothing because nothing looks broken, and reports it as missing variables.
+ * (Johan, 2026-09-16)
+ */
+function PanelState({
+  pending,
+  failed,
+  error,
+  onRetry,
+  pendingText,
+  emptyText,
+}: {
+  pending?: boolean;
+  failed?: boolean;
+  error?: unknown;
+  onRetry?: () => void;
+  pendingText: string;
+  emptyText: string;
+}) {
+  if (pending) {
+    return (
+      <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+        {pendingText}
+      </p>
+    );
+  }
+  if (failed) {
+    const detail = error instanceof Error ? error.message : "";
+    return (
+      <div className="px-2 py-6 text-center">
+        <p className="text-xs text-destructive">
+          Could not load this list.
+          {detail ? ` ${detail}` : ""}
+        </p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-2 text-xs underline underline-offset-2"
+          >
+            Try again
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+      {emptyText}
+    </p>
+  );
+}
+
+/**
  * Controlled grouping editor for a REPORT. Seeded from the report's current
  * `grouping`; on Save it emits the edited override via `onSave` (the report saves
  * it — nothing is persisted per-material here).
@@ -58,7 +116,20 @@ export default function ManageGroupingDialog({
   // grouped automatically.
   initialSelection?: readonly string[];
 }) {
-  const { data: variables } = useVariables(open ? materialId : null, true);
+  // `isPending`/`isError` are read, not just `data`. Every one of these three
+  // states used to render the same sentence — "No ungrouped variables" — so a
+  // request that failed, one that never ran, and a study with genuinely nothing
+  // to group were indistinguishable on screen. Reported as "muuttujat eivät
+  // tule näkyviin listaan", and it cost a long investigation to establish which
+  // of the three it was: a silent failure is not only unhelpful to the analyst,
+  // it hides the evidence. (Johan, 2026-09-16)
+  const {
+    data: variables,
+    isPending: variablesPending,
+    isError: variablesFailed,
+    error: variablesError,
+    refetch: refetchVariables,
+  } = useVariables(open ? materialId : null, true);
 
   const [groups, setGroups] = useState<GroupSpec[]>([]);
   const [singles, setSingles] = useState<string[]>([]);
@@ -95,10 +166,11 @@ export default function ManageGroupingDialog({
   // OPTION label, not the question). Cards + pool are DERIVED from this, so what you
   // see always matches the questions list after "Vie raporttiin".
   const working = { groups, singles, comparisons };
-  const { data: workingReshaped } = useRegroupedQuestions(
-    open ? materialId : null,
-    working
-  );
+  const {
+    data: workingReshaped,
+    isPending: groupsPending,
+    isError: groupsFailed,
+  } = useRegroupedQuestions(open ? materialId : null, working);
   const { data: parallelSuggestions } = useParallelSuggestions(
     open ? materialId : null,
     working
@@ -402,8 +474,19 @@ export default function ManageGroupingDialog({
               </span>
             </div>
             <div className="flex-1 overflow-y-auto p-1.5">
-              {pool.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted-foreground">No ungrouped variables</p>
+              {variablesPending || variablesFailed || pool.length === 0 ? (
+                <PanelState
+                  pending={variablesPending}
+                  failed={variablesFailed}
+                  error={variablesError}
+                  onRetry={() => void refetchVariables()}
+                  pendingText="Loading variables…"
+                  emptyText={
+                    (variables?.length ?? 0) > 0
+                      ? "Nothing here can be grouped — grouping needs tick-box (yes/no) variables, or rating variables sharing a scale."
+                      : "No ungrouped variables"
+                  }
+                />
               ) : (
                 pool.map((name) => (
                   <button
@@ -479,8 +562,13 @@ export default function ManageGroupingDialog({
               <span className="text-xs font-medium uppercase text-muted-foreground">Groups</span>
             </div>
             <div className="flex-1 space-y-2 overflow-y-auto p-2">
-              {cards.length === 0 ? (
-                <p className="px-2 py-6 text-center text-xs text-muted-foreground">No groups</p>
+              {groupsPending || groupsFailed || cards.length === 0 ? (
+                <PanelState
+                  pending={groupsPending}
+                  failed={groupsFailed}
+                  pendingText="Loading groups…"
+                  emptyText="No groups"
+                />
               ) : (
                 cards.map((card) => {
                   const addable = canAddTo(card);

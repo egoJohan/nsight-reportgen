@@ -196,6 +196,11 @@ export interface ChartElements {
   axis_names: boolean;
   filter_var: boolean;
   data_labels: boolean;
+  /** The "(n=516)" after a GROUP's own name — legend entries where the series
+   *  are groups, bar names where the bars are. Distinct from `n`, the slide's
+   *  own base in the footer. Optional: reports saved before it exists have no
+   *  such key, and their behaviour was on. */
+  group_base?: boolean;
 }
 
 // Where the template puts its title, read off the fast preview's response
@@ -341,6 +346,13 @@ export interface AiSlideTitleBody {
   not_answered_codes?: number[] | null;
   // The report's grouping, so a title for a grouped question (battery/multi) resolves.
   grouping?: GroupingOverride;
+  /** What the slide DRAWS. A combo computes a second measure — its secondary
+   *  variable's mean — and the engine dispatches on the chart type plus
+   *  `options.combo_secondary`. Without them the series the headline is written
+   *  from has one measure in it, so it could only describe the bars.
+   *  (Johan, 2026-09-16) */
+  chart_type?: string;
+  options?: Record<string, unknown>;
 }
 
 export interface AiShortLabelsBody {
@@ -1273,7 +1285,18 @@ export const api = {
         // _preview_template in routes_questions.py.
         reportId?: string;
       }
-    ): Promise<{ blob: Blob; titleMeta: ChartPreviewTitleMeta | null }> => {
+    ): Promise<{
+      blob: Blob;
+      titleMeta: ChartPreviewTitleMeta | null;
+      /** This slide had nothing to chart. The picture is a blank placeholder —
+       *  it no longer says so itself, so this is the only way the editor can
+       *  raise it. See `X-Chart-Empty` in routes_questions.py. */
+      empty: boolean;
+      /** How many categories came out too thin to carry a number. 0 = none.
+       *  A property of THIS render: the same chart labels fine in a taller
+       *  chart area. See `X-Chart-Unlabelled` in routes_questions.py. */
+      unlabelled: number;
+    }> => {
       // No gate here any more: previewQueue owns ordering and concurrency, so
       // that a slide's headline is written before its picture is drawn.
       return (async () => {
@@ -1325,7 +1348,12 @@ export const api = {
           // 31 slides, 63 attempts, all inside ten seconds, then silence.
           throw new ApiError(res.status, detail);
         }
-        return { blob: await res.blob(), titleMeta: readTitleMeta(res.headers) };
+        return {
+          blob: await res.blob(),
+          titleMeta: readTitleMeta(res.headers),
+          empty: res.headers.get("X-Chart-Empty") === "1",
+          unlabelled: Number(res.headers.get("X-Chart-Unlabelled")) || 0,
+        };
       })();
     },
 

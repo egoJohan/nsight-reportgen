@@ -226,22 +226,22 @@ def _is_text_question(model: QuestionModel, q) -> bool:
     return bool(qvars) and all(v.measurement == "text" for v in qvars)
 
 
-def _scale_key(var) -> str | None:
+def _scale_key(var, df=None) -> str | None:
     """A signature of a variable's rating scale (its code→label map), or None if it
     isn't a scale. Two variables can only form a battery when their keys match — this
     lets the grouping UI offer 'Group as battery' ONLY for variables that share a
     scale (e.g. NOT age + gender + region, which each carry a different scale)."""
-    lv = scale_levels(var)
+    lv = scale_levels(var, df)
     return "|".join(f"{c}:{l}" for c, l, _p in lv) if lv else None
 
 
-def _scale_compat_key(var) -> str | None:
+def _scale_compat_key(var, df=None) -> str | None:
     """A LOOSER scale signature — the set of scale POINTS (1..N), ignoring the value
     labels. Variables sharing this (e.g. two 1..5 scales worded differently, a grade
     scale + a satisfaction scale) are battery-COMPATIBLE even when their exact scale_key
     differs; the stacked battery maps each member by point and labels the stack from the
     first member. None when the variable isn't a rating scale."""
-    lv = scale_levels(var)
+    lv = scale_levels(var, df)
     if not lv:
         return None
     return "|".join(str(p) for p in sorted({p for _c, _l, p in lv}))
@@ -995,13 +995,13 @@ def list_variables(
                 # customer's whole study un-groupable (see is_tickbox).
                 "tickbox": is_tickbox(var, _df_or_none()),
                 # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
-                "scale": bool(scale_levels(var)),
+                "scale": bool(scale_levels(var, _df_or_none())),
                 # Signature of the scale (its code→label map). Two variables can only
                 # form a battery when their scale_key matches; None when not a scale.
-                "scale_key": _scale_key(var),
+                "scale_key": _scale_key(var, _df_or_none()),
                 # Looser signature — the scale's POINT set. Variables sharing this are
                 # battery-COMPATIBLE even when worded differently (same 1..N range).
-                "scale_compat_key": _scale_compat_key(var),
+                "scale_compat_key": _scale_compat_key(var, _df_or_none()),
             }
             for var in all_vars
         ] + _banner_classifier_rows(model, None if include_all else _df_or_none())
@@ -1464,6 +1464,16 @@ class _SortSpecBody(BaseModel):
 
 
 class _ElementTogglesBody(BaseModel):
+    """The preview's copy of `ElementToggles`.
+
+    Kept in step by `test_preview_carries_every_element_toggle`, which compares
+    the two sets rather than trusting anyone to remember. `group_base` was added
+    to the slide, honoured by every renderer, saved correctly — and did nothing
+    in the editor, because it was missing from here and from the field-by-field
+    construction below. A control that works in the deck and not in the only
+    place the author can see it reads as a broken feature. (Johan, 2026-09-16)
+    """
+
     title: bool = True
     subtitle: bool = True
     legend: bool = True
@@ -1471,6 +1481,7 @@ class _ElementTogglesBody(BaseModel):
     axis_names: bool = True
     filter_var: bool = True
     data_labels: bool = True
+    group_base: bool = True
 
 
 class ChartSpecBody(BaseModel):
@@ -1584,13 +1595,12 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             # size LibreOffice actually uses, measured rather than read off the
             # template), so render_title selects only HOW a slide is rasterised
             # — compositor or LibreOffice — never what is on it.
-            title=body.elements.title,
-            subtitle=body.elements.subtitle,
-            legend=body.elements.legend,
-            n=body.elements.n,
-            axis_names=body.elements.axis_names,
-            filter_var=body.elements.filter_var,
-            data_labels=body.elements.data_labels,
+            # Splatted, not listed. The list above it used to name all seven
+            # fields, so a new toggle had to be remembered here too — and the
+            # one that was not silently did nothing in the editor while working
+            # in the deck. The two models are held in step by a test; this makes
+            # keeping them in step enough. (Johan, 2026-09-16)
+            **body.elements.model_dump(),
         ),
         scatter_xy=tuple(body.scatter_xy) if body.scatter_xy is not None else None,
         show_not_answered=body.show_not_answered,
@@ -1684,6 +1694,8 @@ _PREVIEW_CACHE_SALT = (
 #: in any one of the three sites would fail silently and in the worst way: the
 #: cache would report no path, which is indistinguishable from a fallback.
 _DRAWN_BY = "preview.path"
+_CHART_EMPTY = "preview.empty"
+_CHART_UNLABELLED = "preview.unlabelled"
 
 
 def _record_drawn_by(out_dir: pathlib.Path, which: str) -> None:
@@ -1712,6 +1724,62 @@ def _drawn_by(out_dir: pathlib.Path) -> dict[str, str]:
     except OSError:
         return {}
     return {"X-Preview-Path": which} if which else {}
+
+
+def _record_empty(out_dir: pathlib.Path, empty: bool) -> None:
+    """Record that this entry's chart had nothing to plot.
+
+    Written BEFORE the PNG is published, for the same reason `_record_drawn_by`
+    is: a cache hit gates on the PNG existing, and a cached preview that cannot
+    say it is blank leaves its author unwarned.
+    """
+    try:
+        (out_dir / _CHART_EMPTY).write_text("1" if empty else "0", encoding="utf-8")
+    except OSError:  # a preview that cannot be labelled is still a preview
+        pass
+
+
+def _record_unlabelled(out_dir: pathlib.Path, notes) -> None:
+    """Record how many categories this chart could not label, or 0 for none.
+
+    Written BEFORE the PNG is published, like the two markers above it: a cache
+    hit gates on the PNG existing and cannot rediscover what the render found.
+    """
+    n = next((int(x.count) for x in notes or () if x.kind == "unlabelled"), 0)
+    try:
+        (out_dir / _CHART_UNLABELLED).write_text(str(n), encoding="utf-8")
+    except OSError:  # a preview that cannot be labelled is still a preview
+        pass
+
+
+def _unlabelled_headers(out_dir: pathlib.Path) -> dict[str, str]:
+    """The `X-Chart-Unlabelled` header for a cached entry — or no header at all.
+
+    Absent means "nothing wrong with this one", which is also what an entry
+    cached before this marker existed gets. Same asymmetry as `_empty_headers`,
+    for the same reason: a missed warning costs one look at the picture, and an
+    invented one costs trust in all of them.
+    """
+    try:
+        n = (out_dir / _CHART_UNLABELLED).read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    return {"X-Chart-Unlabelled": n} if n.isdigit() and int(n) > 0 else {}
+
+
+def _empty_headers(out_dir: pathlib.Path) -> dict[str, str]:
+    """The `X-Chart-Empty` header for a cached entry — or no header at all.
+
+    Absent means "nothing wrong with this one", which is also what an entry
+    cached before this marker existed gets. That asymmetry is deliberate: a
+    missed warning costs the author one look at the picture, and a warning
+    invented for a chart that has data costs them trust in all of them.
+    """
+    try:
+        mark = (out_dir / _CHART_EMPTY).read_text(encoding="utf-8").strip()
+    except OSError:
+        return {}
+    return {"X-Chart-Empty": "1"} if mark == "1" else {}
 
 
 def _preview_out_dir(material_id: str, spec_json: str) -> pathlib.Path:
@@ -1784,17 +1852,22 @@ def _styled_template(repo, auth, material_id: str, template_path: str,
         template_path, _template_overrides(repo, auth, material_id, template_id))
 
 
-def _preview_template_filename(template_id: str, blob: bytes) -> str:
+def _preview_template_filename(template_id: str, *, identity: str) -> str:
     """The temp-file name for this exact template CONTENT.
 
-    Named by content hash, not by length. The previous rule rewrote the file
-    only when its size differed, so re-uploading a template that happened to be
-    the same number of bytes kept rendering from the old one — and now that
-    template resolution is cached on the file (template_cache.resolve), it would
-    keep that template's fonts, palette and type sizes too.
+    Named by content, not by length. The previous rule rewrote the file only
+    when its size differed, so re-uploading a template that happened to be the
+    same number of bytes kept rendering from the old one — and now that template
+    resolution is cached on the file (template_cache.resolve), it would keep
+    that template's fonts, palette and type sizes too.
+
+    `identity` is the store's etag where there is one and a sha256 of the bytes
+    otherwise. Both are content-derived, which is the only property that makes
+    this name safe: different bytes must give a different name. It is NOT one
+    fixed algorithm — the two stores hash differently — so nothing may compare
+    this against a hash it computed itself. (Johan, 2026-09-16)
     """
-    digest = hashlib.sha256(blob).hexdigest()[:16]
-    return f"{template_id or 'default'}.{digest}.pptx"
+    return f"{template_id or 'default'}.{identity[:16]}.pptx"
 
 
 def _preview_template(repo, auth, material_id: str, report_id: str = "",
@@ -1829,13 +1902,31 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "",
             # which a lagging unbind would otherwise contradict.
             template_id, _level = repo.resolve_template(
                 auth, m.customer_id, m.case_id, "")
+        tpl_path = (_paths.template_path(m.customer_id, template_id)
+                    if template_id else _paths.default_template_path())
+        path = cache_dirs.template_root()
+        # The cached file is named for the template's CONTENT, and the store can
+        # say what that is without handing over 600KB: an etag is a listing
+        # away. When the file it names is already here, nothing is fetched —
+        # which is the whole of this change. Every slide of a warm report used
+        # to re-download the same template. (Johan, 2026-09-16)
+        # `getattr`, because this function must degrade rather than fail: a
+        # store that cannot answer the cheap question should still render the
+        # template, and the broad `except` below would otherwise turn a missing
+        # method into a silent fall back to house style.
+        ask_etag = getattr(repo, "object_etag", None)
+        etag = ask_etag(auth, tpl_path) if ask_etag else None
+        if etag:
+            f = path / _preview_template_filename(template_id, identity=etag)
+            if f.exists():
+                return str(f), template_id or "default"
         blob = (repo.get_template_bytes(auth, m.customer_id, template_id)
                 if template_id else
                 repo.store.get(auth, _paths.default_template_path()))
         if not blob:
             return None, ""
-        path = cache_dirs.template_root()
-        f = path / _preview_template_filename(template_id, blob)
+        f = path / _preview_template_filename(
+            template_id, identity=etag or hashlib.sha256(blob).hexdigest())
         if not f.exists():
             # Written aside and moved into place, never written where a reader
             # is looking. Previews run concurrently — the whole deck at once
@@ -1952,7 +2043,9 @@ def preview_chart(
     if cached_png.exists():
         log.info("preview %s %s: cached", material_id, body.chart_type)
         return Response(content=cached_png.read_bytes(), media_type="image/png",
-                         headers={**fast_headers, **_drawn_by(out_dir)})
+                         headers={**fast_headers, **_drawn_by(out_dir),
+                                  **_empty_headers(out_dir),
+                                  **_unlabelled_headers(out_dir)})
     started = time.monotonic()
 
     # 1. Load material data, through the SAME seam every other path uses.
@@ -1989,6 +2082,13 @@ def preview_chart(
     #    concurrency)
     uid = uuid.uuid4().hex[:8]
     pptx_path = str(out_dir / f"preview.{uid}.pptx")
+    # Filled by whichever builder runs below with the key of every chart that
+    # had nothing to plot. The preview is a one-chart report, so a non-empty
+    # list means THIS slide is blank.
+    blank: list[str] = []
+    # What the BUILDERS want the author told — filled during drawing, not from
+    # the series, because it depends on how the chart came out in this slot.
+    notes: list = []
     try:
         # Reuse the spec already loaded for fast_headers above (the common
         # case, render_title=False) rather than parsing the template twice.
@@ -2009,7 +2109,9 @@ def preview_chart(
         if not body.render_title:
             try:
                 fast = compose_from_slide(
-                    style, build_presentation(report, model, df, style=style).slides[0])
+                    style, build_presentation(report, model, df, style=style,
+                                              empty_out=blank,
+                                              notes=notes).slides[0])
             except Exception:  # noqa: BLE001 — never worth failing a preview over
                 log.warning("fast preview failed; falling back to LibreOffice",
                             exc_info=True)
@@ -2021,12 +2123,16 @@ def preview_chart(
                 tmp_png = out_dir / f"preview.{uid}.png"
                 tmp_png.write_bytes(png_bytes)
                 _record_drawn_by(out_dir, "composited")
+                _record_empty(out_dir, bool(blank))
+                _record_unlabelled(out_dir, notes)
                 os.replace(tmp_png, cached_png)
                 log.info("preview %s %s: %.1fs (composited)", material_id,
                          body.chart_type, time.monotonic() - started)
                 return Response(content=png_bytes, media_type="image/png",
                                  headers={**fast_headers,
-                                          "X-Preview-Path": "composited"})
+                                          "X-Preview-Path": "composited",
+                                          **_empty_headers(out_dir),
+                                          **_unlabelled_headers(out_dir)})
             # compose_from_slide returns None when there is no cached ground to
             # draw on — a template it has not rendered yet, or one it could not
             # read. That is a silent 20x slowdown, so SAY so: without this line
@@ -2037,7 +2143,8 @@ def preview_chart(
         else:
             log.info("preview %s %s: title baked in, using LibreOffice",
                      material_id, body.chart_type)
-        build_pptx(report, model, df, pptx_path, style=style)
+        build_pptx(report, model, df, pptx_path, style=style, empty_out=blank,
+                   notes=notes)
         built = time.monotonic()
         # The selected slide (priority) takes the reserved soffice slot so it never
         # waits behind background deck-prefetch renders.
@@ -2068,6 +2175,8 @@ def preview_chart(
     tmp_png = out_dir / f"preview.{uid}.png"
     tmp_png.write_bytes(png_bytes)
     _record_drawn_by(out_dir, "libreoffice")
+    _record_empty(out_dir, bool(blank))
+    _record_unlabelled(out_dir, notes)
     os.replace(tmp_png, cached_png)
     # The .pptx, the .pdf and the rasterized page were the road to that PNG, not
     # the destination: only the PNG is ever served. Keeping them made a cached
@@ -2085,7 +2194,9 @@ def preview_chart(
              material_id, body.chart_type, time.monotonic() - started,
              built - started, converted - built, rastered - converted)
     return Response(content=png_bytes, media_type="image/png",
-                    headers={"X-Preview-Path": "libreoffice"})
+                    headers={"X-Preview-Path": "libreoffice",
+                             **_empty_headers(out_dir),
+                             **_unlabelled_headers(out_dir)})
 
 
 @questions_router.post("/materials/{material_id}/preview-cache/clear")

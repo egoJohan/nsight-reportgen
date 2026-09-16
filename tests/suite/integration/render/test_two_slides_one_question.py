@@ -82,7 +82,20 @@ def test_each_slide_is_drawn_on_its_own_group():
     # Suomi answers Kyllä 9 times in 10, Ruotsi 1 in 10: two charts that cannot
     # look alike unless they were given the same numbers.
     assert _picture(prs, 0) != _picture(prs, 1)
-    assert "Suomi" in _texts(prs, 0) and "Ruotsi" in _texts(prs, 1)
+    # REVERSED 2026-09-16. This used to assert the footer named each slide's
+    # group — "Suomi" on one, "Ruotsi" on the other. The slide says nothing
+    # about which groups it was narrowed to any more: that is a warning to the
+    # AUTHOR, raised in the editor on the warning button and the slide-item
+    # icon ("Drawn on 1 group only"), not a line on the client's slide.
+    # (Johan: "Warning should not be rendered to slide in any case!")
+    #
+    # Which leaves the PICTURE as the only proof that the two slides were given
+    # different numbers — which is what this test was always really about, and
+    # what its own `_picture` docstring says: the footer's group names came from
+    # the spec, so they were printed whatever series the slide was handed and
+    # could never have told two slides apart.
+    for i in (0, 1):
+        assert "Suomi" not in _texts(prs, i) and "Ruotsi" not in _texts(prs, i)
 
 
 def test_two_statistics_of_one_question_do_not_collapse_into_one():

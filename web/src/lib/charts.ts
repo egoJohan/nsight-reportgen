@@ -297,6 +297,15 @@ export function titleDataKey(
     chart.statistic,
     chart.show_not_answered,
     chart.not_answered_codes ?? null,
+    // NOT the chart type — this key is deliberately blind to presentation, and
+    // bar↔pie shows the same data and must not rewrite a headline still true of
+    // it. But a COMBO is the one type that changes the DATA: it computes a
+    // second measure from `combo_secondary`. So what goes in is that derived
+    // fact, not the type itself — picking or changing a secondary retitles,
+    // recolouring or reshaping never does. (Johan, 2026-09-16)
+    chart.chart_type === "combo"
+      ? ((chart.options?.["combo_secondary"] as string | undefined) ?? null)
+      : null,
   ]);
 }
 
@@ -424,6 +433,7 @@ export const DEFAULT_ELEMENTS: ChartElements = {
   axis_names: true,
   filter_var: true,
   data_labels: true,
+  group_base: true,
 };
 
 // Survey order by default: the SAV's own category order is the order the

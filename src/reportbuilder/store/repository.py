@@ -424,6 +424,23 @@ class Repository:
         # come before "9".
         return sorted(out, key=lambda c: _natural_key(c.name), reverse=True)
 
+    def count_cases(self, auth: AuthContext, customer_id: str, user=None) -> int:
+        """How many cases this caller may see — without reading any of them.
+
+        `list_cases` reads a `case.json` per case to build the Case objects, and
+        the customers page threw all of them away to keep `len()`. On a tenant
+        with 11 studies that was 11 of the page's 43 datahive round trips.
+
+        The filter is the same one `list_cases` applies, and it is safe to apply
+        here because `_admits` decides on the object PATH, never on the body —
+        so nothing that gates visibility is in the bytes being skipped. Keep the
+        two in step: a count that saw more than the listing would leak how many
+        studies sit behind a customer the caller cannot open. (Johan, 2026-09-16)
+        """
+        return sum(1 for info in self.store.list(auth, P.customer_prefix(customer_id),
+                                                 labels=[P.LABEL_CASE])
+                   if _admits(user, info.path))
+
     def get_case(self, auth: AuthContext, customer_id: str, case_id: str) -> Case:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))
         return Case(id=d["id"], customer_id=customer_id,
@@ -1317,6 +1334,31 @@ class Repository:
                 out.append(user)
         return sorted(out, key=lambda u: u.email.lower())
 
+    def list_user_names(self, auth: AuthContext) -> dict[str, str]:
+        """``{user_id: display name}`` — the user records, and NOT their grants.
+
+        `get_user` always reads a second object, `<id>.grants`, because a User
+        is not much use without them. A page that only wants to print who owns a
+        customer does not need them, and paid one extra datahive round trip per
+        tenant user for the privilege.
+
+        Deliberately returns strings, not Users: a caller that wanted the rest
+        of a User would otherwise be handed one with empty grants, which reads
+        as "this person may do nothing" rather than "nobody asked". Anything
+        that needs permissions calls `get_user`/`list_users` and gets them.
+        (Johan, 2026-09-16)
+        """
+        out: dict[str, str] = {}
+        for info in self.store.list(auth, P.SETTINGS_ROOT + "/", labels=[P.LABEL_USER]):
+            try:
+                d = self._read_json(auth, info.path)
+            except (NotFound, ValueError, UnicodeDecodeError):
+                continue
+            uid = d.get("id")
+            if uid:
+                out[uid] = d.get("name") or d.get("email", "")
+        return out
+
     def find_user_by_email(self, auth: AuthContext, email: str) -> "User | None":
         """Sign-in has a verified email and nothing else.
 
@@ -1959,6 +2001,29 @@ class Repository:
         # own — it would only work while something else also hashed the id.
         digest = hashlib.sha256(f"{template_id}|{etag}|{blob}".encode()).hexdigest()
         return digest[:16]
+
+    def object_etag(self, auth: AuthContext, path: str) -> str | None:
+        """This object's etag, without fetching its bytes — None if unknown.
+
+        A listing carries metadata only, so this is one small call where `get`
+        would pull the whole object. It exists for the template a preview
+        renders through: that is 600KB, it was fetched once per slide, and on a
+        nine-slide report that is 5.4MB pulled for a file already on disk.
+
+        The etag is content-derived in both stores (datahive: sha256 truncated;
+        in-memory: md5), which is the only property the caller needs — different
+        bytes mean a different etag. It is NOT one fixed algorithm across
+        stores, so nothing may assume it equals any particular hash.
+        (Johan, 2026-09-16)
+        """
+        prefix = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        try:
+            for info in self.store.list(auth, prefix):
+                if info.path == path:
+                    return info.etag or None
+        except Exception:  # noqa: BLE001 — a store that cannot list still works
+            return None
+        return None
 
     def get_template_bytes(self, auth: AuthContext, customer_id: str,
                            template_id: str) -> bytes:

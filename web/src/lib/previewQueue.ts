@@ -190,6 +190,8 @@ let statuses = new Map<string, Map<ProducerId, Entry>>();
 /** Patches applied but not yet reflected in what `slideSource` returns. */
 let overlay = new Map<string, Partial<ChartSpec>>();
 let queue: string[] = [];
+/** What each slide's last render said about itself. See `noteChartFacts`. */
+let chartFacts = new Map<string, ChartFacts>();
 let queued = new Set<string>();
 /** Slides with a pass in flight. Enqueueing one again is a no-op: the pass ends
  *  by re-checking its own fingerprints, which is what catches an edit that
@@ -371,6 +373,51 @@ export function statusOf(slideId: string): Partial<Record<ProducerId, Status>> {
   return out;
 }
 
+/** What this slide's last render said about itself.
+ *
+ *  Two facts so far, and both are the same KIND of fact: something the picture
+ *  cannot say for itself any more. The blank slide stopped printing "No data to
+ *  show" — English text on a slide that goes out with the deck — and a chart too
+ *  dense to label never said why its numbers were missing. The preview response
+ *  carries both (`X-Chart-Empty`, `X-Chart-Unlabelled`); this is where the
+ *  answer is kept, keyed by slide, as `failuresOf` is: the warning button and
+ *  the slide-list icon ask about a slide, not about a fingerprint.
+ *
+ *  One entry, not one set per fact. They arrive together, from one render, and
+ *  splitting them would mean two things to keep in step for no gain.
+ *
+ *  Per editing session, like every other status; the chart producer re-states
+ *  them from the cached picture when it skips a render, so reopening a report
+ *  whose pictures are still held does not quietly drop its warnings.
+ */
+export type ChartFacts = {
+  /** Nothing to plot: the picture is a blank placeholder. */
+  empty: boolean;
+  /** How many categories the chart could not fit a number against. 0 = none. */
+  unlabelled: number;
+};
+
+const NO_FACTS: ChartFacts = { empty: false, unlabelled: 0 };
+
+export function noteChartFacts(slideId: string, facts: ChartFacts): void {
+  if (!slideId) return;
+  const had = chartFacts.get(slideId) ?? NO_FACTS;
+  if (had.empty === facts.empty && had.unlabelled === facts.unlabelled) return;
+  if (!facts.empty && !facts.unlabelled) chartFacts.delete(slideId);
+  else chartFacts.set(slideId, facts);
+  notify();
+}
+
+/** This slide's facts, or the all-clear.
+ *
+ *  The SAME object every time nothing has changed — `useSyncExternalStore`
+ *  compares snapshots by identity, and a fresh object per call re-renders for
+ *  ever. Hence the shared `NO_FACTS` and the replace-only-on-change above.
+ */
+export function chartFactsOf(slideId: string): ChartFacts {
+  return chartFacts.get(slideId) ?? NO_FACTS;
+}
+
 /** Which producers failed on this slide, and why — for the warning button. */
 export function failuresOf(slideId: string): Array<{ id: ProducerId; error: unknown }> {
   const out: Array<{ id: ProducerId; error: unknown }> = [];
@@ -407,6 +454,7 @@ export function reset(reportId: string) {
   retried = new Map();
   pendingRetries = 0;
   blankSince = new Map();
+  chartFacts = new Map();
   forceRedraw = new Set();
   // In-flight bookkeeping too. A producer already awaiting cannot be recalled,
   // but its result is abandoned by the generation bump above — so counting it
@@ -1091,6 +1139,7 @@ export function __resetForTest() {
   retried = new Map();
   pendingRetries = 0;
   blankSince = new Map();
+  chartFacts = new Map();
   forceRedraw = new Set();
   active = 0;
   focused = "";

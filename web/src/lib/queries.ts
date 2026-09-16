@@ -526,6 +526,12 @@ export interface ChartPreviewResult {
   // (renderTitle: false). Null on the slow path and on a template with no
   // title box — see readTitleMeta in api.ts.
   titleMeta: ChartPreviewTitleMeta | null;
+  /** This slide had nothing to chart. Held with the picture, not only in the
+   *  queue's per-session notes, so a slide whose picture is still cached can be
+   *  warned about again without being redrawn. */
+  empty: boolean;
+  /** How many categories this render could not label. 0 = none. */
+  unlabelled: number;
 }
 
 /**
@@ -702,7 +708,7 @@ export async function fetchChartPreviewInto(
     /** The author asked for this slide to be drawn again. */
     force?: boolean;
   }
-): Promise<void> {
+): Promise<ChartPreviewResult> {
   // The picture is held under its fingerprint and never goes stale by itself
   // (staleTime: Infinity), which is right: the fingerprint changes when the
   // slide does. "Draw this slide again" is the one case that has nothing to do
@@ -713,7 +719,7 @@ export async function fetchChartPreviewInto(
   if (opts.force) {
     qc.removeQueries({ queryKey: ["chart-preview", materialId, fingerprint], exact: true });
   }
-  await qc.fetchQuery<ChartPreviewResult>({
+  return qc.fetchQuery<ChartPreviewResult>({
     queryKey: ["chart-preview", materialId, fingerprint],
     queryFn: () =>
       api.materials
@@ -723,9 +729,11 @@ export async function fetchChartPreviewInto(
           reportId: opts.reportId,
           templateRef: opts.templateRef,
         })
-        .then(async ({ blob, titleMeta }) => ({
+        .then(async ({ blob, titleMeta, empty, unlabelled }) => ({
           dataUrl: await blobToDataURL(blob),
           titleMeta,
+          empty,
+          unlabelled,
         })),
     staleTime: Infinity,
     gcTime: 10 * 60_000,   // matches the reader above

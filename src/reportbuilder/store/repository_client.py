@@ -76,6 +76,12 @@ class RepositoryClient:
         # share the scope instead of paying for the lookup twice.
         self._case_memo: dict = {} if case_memo is None else case_memo
         self._material_memo: dict = {} if material_memo is None else material_memo
+        # The same, for a material's config. One `preview-chart` read it four
+        # times. NOT injectable: unlike a case or a material record, a config is
+        # written during a request (marked classifiers, sensitive-terms
+        # acceptance), so this memo must be droppable and must not be shared
+        # with a scope that outlives the writes. (Johan, 2026-09-16)
+        self._config_memo: dict = {}
 
     # -- resolution -------------------------------------------------------
 
@@ -89,6 +95,23 @@ class RepositoryClient:
             raise MaterialNotFound(material_id)
         self._material_memo[material_id] = m
         return m
+
+    def _config(self, m) -> dict:
+        """*m*'s config, read ONCE per request — see `_material`.
+
+        Every write through this client calls `_forget_config`, so a request
+        that changes the config sees its own change. Nothing else can change it
+        under a request that is already running.
+        """
+        hit = self._config_memo.get(m.id)
+        if hit is not None:
+            return hit
+        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        self._config_memo[m.id] = cfg
+        return cfg
+
+    def _forget_config(self, material_id: str) -> None:
+        self._config_memo.pop(material_id, None)
 
     def _case(self, case_id: str):
         """The case record, resolved ONCE per request.
@@ -161,7 +184,7 @@ class RepositoryClient:
             m = self._material(material_id)
         except MaterialNotFound:
             return []
-        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        cfg = self._config(m)
         names = cfg.get(self.MARKED_CLASSIFIERS_KEY) or []
         return [str(n) for n in names if isinstance(n, str)]
 
@@ -188,6 +211,7 @@ class RepositoryClient:
 
         # Through update_material_config, so a rename or a word merge happening
         # at the same time is not thrown away — all three edit the same object.
+        self._forget_config(m.id)
         self.repo.update_material_config(self.auth, m.customer_id, m.case_id, m.id,
                                          mark)
         return result
@@ -196,6 +220,7 @@ class RepositoryClient:
         """Read-modify-write this material's curation, serialised against the
         other editors of it. See Repository.update_material_config."""
         m = self._material(material_id)
+        self._forget_config(m.id)
         return self.repo.update_material_config(self.auth, m.customer_id, m.case_id,
                                                 m.id, mutate)
 
@@ -216,7 +241,7 @@ class RepositoryClient:
             m = self._material(material_id)
         except MaterialNotFound:
             return {"accepted": None}
-        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        cfg = self._config(m)
         stored = cfg.get(self.SENSITIVE_TERMS_KEY)
         if not isinstance(stored, dict):
             return {"accepted": None}
@@ -304,7 +329,7 @@ class RepositoryClient:
             m = self._material(material_id)
         except MaterialNotFound:
             return None
-        cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
+        cfg = self._config(m)
         return json.dumps(cfg) if cfg else None
 
     def save_material_config(self, material_id: str, config_json: str) -> None:
@@ -314,6 +339,7 @@ class RepositoryClient:
             cfg = json.loads(config_json) if config_json else {}
         except ValueError:
             cfg = {}
+        self._forget_config(m.id)
         self.repo.save_material_config(self.auth, m.customer_id, m.case_id, m.id, cfg)
 
     # -- report -----------------------------------------------------------

@@ -44,25 +44,34 @@ def _split_series(segments, bases):
                    base_n=dict(bases), statistic="pct")
 
 
-def test_capped_group_is_named_in_the_footer():
+def test_a_capped_group_is_NOT_named_on_the_slide():
+    """REVERSED 2026-09-16. This asserted the opposite.
+
+    What a slide left out is a warning to its AUTHOR — raised in the editor, on
+    the warning button and the slide-item icon, like every other slide problem —
+    not a line printed on a deck handed to a client. The ruling of 2026-08-22
+    put it in the footer so "the omission travels with the deck"; the decision
+    now is "Warning should not be rendered to slide in any case!" (Johan)
+    """
     s = _split_series(("18-29", "30-44", "45-59", "60+", "Total"),
                       {"18-29": 50, "30-44": 90, "45-59": 70, "60+": 30,
                        "Total": 240})
     _prs, slide, _slot, ctx = make_ctx("pie", s, classifying_var="age")
     add_filter_annotation(ctx)
     text = " ".join(_texts(slide))
-    assert "60+" in text
-    assert "Ei mahtunut sivulle" in text
+    assert "age" in text, "the classifier itself is still named"
+    assert "Ei mahtunut sivulle" not in text
 
 
-def test_thin_group_is_named_and_distinguished_from_a_capped_one():
+def test_a_thin_group_is_NOT_named_on_the_slide():
+    """REVERSED 2026-09-16 — see the test above."""
     s = _split_series(("Naiset", "Miehet", "Muut", "Total"),
                       {"Naiset": 60, "Miehet": 40, "Muut": 4, "Total": 104})
     _prs, slide, _slot, ctx = make_ctx("pie", s, classifying_var="sex")
     add_filter_annotation(ctx)
     text = " ".join(_texts(slide))
-    assert "Ei raportoitu" in text and "Muut" in text
-    assert "Ei mahtunut sivulle" not in text
+    assert "sex" in text
+    assert "Ei raportoitu" not in text
 
 
 def test_unaffected_split_names_only_the_variable():
@@ -86,7 +95,7 @@ def test_a_bar_chart_never_claims_it_omitted_groups():
     assert "Ei mahtunut sivulle" not in text and "Ei raportoitu" not in text
 
 
-def test_degraded_split_says_grouping_could_not_be_drawn():
+def test_a_degraded_split_is_NOT_announced_on_the_slide():
     # Every group is under the base floor -- the renderer falls back to the whole
     # sample, and that is the single most severe omission the feature can make:
     # the slide looks like an ordinary un-split pie unless the footer says
@@ -97,5 +106,5 @@ def test_degraded_split_says_grouping_could_not_be_drawn():
     _prs, slide, _slot, ctx = make_ctx("pie", s, classifying_var="sex")
     add_filter_annotation(ctx)
     text = " ".join(_texts(slide))
-    assert "Ryhmittelyä ei voitu piirtää" in text
-    assert "Ei raportoitu:" not in text and "Ei mahtunut sivulle:" not in text
+    assert "sex" in text, "the classifier itself is still named"
+    assert "Ryhmittelyä ei voitu piirtää" not in text

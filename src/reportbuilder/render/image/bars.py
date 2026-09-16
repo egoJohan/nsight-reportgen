@@ -41,8 +41,9 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     place_picture_square, series_values, format_value, label_floor, default_label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     VALUE_GID,
-    _new_agg_figure, _EMU_PER_IN,
+    _new_agg_figure, _EMU_PER_IN, wants_group_base, _value_axis,
 )
+from reportbuilder.render.base import note
 from reportbuilder.render.house_style import (
     series_colors, scale_colors, contrast_ink, MUTED, register_fonts,
 )
@@ -241,35 +242,6 @@ def _wrap_xtick_label(text: str) -> str:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _value_axis(max_val: float, statistic: str) -> tuple[float, list[float]]:
-    """Return (axis_max, gridline/tick positions) for the VALUE axis.
-
-    Percentages use the fixed 0..100 scale (capped, 20-step gridlines). Counts
-    and means have no 100 cap — the axis scales to the data with ~5 "nice" ticks,
-    otherwise a count of e.g. 600 would overflow a 0..100 axis and its data
-    labels (placed at x=value) would blow up the tight bounding box, shrinking
-    the whole chart to a stamp.
-
-    A percentage above 100 is not a rounding artefact to be clipped: it is a
-    stacked chart whose segments genuinely overlap (a multi-response question,
-    shares summing to e.g. 465%) drawn at its TRUE widths (`_stack_scaling`).
-    Capping that at 100 would push most of every bar off the axis — precisely
-    the dishonesty this axis exists to avoid — so it falls through to the
-    nice-tick branch and the axis reads to the real maximum."""
-    if statistic == "pct" and max_val <= 100.0:
-        ax_max = min(100.0, max(max_val * 1.15, 10.0))
-        return ax_max, [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
-    # count / mean: nice round ticks covering the data range.
-    vmax = max(max_val * 1.12, 1.0)
-    raw = vmax / 5.0
-    mag = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
-    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
-    top = math.ceil(vmax / step) * step
-    n = int(round(top / step))
-    ticks = [round(i * step, 6) for i in range(n + 1)]
-    return top, ticks
-
-
 def _tick_text(v: float) -> str:
     """Integer-looking tick → no decimals; otherwise trim trailing zeros."""
     return str(int(v)) if float(v).is_integer() else f"{v:g}"
@@ -378,12 +350,28 @@ def _leading_number(label: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _legend_below(ax, n_segs: int, ctx, y: float = -0.08, *,
+#: How far below the plot the legend row sits, as a share of the axes height.
+#: Was 0.08, which left about 7pt between an x-axis TITLE and the legend — the
+#: two read as one crowded block. ("Maybe add a bit space between the legend and
+#: the chart data", 2026-09-16)
+_LEGEND_GAP: float = 0.13
+#: And further when an axis title has to fit in that space.
+_LEGEND_GAP_WITH_AXIS_TITLE: float = 0.20
+
+
+def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
                   shorten_numeric: bool = True) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
-    bbox_inches='tight' expands the figure to include it."""
+    bbox_inches='tight' expands the figure to include it.
+
+    `None` picks the gap from what is actually in that space: an x-axis title
+    needs room of its own, and a caller that names a `y` still gets exactly it.
+    """
+    if y is None:
+        has_axis_title = bool((getattr(ctx.spec, "axis_x_title", "") or "").strip())
+        y = -(_LEGEND_GAP_WITH_AXIS_TITLE if has_axis_title else _LEGEND_GAP)
     handles, labels = ax.get_legend_handles_labels()
     # A numeric rating scale (every level starts with its point number, e.g. "1 - Täysin
     # eri mieltä", "2", … "7 - …") shows JUST the numbers in the legend — the endpoint
@@ -395,13 +383,42 @@ def _legend_below(ax, n_segs: int, ctx, y: float = -0.08, *,
     # — losing the band names, and with them the "(n=…)" each group now
     # carries. A group list is not a scale, whatever its labels start with.
     # (Johan, 2026-09-09)
+    # …and never over a label the AUTHOR wrote. Shortening is a default for
+    # labels nobody chose; once somebody types one in Category labels, throwing
+    # it away is the editor doing nothing. Reported as "Category labels
+    # määritykset jäävät joissain tilanteissa päivittymättä kuvaan": the engine
+    # applied the rename and this discarded it a moment later, and a rename that
+    # kept its leading number ("1 - Ei kovin tärkeä" → "1 - Ei tärkeä") shortened
+    # to the same "1", so the slide never moved however often it was retyped.
+    #
+    # The whole legend stands down together, not just the renamed level: half
+    # named and half numbered is one chart telling its levels two ways.
+    # (Johan, 2026-09-16)
+    authored = {short for _full, short in
+                (getattr(ctx.spec, "category_label_overrides", None) or ())}
     nums = [_leading_number(l) for l in labels]
     numeric_scale = (shorten_numeric and len(nums) >= 3
-                     and all(n is not None for n in nums))
+                     and all(n is not None for n in nums)
+                     and not any(l in authored for l in labels))
     if numeric_scale:
         labels = [str(n) for n in nums]
-    # ≤7 short items go on ONE row; larger sets wrap into ≤5 columns (row-major).
-    one_row = n_segs <= 7 and (numeric_scale or n_segs <= 5)
+    # Does the row FIT? Measured, not counted.
+    #
+    # This was `n_segs <= 7 and (numeric_scale or n_segs <= 5)`, so six short
+    # words went onto two rows across the full width of a slide with room for
+    # all six, and a count could never tell that from six long ones that do not
+    # fit. `_value_label_layout` already carries this lesson about value labels:
+    # "A count cannot tell a roomy chart from a cramped one."
+    #
+    # The handle, its gap and the space between entries are the legend's own
+    # keyword values below, converted from points to inches so they are measured
+    # in the units the text is. A tenth of an inch of slack keeps a row that only
+    # just fits off the very edge. (Johan, 2026-09-16)
+    _LEGEND_FS = 9.5
+    entry_in = (1.1 + 0.5 + 1.2) * _LEGEND_FS / 72.0      # handle + pad + gap
+    text_in = sum(_measure_max_label_width_in([l], _LEGEND_FS) for l in labels)
+    fig_w_in = ax.get_figure().get_size_inches()[0]
+    one_row = text_in + entry_in * n_segs <= fig_w_in - 0.1
     ncol = n_segs if one_row else min(n_segs, 5)
     if not one_row:
         handles, labels = _rowmajor_legend(handles, labels, ncol)
@@ -537,13 +554,18 @@ def _place_total_category(cats, data, position: str):
     return order, {s: [vals[i] for i in idx] for s, vals in data.items()}
 
 
-def _group_name(series, seg: str) -> str:
+def _group_name(series, seg: str, *, show_base: bool = True) -> str:
     """A group named where it stands for itself — a bar, a panel's legend entry —
-    with the number of people in it: "Naiset (n=501)"."""
+    with the number of people in it: "Naiset (n=501)".
+
+    `show_base` off drops the number and keeps the name — `elements.group_base`.
+    """
+    if not show_base:
+        return _secondary_tick(seg)
     return with_base(_secondary_tick(seg), series.base_n.get(seg))
 
 
-def _bar_names(series, bars, *, short: bool) -> list[str]:
+def _bar_names(series, bars, *, short: bool, show_base: bool = True) -> list[str]:
     """The names a stacked chart's bars are drawn with.
 
     "Kohderyhmäkohtaiset n-luvut tulevat esille vertical ja horizontal bar
@@ -555,8 +577,23 @@ def _bar_names(series, bars, *, short: bool) -> list[str]:
 
     `short` names a cross-tab's bars by their second group only, the first
     being printed once beside them."""
+    # A chart of ONE bar called "Total" is everybody, and saying so under the
+    # axis tells the reader nothing they cannot see. On a vertical stack it also
+    # crowded the x-axis title and the legend into one strip. Blank rather than
+    # dropped, so the bar keeps its position on the axis.
+    #
+    # Only when it is alone: beside real groups, "Total" is what distinguishes
+    # the reference bar from them. And only for "Total" — a lone category in a
+    # distribution is otherwise a real answer ("Attendo"), which `_category_ticks`
+    # makes the same distinction about. (Johan, 2026-09-16)
+    if len(bars) == 1 and str(bars[0]).strip() == "Total":
+        return [""]
     name = _secondary_tick if short else (lambda b: b)
-    if not getattr(series, "segments_are_groups", True) or all("Total" in b for b in bars):
+    # `show_base` off is the author declining the number (`elements.group_base`);
+    # the other two are the chart having no group to state one for.
+    if (not show_base
+            or not getattr(series, "segments_are_groups", True)
+            or all("Total" in b for b in bars)):
         return [name(b) for b in bars]
     return [with_base(name(b), series.base_n.get(b)) for b in bars]
 
@@ -837,7 +874,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         # the next, and a legend shared by the row can say only one of them.
         # Colours stay keyed by position, the same in every panel.
         for ax, (_p, segs) in zip(axes, groups):
-            names = [_group_name(series, s) for s in segs]
+            names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
             ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
                       ncol=min(len(names), 3), frameon=False, fontsize=9)
@@ -1157,7 +1194,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
         # Each panel is titled with its VARIABLE, not with a group of the first one.
         ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
         if ctx.spec.elements.legend:
-            names = [_group_name(series, s) for s in segs]
+            names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
             ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
                       ncol=min(len(names), 4), frameon=False, fontsize=9)
@@ -1391,13 +1428,23 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     per_bar_pt = row_pt * (0.7 / n_segs if n_segs > 1 else 0.62)
     value_fs = max(5.5, min(9.5, per_bar_pt * 0.9))
 
+    # Decided once, for the whole chart, and RECORDED. Dropping the numbers is
+    # right — at this height a label would overlap its neighbours — but it used
+    # to happen in silence: the author got a chart with no numbers, no reason,
+    # and no hint that the same chart labels perfectly on a taller chart area.
+    # The note reaches them in the editor; nothing is printed on the slide.
+    # (Johan, 2026-09-16)
+    labelled = per_bar_pt >= _MIN_LABEL_BAR_PT
+    if not labelled and all_vals:
+        note(ctx, "unlabelled", n_cats)
+
     off = _label_offset(max_val)
     for i, seg in enumerate(segs):
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
         for yi, v in zip(ys, vals):
-            if v is not None and per_bar_pt >= _MIN_LABEL_BAR_PT:
+            if v is not None and labelled:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
@@ -1556,7 +1603,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     # fontsize=10.5 to match the real `ax.set_yticklabels(...)` call below.
     panel_label_w_in = [
         _measure_max_label_width_in(
-            [_wrap_label(b) for b in _bar_names(series, bars, short=True)], 10.5)
+            [_wrap_label(b) for b in _bar_names(series, bars, short=True, show_base=wants_group_base(ctx))], 10.5)
         for _p, bars in groups
     ]
     n_candidate = len(groups)
@@ -1605,7 +1652,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
         _draw_stacked_panel(ax, bars, stack, panel, clrs, ctx, y, flat_vals,
                             normalise=normalise, axis_max=axis_max)
         ax.set_yticks(y)
-        names = _bar_names(series, bars, short=True)
+        names = _bar_names(series, bars, short=True, show_base=wants_group_base(ctx))
         ax.set_yticklabels([_wrap_label(b) for b in names], fontsize=10.5, color=ink)
         register_category_labels(ax, "y", names, wrap=_wrap_label, width=_LABEL_WRAP_WIDTH)
         ax.tick_params(axis="y", labelleft=True)
@@ -1729,7 +1776,7 @@ def build_image_column_stacked(ctx) -> None:
     if grouped:
         # Per-bar tick = the SECONDARY value; the primary is shown once as a group label
         # centred under each group, so both classifiers read clearly.
-        secondary = _bar_names(ctx.series, cats, short=True)
+        secondary = _bar_names(ctx.series, cats, short=True, show_base=wants_group_base(ctx))
         # Flat under its column when it fits there, as it always was. Rotated,
         # like an ungrouped column chart's names, when it does not: eighteen
         # columns of "Suomi (n=1016)" printed flat ran into each other, and no
@@ -1752,7 +1799,7 @@ def build_image_column_stacked(ctx) -> None:
                                  names_depth_px=depth_px)
     else:
         # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-        names = _bar_names(ctx.series, cats, short=False)
+        names = _bar_names(ctx.series, cats, short=False, show_base=wants_group_base(ctx))
         ax.set_xticklabels(
             [_wrap_xtick_label(c) for c in names], fontsize=10.5, color=ink,
             rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
@@ -2295,7 +2342,7 @@ def build_image_bar_stacked(ctx) -> None:
     if grouped:
         maxp = max(grouped[0])
         y = np.array([maxp - p for p in grouped[0]])   # first cat at top
-        secondary = _bar_names(ctx.series, cats, short=True)
+        secondary = _bar_names(ctx.series, cats, short=True, show_base=wants_group_base(ctx))
         # Decided BEFORE the bars are drawn: a written-out group name takes a
         # column of the figure, and the panel measures which numbers fit inside
         # their segments against the plot as it is when it draws them.
@@ -2361,7 +2408,7 @@ def build_image_bar_stacked(ctx) -> None:
                         fontsize=fs, color=ink, gid=_GROUP_GID)
     else:
         # Wrap long y-axis labels onto as many lines as needed (full text, no '…').
-        names = _bar_names(ctx.series, cats, short=False)
+        names = _bar_names(ctx.series, cats, short=False, show_base=wants_group_base(ctx))
         ax.set_yticklabels([_wrap_label(c) for c in names], fontsize=11.5, color=ink)
         register_category_labels(ax, "y", names, wrap=_wrap_label, width=_LABEL_WRAP_WIDTH)
     ax.set_ylim(min(y) - 0.7, max(y) + 0.5)

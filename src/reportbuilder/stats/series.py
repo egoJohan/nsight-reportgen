@@ -42,6 +42,17 @@ class SeriesResult:
     # indexes it directly — even where "Total" is not one of `segments`. (2026-08-04)
     base_n: dict[str, int]
     statistic: str                            # "pct" | "count" | "mean"
+    # What an INDIVIDUAL segment measures, where that differs from `statistic`
+    # above. Only the two-variable combo needs it so far: its bars are the
+    # question's distribution and its line is the mean of another variable, so
+    # one word cannot describe both. The mean was formatted as a percentage and
+    # a 1-8 work-life index printed as "7.5 %".
+    #
+    # None means "every segment is `statistic`", which is every other chart.
+    # Read it with `statistic_of(segment)`, never directly — a renderer that
+    # indexes it has to handle both the None and the missing-key case itself,
+    # and forgetting either brings the percent sign back. (Johan, 2026-09-16)
+    segment_statistics: dict[str, str] | None = None
     # Optional caption rendered under the chart — e.g. the endpoint legend of a
     # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)
     caption: str | None = None
@@ -75,6 +86,14 @@ class SeriesResult:
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]
+
+    def statistic_of(self, segment: str) -> str:
+        """What *segment* measures — its own statistic where it has one, the
+        series' otherwise. The single place that knows how to read
+        `segment_statistics`; see the note on that field."""
+        if not self.segment_statistics:
+            return self.statistic
+        return self.segment_statistics.get(segment, self.statistic)
 
     @property
     def n_series(self) -> int:

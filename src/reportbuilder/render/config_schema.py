@@ -183,9 +183,35 @@ def scatter_xy_field() -> ConfigField:
 
 def combo_secondary_field() -> ConfigField:
     return ConfigField(
-        "combo_secondary", "numeric_variable", "Secondary variable (line)",
-        help="A numeric/rating variable shown as a mean-per-category line on the "
+        # Not "(line)" any more: which shape each half is drawn in is the
+        # author's to pick, so naming one of them here would be a label that
+        # goes stale the moment they change it. (2026-09-16)
+        "combo_secondary", "numeric_variable", "Secondary variable",
+        help="A numeric/rating variable shown as a mean per category on the "
              "right axis. Shares this question's categories as the x-axis.",
+    )
+
+
+#: The shapes a combo's two halves may be drawn in. Both defaults reproduce the
+#: chart as it was before they existed, so no saved slide changes on upgrade.
+_COMBO_KIND_OPTIONS = (("bar", "Bars"), ("line", "Line"), ("area", "Area"))
+
+
+def combo_primary_type_field() -> ConfigField:
+    return ConfigField(
+        "combo_primary_type", "select", "Primary series",
+        options=_COMBO_KIND_OPTIONS, default="bar",
+        help="How this question's own series is drawn, on the left axis.",
+    )
+
+
+def combo_secondary_type_field() -> ConfigField:
+    return ConfigField(
+        "combo_secondary_type", "select", "Secondary series",
+        options=_COMBO_KIND_OPTIONS, default="line",
+        help="How the secondary variable is drawn, on the right axis. Bars on "
+             "both axes share one cluster per category, so they sit side by "
+             "side rather than over each other.",
     )
 
 
@@ -383,4 +409,6 @@ def combo_schema() -> tuple[ConfigField, ...]:
     """Combo: this question is the x-axis (bars); pick a numeric secondary
     variable for the mean-per-category line, or split by a classifying variable."""
     return (statistic_field(), percent_base_field(), show_total_field(),
-            combo_secondary_field(), classifying_var_field(), classifying_values_field(), *_common_tail())
+            combo_secondary_field(),
+            combo_primary_type_field(), combo_secondary_type_field(),
+            classifying_var_field(), classifying_values_field(), *_common_tail())

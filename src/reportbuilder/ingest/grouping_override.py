@@ -27,14 +27,17 @@ def _battery_vars(battery) -> set[str]:
     return {var for (_cat, var, _stem) in cells}
 
 
-def _scale_sig(var: Variable):
+def _scale_sig(var: Variable, df=None):
     """A hashable signature of a variable's rating scale — its POINT set (1..N), or None
     when the variable isn't a scale. Two variables are battery-COMPATIBLE when these
     match, even if their labels differ (e.g. '1- Ei lainkaan' vs '1 - Ei lainkaan', or a
     grade scale + a satisfaction scale). Mirrors the UI's scale_compat_key so a battery
     the user is allowed to form in the dialog actually forms here. (customer)"""
     from reportbuilder.stats.engine import scale_levels
-    lv = scale_levels(var)
+    # The frame goes through: a scale worded only at its ENDS is invisible to the
+    # labels alone, so without it the dialog would offer a battery this then
+    # refused to form. (Johan, 2026-09-16)
+    lv = scale_levels(var, df)
     return tuple(sorted({p for _c, _l, p in lv})) if lv else None
 
 
@@ -125,7 +128,7 @@ def apply_grouping_override(model: QuestionModel, override: dict | None,
         vs = tuple(g.get("variables", []) or [])
         if len(vs) < 2 or not (set(vs) <= known):
             continue
-        sigs = [_scale_sig(model.variables[v]) for v in vs]
+        sigs = [_scale_sig(model.variables[v], df) for v in vs]
         if all(sigs) and len(set(sigs)) == 1:
             manual_batteries.append((g.get("label") or "", vs))
     battery_members = {v for _label, members in manual_batteries for v in members}

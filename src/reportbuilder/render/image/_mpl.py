@@ -4,6 +4,8 @@ Sets the Agg backend at module level before importing pyplot so that callers
 can safely import this module in headless/test environments without a display.
 """
 from __future__ import annotations
+
+import math
 import os
 import tempfile
 import textwrap
@@ -43,8 +45,21 @@ def series_label(ctx, seg: str) -> str:
     Falls back to the bare name when the base is unknown, which is what a
     segment carrying no count means.
     """
+    if not wants_group_base(ctx):
+        return seg
     base = (getattr(getattr(ctx, "series", None), "base_n", None) or {}).get(seg)
     return with_base(seg, base)
+
+
+def wants_group_base(ctx) -> bool:
+    """Whether a group states its own base on this slide (`elements.group_base`).
+
+    Read through `getattr` at both steps: a spec from an older report has no
+    such field, and the answer for one of those is the behaviour it already
+    had — on. (Johan, 2026-09-16)
+    """
+    elements = getattr(getattr(ctx, "spec", None), "elements", None)
+    return bool(getattr(elements, "group_base", True))
 
 
 def with_base(name: str, base) -> str:
@@ -147,15 +162,24 @@ def wrap_label_capped(text: str, width: int, max_lines: int) -> str:
     return "\n".join(kept)
 
 
-def render_empty_chart(ctx, message: str = "No data to show") -> None:
-    """Render a centred 'no data' placeholder as a picture, so a chart with no
-    categories (e.g. a scale variable with no value labels) degrades cleanly
-    instead of crashing the deck. Counts as the chart's one picture."""
+def render_empty_chart(ctx, message: str = "") -> None:
+    """Render a BLANK placeholder as a picture, so a chart with no categories
+    (e.g. a scale variable with no value labels) degrades cleanly instead of
+    crashing the deck. Counts as the chart's one picture.
+
+    It used to print "No data to show" across the chart area — in English, on a
+    deck read by the client. What a slide could not show is a warning to its
+    AUTHOR, raised in the editor like every other slide problem; the preview
+    endpoint says so with the `X-Chart-Empty` header. `message` is kept for a
+    caller that genuinely wants text on the slide; nothing passes one today.
+    (Johan, 2026-09-16)
+    """
     fig, ax = new_figure(ctx)
     ax.axis("off")
-    _ink, muted, _grid = chart_furniture(ctx)
-    ax.text(0.5, 0.5, message, ha="center", va="center",
-            fontsize=13, color=muted, transform=ax.transAxes)
+    if message:
+        _ink, muted, _grid = chart_furniture(ctx)
+        ax.text(0.5, 0.5, message, ha="center", va="center",
+                fontsize=13, color=muted, transform=ax.transAxes)
     place_picture(ctx, render_png(fig))
 
 
@@ -173,6 +197,77 @@ def series_is_empty(series) -> bool:
                 return False
     return True
 
+
+def _capped_height(ctx, w_in: float, h_in: float, *, rows: int = 1) -> float:
+    """A caller-chosen figure height, floored at the slot's height and ceilinged
+    at `rows` times the slot's aspect. See `new_tall_figure` for why the ceiling
+    exists.
+
+    `rows` is the number of STACKED bands of panels. The ceiling is per band,
+    because a band is its own slot-shaped chart: two rows of panels genuinely
+    hold two charts' worth of content, and capping the pair at one slot-aspect
+    collapses the second row onto the first — the rotated tick labels and the
+    second legend land on top of the first row, which is the defect
+    `test_vertical_stacked_panels_grow_figure_height` exists to catch.
+
+    Note what the ceiling does NOT claim: a 2-row figure is still letterboxed
+    down to about half size on the slide. Height is the wrong lever for that —
+    the fix for a picture with too much in it is fewer panels in it, not a
+    taller figure, which is the same trade `new_tall_figure` documents.
+
+    The ceiling is never below the floor: `w_in` is `max(9.0, slot_w)` and
+    `rows >= 1`, so `rows * w_in * slot_h / slot_w >= slot_h`.
+    """
+    slot_w_in = ctx.slot.width / _EMU_PER_IN
+    slot_h_in = ctx.slot.height / _EMU_PER_IN
+    if slot_w_in <= 0 or slot_h_in <= 0:        # a slot with no area to fill
+        return max(h_in, slot_h_in)
+    ceiling = max(1, rows) * w_in * slot_h_in / slot_w_in
+    return min(max(h_in, slot_h_in), ceiling)
+
+
+# Moved here from bars.py, 2026-09-16: the LINE and RADAR builders each
+# carried their own copy of the percentage half of this rule and capped
+# every statistic at 100, so a line of counts ran off the top of its own
+# chart. One axis rule, in the module every builder already imports.
+def _value_axis(max_val: float, statistic: str) -> tuple[float, list[float]]:
+    """Return (axis_max, gridline/tick positions) for the VALUE axis.
+
+    Percentages use the fixed 0..100 scale (capped, 20-step gridlines). Counts
+    and means have no 100 cap — the axis scales to the data with ~5 "nice" ticks,
+    otherwise a count of e.g. 600 would overflow a 0..100 axis and its data
+    labels (placed at x=value) would blow up the tight bounding box, shrinking
+    the whole chart to a stamp.
+
+    A percentage above 100 is not a rounding artefact to be clipped: it is a
+    stacked chart whose segments genuinely overlap (a multi-response question,
+    shares summing to e.g. 465%) drawn at its TRUE widths (`_stack_scaling`).
+    Capping that at 100 would push most of every bar off the axis — precisely
+    the dishonesty this axis exists to avoid — so it falls through to the
+    nice-tick branch and the axis reads to the real maximum."""
+    if statistic == "pct" and max_val <= 100.0:
+        ax_max = min(100.0, max(max_val * 1.15, 10.0))
+        ticks = [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
+        if len(ticks) < 3:
+            # A chart whose biggest bar is small got one or two rungs off the
+            # fixed ladder — and under 9%, where the axis sits on its own 10.0
+            # floor, exactly one: the zero. Twenty-five departments, none above
+            # 5%, and the axis read "0" and nothing else, so no bar could be
+            # measured against anything. The ladder is right for the ordinary
+            # chart and stays; it steps down only where it had stopped saying
+            # anything. (Johan, 2026-09-16)
+            step = 5.0 if ax_max > 12.0 else 2.0
+            ticks = [round(i * step, 6) for i in range(int(ax_max // step) + 1)]
+        return ax_max, ticks
+    # count / mean: nice round ticks covering the data range.
+    vmax = max(max_val * 1.12, 1.0)
+    raw = vmax / 5.0
+    mag = 10.0 ** math.floor(math.log10(raw)) if raw > 0 else 1.0
+    step = next(m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw)
+    top = math.ceil(vmax / step) * step
+    n = int(round(top / step))
+    ticks = [round(i * step, 6) for i in range(n + 1)]
+    return top, ticks
 
 def new_figure(ctx):
     """Create a matplotlib Figure/Axes sized to ctx.slot, with nSight house style applied.
@@ -223,7 +318,10 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     across groups. (spec 2026-08-22)"""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(tall_in or 4.5, ctx.slot.height / _EMU_PER_IN)
+    # Capped for the same reason a single tall figure is — a grid is placed by
+    # the same letterboxing rule, so anything more portrait than the slot is
+    # scaled away. Per STACKED BAND, not per figure: see `_capped_height`.
+    h_in = _capped_height(ctx, w_in, tall_in or 4.5, rows=rows)
     fig = _new_agg_figure(w_in, h_in)
     _remember_font(fig, ctx)
     cols = max(1, -(-n // max(1, rows)))          # ceil(n / rows)
@@ -250,15 +348,27 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
 
 
 def new_tall_figure(ctx, h_in: float):
-    """Like new_figure but with a caller-chosen height (>= the slot height).
+    """Like new_figure but with a caller-chosen height, between the slot's own
+    height and the slot's own ASPECT.
 
     Horizontal-bar charts grow taller as categories increase so every row keeps
     room for a ~2-line wrapped label at a legible font (instead of shrinking the
-    font / truncating). The taller PNG is letterbox-placed top-aligned, filling
-    the slot's height and using the otherwise-empty space below the chart."""
+    font / truncating).
+
+    That growth has a ceiling, and it is not a matter of taste: `place_picture`
+    letterboxes, scaling by `min(slot_w/px_w, slot_h/px_h)`. The moment the
+    figure is more portrait than the slot, HEIGHT is the limiting dimension and
+    the entire picture — every bar, every label — is scaled down to fit it,
+    leaving the slide's width empty. Growing past the aspect therefore makes the
+    labels SMALLER on the slide, which is the opposite of why the figure grows.
+
+    Measured on a 12.3x4.4in slot: 25 categories asked for 14.2in and were
+    placed at 31 % of the slot width, printing a 9pt tick label at 2.8pt. The
+    loss starts at 7 categories. Past the cap the rows compress and the
+    builders' font floors take over. (Johan, 2026-09-16)"""
     register_fonts()
     w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(h_in, ctx.slot.height / _EMU_PER_IN)
+    h_in = _capped_height(ctx, w_in, h_in)
     fig = _new_agg_figure(w_in, h_in)
     _remember_font(fig, ctx)
     ax = fig.subplots()

@@ -40,6 +40,7 @@ import {
   fetchChartPreviewInto,
   qk,
 } from "@/lib/queries";
+import type { ChartPreviewResult } from "@/lib/queries";
 import * as previewQueue from "@/lib/previewQueue";
 import {
   cacheClearedGeneration,
@@ -823,6 +824,11 @@ export default function ReportWizard({
       grouping: () => draftRef.current?.grouping,
       hasImage: (fingerprint) =>
         qc.getQueryData(["chart-preview", materialId, fingerprint]) !== undefined,
+      imageFacts: (fingerprint) => {
+        const hit = qc.getQueryData<ChartPreviewResult>(
+          ["chart-preview", materialId, fingerprint]);
+        return { empty: hit?.empty === true, unlabelled: hit?.unlabelled ?? 0 };
+      },
       // The fingerprint the QUEUE computed, not one recomputed from `ctx` —
       // which is captured here and is one statement stale the moment a template
       // change refills the queue and starts rendering synchronously.

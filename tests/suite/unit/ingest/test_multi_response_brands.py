@@ -82,9 +82,26 @@ def test_an_option_named_once_is_not_a_list():
     assert propose_sensitive_terms(model) == []
 
 
-def test_an_inflected_VALUE_label_is_still_dropped():
-    """The guard the case-ending rule exists for must survive: these are answer
-    options a question puts the respondent inside, not enumerated members."""
+def test_an_inflected_VALUE_label_is_now_offered_too():
+    """REVERSED 2026-09-16. This used to assert the opposite.
+
+    The case-ending rule was applied to value labels and not to multi-response
+    options, on the reasoning that an option is a phrase the question puts the
+    respondent inside (`Muualla`, `Omassa rauhassa`) while an enumerated member
+    stands in the nominative. But a single-choice question's value labels are
+    ALSO an enumerated list when the question is "which of these brands do you
+    know" — and there the rule dropped `Estrella`, the brand it was written to
+    protect, which only survived because Taffel happened to ask it as a
+    multi-response.
+
+    Measured the way the original rule was, across Attendo, Holiday Club and
+    Synsam: no company is lost and 29 candidates are added, all of them
+    demographics and attribute phrases. The old rule was also inconsistent
+    inside a single list — it kept `Hämeen lääni` and dropped `Uudenmaan lääni`.
+
+    `ai.text.pick_company_terms` drops these; a company it never sees reaches
+    the vendor in clear.
+    """
     var = Variable(name="q1", label="Missä syöt sipsejä?", measurement="categorical",
                    value_labels=(ValueLabel(1.0, "Kotona"), ValueLabel(2.0, "Muualla"),
                                  ValueLabel(3.0, "Omassa rauhassa")),
@@ -93,8 +110,8 @@ def test_an_inflected_VALUE_label_is_still_dropped():
                     value_labels=var.value_labels, missing_values=frozenset())
     model = QuestionModel(variables={"q1": var, "q2": var2}, questions=[])
     proposed = propose_sensitive_terms(model)
-    assert "Muualla" not in proposed
-    assert "Omassa rauhassa" not in proposed
+    assert "Muualla" in proposed
+    assert "Omassa rauhassa" in proposed
 
 
 def test_a_battery_is_unaffected():

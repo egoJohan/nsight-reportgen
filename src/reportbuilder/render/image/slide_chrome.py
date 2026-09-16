@@ -24,7 +24,6 @@ from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
 from reportbuilder.render.base import RenderContext
-from reportbuilder.render.elements import _omission_clause
 from reportbuilder.render.template_profile import clone_furniture
 from reportbuilder.render.house_style import (
     _relative_luminance,
@@ -847,6 +846,30 @@ def _fill_title_placeholder(slide, title: str, style=None) -> bool:
     return True
 
 
+
+def _combo_subtitle(ctx, question: str) -> str:
+    """The default subtitle for this slide — the question, plus the SECOND
+    measure when the slide draws one.
+
+    A combo's bars are the question and its line is another variable, so the
+    question alone describes half the chart. Only for the two-variable combo:
+    every other chart has one measure and its subtitle is unchanged.
+
+    The secondary's own segment name is used rather than the raw variable name,
+    so it reads as the legend does. (Johan, 2026-09-16)
+    """
+    if getattr(ctx.spec, "chart_type", "") != "combo":
+        return question
+    if not (getattr(ctx.spec, "options", None) or {}).get("combo_secondary"):
+        return question
+    series = getattr(ctx, "series", None)
+    names = [s for s in getattr(series, "segments", ())
+             if getattr(series, "statistic_of", None)
+             and series.statistic_of(s) == "mean"]
+    if not names:
+        return question
+    return f"{question} · {names[0]} (keskiarvo)" if question else names[0]
+
 def add_image_slide_chrome(ctx: RenderContext) -> None:
     """Decorate an image-mode slide with house-style chrome.
 
@@ -906,8 +929,13 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # (otherwise the title already IS the question, so no redundant subtitle).
         has_distinct_title = bool(slide_title) and slide_title != question
         wants_subtitle = getattr(getattr(ctx.spec, "elements", None), "subtitle", True)
-        secondary = (slide_description or (question if has_distinct_title else "")
-                     ) if wants_subtitle else ""
+        # A combo's DEFAULT subtitle names both measures, because the slide draws
+        # two and the question describes only the bars. The author's own line is
+        # untouched — this is the fallback the question already was, not
+        # something appended to what somebody typed. ("Combo chartin otsikko ja
+        # alaotsikko ei mukaudu molempiin kuvaajiin", 2026-09-16)
+        default_subtitle = _combo_subtitle(ctx, question) if has_distinct_title else ""
+        secondary = (slide_description or default_subtitle) if wants_subtitle else ""
         # The subtitle is the AUTHOR'S line and nothing is appended to it.
         #
         # A stacked bar's endpoint wording ("1 = … · 7 = …") used to be added
@@ -1072,15 +1100,13 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # A pie/doughnut/funnel split into panels can drop a group (too thin a base,
     # or more groups than the page holds) — the editor's warning stays in the
     # editor, so this is the ONLY record of it that travels with the deck. Image
-    # mode has no separate "classifying variable" box the way the native builder
-    # does, so the disclosure rides on the same footer line. It names only the
-    # omitted GROUPS, never the classifier's raw code (e.g. "var7") — RenderContext
-    # carries no model to resolve that to a human label, and the panel titles
-    # already show which variable the split used. (spec 2026-08-22, ruling 2026-08-22)
-    if getattr(ctx.spec, "classifying_var", None):
-        omission = _omission_clause(ctx).removeprefix(" · ")
-        if omission:
-            footer_text = _joined(footer_text, omission)
+    # NOT on the slide. Omitted groups are a warning to the AUTHOR, raised in the
+    # editor beside the slide (the warning button and the slide-item icon, like
+    # every other slide problem) — not text printed on a deck handed to a client.
+    #
+    # This reverses the ruling of 2026-08-22, which put it in the footer so "the
+    # omission travels with the deck". Decided 2026-09-16: "Warning should not be
+    # rendered to slide in any case!" (Johan)
     # A slide computed on SOME of the classifier's groups names them on the same
     # line, for the same reason: N counts those respondents and nobody else, and a
     # reader who is not told reads the slide as the whole study. The groups are
@@ -1094,9 +1120,10 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # the slide that its own numbers contradict. Nothing clears the selection
     # when the classifying variable changes, so a reclassified slide carries
     # names from the old variable and that is not an exotic path.
-    picked = tuple(getattr(ctx.series, "applied_filter", ()) or ())
-    if picked:
-        footer_text = _joined(footer_text, ", ".join(picked))
+    # NOT on the slide either. Which groups a slide was narrowed to is the
+    # author's business while they build it — raised in the editor beside the
+    # slide like every other slide problem — not a line on the deck. Same
+    # decision as the omitted-groups clause above. (Johan, 2026-09-16)
     # Left margin follows the chart on a templated or harvested slide: those
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.

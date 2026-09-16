@@ -87,6 +87,20 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         lines.append(f"- {label}: {v}")
     findings_block = "\n".join(lines) if lines else "- (ei kärkituloksia)"
     examples_block = "\n".join(f"- {e}" for e in _TITLE_EXAMPLES)
+    # A combo carries TWO measures: its bars are percentages and its line is
+    # another variable's mean on its own scale. Said only when such a finding is
+    # present, so every other chart's prompt is unchanged to the byte.
+    #
+    # It states what the numbers ARE and permits a mention; it does not demand
+    # one. Forcing every combo headline to talk about the line would make the
+    # ones where the line says nothing worse, and the analyst can always write
+    # their own. ("otsikko … ei mukaudu molempiin kuvaajiin", 2026-09-16)
+    second_measure = (
+        "Huom: kärkituloksissa merkintä (keskiarvo) tarkoittaa TOISTA mittaria, "
+        "joka on oma keskiarvonsa omalla asteikollaan — ei prosenttiosuus. "
+        "Voit halutessasi mainita sen, jos se tuo havaintoon jotain olennaista.\n\n"
+        if any("(keskiarvo)" in label for label, _v in findings) else ""
+    )
     return (
         "Olet markkinatutkimuksen analyytikko. Kirjoitat kaaviolle avainviestin "
         "(otsikon), joka kertoo lukijalle, mitä kysyttiin ja mikä on vastausten "
@@ -94,6 +108,7 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         f"Kysymys (mitä kysyttiin): \"{question_text}\".\n"
         "Vastausten kärkitulokset (kategoria: arvo):\n"
         f"{findings_block}\n\n"
+        f"{second_measure}"
         "Esimerkkejä hyvän avainviestin tyylistä:\n"
         f"{examples_block}\n\n"
         "Kirjoita YKSI suomenkielinen avainviesti, joka tiivistää kysymyksen aiheen "

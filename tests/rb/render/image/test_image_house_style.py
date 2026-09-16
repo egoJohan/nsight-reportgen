@@ -313,7 +313,7 @@ def test_add_image_slide_chrome_n_annotation():
     assert n_texts, "N=5 annotation not found in any textbox after chrome"
 
 
-def test_add_image_slide_chrome_names_a_capped_group_in_the_footer():
+def test_add_image_slide_chrome_does_NOT_name_a_capped_group():
     """The image-mode footer is the ONLY one real users see: deck.py routes
     render_mode == "image" to add_image_slide_chrome, never add_filter_annotation
     (deck.py:259-267), and the web app only ever sends render_mode "image"
@@ -336,10 +336,14 @@ def test_add_image_slide_chrome_names_a_capped_group_in_the_footer():
     add_image_slide_chrome(ctx)
 
     text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
-    assert "60+" in text
-    assert "Ei mahtunut sivulle" in text
-    # The raw classifier code never belongs on a client slide: RenderContext
-    # carries no model to resolve it to a human label. (ruling 2026-08-22)
+    # REVERSED 2026-09-16: nothing about an omission is printed on the slide.
+    # It is the AUTHOR's warning, raised in the editor beside the slide, not a
+    # line on a deck handed to a client. ("Warning should not be rendered to
+    # slide in any case!" — Johan)
+    assert "Ei mahtunut sivulle" not in text
+    assert "60+" not in text
+    # Still true, and for the original reason: the raw classifier code never
+    # belongs on a client slide. (ruling 2026-08-22)
     assert "age" not in text
 
 
@@ -364,7 +368,7 @@ def test_add_image_slide_chrome_says_nothing_when_nothing_was_dropped():
     assert "Ei mahtunut sivulle" not in text and "Ei raportoitu" not in text
 
 
-def test_add_image_slide_chrome_says_grouping_could_not_be_drawn_when_all_thin():
+def test_add_image_slide_chrome_stays_silent_when_all_groups_are_thin():
     """Every group under the base floor is the most severe omission the feature
     can produce: the renderer falls back to a single whole-sample pie that looks
     exactly like an ordinary un-split slide. This is the path real users see
@@ -385,7 +389,8 @@ def test_add_image_slide_chrome_says_grouping_could_not_be_drawn_when_all_thin()
     add_image_slide_chrome(ctx)
 
     text = " ".join(s.text_frame.text for s in slide.shapes if s.has_text_frame)
-    assert "Ryhmittelyä ei voitu piirtää" in text
+    # REVERSED 2026-09-16 — see the capped-group test above.
+    assert "Ryhmittelyä ei voitu piirtää" not in text
 
 
 # ---------------------------------------------------------------------------

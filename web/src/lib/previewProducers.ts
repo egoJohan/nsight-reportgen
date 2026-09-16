@@ -14,7 +14,10 @@
 import { api, type ChartSpec, type GroupingOverride, type Question } from "./api";
 import { isSpecialSlide, isThemes, titleDataKey } from "./charts";
 import { imageFingerprint } from "./previewFingerprint";
-import { setProducers, type Producer, type ProducerCtx } from "./previewQueue";
+import {
+  noteChartFacts, setProducers,
+  type ChartFacts, type Producer, type ProducerCtx,
+} from "./previewQueue";
 
 /** What the producers need from the wizard that is not on the chart itself. */
 export interface ProducerEnv {
@@ -25,6 +28,9 @@ export interface ProducerEnv {
   grouping: () => GroupingOverride | undefined;
   /** Is this image already in the client cache? */
   hasImage: (fingerprint: string) => boolean;
+  /** What that cached image said about itself. The all-clear when there is no
+   *  cached image, and for one fetched before the signal existed. */
+  imageFacts: (fingerprint: string) => ChartFacts;
   /** Fetch it and put it there.
    *
    *  Takes the render context the QUEUE ran with — not one captured in a
@@ -37,7 +43,7 @@ export interface ProducerEnv {
     chart: ChartSpec,
     fingerprint: string,
     ctx: { templateRef: string; reportId: string; force?: boolean }
-  ) => Promise<void>;
+  ) => Promise<ChartFacts>;
 }
 
 let env: ProducerEnv | null = null;
@@ -85,6 +91,12 @@ const title: Producer = {
       classifying_values: c.chart.classifying_values,
       show_not_answered: c.chart.show_not_answered,
       not_answered_codes: c.chart.not_answered_codes,
+      // What the slide DRAWS. A combo computes a second measure — its
+      // secondary variable's mean — and only when the backend knows both of
+      // these; without them the headline could describe only the bars.
+      // (Johan, 2026-09-16)
+      chart_type: c.chart.chart_type,
+      options: c.chart.options,
       grouping: env.grouping(),
     });
     if (!text) return;
@@ -145,14 +157,21 @@ const chart: Producer = {
   // image is simply missing and gets made again — and under `force` it does not
   // get to answer at all: the author (or the screen) is saying the picture on
   // display is wrong, which the cache cannot know.
-  storedFingerprint: (c: ProducerCtx) =>
-    !c.force && env?.hasImage(c.fingerprint) ? c.fingerprint : null,
+  storedFingerprint: (c: ProducerCtx) => {
+    if (c.force || !env?.hasImage(c.fingerprint)) return null;
+    // `run` will not be reached, so restate what that picture said about itself
+    // here. The queue's notes are per editing session and the image cache is
+    // not: without this, reopening a report whose pictures are still held drops
+    // every blank-slide warning until something forces a redraw.
+    noteChartFacts(c.chart.slide_id ?? "", env.imageFacts(c.fingerprint));
+    return c.fingerprint;
+  },
 
   run: async (c) => {
     // Not "nothing to do": recording a render that never happened would leave
     // the slide blank with no way back. Failing marks it retryable instead.
     if (!env) throw new Error("preview producers used before setProducerEnv");
-    await env.fetchImage(c.chart, c.fingerprint, {
+    const drawn = await env.fetchImage(c.chart, c.fingerprint, {
       templateRef: c.ctx.templateRef,
       reportId: c.ctx.reportId,
       // "Draw this slide again" has to reach the render host. The image is read
@@ -160,6 +179,13 @@ const chart: Producer = {
       // so without this the fetch returns the picture already held and the
       // button does nothing — which is precisely the state it exists for.
       force: c.force,
+    });
+    // What the picture cannot say for itself — it is blank, or its bars were
+    // too thin to carry numbers — is told to the author here instead, and shown
+    // on the warning button like every other slide problem.
+    noteChartFacts(c.chart.slide_id ?? "", {
+      empty: !!drawn?.empty,
+      unlabelled: drawn?.unlabelled ?? 0,
     });
   },
 

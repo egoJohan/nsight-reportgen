@@ -57,6 +57,17 @@ class ElementToggles:
     axis_names: bool = True
     filter_var: bool = True
     data_labels: bool = True
+    #: The "(n=516)" after a GROUP's name — in the legend where the series are
+    #: the groups, and on the bars where the bars are. Distinct from `n`, which
+    #: is the slide's own base in the footer: an author may want the whole
+    #: slide's N and not a number after every group, or the reverse.
+    #:
+    #: Default True — a slide comparing groups otherwise gives two percentages
+    #: and no way to know one is 516 people and the other 448. Off is for the
+    #: deck where the bases are already stated elsewhere and the repetition is
+    #: noise. ("Onko meillä mitään tapaa haluttaessa poistaa legendiin tulevat
+    #: N-luvut?", 2026-09-16)
+    group_base: bool = True
 
 
 @dataclass(frozen=True)

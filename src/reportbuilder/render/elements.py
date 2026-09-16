@@ -11,7 +11,6 @@ from pptx.dml.color import RGBColor
 from reportbuilder.model.report import NumberFormat
 from reportbuilder.render.base import RenderContext
 from reportbuilder.render.house_style import furniture_colors
-from reportbuilder.render.panels import panel_segments
 import reportbuilder.stats.statistics  # noqa: F401 — ensure built-in registrations are loaded
 import reportbuilder.stats.registry as _registry
 
@@ -171,39 +170,6 @@ def add_n_annotation(ctx: RenderContext) -> None:
     run.font.size = Pt(font_size)
 
 
-# Only these chart types draw one panel per group and cap at three; every other
-# chart type draws all its groups, so an omission clause there would be a lie.
-_PANEL_CHART_TYPES = ("pie", "doughnut", "funnel")
-
-
-def _omission_clause(ctx) -> str:
-    """The footer's record of every classifier group the slide did NOT draw.
-
-    The editor's warning stays in the editor; this line travels with the deck, so
-    it is the authoritative account of what was omitted. The two reasons are kept
-    apart because they mean different things to a reader: a group omitted for a
-    thin base could not be reported at all, while a capped group fits the data but
-    not the page. (spec 2026-08-22)
-
-    Only pie/doughnut/funnel draw one panel per group and cap at three; every
-    other chart type draws all its groups, so an omission clause there would be a
-    false statement printed on a client slide. (ruling 2026-08-22)
-    """
-    if getattr(ctx.spec, "chart_type", "") not in _PANEL_CHART_TYPES:
-        return ""
-    sel = panel_segments(ctx.series)
-    if not sel.split:
-        return ""
-    if sel.degraded:
-        return " · Ryhmittelyä ei voitu piirtää"
-    parts = []
-    if sel.thin:
-        parts.append("Ei raportoitu: " + ", ".join(sel.thin))
-    if sel.capped:
-        parts.append("Ei mahtunut sivulle: " + ", ".join(sel.capped))
-    return (" · " + " · ".join(parts)) if parts else ""
-
-
 def add_filter_annotation(ctx: RenderContext) -> None:
     """Add a slide textbox naming the classifying variable.
 
@@ -232,7 +198,10 @@ def add_filter_annotation(ctx: RenderContext) -> None:
     if cv2 and opts.get("xtab_layout") == "separate":
         tf.text = f"{ctx.spec.classifying_var} · {cv2}"
     else:
-        tf.text = f"{ctx.spec.classifying_var}{_omission_clause(ctx)}"
+        # The classifier alone. What the slide left OUT is the author's
+        # warning in the editor, not a line on the client's slide —
+        # see slide_chrome. (Johan, 2026-09-16)
+        tf.text = f"{ctx.spec.classifying_var}"
 
     font_name, font_size = ctx.style.font_for("filter_var")
     run = tf.paragraphs[0].runs[0]

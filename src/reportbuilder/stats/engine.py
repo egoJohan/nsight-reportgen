@@ -826,8 +826,12 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     else:
         rating = _rating_scale(var)
         is_rating = len(rating) >= max(3, len(labels) - 1)
+        # Clash-free: two categories renamed to one string would collapse into a
+        # single cell and one of them would leave the chart unannounced. See
+        # `_clash_free`.
+        display = _clash_free(tuple(labels.values()), overrides)
         entries = [
-            (code, overrides.get(label, label),
+            (code, display(label),
              float(rating.get(code, 1000 + idx) if is_rating else idx))
             for idx, (code, label) in enumerate(labels.items())
         ]
@@ -1209,8 +1213,10 @@ def _multi(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
     cells: dict[tuple[str, str], Cell] = {}
     rows = []
+    # Clash-free, so two options renamed to one string keep their own bars.
+    _display = _clash_free(tuple(v.label for v in vars_), overrides)
     for idx, v in enumerate(vars_):
-        display = overrides.get(v.label, v.label)
+        display = _display(v.label)
         s = pd.to_numeric(data[v.name], errors="coerce")
         sel = (s == 1.0) & ~s.isin(v.missing_values)
         tc = int(sel.sum())
@@ -1315,6 +1321,12 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
         # The row-summary values are keyed by segment, so their keys are display
         # labels too — otherwise the renderer looks them up by label and finds none.
         row_summary_keys=tuple(rl(s) for s in result.row_summary_keys),
+        # Same for what each segment MEASURES. A combo's bars are the classifier's
+        # groups and its line is a mean, and the renderer asks by display label.
+        segment_statistics=(
+            {rl(s): v for s, v in result.segment_statistics.items()}
+            if result.segment_statistics else None
+        ),
     )
 
 
@@ -1324,14 +1336,24 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     bars are the question's distribution (%), and the line is the MEAN of a
     compatible numeric secondary variable within each category (dual axis). The
     secondary mean is stored in the line segment's ``pct`` field so the existing
-    combo renderer (bars=seg0, line=seg1) plots it on the right axis unchanged."""
+    combo renderer (bars=seg0, line=seg1) plots it on the right axis unchanged.
+
+    Storing it in ``pct`` is only about which slot the renderer reads. What the
+    line MEASURES is said separately, in ``segment_statistics`` — without that
+    the renderer had one statistic for both segments and printed a 1-8 index
+    as "7.5 %"."""
     var = model.variable(question.variables[0])
     sec_name = spec.options.get("combo_secondary")
     sec = model.variable(sec_name)
-    # Primary distribution (%), single series over the question's categories.
+    # Primary distribution (%) over the question's categories — split by the
+    # classifying variable when there is one.
+    #
+    # This used to force `classifying_var=None`, so choosing a classifier on a
+    # combo slide changed nothing whatsoever: the result came back identical
+    # with and without it, and the reader saw the overall distribution while the
+    # editor said it was split. (Johan, 2026-09-16)
     base_spec = dataclasses.replace(
-        spec, options={}, classifying_var=None, statistic="pct",
-        chart_type="vertical_bar",
+        spec, options={}, statistic="pct", chart_type="vertical_bar",
     )
     base = _single(question, base_spec, data, model)
     pcol = pd.to_numeric(data[var.name], errors="coerce")
@@ -1349,24 +1371,65 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         label_to_code = {label: code
                          for code, label in code_labels(var, data, _effective_missing(
                              spec, var)).items()}
+    # The DISPLAY spelling too. `_single` has already applied the author's
+    # category-label overrides, so the categories this function is about to
+    # iterate are the short labels — and resolving those through a map keyed by
+    # the full value labels missed every renamed one. The line then took an
+    # empty set of rows and produced None, which draws as a flat 0.0.
+    #
+    # `setdefault`, so a short label that happens to equal another category's
+    # full label cannot steal it. Two categories given the SAME short label
+    # still collapse into one, but that happens to the bars as well and is a
+    # property of the override, not of this lookup. (Johan, 2026-09-16)
+    for full, short in (spec.label_override_map()
+                        if hasattr(spec, "label_override_map") else {}).items():
+        if full in label_to_code:
+            label_to_code.setdefault(short, label_to_code[full])
     primary_label = (var.label or var.name)[:30]
     secondary_label = (sec.label or sec.name)[:30]
 
+    # The bars. With no classifier that is the question's own distribution, in
+    # one series named after the question. With one, it is that classifier's
+    # groups, each its own series — the segments `_single` just produced.
+    bar_segments: tuple[str, ...] = (
+        tuple(base.segments) if spec.classifying_var else (primary_label,)
+    )
+
     cells: dict[tuple[str, str], Cell] = {}
     for cat in base.categories:
-        ptot = base.cell(cat, "Total")
-        cells[(cat, primary_label)] = Cell(pct=(ptot.pct if ptot else None))
+        if spec.classifying_var:
+            for seg in bar_segments:
+                cells[(cat, seg)] = base.cells.get((cat, seg), Cell(pct=None))
+        else:
+            ptot = base.cell(cat, "Total")
+            cells[(cat, primary_label)] = Cell(pct=(ptot.pct if ptot else None))
+        # The line is ONE mean per category, over everyone in the category
+        # rather than per group. The secondary variable is chosen once, as a
+        # single "Secondary variable (line)", and a line per group on top of a
+        # bar per group is a chart nobody can read.
         code = label_to_code.get(cat)
         vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
         cells[(cat, secondary_label)] = Cell(
             pct=(float(vals.mean()) if len(vals) else None)
         )
+    # Every segment needs a base. `series_values` drops any segment whose base is
+    # under MIN_SEGMENT_BASE, so a secondary with no entry at all was silently
+    # discarded the moment a classifier put real bases on the other segments —
+    # the line then disappeared and the classifier's own groups were drawn as
+    # lines in its place. The line's base is everyone the mean is taken over.
+    total_n = base.base_n.get("Total", 0)
+    base_n = dict(base.base_n)
+    base_n.setdefault(secondary_label, total_n)
+    for seg in bar_segments:
+        base_n.setdefault(seg, total_n)
     return SeriesResult(
         categories=base.categories,
-        segments=(primary_label, secondary_label),
+        segments=bar_segments + (secondary_label,),
         cells=cells,
-        base_n=dict(base.base_n),
+        base_n=base_n,
         statistic="pct",
+        segment_statistics={
+            **{s: "pct" for s in bar_segments}, secondary_label: "mean"},
     )
 
 
@@ -1429,13 +1492,38 @@ def _selected_rows(spec, data: pd.DataFrame,
     return data[selected], tuple(label for label, _m in kept)
 
 
+def _clash_free(names: tuple[str, ...], overrides: dict[str, str]):
+    """A renamer that will not make two of *names* into one.
+
+    A label is a KEY here — categories, cells and bases are all keyed by it — so
+    two renamed to the same string collapse into one dict entry and a whole
+    category leaves the chart with nothing said. Measured on a real slide: the
+    two "Suuressa kaupungissa" bands were both shortened to that, and the chart
+    drew 18 % twice while the 50 % band simply vanished.
+
+    So a rename that would clash is not applied to the ones that clash, and they
+    keep their full names. Renaming is a convenience and a convenience may not
+    cost a category; keeping the full name also shows the author the ambiguity,
+    where merging or dropping would hide it. A clash against a category nobody
+    renamed counts too. (Johan, 2026-09-16)
+    """
+    renamed = [overrides.get(t, t) for t in names]
+    seen: dict[str, int] = {}
+    for n in renamed:
+        seen[n] = seen.get(n, 0) + 1
+    clashing = {n for n, count in seen.items() if count > 1}
+    if not clashing:
+        return lambda t: overrides.get(t, t)
+    return lambda t: (t if overrides.get(t, t) in clashing else overrides.get(t, t))
+
+
 def _relabelled(result: SeriesResult, overrides: dict[str, str]) -> SeriesResult:
     """*result* with categories and segments renamed, cells and bases following.
 
     A rename that moved the names and left the cells keyed by the old ones would
     empty the chart, so both move together or neither does.
     """
-    name = lambda t: overrides.get(t, t)  # noqa: E731
+    name = _clash_free(tuple(result.categories) + tuple(result.segments), overrides)
     cats = tuple(name(c) for c in result.categories)
     segs = tuple(name(sg) for sg in result.segments)
     if cats == result.categories and segs == result.segments:
@@ -1455,7 +1543,8 @@ def _compute_series(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # Two-variable combo: question distribution (bars) + secondary var mean (line).
     if spec.chart_type == "combo" and spec.options.get("combo_secondary"):
         try:
-            return _combo_two_var(question, spec, data, model)
+            return _finish_series(
+                _combo_two_var(question, spec, data, model), spec, model)
         except Exception:
             pass  # fall through to the standard (classifier) combo
     # Task J.1: word-cloud chart type — route to the word-frequency path regardless
@@ -1528,6 +1617,20 @@ def _compute_series(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 result = _multi(question, spec, data, model)
         else:
             result = _single(question, spec, data, model)
+    return _finish_series(result, spec, model)
+
+
+def _finish_series(result: SeriesResult, spec: ChartSpec,
+                   model: QuestionModel) -> SeriesResult:
+    """Turn segment CODES into display labels and resolve the Total series.
+
+    Extracted from the tail of `_compute_series` because the combo path returns
+    early and so never ran it: a combo split by a classifier came out with
+    segments named "1", "2", "3" instead of "Mies", "Nainen", "Muu", and with
+    "Total" drawn as one more bar. Every path that produces segments needs this,
+    so it is reachable by every path. (Johan, 2026-09-16)
+    """
+    cv2 = getattr(spec, "classifying_var_2", None)
     # Display segment codes as the classifying variable's value labels (a cross-tab
     # of two classifiers joins both labels: "Male · 25-34 vuotias"). The SEPARATE
     # layout already emits display labels, and _relabel_combo_segments would split
@@ -1558,7 +1661,7 @@ def _rating_scale(var: Variable) -> dict[float, float]:
     return scale
 
 
-def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
+def scale_levels(var: Variable, df=None) -> list[tuple[float, str, float]]:
     """Ordered ``(code, label, scale_point)`` for a rating scale — for use where a
     scale is ALREADY asserted (the battery paths / manual battery validation), NOT for
     reclassifying standalone questions.
@@ -1573,7 +1676,10 @@ def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
              if vl.value not in var.missing_values
              and not _is_non_answer_level(vl.label or "")]
     if len(pairs) < 3:
-        return []
+        # Too few labels to read a scale off — an ENDPOINT-labelled rating, or
+        # an export that wrote none at all. The data can still say. See
+        # `_scale_from_data`; without a frame this is the [] it always was.
+        return _scale_from_data(var, df)
     # Leading-digit labels → the parsed points (keeps out-of-order SAV codes correct).
     # Uses the digit-labelled points when there are ≥3 (matching _rating_scale, so a
     # scale with a stray non-digit label doesn't regress).
@@ -1588,10 +1694,71 @@ def scale_levels(var: Variable) -> list[tuple[float, str, float]]:
         if 3 <= len(ints) <= 11 and ints == list(range(ints[0], ints[0] + len(ints))):
             by = {vl.value: (vl.label or "") for vl in var.value_labels}
             return [(float(c), by.get(c, str(int(c))), float(c)) for c in codes]
-    return []
+    return _scale_from_data(var, df)
 
 
-def battery_scale_levels(vars_: list[Variable]) -> list[tuple[float, str]]:
+def _scale_from_data(var: Variable, df) -> list[tuple[float, str, float]]:
+    """The levels of a scale the LABELS cannot describe — or [] without data.
+
+    A scale worded only at its ends carries two value labels ("Erittäin
+    huonosti", "Erittäin hyvin" on 1 and 5), and the rule above wants three. So
+    five brand attributes on a 1..5 rating reported `scale=False`, never reached
+    the grouping editor, could not be made into a battery, and the radar that
+    needed them charted one variable's scale points instead. Reported as
+    "en saa määritettyä muuttujanippua oikein".
+
+    The rest of the product already reads this shape — `_partial_scale` draws
+    "1..7 with words on 1 and 7" as numbered categories with the wording in a
+    caption — so it was a scale everywhere except where you try to group one.
+
+    With nothing to read the labels for, the DATA answers, exactly as
+    `is_tickbox` does for an export that wrote no labels: a contiguous run of
+    3..11 integers is a rating of that many points. 2 values is a tick-box's
+    business; 62 is an age. Points keep their wording where the file gave any
+    and are numbered where it did not.
+
+    `df is None` returns [] — every caller that passes no frame sees precisely
+    what it saw before. (Johan, 2026-09-16)
+    """
+    if df is None or var.name not in getattr(df, "columns", ()):
+        return []
+    by = {vl.value: (vl.label or "") for vl in var.value_labels}
+
+    def _levels(lo: int, hi: int):
+        if not (3 <= hi - lo + 1 <= 11):
+            return []
+        return [(float(c), by.get(float(c)) or str(c), float(c))
+                for c in range(lo, hi + 1)]
+
+    # The LABELLED ends state the range, and the sample does not get a vote on
+    # it. Reading the extent off the data instead made a scale's width depend on
+    # who happened to answer: in a 41-person sample nobody rated `Luotettava` a
+    # 5, so it came out four points wide where its four siblings were five, the
+    # compat keys differed, and the attributes still would not form a battery.
+    ends = sorted(c for c in by
+                  if float(c).is_integer() and c not in var.missing_values
+                  and not _is_non_answer_level(by[c]))
+    if len(ends) >= 2:
+        return _levels(int(ends[0]), int(ends[-1]))
+
+    # Nothing labelled at all — an export that wrote no labels. Now the data is
+    # all there is, and a contiguous run of 3..11 integers is a rating.
+    try:
+        import pandas as pd  # noqa: PLC0415 — optional at import time
+        seen = pd.to_numeric(df[var.name], errors="coerce").dropna().unique().tolist()
+    except Exception:  # noqa: BLE001 — a column we cannot read is not a scale
+        return []
+    codes = sorted(c for c in seen
+                   if float(c).is_integer() and c not in var.missing_values)
+    if not codes:
+        return []
+    ints = [int(c) for c in codes]
+    if ints != list(range(ints[0], ints[0] + len(ints))):
+        return []
+    return _levels(ints[0], ints[-1])
+
+
+def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, str]]:
     """The shared rating-scale ``(point, label)`` pairs a STACKED battery stacks by,
     ascending by point.
 
@@ -1599,7 +1766,7 @@ def battery_scale_levels(vars_: list[Variable]) -> list[tuple[float, str]]:
     parseable one. Empty when no member has a scale."""
     level_label: dict[float, str] = {}
     for v in vars_:
-        lv = scale_levels(v)
+        lv = scale_levels(v, df)
         if lv:
             for _code, label, point in lv:
                 level_label.setdefault(point, label)
@@ -1649,9 +1816,10 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     rows = []
     answered_any = pd.Series(False, index=data.index)
     base_by_seg: dict[str, int] = {}
+    _display = _clash_free(tuple(v.label for v in vars_), overrides)
     for idx, v in enumerate(vars_):
-        display = overrides.get(v.label, v.label)
-        scale = {c: p for c, _lbl, p in scale_levels(v)}
+        display = _display(v.label)
+        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
         for seg, mask in segs.items():
@@ -1728,7 +1896,7 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
     sibs = members if members is not None else _parallel_batteries(question, model)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     raw_attrs = [model.variable(v).label for v in question.variables]   # canonical order
-    attrs = [overrides.get(a, a) for a in raw_attrs]                    # display labels
+    attrs = [_clash_free(tuple(raw_attrs), overrides)(a) for a in raw_attrs]  # display
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}
     entities: list[str] = []
@@ -1792,7 +1960,7 @@ def _multi_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
     sibs = members if members is not None else _parallel_questions(question, model)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     raw_options = [model.variable(v).label for v in question.variables]  # this q's axis order
-    options = [overrides.get(o, o) for o in raw_options]                 # display labels
+    options = [_clash_free(tuple(raw_options), overrides)(o) for o in raw_options]  # display
     cells: dict[tuple[str, str], Cell] = {}
     base_n: dict[str, int] = {}
     segments: list[str] = []
@@ -1889,7 +2057,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     vars_ = [model.variable(n) for n in question.variables]
     # Shared scale levels from the first member with a parseable scale (digit- OR
     # word-labelled, via scale_levels).
-    scale_pts = battery_scale_levels(vars_)            # [(point, label)], 1..N ascending
+    scale_pts = battery_scale_levels(vars_, data)      # [(point, label)], 1..N ascending
     points = [p for p, _lbl in scale_pts]
     levels = [lbl for _p, lbl in scale_pts]            # stack-segment labels
     # The SAV code behind each level, from the first member that has a scale.
@@ -1901,7 +2069,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # battery of the same data.
     _code_for_point: dict[float, float] = {}
     for _v in vars_:
-        _lv = scale_levels(_v)
+        _lv = scale_levels(_v, data)
         if _lv:
             for _code, _lbl, _pt in _lv:
                 _code_for_point.setdefault(_pt, _code)
@@ -1910,7 +2078,8 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # Bar labels (member order), honouring the author's category-label overrides —
     # the editor lists the member labels, so a shortened label must reach the bars.
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
-    statements = [overrides.get(v.label, v.label) for v in vars_]
+    statements = [_clash_free(tuple(v.label for v in vars_), overrides)(v.label)
+                  for v in vars_]
 
     # Optional split by a classifying variable. Statement x level x segment is three
     # dimensions and a SeriesResult holds two, so a segment turns each statement into
@@ -1939,7 +2108,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     bars: list[str] = []
     answered_any = pd.Series(False, index=data.index)
     for v, stmt in zip(vars_, statements):
-        scale = {c: p for c, _lbl, p in scale_levels(v)}
+        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
         mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
         answered_any = answered_any | mapped.notna()
         for seg_label, mask in seg_items:

@@ -39,9 +39,14 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import {
+  decimalFieldLabel,
+  decimalFields,
+  showsPercentSign,
+} from "@/lib/numberFormatFields";
 import type { ChartSpec, ConfigField, PanelSelection, Question, Variable, GroupingOverride } from "@/lib/api";
 import { useChartPreview, useChartTypes, useRegroupedQuestions, useVariables } from "@/lib/queries";
-import { usePreviewStatus } from "@/lib/usePreviewStatus";
+import { usePreviewStatus, useChartFacts } from "@/lib/usePreviewStatus";
 import * as previewQueue from "@/lib/previewQueue";
 import { useDragReorder } from "@/lib/useDragReorder";
 import { slideTitle } from "@/components/wizard/slideTitle";
@@ -200,7 +205,11 @@ function Field({
    *  "what this is … whether it is drawn" and the field below it is only ever
    *  the value. (Johan, 2026-09-07) */
   action?: React.ReactNode;
-  children: React.ReactNode;
+  /** Optional: a setting whose whole value IS its "Show" tick has no control to
+   *  put under the label, and inventing one — a sentence showing what it would
+   *  look like — means writing example data into a panel every customer sees.
+   *  (Johan, 2026-09-16) */
+  children?: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
@@ -823,52 +832,51 @@ function NumberFormatWidget({ field, chart, onChange }: WidgetProps) {
         </Field>
       )}
 
-      {manual && (
+      {manual && (decimalFields(chart).length > 0 || showsPercentSign(chart)) && (
         <div className="col-span-2 grid grid-cols-3 items-end gap-4 rounded-lg border bg-muted/30 p-3">
-          <Field label="% decimals">
-            <Input
-              type="number"
-              min={0}
-              max={4}
-              value={chart.number_format.pct_decimals}
-              onChange={(e) =>
-                onChange({
-                  number_format: {
-                    ...chart.number_format,
-                    pct_decimals: Number(e.target.value) || 0,
-                  },
-                })
-              }
-            />
-          </Field>
-          <Field label="Mean decimals">
-            <Input
-              type="number"
-              min={0}
-              max={4}
-              value={chart.number_format.mean_decimals}
-              onChange={(e) =>
-                onChange({
-                  number_format: {
-                    ...chart.number_format,
-                    mean_decimals: Number(e.target.value) || 0,
-                  },
-                })
-              }
-            />
-          </Field>
-          <Field label="% sign">
-            <div className="flex h-8 items-center">
-              <Switch
-                checked={chart.number_format.show_pct_sign}
-                onCheckedChange={(c: boolean) =>
+          {/* One box per measure this chart actually draws, named specifically
+              only when there are two of them to tell apart. See
+              lib/numberFormatFields. */}
+          {decimalFields(chart).map((field) => (
+            <Field
+              key={field}
+              label={decimalFieldLabel(field, decimalFields(chart))}
+            >
+              <Input
+                type="number"
+                min={0}
+                max={4}
+                value={
+                  field === "pct"
+                    ? chart.number_format.pct_decimals
+                    : chart.number_format.mean_decimals
+                }
+                onChange={(e) =>
                   onChange({
-                    number_format: { ...chart.number_format, show_pct_sign: c },
+                    number_format: {
+                      ...chart.number_format,
+                      [field === "pct" ? "pct_decimals" : "mean_decimals"]:
+                        Number(e.target.value) || 0,
+                    },
                   })
                 }
               />
-            </div>
-          </Field>
+            </Field>
+          ))}
+          {showsPercentSign(chart) && (
+            <Field label="% sign">
+              <div className="flex h-8 items-center">
+                <Switch
+                  checked={chart.number_format.show_pct_sign}
+                  onCheckedChange={(c: boolean) =>
+                    onChange({
+                      number_format: { ...chart.number_format, show_pct_sign: c },
+                    })
+                  }
+                />
+              </div>
+            </Field>
+          )}
         </div>
       )}
     </>
@@ -1318,6 +1326,7 @@ function ChartControls({
       />
       <AxisTitleFields chart={chart} onChange={onChange} />
       <FooterNoteField chart={chart} onChange={onChange} />
+      <GroupBaseField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
         chart={chart}
@@ -1483,6 +1492,46 @@ function FooterNoteField({
         onChange={(e) => onChange({ footer_note: e.target.value || null })}
       />
     </Field>
+  );
+}
+
+// ── Group sizes: the "(n=516)" after a group's own name ─────────────────────
+function GroupBaseField({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  // Only where there ARE groups to size. Without a classifying variable the
+  // chart is one series for everybody, its base is the slide's own N in the
+  // footer, and nothing appends "(n=…)" anywhere — so the switch would be a
+  // control that changes nothing. With one, the groups are named either in the
+  // legend or on the bars, and both carry the base. (Johan, 2026-09-16)
+  if (!chart.classifying_var) return null;
+  // Older reports have no such field; their behaviour was on.
+  const shown = chart.elements?.group_base !== false;
+  return (
+    <Field
+      label="Group sizes"
+      hint={
+        <>
+          The <code>(n=…)</code> after a group’s own name — in the legend where
+          the series are the groups, and on the bars where the bars are.
+          Separate from the footer’s N, which is the whole slide’s base. Untick
+          where the group sizes are stated elsewhere and repeating them is
+          noise.
+        </>
+      }
+      action={
+        <ShowToggle
+          checked={shown}
+          onChange={(v) =>
+            onChange({ elements: { ...chart.elements, group_base: v } })
+          }
+        />
+      }
+    />
   );
 }
 
@@ -2042,6 +2091,44 @@ type SlideProblem = { id: string; title: string; detail: string };
  *  actually draws panels, so an ordinary bar chart costs no request — this runs
  *  once per slide in the list, and the list can be long.
  */
+/** What this slide's picture could not say for itself.
+ *
+ *  Both of these used to be invisible to the author. The blank slide printed
+ *  "No data to show" across the chart area — English text on a slide that goes
+ *  out with the deck — and a chart too dense to label simply came out with no
+ *  numbers on it and no reason given. The slide says nothing now; this is where
+ *  the author is told. (Johan, 2026-09-16)
+ */
+function renderProblems(facts: previewQueue.ChartFacts): SlideProblem[] {
+  const out: SlideProblem[] = [];
+  if (facts.empty) {
+    out.push({
+      id: "no-data",
+      title: "Nothing to chart on this slide",
+      detail:
+        "Every value on this slide is missing or zero, so its picture is blank. " +
+        "Usually the question has no answers under the filters this slide uses, " +
+        "or the variable carries no value labels to chart. Pick another " +
+        "question, widen the groups, or take the slide out — it goes into the " +
+        "deck as an empty chart area otherwise.",
+    });
+  }
+  if (facts.unlabelled) {
+    out.push({
+      id: "unlabelled",
+      title: `${facts.unlabelled} categories, too many to label`,
+      detail:
+        `Each bar is under 5pt tall in this template's chart area, and a number ` +
+        `printed there would overlap the bars either side of it — so the ` +
+        `percentages were left off and the reader has only the axis. This is ` +
+        `about the ROOM, not the question: the same chart carries its numbers ` +
+        `in a taller chart area. Sort the slide and keep the largest few ` +
+        `categories, or give the chart area more height in the template.`,
+    });
+  }
+  return out;
+}
+
 function producerProblems(chart: ChartSpec | undefined): SlideProblem[] {
   const failures = previewQueue.failuresOf(chart?.slide_id ?? "");
   const say: Record<string, { title: string; detail: string }> = {
@@ -2082,8 +2169,13 @@ function usePanelSelection(
   chart: ChartSpec | undefined,
   grouping: GroupingOverride
 ) {
-  const applies =
-    !!chart && PANEL_CHART_TYPES.includes(chart.chart_type) && !!chart.classifying_var;
+  // A CLASSIFIER is what makes this worth asking, not the chart type. Thin
+  // groups are dropped by `series_values`, which every builder shares, so a bar
+  // chart split six ways on a small study loses its groups exactly as a pie
+  // does — and used to do it with no warning anywhere, because this asked only
+  // for the panel types. A slide with no classifier still costs no request.
+  // (Johan, 2026-09-16)
+  const applies = !!chart && !!chart.classifying_var;
   return useQuery({
     // The selection is in the key: pick three of five groups and the warning
     // about the other two has to go, rather than sit there describing the chart
@@ -2106,21 +2198,24 @@ function slideProblems(
   chart: ChartSpec | undefined,
   panels: PanelSelection | undefined
 ): SlideProblem[] {
-  if (!chart || !PANEL_CHART_TYPES.includes(chart.chart_type)) return [];
-  if (!chart.classifying_var || !panels || !panels.split) return [];
+  if (!chart || !chart.classifying_var || !panels || !panels.split) return [];
 
   const out: SlideProblem[] = [];
   // Two reasons, two entries. Merging them would tell an author that four
   // groups "did not fit" when some of them could not have been charted at any
   // size — which is a different problem with a different answer.
-  if (panels.capped.length) {
+  // Capping is panel-only: those chart types draw one panel per group and stop
+  // at three. A bar chart draws every group it keeps, so telling its author that
+  // groups "did not fit" would be false. Thin groups and a dropped split are
+  // real on every chart type. (Johan, 2026-09-16)
+  if (panels.capped.length && PANEL_CHART_TYPES.includes(chart.chart_type)) {
     out.push({
       id: "too-many-groups",
       title: `${panels.capped.length} group${panels.capped.length === 1 ? "" : "s"} left off this slide`,
       detail:
         `A slide holds ${panels.max_panels} charts. Drawn: ${panels.drawn.join(", ")}. ` +
         `Left out: ${panels.capped.join(", ")} — the largest groups are kept. ` +
-        `The slide's footer names them too, so the omission travels with the deck.`,
+        `The slide itself says nothing about them, so this is the only warning.`,
     });
   }
   if (panels.thin.length) {
@@ -2130,8 +2225,8 @@ function slideProblems(
       detail:
         `Too few respondents to chart: ${panels.thin.join(", ")}. ` +
         `Their percentages would be noise, so they are left out whatever else ` +
-        `fits. The slide's footer names them separately from anything that ` +
-        `merely ran out of room.`,
+        `fits. The slide itself says nothing about them — its N counts them, ` +
+        `and no reader of the deck is told which groups went missing.`,
     });
   }
   if (panels.degraded) {
@@ -2142,6 +2237,24 @@ function slideProblems(
         `Every group is too small to report, so the slide falls back to one ` +
         `chart of the whole sample rather than a blank space. Split by a ` +
         `variable with fewer, larger groups.`,
+    });
+  }
+  // Which groups the slide was NARROWED to. It used to be printed in the
+  // slide's own footer, so the reader of the deck could see that N counted
+  // those respondents and nobody else. That line is gone from the slide
+  // (2026-09-16), which leaves the author as the only one who can notice —
+  // so tell them here, where every other slide problem is raised.
+  const picked = chart.classifying_values ?? [];
+  if (chart.classifying_var && picked.length && panels.split &&
+      picked.length < panels.drawn.length + panels.thin.length + panels.capped.length) {
+    out.push({
+      id: "narrowed-to-groups",
+      title: `Drawn on ${picked.length} group${picked.length === 1 ? "" : "s"} only`,
+      detail:
+        `This slide counts ${picked.join(", ")} and nobody else, and its N says ` +
+        `so without naming them. A reader who is not told reads it as the whole ` +
+        `study. Tick the rest under "Groups on this slide", or say which groups ` +
+        `it covers in the slide title.`,
     });
   }
   return out;
@@ -2171,7 +2284,12 @@ function SlideWarning({
   className?: string;
 }) {
   const { data: panels } = usePanelSelection(materialId, chart, grouping);
-  const problems = [...slideProblems(chart, panels), ...producerProblems(chart)];
+  // Subscribed, so the marker appears when the picture lands rather than
+  // whenever this row happens to render next — which, for a slide nobody has
+  // touched, is never.
+  const facts = useChartFacts(chart.slide_id ?? "");
+  const problems = [...slideProblems(chart, panels), ...producerProblems(chart),
+                    ...renderProblems(facts)];
   if (!problems.length) return null;
   return (
     <AlertTriangleIcon
@@ -2323,9 +2441,11 @@ function StepConfigureInner({
   const activeStatus = usePreviewStatus(activeChart?.slide_id ?? "");
   void activeStatus;
   const { data: activePanels } = usePanelSelection(materialId, activeChart, grouping);
+  const activeFacts = useChartFacts(activeChart?.slide_id ?? "");
   const activeProblems = [
     ...slideProblems(activeChart, activePanels),
     ...producerProblems(activeChart),
+    ...renderProblems(activeFacts),
   ];
   const activeSpecial = activeChart ? rendersFullSlide(activeChart) : false;
   const activeBullets = activeChart ? rendersAsBullets(activeChart) : false;
@@ -2448,13 +2568,34 @@ function StepConfigureInner({
                 }
               />
             )}
+            {/* ONE column, top-right of the picture, in source order.
+                Each of these used to carry its own `absolute top-…`, recomputed
+                against which of its neighbours happened to be showing — and the
+                warning sat in a second column beside them because there was no
+                slot left. A flex column makes the order the code's order and
+                the spacing one number. (Johan, 2026-09-16) */}
+            <div className="absolute right-2 top-2 z-20 flex flex-col gap-2">
+            {/* What this slide will NOT show. FIRST, and never moves: it is the
+                one button that reports a problem, so it must be where the eye
+                lands whatever else is on the slide. */}
+            {!activeSpecial && activeProblems.length > 0 && (
+              <button
+                type="button"
+                title={activeProblems[0].title}
+                aria-label={activeProblems[0].title}
+                onClick={() => setProblemsOpen(true)}
+                className="flex size-8 items-center justify-center rounded-md bg-destructive/10 text-destructive shadow-sm ring-1 ring-destructive/30 backdrop-blur-sm transition-colors hover:bg-destructive/20"
+              >
+                <AlertTriangleIcon className="size-4" />
+              </button>
+            )}
             {/* Question details — chart slides only (special slides are edited inline). */}
             {!activeSpecial && (
               <button
                 type="button"
                 title="View question details"
                 onClick={() => setEditQid(activeChart.question_ref)}
-                className="absolute right-2 top-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
+                className="flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
               >
                 <InfoIcon className="size-4" />
               </button>
@@ -2478,12 +2619,7 @@ function StepConfigureInner({
                   // about it — the chart type, the split — straight away.
                   if (id) setActive(id);
                 }}
-                // The (i) is chart-slides-only, so on a special slide the
-                // stack starts here rather than leaving a hole where it was.
-                className={cn(
-                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground",
-                  activeSpecial ? "top-2" : "top-12"
-                )}
+                className="flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
               >
                 <CopyIcon className="size-4" />
               </button>
@@ -2502,10 +2638,7 @@ function StepConfigureInner({
                 title="Draw this slide again"
                 aria-label="Draw this slide again"
                 onClick={() => previewQueue.redraw(activeChart.slide_id!)}
-                className={cn(
-                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground",
-                  activeSpecial ? "top-12" : "top-[5.5rem]"
-                )}
+                className="flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-foreground"
               >
                 <RotateCcwIcon className="size-4" />
               </button>
@@ -2529,28 +2662,12 @@ function StepConfigureInner({
                   onRemoveChart(gone);
                   setActive(next?.slide_id ?? null);
                 }}
-                className={cn(
-                  "absolute right-2 z-20 flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-destructive",
-                  activeSpecial ? "top-[5.5rem]" : "top-[7.5rem]"
-                )}
+                className="flex size-8 items-center justify-center rounded-md bg-background/85 text-muted-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition-colors hover:text-destructive"
               >
                 <Trash2Icon className="size-4" />
               </button>
             )}
-            {/* What this slide will NOT show. Sits beside the (i) rather than in
-                the config panel: it is about the RENDERED slide, so it belongs on
-                the picture. Only appears when there is something to say. */}
-            {!activeSpecial && activeProblems.length > 0 && (
-              <button
-                type="button"
-                title={activeProblems[0].title}
-                aria-label={activeProblems[0].title}
-                onClick={() => setProblemsOpen(true)}
-                className="absolute right-12 top-2 z-20 flex size-8 items-center justify-center rounded-md bg-destructive/10 text-destructive shadow-sm ring-1 ring-destructive/30 backdrop-blur-sm transition-colors hover:bg-destructive/20"
-              >
-                <AlertTriangleIcon className="size-4" />
-              </button>
-            )}
+            </div>
           </div>
         )}
       </div>

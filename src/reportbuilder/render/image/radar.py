@@ -30,7 +30,7 @@ from reportbuilder.render.image._mpl import (
     render_png, place_picture_square, series_label, series_values, place_total,
     colours_by_series,
     style_legend, wrap_label,
-    chart_background, chart_furniture,
+    chart_background, chart_furniture, _value_axis,
 )
 from reportbuilder.render.house_style import register_fonts, series_colors
 from reportbuilder.render.image._mpl import template_palette
@@ -74,7 +74,12 @@ def build_image_radar(ctx) -> None:
 
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
     max_val = max(all_vals, default=100.0)
-    r_max = min(100.0, max_val * 1.15)
+    # The shared axis rule, not a copy of its percentage half. `min(100.0, …)`
+    # capped every statistic, so a radar of COUNTS was drawn against a 0..100
+    # scale and its polygon left the plot — the same defect reported on the line
+    # chart, here simply never tried. A small integer scale (a 1-5 rating) still
+    # gets its own ticks below. (Johan, 2026-09-16)
+    r_max, r_scale_ticks = _value_axis(max_val, ctx.series.statistic)
 
     for i, seg in enumerate(segs):
         vals = data[seg]
@@ -102,9 +107,11 @@ def build_image_radar(ctx) -> None:
     if r_max <= 12:
         r_ticks = [v for v in range(1, int(r_max) + 1)]
     else:
-        r_ticks = [v for v in [20, 40, 60, 80, 100] if v <= r_max]
+        r_ticks = [v for v in r_scale_ticks if 0 < v <= r_max]
     ax.set_yticks(r_ticks)
-    ax.set_yticklabels([str(v) for v in r_ticks], fontsize=8.0, color=muted)
+    ax.set_yticklabels(
+        [str(int(v)) if float(v).is_integer() else f"{v:g}" for v in r_ticks],
+        fontsize=8.0, color=muted)
     ax.grid(color=grid, linewidth=0.8)
     ax.spines["polar"].set_color("#C9C1B4")
     ax.spines["polar"].set_linewidth(1.0)

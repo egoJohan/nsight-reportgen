@@ -62,10 +62,16 @@ def test_an_authored_footer_note_goes_with_it():
     assert not any("Osuus vastaajista" in t for t in texts), texts
 
 
-def test_the_group_selection_is_still_disclosed():
-    """The slide counts only these respondents. Hiding the N does not buy the
-    author the right to stop saying so."""
+def test_the_group_selection_is_no_longer_on_the_slide():
+    """REVERSED 2026-09-16. This asserted that hiding the N does not buy the
+    author the right to stop saying which groups the slide counts.
+
+    Which groups it was narrowed to is now the author's warning in the editor
+    (`narrowed-to-groups`), not a line on a deck handed to a client — "Warning
+    should not be rendered to slide in any case!" (Johan). Hiding the N still
+    hides the N, which is what this file is actually about.
+    """
     texts = _texts(_series(applied=("Naiset", "25-34 vuotias")),
                    classifying_var="sex", elements=_elements(n=False))
-    assert any("Naiset" in t and "25-34 vuotias" in t for t in texts), texts
-    assert not any("N = 900" in t for t in texts)
+    assert not any("Naiset" in t for t in texts), texts
+    assert not any("N = 900" in t for t in texts), texts

@@ -257,15 +257,28 @@ def test_it_is_never_the_union():
 # Club, Synsam -- these remove 26% of the proposal and lose NONE of the 24
 # companies in them. The rules that cut more all cost a company: sentence-case
 # alone would drop "Sokos hotels (S-kortti)".
+#
+# UPDATE 2026-09-16: the first of the two no longer applies to value labels.
+# The measurement above held for the shapes those three studies contain, and
+# missed one: a brand list asked as a SINGLE-choice question. There the case
+# ending dropped `Estrella`, failing the requirement this note states. Re-run
+# the same way, exempting value labels loses no company in the three studies
+# and adds 29 candidates, all demographics and attribute phrases. The rule
+# still applies where it was measured to help -- it is the DESCRIPTION-opener
+# rule below, which is untouched, that removes most of the 26%.
 
-def test_an_inflected_option_is_not_proposed():
+def test_an_inflected_option_is_proposed_and_left_to_the_judge():
+    """REVERSED 2026-09-16 — see the note above and
+    `test_multi_response_brands.test_an_inflected_VALUE_label_is_now_offered_too`.
+    The case ending no longer refuses a value label, because the same rule was
+    refusing `Estrella`."""
     m = _model(
         _var("q1", values=("Kotona", "Muualla", "Omassa rauhassa")),
         _var("q2", values=("Kotona", "Muualla", "Omassa rauhassa")),
     )
     proposed = propose_sensitive_terms(m)
-    assert "Muualla" not in proposed
-    assert "Omassa rauhassa" not in proposed
+    assert "Muualla" in proposed
+    assert "Omassa rauhassa" in proposed
 
 
 def test_a_description_opening_with_an_evaluation_is_not_proposed():

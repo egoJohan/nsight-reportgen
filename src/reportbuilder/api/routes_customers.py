@@ -174,20 +174,23 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     paid once for the page, not once per customer.
     """
     customers = repo.list_customers(auth, user=user)
-    by_id = {u.id: u for u in repo.list_users(auth)}
+    # Names only — this page prints who owns a customer and nothing else about
+    # them, and `list_users` reads a second object per user for grants it would
+    # throw away. (Johan, 2026-09-16)
+    names = repo.list_user_names(auth)
     # One read for the whole page, not one per row.
     modes = repo.customer_modes(auth)
     out = []
     for c in customers:
-        cases = repo.list_cases(auth, c.id, user=user)
-        owner = by_id.get(c.owner_id)
+        owner_name = names.get(c.owner_id)
         out.append({
             "id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
-            "case_count": len(cases),
+            # Counted from the listing; the studies themselves are not read.
+            "case_count": repo.count_cases(auth, c.id, user=user),
             "permission_mode": modes.get(c.id, "inherit"),
-            "owner": ({"id": owner.id, "name": owner.name or owner.email}
-                      if owner else None),
+            "owner": ({"id": c.owner_id, "name": owner_name}
+                      if owner_name is not None else None),
         })
     return out
 

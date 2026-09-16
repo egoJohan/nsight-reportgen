@@ -11,17 +11,24 @@ Returns None.
 """
 from __future__ import annotations
 
+from reportbuilder.render.image.bars import _category_ticks, _as_one_series_per_group
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
     format_value, series_label, style_legend, wrap_label, place_total,
-    colours_by_series,
+    colours_by_series, _value_axis,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
 from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.image.label_fit import register_category_labels
 
+
+
+def _tick_text(v: float) -> str:
+    """A tick label without a pointless ".0" — counts are whole numbers, and a
+    mean's ticks may not be."""
+    return str(int(v)) if float(v).is_integer() else f"{v:g}"
 
 def build_image_line(ctx) -> None:
     """Line chart: one line per segment, x-axis = categories (REQ-C-24b/f, REQ-C-27a).
@@ -33,6 +40,11 @@ def build_image_line(ctx) -> None:
     - No matplotlib title (handled by slide chrome, REQ-D-04)
     """
     cats, segs, data = series_values(ctx.series)
+    # A summary statistic is ONE category (the question) times the groups,
+    # which drawn literally is every group's point stacked on one x. The bar
+    # builder already transposes it — see `_as_one_series_per_group` — and
+    # this did not. (Johan, 2026-09-16)
+    cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
     # A line has no top or bottom; its legend has a first and a last.
     default_segs, segs = segs, place_total(segs, getattr(ctx.spec, "total_position", "auto"))
     fig, ax = new_figure(ctx)
@@ -75,8 +87,12 @@ def build_image_line(ctx) -> None:
     longest = max((len(c) for c in cats), default=0)
     rotate = len(cats) > 4 or longest > 16
     ax.set_xticks(x)
+    # Through the shared rule: a lone SUMMARY category is the question itself,
+    # and printing it under the axis repeats the subtitle as an axis title
+    # nobody asked for. See `_category_ticks`. (Johan, 2026-09-16)
     ax.set_xticklabels(
-        wrapped, fontsize=10.5 if rotate else 11.5, color=ink,
+        _category_ticks(wrapped, lambda t: t, ctx.series.statistic),
+        fontsize=10.5 if rotate else 11.5, color=ink,
         rotation=25 if rotate else 0,
         ha="right" if rotate else "center",
         rotation_mode="anchor" if rotate else None,
@@ -91,15 +107,17 @@ def build_image_line(ctx) -> None:
     ax.spines["bottom"].set_color("#C9C1B4")
     ax.spines["bottom"].set_linewidth(1.0)
 
-    # Grid-tone horizontal gridlines
-    ax_max = min(100.0, max(max_val * 1.20, 10.0))
-    for yv in [20, 40, 60, 80, 100]:
-        if yv <= ax_max:
+    # The shared axis rule. This used to be a copy of the PERCENTAGE half of it
+    # — `min(100.0, …)` — applied to every statistic, so a line of counts ran
+    # off the top of its own chart and its points were drawn outside the axes.
+    # ("Jos line chartissa tunnusluvuksi valitsee count, niin kuvaaja piirtyy
+    # väärin", 2026-09-16)
+    ax_max, y_ticks = _value_axis(max_val, ctx.series.statistic)
+    for yv in y_ticks:
+        if yv > 0:
             ax.axhline(yv, color=grid, lw=0.8, zorder=1)
-
-    y_ticks = [v for v in [0, 20, 40, 60, 80, 100] if v <= ax_max]
     ax.set_yticks(y_ticks)
-    ax.set_yticklabels([str(v) for v in y_ticks], fontsize=9.5, color=muted)
+    ax.set_yticklabels([_tick_text(v) for v in y_ticks], fontsize=9.5, color=muted)
     ax.set_ylim(0, ax_max)
 
     if ctx.spec.elements.legend and len(segs) > 1:

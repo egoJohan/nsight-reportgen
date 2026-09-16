@@ -22,6 +22,22 @@ export function usePreviewStatus(slideId: string): Partial<Record<ProducerId, St
   return decode(key);
 }
 
+/** What this slide's last render said about itself — blank, or unlabelled.
+ *
+ *  Subscribed rather than read, because the row that shows the warning is not
+ *  the slide the author is editing: nothing else re-renders the slide list when
+ *  a preview lands, so a plain read would put the marker up whenever the list
+ *  happened to render next, which for a slide nobody has touched is never.
+ */
+export function useChartFacts(slideId: string): previewQueue.ChartFacts {
+  const subscribe = useCallback(
+    (fn: () => void) => previewQueue.subscribe(fn),
+    []
+  );
+  const get = useCallback(() => previewQueue.chartFactsOf(slideId), [slideId]);
+  return useSyncExternalStore(subscribe, get, get);
+}
+
 /** True while this slide's headline is being written. */
 export function useTitlePending(slideId: string): boolean {
   return usePreviewStatus(slideId).title === "running";

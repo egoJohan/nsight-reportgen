@@ -1,11 +1,17 @@
-"""A slide drawn on part of the sample has to say so.
+"""A slide drawn on part of the sample says so IN THE EDITOR, not on the slide.
 
-The base line already carries this kind of disclosure — when a pie drops a panel
-whose base was too thin, the footer says which groups are missing, because image
-mode has no separate "classifying variable" box the way the native builder has.
-A slide computed on one group of the classifier is the same promise: N counts
-those respondents and nobody else, and a reader who is not told reads the slide
-as the whole study.
+REVERSED 2026-09-16. This file asserted the opposite: that the footer names the
+groups a slide was narrowed to, the same way it used to name groups dropped for
+a thin base.
+
+Both are now the author's warning, raised beside the slide in the editor with
+every other slide problem — "Warning should not be rendered to slide in any
+case!" (Johan). The editor gained a `narrowed-to-groups` problem in the same
+change, so the information is not lost; it is told to the person who can act on
+it rather than printed on a deck handed to a client.
+
+What the footer still carries is the N itself, which is a fact about the chart
+rather than a note about what is missing from it.
 """
 from __future__ import annotations
 
@@ -56,16 +62,16 @@ def test_the_whole_sample_says_nothing_extra():
     assert "Design 1" not in out.split("N = 30")[1]
 
 
-def test_one_group_is_named_on_the_base_line():
+def test_one_group_is_NOT_named_on_the_base_line():
     out = _texts(("Design 1",))
     assert "N = 10" in out, out
-    assert "Design 1" in out, out
+    assert "Design 1" not in out, out
 
 
-def test_a_partial_selection_names_every_group_it_kept():
+def test_a_partial_selection_names_no_group_on_the_slide():
     out = _texts(("Design 1", "Design 3"))
     assert "N = 20" in out, out
-    assert "Design 1" in out and "Design 3" in out, out
+    assert "Design 1" not in out and "Design 3" not in out, out
 
 
 def test_naming_every_group_draws_the_whole_sample():

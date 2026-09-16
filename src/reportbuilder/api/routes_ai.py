@@ -211,20 +211,34 @@ def _findings_from_series(
     can all belong to one entity, which would hand the model a "comparison" with
     nothing to compare.
     """
-    stat = series.statistic
+    def _stat_of(seg: str) -> str:
+        return series.statistic_of(seg) if hasattr(series, "statistic_of") else series.statistic
 
     def _val(cat: str, seg: str) -> float | None:
         cell = series.cells.get((cat, seg))
         if cell is None:
             return None
-        val = cell.value(stat)
+        # `series.statistic` names the FIELD the number is in, which is not the
+        # same question as what the number IS. A two-variable combo deliberately
+        # parks its secondary mean in `pct` so the renderer can plot it, so
+        # reading that cell as a "mean" finds an empty slot and the line
+        # vanishes from the findings. Storage here, meaning below — the renderer
+        # splits them the same way. (Johan, 2026-09-16)
+        val = cell.value(series.statistic)
         return None if val is None else float(val)
 
+    # Segments measuring something OTHER than the series' own statistic are set
+    # aside and reported separately below: a mean and a percentage do not belong
+    # in one ranking, and sorting them together put a 6.2 above a 19 % it has no
+    # relation to. Empty for every chart but the two-variable combo.
+    other = [s for s in series.segments if _stat_of(s) != series.statistic]
+    main = [s for s in series.segments if s not in other]
+
     ref: str | None = None
-    if "Total" in series.segments:
+    if "Total" in main:
         ref = "Total"
-    elif len(series.segments) == 1:
-        ref = series.segments[0]
+    elif len(main) == 1:
+        ref = main[0]
 
     pairs: list[tuple[str, float]] = []
     if ref is not None:
@@ -233,7 +247,7 @@ def _findings_from_series(
             if val is not None:
                 pairs.append((cat, val))
     else:
-        for seg in series.segments:
+        for seg in main:
             scored = [(cat, v) for cat in series.categories
                       if (v := _val(cat, seg)) is not None]
             if not scored:
@@ -242,7 +256,23 @@ def _findings_from_series(
             pairs.append((f"{seg} — {cat}", val))
 
     pairs.sort(key=lambda p: p[1], reverse=True)
-    return pairs[: max(1, top_n)]
+    top = pairs[: max(1, top_n)]
+
+    # The other measure, after the ranking rather than inside it, and named for
+    # what it is so a 6.2 is not read back as 6.2 %. Its high and low points:
+    # what a headline can say about a line is which end of the chart it rises
+    # towards, and two numbers carry that where a whole series would not.
+    for seg in other:
+        scored = [(cat, v) for cat in series.categories
+                  if (v := _val(cat, seg)) is not None]
+        if not scored:
+            continue
+        hi = max(scored, key=lambda p: p[1])
+        lo = min(scored, key=lambda p: p[1])
+        top.append((f"{seg} (keskiarvo) — {hi[0]}", hi[1]))
+        if lo[0] != hi[0]:
+            top.append((f"{seg} (keskiarvo) — {lo[0]}", lo[1]))
+    return top
 
 
 # --------------------------------------------------------------------------- #
@@ -266,6 +296,16 @@ class SlideTitleBody(BaseModel):
     # resolves the same qid the report uses; without it the base model has no
     # "battery-…"/"multi-…" qid and the request 404s → the slide keeps its raw question.
     grouping: dict | None = None
+    # What the slide actually DRAWS. Both default to the old behaviour, so a
+    # caller that sends neither gets exactly the series it got before.
+    #
+    # A combo computes a second measure — the secondary variable's mean — and
+    # only when its chart type and `combo_secondary` are both known. Without
+    # them the series handed to the prompt had one measure in it, so a headline
+    # could only ever describe half the chart. ("Combo chartin otsikko … ei
+    # mukaudu molempiin kuvaajiin", 2026-09-16)
+    chart_type: str = "horizontal_bar"
+    options: dict = {}
 
 
 class ShortLabelsBody(BaseModel):
@@ -279,7 +319,12 @@ def _spec_from_title_body(body: SlideTitleBody) -> ChartSpec:
     """Build a minimal ChartSpec sufficient for the stats engine to compute a series."""
     return ChartSpec(
         question_ref=body.question_ref,
-        chart_type="horizontal_bar",  # irrelevant to compute()
+        # The chart type is NOT irrelevant to compute(), as this once said: the
+        # combo branch dispatches on it, and hard-coding a bar here is what kept
+        # the secondary variable out of the series. It still defaults to a bar,
+        # which is what every caller that does not care sends.
+        chart_type=body.chart_type,
+        options=dict(body.options or {}),
         statistic=body.statistic,
         classifying_var=body.classifying_var,
         classifying_values=tuple(body.classifying_values or ()),
