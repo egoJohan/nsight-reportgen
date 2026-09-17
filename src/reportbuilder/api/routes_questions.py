@@ -172,6 +172,7 @@ def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
     here stays synthetic/cheap. (REQ-C-13)
     """
     # multi + battery: one category per member variable (its rewritten label).
+    unlabelled = False
     if question.kind in ("multi", "battery"):
         cats = tuple(model.variables[v].label for v in question.variables)
     else:
@@ -183,11 +184,33 @@ def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
         )
         if not cats:
             cats = ("A", "B", "C")  # fallback: no value labels defined
+            unlabelled = True
 
-    # A battery reports a mean per member (not a part-of-whole %), so its
-    # synthetic shape uses the mean statistic — keeps pie/doughnut out and
-    # picks a bar default.
-    is_battery = question.kind == "battery"
+    # A question that reports a MEAN rather than a distribution. Its synthetic
+    # shape has to say so: the mean statistic keeps pie/doughnut out (their
+    # suitability needs an additive one) and leaves a bar as the default.
+    #
+    # A battery always did. Two others never did and are the same kind of
+    # thing:
+    #
+    #   * a numeric SCALE — an index, a score, a spend. It has one value, a
+    #     mean, and there is no whole for it to be part of.
+    #   * a variable with NO value labels, where the three categories above are
+    #     a placeholder this function invented. Left as they were, "A", "B" and
+    #     "C" at 50 % each read as three nominal groups partitioning a whole,
+    #     which is the one shape the pie plugin scores its top 0.95 on. So the
+    #     product's suggested chart for Työelämäindeksi was a pie, and a mean of
+    #     5.7 drew as a single filled circle with "5.7" on it.
+    #
+    # Guessing "pie" from an invented shape is the error; a bar is right for
+    # every one of these and right for an unlabelled ordered score too.
+    measured = (
+        question.kind == "battery"
+        or unlabelled
+        or (bool(question.variables)
+            and all(model.variables[v].measurement == "scale"
+                    for v in question.variables if v in model.variables))
+    )
 
     if question.kind == "multi" and cats:
         real = _multi_quick_counts(question, model, df)
@@ -208,8 +231,8 @@ def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
 
     segments = ("Total",)
     cells: dict[tuple[str, str], Cell] = {
-        (cat, "Total"): Cell(pct=None if is_battery else 50.0, count=10.0,
-                             mean=3.0 if is_battery else None)
+        (cat, "Total"): Cell(pct=None if measured else 50.0, count=10.0,
+                             mean=3.0 if measured else None)
         for cat in cats
     }
     return SeriesResult(
@@ -217,7 +240,7 @@ def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
         segments=segments,
         cells=cells,
         base_n={"Total": len(cats) * 10},
-        statistic="mean" if is_battery else "pct",
+        statistic="mean" if measured else "pct",
     )
 
 
