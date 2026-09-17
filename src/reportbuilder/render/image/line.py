@@ -16,7 +16,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
     format_value, series_label, style_legend, wrap_label, place_total,
-    colours_by_series, _value_axis,
+    colours_by_series, _value_axis, author_label_floor,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
@@ -68,9 +68,11 @@ def build_image_line(ctx) -> None:
             markeredgecolor=bg, markeredgewidth=1.2,
             zorder=3,
         )
-        # Data labels always shown (ink-tone bold, above each point)
+        # Data labels above each point, ink-tone bold — except any the author
+        # asked not to print (`number_format.hide_below_pct`).
+        _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
         for xi, v in zip(x, vals):
-            if v is not None:
+            if v is not None and v >= _floor:
                 ax.annotate(
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
                     xy=(xi, v),

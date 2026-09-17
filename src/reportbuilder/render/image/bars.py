@@ -38,7 +38,8 @@ import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
     series_label, with_base, place_total, colours_by_series,
-    place_picture_square, series_values, format_value, label_floor, default_label_floor, style_legend,
+    place_picture_square, series_values, format_value, label_floor, default_label_floor,
+    author_label_floor, style_legend,
     force_break_token, wrap_label, wrap_label_capped,
     VALUE_GID,
     _new_agg_figure, _EMU_PER_IN, wants_group_base, _value_axis,
@@ -1317,8 +1318,9 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                                         ctx.spec.number_format, all_vals)
                            for v in all_vals), key=len, default="")
             _value_fit = _value_label_layout(fig, ax, n_cats, bwidth, _widest) or ()
+        _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
         for bar, v in zip(bars, vals):
-            if v is not None and _value_fit:
+            if v is not None and _value_fit and v >= _floor:
                 _pt, _rot = _value_fit
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
@@ -1455,8 +1457,9 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
+        _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
         for yi, v in zip(ys, vals):
-            if v is not None and labelled:
+            if v is not None and labelled and v >= _floor:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),

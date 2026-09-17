@@ -758,7 +758,8 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # A scale whose middle points are labelled with their own numbers is
         # fully labelled, so `_partial_scale` says nothing about it — while the
         # legend still shortens it to bare numbers. See `_numbered_scale_caption`.
-        scale_caption = _numbered_scale_caption(var, data, eff)
+        scale_caption = _numbered_scale_caption(var, data, eff,
+                                                spec.chart_type)
     drawn_codes: set[float] = ({float(c) for c, _l, _o in scale_entries}
                                if scale_entries is not None
                                else {float(c) for c in labels})
@@ -1145,8 +1146,16 @@ def _scale_words(code: int, label: str) -> str:
     return t
 
 
+#: Chart types whose LEGEND carries the scale, and which therefore shorten it
+#: to bare numbers. Everywhere else the scale is on the category axis and every
+#: label is printed in full, so there is nothing for a caption to rescue.
+_SCALE_IN_LEGEND: frozenset[str] = frozenset({
+    "stacked_horizontal_bar", "stacked_vertical_bar",
+})
+
+
 def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
-                            eff: set[float]) -> str | None:
+                            eff: set[float], chart_type: str) -> str | None:
     """The endpoint caption for a scale numbered in its OWN labels.
 
     A stacked bar shortens a numeric rating scale's legend to bare numbers
@@ -1168,7 +1177,16 @@ def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
     such chart top to bottom, which is not what a missing caption asks for.
     Returns None — leaving the chart exactly as it was — unless the caption is
     the only thing that was missing.
+
+    Only for a chart that actually drops the words. A plain bar, a pie and the
+    rest put this scale on the CATEGORY axis and print "1- Ei lainkaan ylpeä"
+    in full beside the bar; captioning those would add a second copy of what
+    the reader can already see to every such slide in every deck. (The
+    `_partial_scale` case is not the same and is untouched: there the middle
+    points carry no label at all, so even a plain bar's axis reads "1 2 3 …".)
     """
+    if chart_type not in _SCALE_IN_LEGEND:
+        return None
     if var.name not in data.columns:
         return None
     labels = {int(vl.value): vl.label for vl in var.value_labels

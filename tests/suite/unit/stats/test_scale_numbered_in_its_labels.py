@@ -94,3 +94,36 @@ def test_the_categories_are_still_the_scales_points():
     """Reclassifying must not change what the chart draws."""
     got = _series(NUMBERED_MIDDLE)
     assert len(got.categories) == 7, got.categories
+
+
+class TestOnlyWhereTheWordsAreActuallyDropped:
+    """The caption compensates for a legend that shortens. Nothing else.
+
+    A STACKED bar turns the scale into its legend and shortens that legend to
+    bare numbers, so the words have to go somewhere. Every other chart type
+    puts the scale on the CATEGORY axis and prints each label in full — "1- Ei
+    lainkaan ylpeä" is right there beside the bar — so a caption repeating it
+    is a second copy of what the reader can already see, added to every such
+    slide in every deck.
+
+    (The `_partial_scale` case is different and is untouched: there the middle
+    points carry no label at all, so even a plain bar's axis reads "1 2 3 4 5
+    6 7" and needs the caption.)
+    """
+
+    def test_a_stacked_bar_gets_it(self):
+        assert _series(NUMBERED_MIDDLE, "stacked_horizontal_bar").caption
+
+    def test_a_stacked_column_gets_it(self):
+        assert _series(NUMBERED_MIDDLE, "stacked_vertical_bar").caption
+
+    def test_a_plain_bar_does_not(self):
+        assert not _series(NUMBERED_MIDDLE, "horizontal_bar").caption
+
+    def test_a_pie_does_not(self):
+        assert not _series(NUMBERED_MIDDLE, "pie").caption
+
+    def test_the_unlabelled_middle_case_is_captioned_everywhere_still(self):
+        """It was before this existed, and a plain bar still needs it."""
+        for ct in ("horizontal_bar", "pie", "stacked_horizontal_bar"):
+            assert _series(UNLABELLED_MIDDLE, ct).caption, ct

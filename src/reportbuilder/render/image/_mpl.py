@@ -124,6 +124,10 @@ def _remember_font(fig, ctx) -> None:
     """
     style = getattr(ctx, "style", None) if ctx is not None else None
     fig._nsight_chart_font = chart_text_font(style)
+    # …and the spec it is being drawn for, so a pass that needs the
+    # author's choices can run at the one point every builder passes
+    # through. See `hide_values_when_off`.
+    fig._nsight_spec = getattr(ctx, "spec", None)
 
 
 _EMU_PER_IN = 914400.0
@@ -400,6 +404,65 @@ def new_tall_figure(ctx, h_in: float):
     return fig, ax
 
 
+def hide_values_when_off(fig, spec) -> int:
+    """Take every printed value off *fig* when the author turned them off.
+
+    `elements.data_labels` used to be read by the native OOXML path and by the
+    image SCATTER builder, and by nothing else — so in image mode, which is
+    what a preview and a rendered deck both use, unticking "Data labels" left
+    the picture exactly as it was on a bar, column, line, pie, doughnut,
+    funnel, combo or stacked chart. An author clicks a control, nothing moves,
+    and the only available conclusion is that the editor is broken.
+
+    One pass rather than nine builders: every value a builder prints already
+    carries `VALUE_GID` — the shrink and declash passes are built on that — and
+    every builder goes through `new_figure*` (which remembers the spec) and
+    `render_png` (which calls this). A builder written later inherits it
+    without knowing it exists, which is the property the old arrangement
+    lacked.
+
+    Hidden, not removed: the layout passes have already run and some of them
+    read these artists. Returns how many were hidden.
+    """
+    el = getattr(spec, "elements", None) if spec is not None else None
+    if el is None or getattr(el, "data_labels", True):
+        return 0
+    hidden = 0
+    for ax in getattr(fig, "axes", ()) or ():
+        for artist in list(getattr(ax, "texts", ()) or ()):
+            if artist.get_gid() == VALUE_GID and artist.get_visible():
+                artist.set_visible(False)
+                hidden += 1
+    return hidden
+
+
+def author_label_floor(spec, statistic: str, all_vals) -> float:
+    """The author's own "hide values below X" — and nothing when they set none.
+
+    `label_floor` answers with the chart TYPE's default when nobody has set a
+    cut-off, which is what a pie and a stack want: their numbers sit inside
+    wedges and slivers and collide as soon as the piece is small. A plain bar,
+    column or line prints its number in free space beside the point, where a
+    small value costs nothing — so those builders had no floor at all, and in
+    having none they ignored the author's too. The control did nothing on the
+    three commonest chart types in the product.
+
+    This gives them the author's answer without inventing a default, so a deck
+    written before it renders unchanged.
+
+    A percentage is measured against 100, not against the axis top, so "hide
+    below 10" means ten per cent on every chart — the same thing it already
+    means on a pie and on a 100 %-stacked bar. A count or a mean has no such
+    scale, so there it stays a share of the axis, as `label_floor` documents.
+    """
+    fmt = getattr(spec, "number_format", None) if spec is not None else None
+    if getattr(fmt, "hide_below_pct", None) is None:
+        return 0.0
+    axis_max = 100.0 if statistic == "pct" else max(
+        (v for v in (all_vals or ()) if v is not None), default=100.0)
+    return label_floor(fmt, default_pct=0.0, axis_max=axis_max)
+
+
 def render_png(fig) -> str:
     """Save figure to a temp PNG file at high quality and free it. Returns the path.
 
@@ -407,6 +470,7 @@ def render_png(fig) -> str:
     registry entry to close — clearing it just releases its artists/memory."""
     # Deleted by place_picture_square once python-pptx has embedded it; the
     # caller is not expected to clean up.
+    hide_values_when_off(fig, getattr(fig, "_nsight_spec", None))
     fd, path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     # transparent: the chart is placed ON a slide whose layout already paints
