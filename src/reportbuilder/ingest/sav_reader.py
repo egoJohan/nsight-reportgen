@@ -392,6 +392,29 @@ def sav_file_label(path: str | pathlib.Path) -> str | None:
     return label or None
 
 
+def _clean_label(label: str | None) -> str:
+    """A label as it can actually be drawn.
+
+    An SPSS variable label is capped at 256 BYTES and a value label at 120. A
+    long Finnish statement runs past the cap and the file stores it truncated
+    at that byte — in the middle of a multi-byte character. Decoding the
+    orphaned byte gives U+FFFD, and the renderer draws it: the Synsam study's
+    headline ended "…ja 7= erittäin t" followed by a black diamond, on a
+    client's slide, with matplotlib warning once per render that the glyph is
+    missing from the font.
+
+    The half character is the tail of a letter the file does not contain, so it
+    carries nothing and is dropped. Only at the END, which is where a
+    truncation boundary can be: a replacement character in the MIDDLE of a
+    label means something else went wrong with the encoding, and quietly
+    removing that would hide a real fault rather than a byte-count artefact.
+    """
+    text = (label or "").rstrip()
+    while text.endswith("\ufffd"):
+        text = text[:-1].rstrip()
+    return text
+
+
 def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
     df, meta = pyreadstat.read_sav(str(path), apply_value_formats=False, user_missing=True)
     labels = dict(meta.column_names_to_labels)
@@ -429,7 +452,8 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             measurement = "categorical"
             codes, pairs = _codes_for_coded_string(df[name])
             df[name] = codes
-            vls = tuple(ValueLabel(code, string_labels.get(cat, cat)) for code, cat in pairs)
+            vls = tuple(ValueLabel(code, _clean_label(string_labels.get(cat, cat)))
+                        for code, cat in pairs)
             code_of = {cat: code for code, cat in pairs}
         # Task G.1: classify open-ended free-text variables as measurement "text"
         # so questions built from them can be flagged non-chartable downstream.
@@ -445,11 +469,12 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
             measurement = "categorical"
             codes, pairs = _codes_for_coded_string(df[name])
             df[name] = codes
-            vls = tuple(ValueLabel(code, label) for code, label in pairs)
+            vls = tuple(ValueLabel(code, _clean_label(label))
+                        for code, label in pairs)
             code_of = {label: code for code, label in pairs}
         variables[name] = Variable(
             name=name,
-            label=labels.get(name) or name,
+            label=_clean_label(labels.get(name)) or name,
             measurement=measurement,
             value_labels=vls,
             missing_values=_user_missing(missing_ranges.get(name), code_of),
