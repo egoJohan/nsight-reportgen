@@ -754,6 +754,11 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # only the home block labelled — made a 100 % stack reach 33 %.
     # (Johan, 2026-09-08)
     scale_entries, scale_caption = _partial_scale(var, data, eff)
+    if scale_caption is None:
+        # A scale whose middle points are labelled with their own numbers is
+        # fully labelled, so `_partial_scale` says nothing about it — while the
+        # legend still shortens it to bare numbers. See `_numbered_scale_caption`.
+        scale_caption = _numbered_scale_caption(var, data, eff)
     drawn_codes: set[float] = ({float(c) for c, _l, _o in scale_entries}
                                if scale_entries is not None
                                else {float(c) for c in labels})
@@ -1119,6 +1124,75 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         row_summaries=row_summaries,
                         row_summary_keys=tuple(statements),
                         segment_primary=(separate[1] if separate is not None else None))
+
+
+#: The point number a scale label may begin with, and the punctuation that
+#: separates it from the words: "1- Ei lainkaan ylpeä", "1 - …", "1. …", "1) …".
+_SCALE_POINT_PREFIX = re.compile(r"^\s*(\d+)\s*[-\u2013\u2014.:)]*\s*")
+
+
+def _scale_words(code: int, label: str) -> str:
+    """What a value label says BEYOND its own point number.
+
+    "1- Ei lainkaan ylpeä" → "Ei lainkaan ylpeä"; "2" → "". Only a number that
+    MATCHES the point is stripped, so a label that genuinely opens with a
+    different figure ("5 vuotta tai enemmän" on code 3) keeps it.
+    """
+    t = (label or "").strip()
+    m = _SCALE_POINT_PREFIX.match(t)
+    if m and int(m.group(1)) == code:
+        t = t[m.end():].strip()
+    return t
+
+
+def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
+                            eff: set[float]) -> str | None:
+    """The endpoint caption for a scale numbered in its OWN labels.
+
+    A stacked bar shortens a numeric rating scale's legend to bare numbers
+    (`image/bars._legend_below`) because the endpoint wording is supposed to
+    move to the caption above the footer. `_partial_scale` builds that caption
+    only when some point carries no value label at all — and an SPSS export
+    that labels its middle points with their own number ("1- Ei lainkaan
+    ylpeä", "2", "3" … "7- Erittäin ylpeä") has a label on every point. So the
+    legend dropped the words and nothing caught them: a seven-point scale drawn
+    as "1 2 3 4 5 6 7" with nothing on the slide saying which end was which.
+    The same question as a PIE kept its words, because a pie does not shorten.
+
+    A point labelled with nothing but its own number says no more than an
+    unlabelled one does, so this is the same case and gets the same caption.
+
+    Deliberately separate from `_partial_scale` rather than folded into it:
+    that function also decides the scale's ENTRIES, and so its category ORDER
+    (high→low). Reclassifying this variable there would silently flip every
+    such chart top to bottom, which is not what a missing caption asks for.
+    Returns None — leaving the chart exactly as it was — unless the caption is
+    the only thing that was missing.
+    """
+    if var.name not in data.columns:
+        return None
+    labels = {int(vl.value): vl.label for vl in var.value_labels
+              if float(vl.value).is_integer() and vl.value not in eff}
+    if len(labels) < 3:
+        return None
+    # Every level opens with its own point number: the same test the legend
+    # applies before it shortens. If one does not, the legend keeps the words
+    # and there is nothing to preserve.
+    words = {}
+    for code, label in labels.items():
+        t = (label or "").strip()
+        m = _SCALE_POINT_PREFIX.match(t)
+        if not m or int(m.group(1)) != code:
+            return None
+        words[code] = _scale_words(code, label)
+    worded = {c: w for c, w in words.items() if w}
+    # Some points carry words and some do not — an endpoint-labelled scale.
+    # When EVERY level is worded the legend drops all of them, which wants a
+    # different answer (not shortening at all) than a caption can give; when
+    # none is, there is nothing to say.
+    if not worded or len(worded) == len(words):
+        return None
+    return " · ".join(f"{c} = {worded[c]}" for c in sorted(worded))
 
 
 def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
