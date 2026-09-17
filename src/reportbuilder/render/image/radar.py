@@ -19,6 +19,8 @@ Returns None.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -36,6 +38,37 @@ from reportbuilder.render.house_style import register_fonts, series_colors
 from reportbuilder.render.image._mpl import template_palette
 
 _EMU_PER_IN = 914400.0
+
+
+def _rlabel_angle(angles: list[float], segs, data) -> float:
+    """Where to print the ring numbers: the gap the data leaves emptiest.
+
+    matplotlib puts them on a fixed diagonal and the polygon goes wherever the
+    data goes, so the two met — on the brand radar the "15" was drawn straight
+    through the polygon's edge, its digits crossed by a 2.4pt line. Nothing
+    about that angle was chosen; it is just the default.
+
+    Between two spokes rather than on one, because a spoke line is drawn at its
+    own angle and the numbers would sit along it. Each gap is scored by how far
+    the data reaches on the two spokes bounding it — across every series, since
+    any of them can cross the numbers — and the emptiest gap wins. Ties go to
+    the first, so a flat radar is deterministic.
+    """
+    n = len(angles)
+    if n < 2:
+        return 22.5
+    reach = []
+    for i in range(n):
+        vals = [data[seg][i] for seg in segs
+                if data.get(seg) and data[seg][i] is not None]
+        reach.append(max(vals) if vals else 0.0)
+    best_i, best_score = 0, None
+    for i in range(n):
+        score = max(reach[i], reach[(i + 1) % n])
+        if best_score is None or score < best_score:
+            best_i, best_score = i, score
+    step = 360.0 / n
+    return (math.degrees(angles[best_i]) + step / 2.0) % 360.0
 
 
 def build_image_radar(ctx) -> None:
@@ -112,6 +145,7 @@ def build_image_radar(ctx) -> None:
     ax.set_yticklabels(
         [str(int(v)) if float(v).is_integer() else f"{v:g}" for v in r_ticks],
         fontsize=8.0, color=muted)
+    ax.set_rlabel_position(_rlabel_angle(angles, segs, data))
     ax.grid(color=grid, linewidth=0.8)
     ax.spines["polar"].set_color("#C9C1B4")
     ax.spines["polar"].set_linewidth(1.0)
