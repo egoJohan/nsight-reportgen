@@ -187,8 +187,19 @@ def test_radar_high_for_four_plus():
     assert plugin("radar").suitability(B.q(), B.partition_series()) == 0.80
 
 
-def test_radar_low_for_few():
-    assert plugin("radar").suitability(B.q(), B.few_short_series()) == 0.40
+def test_radar_is_not_offered_below_three_spokes():
+    """Two categories put two spokes opposite each other, so the polygon that
+    IS the chart collapses to a line through the centre; one category leaves a
+    point. This used to score 0.40 and be offered — an index rendered as its
+    rings, one spoke and nothing else."""
+    assert plugin("radar").suitability(B.q(), B.few_short_series()) is None
+
+
+def test_radar_is_offered_from_three_spokes_up():
+    """The boundary: three is the fewest that encloses an area."""
+    three = B.build_series(("A", "B", "C"), statistic="pct", base=99,
+                           pct=33.0, count=33.0)
+    assert plugin("radar").suitability(B.q(), three) == 0.40
 
 
 # ---- stacked variants ------------------------------------------------------

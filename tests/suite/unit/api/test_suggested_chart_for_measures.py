@@ -66,3 +66,60 @@ def test_a_labelled_scale_is_not_suggested_as_a_pie():
                    value_labels=[ValueLabel(value=float(i + 1), label=str(i + 1))
                                  for i in range(7)])
     assert _suggest(var) not in _ROUND
+
+
+# ---------------------------------------------------------------------------
+# What is OFFERED, not just what is suggested
+# ---------------------------------------------------------------------------
+
+def _compatible(var: Variable, kind: str = "single") -> list[str]:
+    from reportbuilder.api.routes_questions import _compatible_chart_types
+
+    q = Question(qid="q", text=var.label, kind=kind, variables=("q",))
+    model = QuestionModel(variables={"q": var}, questions=[q])
+    return _compatible_chart_types(q, _quick_series(q, model, None))
+
+
+def test_an_index_is_not_offered_a_radar():
+    """A radar of one value draws its rings, one spoke and no polygon at all —
+    there is nothing to join up. Työelämäindeksi rendered exactly that: an
+    empty web with a label on it."""
+    assert "radar" not in _compatible(_scale())
+
+
+def test_a_profile_is_still_offered_a_radar():
+    """The control: four attributes is what a radar is for."""
+    var = Variable(name="q", label="Profiili", measurement="nominal",
+                   missing_values=[],
+                   value_labels=[ValueLabel(value=float(i + 1), label=n)
+                                 for i, n in enumerate(["A", "B", "C", "D"])])
+    assert "radar" in _compatible(var)
+
+
+def test_an_index_has_one_category_not_three():
+    """`compute()` returns a single category for a scale variable — its own
+    label, carrying the mean. The synthetic shape has to agree, or every
+    suitability rule is answered about a question that does not exist."""
+    q = Question(qid="q", text="Työelämäindeksi", kind="single", variables=("q",))
+    model = QuestionModel(variables={"q": _scale()}, questions=[q])
+    assert len(_quick_series(q, model, None).categories) == 1
+
+
+def test_a_battery_still_has_one_category_per_member():
+    """Measured too, but genuinely multi-dimensional — and a radar suits it."""
+    members = {}
+    for i in range(4):
+        members[f"v{i}"] = Variable(name=f"v{i}", label=f"Väittämä {i}",
+                                    measurement="scale", missing_values=[],
+                                    value_labels=[])
+    q = Question(qid="b", text="Battery", kind="battery",
+                 variables=tuple(members))
+    model = QuestionModel(variables=members, questions=[q])
+    s = _quick_series(q, model, None)
+    assert len(s.categories) == 4
+    assert "radar" in _compatible_for(q, s)
+
+
+def _compatible_for(q, series):
+    from reportbuilder.api.routes_questions import _compatible_chart_types
+    return _compatible_chart_types(q, series)

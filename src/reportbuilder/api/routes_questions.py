@@ -211,6 +211,21 @@ def _quick_series(question, model: QuestionModel, df=None) -> SeriesResult:
             and all(model.variables[v].measurement == "scale"
                     for v in question.variables if v in model.variables))
     )
+    # …and a single SCALE variable has exactly one category: itself, carrying
+    # its mean. That is what `compute()` returns, and the synthetic shape has to
+    # agree or every suitability rule is answered about a question that does not
+    # exist. Read as three, an index was offered a radar — which drew its rings,
+    # one spoke and no polygon, because there was nothing to join up. A battery
+    # is measured too but genuinely has one category per member, so it keeps the
+    # categories collected above.
+    # SCALE only. An unlabelled NOMINAL variable (an NPS coded 1-10, a
+    # department list) really does have many categories — we simply do not know
+    # them from the labels — and collapsing it to one would misinform every
+    # suitability rule in the other direction.
+    if (question.kind not in ("multi", "battery") and question.variables
+            and model.variables[question.variables[0]].measurement == "scale"):
+        cats = (model.variables[question.variables[0]].label
+                or question.text or "Total",)
 
     if question.kind == "multi" and cats:
         real = _multi_quick_counts(question, model, df)
