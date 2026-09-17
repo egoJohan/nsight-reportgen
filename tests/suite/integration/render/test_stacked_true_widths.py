@@ -183,17 +183,53 @@ def test_one_overshooting_bar_makes_every_bar_true(chart_type, monkeypatch):
 
 @pytest.mark.parametrize("chart_type", STACKED)
 def test_unjudgeable_bar_keeps_the_100_percent_reading(chart_type, monkeypatch):
-    """Cells carrying neither a count nor a percentage (e.g. a mean-statistic
-    stack) say nothing about overlap. Missing information must not be read as
-    evidence of it, so such a chart keeps normalising."""
+    """A bar with a HOLE in its cell grid says nothing about overlap, and
+    missing information must not be read as evidence of it: such a chart keeps
+    normalising.
+
+    The example used to be a mean-statistic stack. That turned out to be a
+    different case — see `test_a_mean_stack_is_drawn_at_its_true_widths` — so
+    this now uses an additive statistic on a bar with no BASE, which is a real
+    situation (an empty classifier group) and the shape the rule protects: the
+    percentages are there, but with nothing behind them they cannot be checked
+    for overlap either way.
+    """
     cats = ("A", "B")
-    cells = {(c, "Total"): Cell(mean=2.0 if c == "A" else 3.0) for c in cats}
+    cells = {(c, "Total"): Cell(pct=60.0 if c == "A" else 40.0,
+                                count=None) for c in cats}
     s = SeriesResult(categories=cats, segments=("Total",), cells=cells,
-                     base_n={"Total": 100}, statistic="mean")
+                     base_n={"Total": 0}, statistic="pct")
     shots = _render(chart_type, s, monkeypatch)
     totals = _bar_totals(shots[0], chart_type, n_bars=1)
     assert abs(totals[0] - 100.0) < 1e-6
     assert _value_axis_max(shots[0], chart_type) == 100.0
+
+
+@pytest.mark.parametrize("chart_type", STACKED)
+def test_a_mean_stack_is_drawn_at_its_true_widths(chart_type, monkeypatch):
+    """A statistic that does not ADD cannot be a composition, and that is
+    knowledge rather than missing information.
+
+    This case used to be the example for the rule above, on the reasoning that
+    a mean cell says nothing about overlap. It says something more decisive: a
+    mean is not a share of a base, so there is no whole for it to fill. Because
+    every bar of such a chart is unjudgeable, the `all()` guarding the 100 %
+    reading was vacuously true and normalised a chart nothing had vouched for —
+    and normalising is PER BAR, so Työelämäindeksi crossed by pride drew eight
+    identical full-width bars carrying 3.0, 3.6, 4.3, 4.9, 5.5, 6.1, 6.7 and
+    5.7. Groups more than a scale point apart came out exactly the same length.
+    """
+    cats = ("A", "B")
+    cells = {(c, seg): Cell(mean=m) for c, seg, m in
+             [("A", "Yksi", 2.0), ("B", "Yksi", 3.0),
+              ("A", "Kaksi", 4.0), ("B", "Kaksi", 6.0)]}
+    s = SeriesResult(categories=cats, segments=("Yksi", "Kaksi"), cells=cells,
+                     base_n={"Yksi": 100, "Kaksi": 100}, statistic="mean")
+    shots = _render(chart_type, s, monkeypatch)
+    totals = _bar_totals(shots[0], chart_type, n_bars=2)
+    assert [round(t, 6) for t in totals] == [5.0, 10.0], (
+        f"a 5.0 bar and a 10.0 bar must differ, got {totals}")
+    assert _value_axis_max(shots[0], chart_type) < 50.0
 
 
 # ---------------------------------------------------------------------------

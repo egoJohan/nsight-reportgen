@@ -32,6 +32,7 @@ import math
 import re
 import textwrap
 
+from reportbuilder.render.shape import ADDITIVE_STATISTICS
 from reportbuilder.render.image.label_fit import register_category_labels
 
 import numpy as np
@@ -1573,14 +1574,40 @@ def _stack_scaling(series, bars, stack, data) -> tuple[bool, float]:
     and keeps normalising exactly as before; overshoot is overlap and gets no
     slack. Bars `is_partition` cannot judge (see `_bar_is_measurable`) keep the
     100% reading."""
+    totals = [sum(data[s][i] or 0.0 for s in stack) for i in range(len(bars))]
+    # An all-zero or empty chart has no scale to read; keep the 0-100 axis it
+    # always had rather than collapsing every limit onto zero.
+    true_widths = (False, max(totals, default=0.0) or 100.0)
+
+    # A statistic that does not ADD does not partition anything, and that is
+    # knowledge, not missing information. A mean is not a share of a base:
+    # there is no whole for it to be part of, so filling a bar to 100 with it
+    # states a composition the data never claimed.
+    #
+    # The rule below deliberately lets an UNJUDGEABLE bar keep the 100 %
+    # reading — absence of evidence is not evidence of overlap — and a
+    # mean-statistic bar is unjudgeable by `_bar_is_measurable`. With every bar
+    # in that state the `all()` was vacuously True, so the two rules together
+    # normalised a chart nothing had vouched for. Työelämäindeksi crossed by
+    # pride then drew eight identical full-width bars carrying 3.0, 3.6, 4.3,
+    # 4.9, 5.5, 6.1, 6.7 and 5.7 — each bar normalised against its own total,
+    # so groups more than a scale point apart came out the same length. The
+    # printed number true and the picture false: the very failure the
+    # multi-response case above exists to prevent.
+    #
+    # Asked BEFORE measurability, because it is a different question. This one
+    # is "can these values be a composition at all", which `ADDITIVE_STATISTICS`
+    # answers for the pie in exactly the same way (`charts/pie.py`).
+    if getattr(series, "statistic", "pct") not in ADDITIVE_STATISTICS:
+        return true_widths
+
     normalise = all(
         series.is_partition(b, undershoot_tol=PARTITION_UNDERSHOOT_TOL_PCT)
         for b in bars if _bar_is_measurable(series, b)
     )
     if normalise:
         return True, 100.0
-    totals = [sum(data[s][i] or 0.0 for s in stack) for i in range(len(bars))]
-    return False, max(totals, default=0.0)
+    return true_widths
 
 
 def _render_stacked_variable_panels(ctx, cats) -> None:
