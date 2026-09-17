@@ -13,9 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# A classifier segment (or cross-tab combo) whose base is below this is too small
-# to chart — its percentages would be noise (a "won't say" group of 1 -> 100%). The
-# engine still computes it exactly; we just don't PLOT it. Defined here (not in
+# A classifier group (or cross-tab combo) whose base is below this is SMALL: its
+# percentages rest on few people, and the editor warns the author about it. It is
+# still drawn, with its own base in its label ("Amazon (n=3)"). Until 2026-09-17
+# such groups were not plotted at all — a number picked in development ("e.g. <
+# 20, tunable"), never a methodology decision — and a 41-respondent study split
+# by six companies lost every group without a word on the slide. Defined here (not in
 # image._mpl) so this module has no dependency on the image package — `panels` is
 # imported by callers (the pie/doughnut suitability check, native builders) that
 # must not have to pull in matplotlib-backed rendering just to ask this question.
@@ -31,9 +34,10 @@ MAX_PANELS: int = 3
 class PanelSelection:
     """The panels to draw, plus every group that will NOT be drawn and why.
 
-    `thin` and `capped` are kept apart because they mean different things to a
-    reader: a thin group could not be reported at all, while a capped group fits
-    the data but not the page.
+    `thin` names the SMALL groups — under MIN_SEGMENT_BASE respondents. They are
+    drawn like any other (since 2026-09-17; they used to be dropped) and named
+    here so the editor can warn that their percentages rest on few people.
+    `capped` groups fit the data but not the page, and are NOT drawn.
     """
 
     labels: tuple[str, ...]
@@ -51,12 +55,14 @@ def panel_segments(series) -> PanelSelection:
         return PanelSelection(labels=series.segments[:1])
 
     thin = tuple(s for s in groups
-                 if series.base_n.get(s, 0) < MIN_SEGMENT_BASE)
-    kept = [s for s in groups if s not in thin]
+                 if 0 < series.base_n.get(s, 0) < MIN_SEGMENT_BASE)
+    # Every group with respondents is drawn, small ones included — see
+    # `series_values`. Only a group nobody is in has nothing to show.
+    kept = [s for s in groups if series.base_n.get(s, 0) > 0]
 
     if not kept:
-        # Everything is too thin to report. Fall back to the whole-sample segment
-        # rather than to zero panels — a blank slide discloses nothing.
+        # Nobody in any group. Fall back to the whole-sample segment rather than
+        # to zero panels — a blank slide discloses nothing.
         return PanelSelection(labels=("Total",), thin=thin, degraded=True,
                               split=True)
 

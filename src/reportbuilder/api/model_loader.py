@@ -153,7 +153,27 @@ def _apply_labels(model: QuestionModel, labels: dict[str, str]) -> QuestionModel
         dataclasses.replace(q, text=labels[q.qid]) if q.qid in labels else q
         for q in model.questions
     ]
-    return QuestionModel(variables=model.variables, questions=questions)
+    # The VARIABLE too, when the question is exactly one of them.
+    #
+    # A combo names its secondary series from `sec.label or sec.name`, a
+    # classifier names itself the same way, and so does anything else read off
+    # the variable rather than the question. Renaming only `Question.text` left
+    # an author renaming a question, seeing it change everywhere a question is
+    # named, and still getting the SAV's bare column name — "tyoelamaindeksi" —
+    # in the combo legend they were looking at, with nowhere to correct it.
+    #
+    # One variable means the question IS that variable to the person renaming
+    # it. A battery is deliberately excluded: its members carry the statement
+    # wording, and one name for the group would erase all of them.
+    # (Johan, 2026-09-17)
+    renamed = {q.variables[0]: labels[q.qid]
+               for q in model.questions
+               if q.qid in labels and len(q.variables) == 1}
+    variables = {
+        name: (dataclasses.replace(v, label=renamed[name]) if name in renamed else v)
+        for name, v in model.variables.items()
+    }
+    return QuestionModel(variables=variables, questions=questions)
 
 
 def dropped_words(material_id: str, client) -> dict[str, tuple[str, ...]]:

@@ -17,6 +17,8 @@ Returns None. Requires ctx.spec.scatter_xy to be set.
 """
 from __future__ import annotations
 
+from reportbuilder.stats.series import shown_segment
+
 from reportbuilder.render.image._mpl import (
     apply_axis_titles, new_figure, render_png, place_picture, series_values,
     chart_background, chart_furniture,
@@ -34,7 +36,8 @@ def build_image_scatter(ctx) -> None:
             "scatter requires scatter_xy (two numeric axis segments)"
         )
 
-    x_seg, y_seg = ctx.spec.scatter_xy
+    # Saved under the groups' own names; the series may carry legend renames.
+    x_seg, y_seg = (shown_segment(ctx.spec, ctx.series, s) for s in ctx.spec.scatter_xy)
     cats, segs, data = series_values(ctx.series)
     xs = data[x_seg]
     ys = data[y_seg]

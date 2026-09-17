@@ -248,6 +248,11 @@ export interface ChartSpec {
   not_answered_codes: number[] | null;
   // Ordered [full_label, short_label] display overrides.
   category_label_overrides: [string, string][];
+  /** [series name, shown name] renames for what the legend shows that is NOT an
+   *  answer: a classifying variable's groups, a combo's secondary series.
+   *  Absent on slides that never renamed one — deliberately not defaulted, so
+   *  their preview fingerprint stays what it was. See lib/legendLabels.ts. */
+  series_label_overrides?: [string, string][];
   slide_title: string | null;
   // The data fingerprint the title above was generated FOR (see charts.ts::titleDataKey).
   // null/absent means either no AI title has ever been generated for this slide, OR the
@@ -1367,6 +1372,21 @@ export const api = {
 
     // AI: shorten category labels into [full, short] pairs. Through the shared
     // AI gate (bounded concurrency + 503 retry).
+    /** The names this slide draws that are not the question's answers — its
+     *  groups, a combo's secondary series — as the DATA names them. Computed
+     *  server-side from the chart itself; empty (and `cross_tab`) where renaming
+     *  them is not offered. */
+    legendNames: (
+      materialId: string,
+      chart: ChartSpec,
+      grouping?: GroupingOverride,
+    ): Promise<{ names: string[]; cross_tab: boolean }> =>
+      fetch(`${API_BASE}/materials/${materialId}/legend-names`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...chart, ...(grouping ? { grouping } : {}) }),
+      }).then((r) => json<{ names: string[]; cross_tab: boolean }>(r)),
+
     aiShortLabels: (
       materialId: string,
       body: AiShortLabelsBody
@@ -2043,12 +2063,20 @@ export type AccessMode = "view" | "edit";
  *  but not the page. */
 export interface PanelSelection {
   drawn: string[];
+  /** SMALL groups: drawn, but under the reporting minimum of respondents. */
   thin: string[];
+  /** How many respondents each small group has. Absent from older servers. */
+  sizes?: Record<string, number>;
   capped: string[];
   degraded: boolean;
   /** False when the chart is not split into panels at all — one ordinary pie. */
   split: boolean;
   max_panels: number;
+  /** The groups the slide was actually narrowed to, as the ENGINE applied them
+   *  — empty when it covers the whole sample. Not the spec's own
+   *  `classifying_values`: a name left behind by a change of classifying
+   *  variable does not resolve, and the slide is then the whole sample. */
+  narrowed_to: string[];
 }
 
 export interface SignupTicket {

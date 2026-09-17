@@ -191,14 +191,14 @@ def test_single_series_schema_has_classifying_var_but_no_crosstab_controls():
     # reference series, none of which a row of pies can express.
     keys = _keys(single_series_schema())
     assert keys == [
-        "statistic", "classifying_var", "classifying_values", "show_panel_base",
+        "statistic", "classifying_var", "classifying_values",
         "sort", "category_label_overrides", "number_format",
         "show_not_answered", "show_empty_categories", "not_answered_codes",
     ]
-    # The per-panel base sits with the classifier controls: it is a property of
-    # the split, and it is the only schema these three types share that the
-    # frontend hides until the slide really draws a row of charts.
-    assert keys.index("show_panel_base") == keys.index("classifying_values") + 1
+    # The per-panel base is NOT here any more (2026-09-17): every group's "n" —
+    # a legend entry's, a bar's, a panel's — is the one "Group sizes" switch, and
+    # a second control for the same idea is how the first came to do nothing.
+    assert "show_panel_base" not in keys
     for absent in ("classifying_var_2", "xtab_layout", "show_total", "percent_base"):
         assert absent not in keys
 

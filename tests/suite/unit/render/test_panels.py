@@ -32,11 +32,13 @@ def test_total_is_never_a_panel():
     assert sel.split is True
 
 
-def test_thin_group_is_dropped_and_named():
+def test_a_small_group_is_drawn_and_named():
+    """Drawn since 2026-09-17 — its base is in its label — and still named, so
+    the editor can warn that its percentages rest on few people."""
     sel = panel_segments(_series(
         ("Naiset", "Miehet", "Muut", "Total"),
         {"Naiset": 60, "Miehet": 40, "Muut": 8, "Total": 108}))
-    assert sel.labels == ("Naiset", "Miehet")
+    assert sel.labels == ("Naiset", "Miehet", "Muut")
     assert sel.thin == ("Muut",)
 
 
@@ -58,21 +60,32 @@ def test_cap_ties_break_on_segment_order():
     assert sel.capped == ("D",)
 
 
-def test_all_groups_thin_degrades_to_total_not_to_nothing():
+def test_all_groups_small_are_all_drawn():
+    """The reported case: 41 respondents over six companies, every one under 10,
+    drew the whole sample and read as a classifier that did not work."""
     sel = panel_segments(_series(
         ("Naiset", "Miehet", "Total"),
         {"Naiset": 4, "Miehet": 6, "Total": 10}))
-    assert sel.labels == ("Total",)
-    assert sel.degraded is True
+    assert sel.labels == ("Naiset", "Miehet")
+    assert sel.degraded is False
     assert sel.split is True
     assert sel.thin == ("Naiset", "Miehet")
 
 
-def test_one_surviving_group_still_counts_as_split():
+def test_groups_with_nobody_in_them_degrade_to_total_not_to_nothing():
+    sel = panel_segments(_series(
+        ("Naiset", "Miehet", "Total"),
+        {"Naiset": 0, "Miehet": 0, "Total": 10}))
+    assert sel.labels == ("Total",)
+    assert sel.degraded is True
+    assert sel.split is True
+
+
+def test_a_large_and_a_tiny_group_are_both_drawn():
     sel = panel_segments(_series(
         ("Naiset", "Miehet", "Total"),
         {"Naiset": 60, "Miehet": 3, "Total": 63}))
-    assert sel.labels == ("Naiset",)
+    assert sel.labels == ("Naiset", "Miehet")
     assert sel.split is True
     assert sel.thin == ("Miehet",)
 

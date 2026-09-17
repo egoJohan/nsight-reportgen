@@ -71,6 +71,7 @@ from reportbuilder.render.plugins import CHART_PLUGINS, suggest_chart_type
 from reportbuilder.stats.engine import (
     _partial_scale,
     _rating_scale,
+    code_labels,
     compute, scale_levels, battery_scale_levels, _wordcloud,
 )
 from reportbuilder.stats.series import Cell, SeriesResult
@@ -235,6 +236,67 @@ def _scale_key(var, df=None) -> str | None:
     return "|".join(f"{c}:{l}" for c, l, _p in lv) if lv else None
 
 
+def _is_endpoint_labelled(var) -> bool:
+    """True when this variable's scale can only have come from the DATA.
+
+    Fewer than three labelled, answerable points is the shape `_scale_from_data`
+    reads a rating off the column for. It is also the shape a partially-labelled
+    categorical has, which is the whole problem — see `_groupable_scale_rows`.
+    """
+    from reportbuilder.stats.engine import _is_non_answer_level
+
+    real = [vl for vl in var.value_labels
+            if vl.value not in var.missing_values
+            and not _is_non_answer_level(vl.label or "")]
+    return len(real) < 3
+
+
+def _groupable_scale_rows(all_vars, df) -> dict[str, dict]:
+    """The `scale` / `scale_key` / `scale_compat_key` fields, for every variable.
+
+    Computed over the whole variable list rather than one at a time, because one
+    variable is not enough to answer the question.
+
+    `scale_levels(var, df)` reads a rating off the column when only the ends are
+    labelled — the shape a brand-image battery exports as, and the reported
+    reason a radar could not be configured. It cannot tell that from a
+    partially-labelled CATEGORICAL: "Asuinalue" with `1 = Etelä-Suomi` and
+    `5 = Lappi` yields the same five points and the same compat key as a 1..5
+    satisfaction rating, so the grouping dialog offered to make a battery of
+    region + satisfaction and answered with a mean region of 3.0.
+
+    No rule over a single variable separates them — on the data they ARE the
+    same. What separates them is that a battery has PARALLEL MEMBERS: the five
+    attributes share an endpoint signature with each other, the lone region
+    variable with nothing. So an inferred scale must be corroborated by another
+    variable carrying the same signature before it is OFFERED for grouping.
+
+    A variable that states its own scale (three or more labelled points) is
+    unaffected and needs no sibling. Charting is unaffected entirely: once a
+    battery exists, every path still reads its scale from the data.
+    (Johan, 2026-09-17)
+    """
+    keys = {var.name: _scale_key(var, df) for var in all_vars}
+    seen: dict[str, int] = {}
+    for k in keys.values():
+        if k:
+            seen[k] = seen.get(k, 0) + 1
+
+    rows: dict[str, dict] = {}
+    for var in all_vars:
+        key = keys[var.name]
+        # The keys go too, not just the flag: the grouping dialog pools on
+        # `scale_compat_key ?? scale_key`, so leaving them behind would put the
+        # variable straight back in the pool it was just taken out of.
+        if key and _is_endpoint_labelled(var) and seen.get(key, 0) < 2:
+            rows[var.name] = {"scale": False, "scale_key": None,
+                              "scale_compat_key": None}
+            continue
+        rows[var.name] = {"scale": bool(key), "scale_key": key,
+                          "scale_compat_key": _scale_compat_key(var, df)}
+    return rows
+
+
 def _scale_compat_key(var, df=None) -> str | None:
     """A LOOSER scale signature — the set of scale POINTS (1..N), ignoring the value
     labels. Variables sharing this (e.g. two 1..5 scales worded differently, a grade
@@ -269,10 +331,25 @@ def _text_is_short(df, q, *, max_words: float = 2.0) -> bool:
         return False
 
 
-def _aggregatable(var) -> bool:
+#: The largest leading number that can still be a SCALE POINT. Above it the
+#: number is a quantity the label names — an age band, a euro bracket — and its
+#: "mean" is the average of those brackets' first numbers, which is nothing.
+_MAX_SCALE_POINT = 11
+
+
+def _aggregatable(var, df=None) -> bool:
     """True when a per-category MEAN of this variable is meaningful — a numeric
-    scale, or a rating whose value labels start with a digit (1..N). Used to
-    offer valid secondary variables for a combo line."""
+    scale, a rating whose value labels are SCALE POINTS (1..N), or an unlabelled
+    score the data shows to be one (NPS 0-10). Used to offer valid secondary
+    variables for a combo.
+
+    A BRACKET is not a scale: "18-24", "500-999 €". Their leading numbers are
+    quantities, and averaging them produced the reported "Ikäluokka 55.1" on a
+    slide nobody could read — "en ymmärrä ikäluokan kuvaustapaa" (2026-09-17).
+    The same line `_is_likert_scale` already draws for the classifier picker.
+    Such a variable is still offered as a combo secondary; as the SHARE of one
+    of its groups ("% 55-64"), which is a number about people.
+    """
     import re as _re
     if var.measurement == "text":
         return False
@@ -280,9 +357,24 @@ def _aggregatable(var) -> bool:
         return True
     vls = var.value_labels
     if not vls:
-        return var.measurement == "scale"
-    digit = sum(1 for vl in vls if _re.match(r"^\s*\d", vl.label or ""))
-    return digit >= max(1, int(len(vls) * 0.6))
+        if var.measurement == "scale":
+            return True
+        # No labels at all: the DATA says whether this is a score. The same rule
+        # the reader uses to tell a rating from a working column (sav_reader).
+        if df is None or var.name not in getattr(df, "columns", []):
+            return False
+        import pandas as _pd  # noqa: PLC0415
+        from reportbuilder.ingest.sav_reader import (  # noqa: PLC0415
+            _RATING_MAX_CODES, _RATING_MIN_CODES,
+        )
+        codes = _pd.to_numeric(df[var.name], errors="coerce").dropna().unique()
+        return (_RATING_MIN_CODES <= len(codes) <= _RATING_MAX_CODES
+                and all(float(c).is_integer() for c in codes))
+    points = [int(m.group(1)) for m in
+              (_re.match(r"^\s*(\d+)", vl.label or "") for vl in vls) if m]
+    if len(points) < max(1, int(len(vls) * 0.6)):
+        return False                      # mostly word labels — no scale in them
+    return max(points) <= _MAX_SCALE_POINT
 
 
 def _is_likert_scale(var) -> bool:
@@ -569,6 +661,15 @@ def _category_labels(model: QuestionModel, q, df=None) -> list[str]:
             return [display for _code, display, _order
                     in sorted(entries, key=lambda e: e[2])]
     if not var.value_labels:
+        # Unlabelled CODES are drawn by their number ("1".."10" — an NPS score,
+        # a question the file labelled nothing). Asked of the engine's own
+        # `code_labels`, so the editor lists what the chart draws: listing the
+        # raw floats ("1.0") stored a rename under a name no category has, and
+        # nothing moved on the slide. (2026-09-17)
+        if df is not None and var.name in getattr(df, "columns", []):
+            codes = code_labels(var, df, set(var.missing_values))
+            if codes:
+                return [codes[c] for c in sorted(codes)]
         return list(_string_cats(var, df))
     return [vl.label for vl in var.value_labels if vl.value not in var.missing_values]
 
@@ -956,6 +1057,9 @@ def list_variables(
     all_vars = [v for v in model.variables.values() if _keep(v) or v.name in marked]
     # Stable sort: categorical before scale; original file order within each tier.
     all_vars.sort(key=lambda v: (0 if v.measurement == "categorical" else 1))
+    # Asked once for the whole list, because whether a variable counts as a
+    # groupable scale depends on the OTHERS — see `_groupable_scale_rows`.
+    _scale_rows = _groupable_scale_rows(all_vars, _df_or_none())
     return {
         "variables": [
             {
@@ -969,7 +1073,7 @@ def list_variables(
                 "n_values": len(var.value_labels),
                 # Can a per-category MEAN be taken (numeric scale, or a rating whose
                 # value labels start with a digit) — i.e. a valid combo secondary.
-                "aggregatable": _aggregatable(var),
+                "aggregatable": _aggregatable(var, _df_or_none()),
                 # Is this a MEANINGFUL classifying/segmentation variable — a
                 # background/demographic categorical (not a Likert item), OR a
                 # derived binary SEGMENT FLAG (e.g. "Suosittelijat", "Kokemusta":
@@ -994,14 +1098,14 @@ def list_variables(
                 # tick-boxes in it, and reading the labels alone left one
                 # customer's whole study un-groupable (see is_tickbox).
                 "tickbox": is_tickbox(var, _df_or_none()),
-                # A rating scale (digit- or word-labelled 1..N) — groupable into a battery.
-                "scale": bool(scale_levels(var, _df_or_none())),
-                # Signature of the scale (its code→label map). Two variables can only
-                # form a battery when their scale_key matches; None when not a scale.
-                "scale_key": _scale_key(var, _df_or_none()),
-                # Looser signature — the scale's POINT set. Variables sharing this are
-                # battery-COMPATIBLE even when worded differently (same 1..N range).
-                "scale_compat_key": _scale_compat_key(var, _df_or_none()),
+                # A rating scale (digit- or word-labelled 1..N) — groupable into
+                # a battery — plus its two signatures. Answered for the whole
+                # list at once by `_groupable_scale_rows`: a scale inferred from
+                # endpoint labels alone needs a sibling carrying the same
+                # signature before it is offered, or a partially-labelled
+                # categorical (region, 1 = Etelä-Suomi … 5 = Lappi) joins the
+                # battery pool beside the real ratings.
+                **_scale_rows[var.name],
             }
             for var in all_vars
         ] + _banner_classifier_rows(model, None if include_all else _df_or_none())
@@ -1329,8 +1433,8 @@ def question_panels(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Question '{qid}' not found") from exc
 
-    empty = {"drawn": [], "thin": [], "capped": [], "degraded": False,
-             "split": False, "max_panels": 0}
+    empty = {"drawn": [], "thin": [], "sizes": {}, "capped": [], "degraded": False,
+             "split": False, "max_panels": 0, "narrowed_to": []}
     try:
         # The groups the SLIDE draws, not the ones the variable has. Answering
         # for the whole variable while the slide is drawn on part of it makes
@@ -1340,7 +1444,15 @@ def question_panels(
         # three, and named three of its own choosing.
         spec = replace(_summary_spec(q.qid), classifying_var=classifying_var,
                        classifying_values=tuple(classifying_values or ()))
-        sel = panel_segments(compute(q, spec, df, model))
+        series = compute(q, spec, df, model)
+        sel = panel_segments(series)
+        # What the ENGINE narrowed to, not what the spec asked for. The two
+        # differ exactly when they matter: a name left behind by a change of
+        # classifying variable does not resolve, so the engine ignores it and
+        # the slide is the whole sample — and the editor used to announce, with
+        # confidence, that the slide counted groups of a variable it no longer
+        # uses. (Johan, 2026-09-17)
+        narrowed = list(getattr(series, "applied_filter", ()) or ())
     except Exception:  # noqa: BLE001 — see the docstring
         return empty
     from reportbuilder.render.panels import MAX_PANELS
@@ -1348,9 +1460,14 @@ def question_panels(
     # `split` is what says panels APPLY at all. A classifier the data does not
     # resolve — a stale name on a chart whose material was replaced — yields the
     # whole-sample segment, which is one ordinary pie and nothing to warn about.
+    # `thin` are the SMALL groups — drawn, but resting on few respondents — and
+    # `sizes` how few, so the warning can say "Amazon (n=3)" rather than only
+    # that something is small. (2026-09-17)
     return {"drawn": list(sel.labels), "thin": list(sel.thin),
+            "sizes": {g: int(series.base_n.get(g, 0)) for g in sel.thin},
             "capped": list(sel.capped), "degraded": sel.degraded,
-            "split": sel.split, "max_panels": MAX_PANELS}
+            "split": sel.split, "max_panels": MAX_PANELS,
+            "narrowed_to": narrowed}
 
 
 @questions_router.get("/materials/{material_id}/questions/{qid}/words")
@@ -1513,6 +1630,8 @@ class ChartSpecBody(BaseModel):
     show_total: str = "auto"
     total_position: str = "auto"
     category_label_overrides: list[tuple[str, str]] = []
+    # The legend's own names: a classifier's groups, a combo's secondary series.
+    series_label_overrides: list[tuple[str, str]] = []
     # Right-hand per-row summary column (stacked_horizontal_bar only).
     row_summary_fn: str = "none"
     row_summary_codes: list[float] = []
@@ -1613,6 +1732,9 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
         ),
         category_label_overrides=tuple(
             (str(full), str(short)) for full, short in body.category_label_overrides
+        ),
+        series_label_overrides=tuple(
+            (str(full), str(short)) for full, short in body.series_label_overrides
         ),
         percent_base=body.percent_base,
         show_total=body.show_total,
@@ -1942,6 +2064,53 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "",
         return str(f), template_id or "default"
     except Exception:  # noqa: BLE001 — styling must never break a preview
         return None, ""
+
+
+@questions_router.post("/materials/{material_id}/legend-names")
+def legend_names(
+    material_id: str,
+    body: ChartSpecBody,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_material),
+) -> dict:
+    """The names this slide draws that are NOT the question's answers — a
+    classifier's groups, a combo's secondary series — for the labels editor.
+
+    Computed from the chart itself, so the list is what the slide draws rather
+    than the editor's guess at which chart types show groups. The DATA's own
+    names: both label settings are cleared first, because a rename is keyed on
+    the original and the editor must still find it after it has been renamed.
+
+    For a cross-tab or a battery split by a classifier the series are
+    combinations ("Mies · Nuori"); their PARTS are offered, since each is drawn
+    on its own and the engine renames by part (`cross_tab` says so).
+    (Johan, 2026-09-17)
+    """
+    df, model = df_model_for_material(material_id, client, body.grouping or {})
+    try:
+        q = model.question(body.question_ref)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail=f"Question '{body.question_ref}' not found") from exc
+    spec = replace(_chart_spec_from_body(body),
+                   series_label_overrides=(), category_label_overrides=())
+    try:
+        series = compute(q, spec, df, model)
+    except Exception:  # noqa: BLE001 — a chart that cannot compute has no names
+        return {"names": [], "cross_tab": False}
+    answers = set(series.categories)
+    if series.segment_primary or spec.classifying_var_2:
+        # Combinations ("Mies · Nuori"): each PART is a name the slide draws on
+        # its own, and the engine renames by part. In first-seen order.
+        parts: list[str] = []
+        for seg in series.segments:
+            for part in seg.split(" · "):
+                if part != "Total" and part not in answers and part not in parts:
+                    parts.append(part)
+        return {"names": parts, "cross_tab": True}
+    return {"names": [s for s in series.segments
+                      if s != "Total" and s not in answers],
+            "cross_tab": False}
 
 
 @questions_router.post("/materials/{material_id}/preview-chart")

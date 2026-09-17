@@ -67,3 +67,30 @@ def test_a_combo_whose_series_has_no_mean_is_unchanged():
     no-secondary fallback. Nothing to name."""
     ctx = _Ctx(_Spec(), _series(with_mean=False))
     assert _combo_subtitle(ctx, QUESTION) == QUESTION
+
+
+def _mean_series() -> SeriesResult:
+    """A combo on a BATTERY: the series' own statistic is already `mean`.
+
+    `_battery` reports `statistic="mean"` whatever the spec asks for, so this is
+    an ordinary slide, not a contrivance.
+    """
+    segs = ("Miehet", "Naiset", INDEX)
+    return SeriesResult(
+        categories=("A",), segments=segs,
+        cells={("A", s): Cell(mean=3.0) for s in segs},
+        base_n={s: 10 for s in segs} | {"Total": 20}, statistic="mean",
+        segment_statistics={"Miehet": "mean", "Naiset": "mean", INDEX: "mean"})
+
+
+def test_a_classifier_group_is_never_named_as_the_second_measure():
+    """The subtitle asked which segment is a "mean", which is true of EVERY
+    segment once the series itself measures means — so it named whichever
+    classifier group came first and called it the second measure.
+
+    The question is "does this segment measure something OTHER than the series
+    does?", the same one the renderer asks to find its two halves.
+    (Johan, 2026-09-17)
+    """
+    out = _combo_subtitle(_Ctx(_Spec(), _mean_series()), QUESTION)
+    assert "Miehet" not in out, f"named a classifier group as the measure: {out}"

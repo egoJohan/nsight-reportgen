@@ -53,6 +53,13 @@ class SeriesResult:
     # indexes it has to handle both the None and the missing-key case itself,
     # and forgetting either brings the percent sign back. (Johan, 2026-09-16)
     segment_statistics: dict[str, str] | None = None
+    # The segments that are a combo's SECONDARY VARIABLE, as opposed to the
+    # question's own series. Recorded because it cannot always be read off the
+    # statistics: a categorical secondary is drawn as the share of one of its
+    # groups, a percentage like the bars beside it, so "measures something
+    # else" finds nothing and the renderer fell back to guessing by position.
+    # Empty for every chart that has no secondary variable. (Johan, 2026-09-17)
+    secondary_segments: tuple[str, ...] = ()
     # Optional caption rendered under the chart — e.g. the endpoint legend of a
     # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)
     caption: str | None = None
@@ -166,3 +173,18 @@ class SeriesResult:
         if pcts and all(p is not None for p in pcts):
             return _within(float(sum(pcts)), 100.0)  # type: ignore[arg-type]
         return False
+
+
+def shown_segment(spec, series: "SeriesResult", name: str) -> str:
+    """The segment a SAVED group name refers to, once the legend renames apply.
+
+    Settings that name a group — the scatter's X and Y — keep the name the data
+    gave it, while the series carries the name the author gave it in the legend.
+    The renamed name when the series has it, else the name as given: a rename
+    that was not applied (a clash, "Total") leaves the series under its own.
+    (2026-09-17)
+    """
+    renames = (spec.series_label_override_map()
+               if hasattr(spec, "series_label_override_map") else {})
+    renamed = renames.get(name)
+    return renamed if renamed and renamed in series.segments else name

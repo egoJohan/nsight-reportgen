@@ -863,12 +863,23 @@ def _combo_subtitle(ctx, question: str) -> str:
     if not (getattr(ctx.spec, "options", None) or {}).get("combo_secondary"):
         return question
     series = getattr(ctx, "series", None)
-    names = [s for s in getattr(series, "segments", ())
-             if getattr(series, "statistic_of", None)
-             and series.statistic_of(s) == "mean"]
+    # The same question the renderer asks to find its two halves: does this
+    # segment measure something OTHER than the series does? Asking "is it a
+    # mean" was true of every segment once the series itself measured means — a
+    # combo on a battery — so this named whichever classifier group came first
+    # and called it the second measure. (Johan, 2026-09-17)
+    names = list(getattr(series, "secondary_segments", ()) or ()) or [
+        s for s in getattr(series, "segments", ())
+        if getattr(series, "statistic_of", None)
+        and series.statistic_of(s) != getattr(series, "statistic", None)]
     if not names:
         return question
-    return f"{question} · {names[0]} (keskiarvo)" if question else names[0]
+    # "(keskiarvo)" only when it IS one. A categorical secondary is the share of
+    # a group, and its name already says which group. (Johan, 2026-09-17)
+    is_mean = (getattr(series, "statistic_of", None) is not None
+               and series.statistic_of(names[0]) == "mean")
+    second = f"{names[0]} (keskiarvo)" if is_mean else names[0]
+    return f"{question} · {second}" if question else names[0]
 
 def add_image_slide_chrome(ctx: RenderContext) -> None:
     """Decorate an image-mode slide with house-style chrome.

@@ -279,6 +279,12 @@ export function rendersAsBullets(chart: { chart_type: string }): boolean {
 // OUT, because none of them change the ANSWER, only how it's presented:
 // template_ref, chart_type, colours/elements, sort order, number_format,
 // footer_note, row_summary_* (a display column, not a different finding).
+function secondaryKey(options: Record<string, unknown> | null | undefined): string | undefined {
+  const variable = options?.["combo_secondary"] as string | undefined;
+  const group = options?.["combo_secondary_value"] as string | undefined;
+  return variable && group ? `${variable}=${group}` : variable;
+}
+
 export function titleDataKey(
   chart: ChartSpec,
   resolved: Pick<Question, "text" | "variables"> | undefined
@@ -303,8 +309,13 @@ export function titleDataKey(
     // second measure from `combo_secondary`. So what goes in is that derived
     // fact, not the type itself — picking or changing a secondary retitles,
     // recolouring or reshaping never does. (Johan, 2026-09-16)
+    //
+    // Which GROUP of it, when the secondary is categorical: "Kyllä" and "Ei" are
+    // different series, and a headline about one is false of the other. Folded
+    // into the same entry, and only when set, so every key saved before groups
+    // existed is still the same string and no headline regenerates. (2026-09-17)
     chart.chart_type === "combo"
-      ? ((chart.options?.["combo_secondary"] as string | undefined) ?? null)
+      ? (secondaryKey(chart.options) ?? null)
       : null,
   ]);
 }

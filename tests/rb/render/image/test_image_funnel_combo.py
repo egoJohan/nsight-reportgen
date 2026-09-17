@@ -128,8 +128,23 @@ def _assert_picture(slide, slot):
 
     px_w, px_h = Image.open(io.BytesIO(pic.image.blob)).size
     assert abs(pic.width / pic.height - px_w / px_h) < 0.01, "image distorted (stretched/squeezed)"
+    # REVERSED 2026-09-17. This asserted that one dimension always reaches its
+    # slot bound — "fill the slot, whatever it takes".
+    #
+    # It took magnifying to do that. Every font in a chart is chosen in POINTS,
+    # and `bbox_inches="tight"` trims the drawing to its ink, so a chart with
+    # short labels saves a PNG narrower than the figure it came from; stretching
+    # that across the slot scaled every point size with it. Reported as "why is
+    # the chart font so big… it is now bigger than the question subtitle" —
+    # an 11.5pt row label arriving at roughly 17pt. (Johan)
+    #
+    # So: fill the slot, or stop at 1:1, whichever comes first. What is still
+    # guaranteed — contained, undistorted, centred — is asserted above.
+    natural = pic.image.size[0] * (914400 / 200)
     touches = (abs(pic.width - slot.width) <= 2) or (abs(pic.height - slot.height) <= 2)
-    assert touches, "Picture should be scaled to the largest fit inside the slot"
+    assert touches or abs(pic.width - natural) <= 2, (
+        "Picture should fill the slot, or sit at the size it was drawn — "
+        f"placed {pic.width}, natural {natural:.0f}, slot {slot.width}")
     assert abs(pic.left - (slot.left + (slot.width - pic.width) // 2)) <= 2, "not centred horizontally"
     assert abs(pic.top - slot.top) <= 2, "bar/line/funnel charts top-align in the slot"
 

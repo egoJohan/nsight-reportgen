@@ -650,7 +650,8 @@ _BOX_ROW_SUMMARIES = {
 
 def _top_scale_categories(var: Variable, categories: list[str], n: int,
                           lowest: bool = False,
-                          overrides: dict[str, str] | None = None) -> list[str]:
+                          overrides: dict[str, str] | None = None,
+                          df=None) -> list[str]:
     """The display labels of the `n` HIGHEST rating-scale points of `var` that are
     present in `categories` (e.g. the top-2 or top-3 agreement levels), or the `n`
     LOWEST when `lowest`. Empty when the variable isn't a rating scale.
@@ -661,7 +662,7 @@ def _top_scale_categories(var: Variable, categories: list[str], n: int,
     the caller found no levels to sum, and the sort silently did nothing while the
     control still read "Top 2".
     """
-    lv = scale_levels(var)                     # [(code, label, point), …]
+    lv = scale_levels(var, df)                 # [(code, label, point), …]
     if not lv:
         return []
     shown = overrides or {}
@@ -865,7 +866,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 continue
             summary_points[code] = float(code)
     else:
-        summary_points = {code: pt for code, _lbl, pt in scale_levels(var)}
+        summary_points = {code: pt for code, _lbl, pt in scale_levels(var, data)}
         if not summary_points:
             summary_points = {code: pt for code, _lbl, pt in entries}
     # Whatever route got us here, a non-answer is never a scale point.
@@ -994,7 +995,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     if _bars_are_segments and spec.sort.basis in _BOX_SORT_BASES:
         n_top, _lowest = _BOX_SORT_BASES[spec.sort.basis]
         top_cats = _top_scale_categories(var, categories, n_top, lowest=_lowest,
-                                         overrides=overrides)
+                                         overrides=overrides, df=data)
         if top_cats:
             def _topbox(seg: str) -> float:
                 return sum((cells.get((c, seg)) or Cell(pct=None)).pct or 0.0
@@ -1327,6 +1328,7 @@ def _relabel_segments(result: SeriesResult, model: QuestionModel,
             {rl(s): v for s, v in result.segment_statistics.items()}
             if result.segment_statistics else None
         ),
+        secondary_segments=tuple(rl(s) for s in result.secondary_segments),
     )
 
 
@@ -1344,7 +1346,6 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     as "7.5 %"."""
     var = model.variable(question.variables[0])
     sec_name = spec.options.get("combo_secondary")
-    sec = model.variable(sec_name)
     # Primary distribution (%) over the question's categories — split by the
     # classifying variable when there is one.
     #
@@ -1357,11 +1358,8 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     )
     base = _single(question, base_spec, data, model)
     pcol = pd.to_numeric(data[var.name], errors="coerce")
-    # Secondary values: map rating codes (e.g. 1000x) to their 1..N scale point
-    # via the value-label leading digit; otherwise use the raw numeric value.
-    sec_num = pd.to_numeric(data[sec_name], errors="coerce")
-    sec_scale = _rating_scale(sec)
-    scol = sec_num.map(sec_scale) if sec_scale else sec_num
+    scol, secondary_label, secondary_statistic = _combo_secondary_values(
+        spec, data, model, sec_name)
     label_to_code = {vl.label: vl.value for vl in var.value_labels}
     if not label_to_code:
         # The categories are the codes themselves (see `code_labels`), so the
@@ -1385,8 +1383,8 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         if hasattr(spec, "label_override_map") else {}).items():
         if full in label_to_code:
             label_to_code.setdefault(short, label_to_code[full])
-    primary_label = (var.label or var.name)[:30]
-    secondary_label = (sec.label or sec.name)[:30]
+    # Uncut: it is a legend entry, and a cut name cannot be read or edited.
+    primary_label = (var.label or var.name).strip()
 
     # The bars. With no classifier that is the question's own distribution, in
     # one series named after the question. With one, it is that classifier's
@@ -1396,6 +1394,7 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     )
 
     cells: dict[tuple[str, str], Cell] = {}
+    secondary_n = 0
     for cat in base.categories:
         if spec.classifying_var:
             for seg in bar_segments:
@@ -1409,6 +1408,7 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # bar per group is a chart nobody can read.
         code = label_to_code.get(cat)
         vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
+        secondary_n += len(vals)
         cells[(cat, secondary_label)] = Cell(
             pct=(float(vals.mean()) if len(vals) else None)
         )
@@ -1419,6 +1419,11 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # lines in its place. The line's base is everyone the mean is taken over.
     total_n = base.base_n.get("Total", 0)
     base_n = dict(base.base_n)
+    if secondary_statistic == "pct":
+        # A share is stated with its own base, which is NOT the slide's N: those
+        # who did not answer the secondary question are out of it. The mean
+        # keeps the base it always had, so no saved slide changes.
+        base_n[secondary_label] = secondary_n
     base_n.setdefault(secondary_label, total_n)
     for seg in bar_segments:
         base_n.setdefault(seg, total_n)
@@ -1429,8 +1434,86 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         base_n=base_n,
         statistic="pct",
         segment_statistics={
-            **{s: "pct" for s in bar_segments}, secondary_label: "mean"},
+            **{s: "pct" for s in bar_segments}, secondary_label: secondary_statistic},
+        secondary_segments=(secondary_label,),
     )
+
+
+def _code_group_masks(model: QuestionModel, data: pd.DataFrame,
+                      var_name: str) -> dict[str, pd.Series]:
+    """One mask per CODE of *var_name*, named as the classifier path names it.
+
+    `_classifier_masks` reads value labels, and a variable can be a perfectly
+    good classifier without any: a derived 0/1 segment flag, or codes the file
+    never labelled. The classifier path relabels those through
+    `_code_label_map` ("AikooJatkaa" / "Muut", or the bare code), and that is
+    what the picker offers — so resolving a picked group has to read the same
+    names, or the group is not found and the series is dropped.
+    (Johan, 2026-09-17)
+    """
+    var = model.variables.get(var_name)
+    if var is None or var_name not in data.columns:
+        return {}
+    col = pd.to_numeric(data[var_name], errors="coerce")
+    missing = getattr(var, "missing_values", frozenset())
+    codes = sorted({float(c) for c in col.dropna().unique()
+                    if float(c) not in missing and float(c).is_integer()})
+    names = _code_label_map(var, {str(int(c)) for c in codes})
+    return {names.get(str(int(c)), str(int(c))): (col == c) for c in codes}
+
+
+def _combo_secondary_values(spec: ChartSpec, data: pd.DataFrame, model: QuestionModel,
+                            sec_name: str) -> tuple[pd.Series, str, str]:
+    """(one value per respondent, the series' name, what it measures) for a
+    combo's secondary variable. The caller averages the values per category.
+
+    With no group chosen that is the variable itself, and the average is its
+    MEAN — a numeric scale or a 1..N rating.
+
+    With a group chosen (`combo_secondary_value`, one of the variable's group
+    labels as the classifier picker names them) each respondent who answered is
+    100 when they are in that group and 0 when not, so the same average is the
+    SHARE of the category in it, as a percentage. That is what a categorical
+    variable can say per category; its mean cannot say anything. Respondents
+    with no answer stay out of the base, as they do everywhere else.
+
+    Resolved through `_classifier_masks`, so every form a classifier can take —
+    a value-labelled column, a coded string, a grouped multi — works as a
+    secondary too, and the groups offered are the ones the classifier picker
+    already shows. (Johan, 2026-09-17)
+    """
+    group = spec.options.get("combo_secondary_value")
+    if group:
+        masks = _classifier_masks(spec, data, model, sec_name) or {}
+        if group not in masks:
+            masks = _code_group_masks(model, data, sec_name) or masks
+        if group not in masks:
+            raise ValueError(
+                f"'{group}' is not a group of the secondary variable '{sec_name}'")
+        answered = pd.Series(False, index=data.index)
+        for m in masks.values():
+            answered = answered | m.fillna(False).astype(bool)
+        values = pd.Series(float("nan"), index=data.index)
+        values[answered] = 0.0
+        values[masks[group].fillna(False).astype(bool)] = 100.0
+        # Never cut. This name IS the legend entry and the subtitle's second
+        # half, and nothing on the slide lets an author edit it: cut at 30
+        # characters it read "53 Aion jatkossakin pysyä…", and what the bars
+        # measured could not be told from the slide at all. A long name is the
+        # renderer's to wrap. (Johan, 2026-09-17)
+        name = _classifier_label(sec_name, model).strip()
+        # "% Kyllä", not "Kyllä": the legend has to say this is a PERCENTAGE
+        # of each category's respondents, or it reads as one more group.
+        label = f"{name}: % {group}"
+        return values, label, "pct"
+    sec = model.variable(sec_name)
+    # Map rating codes (e.g. 1000x) to their 1..N scale point via the value-label
+    # leading digit; otherwise use the raw numeric value.
+    sec_num = pd.to_numeric(data[sec_name], errors="coerce")
+    sec_scale = _rating_scale(sec)
+    values = sec_num.map(sec_scale) if sec_scale else sec_num
+    # Uncut, for the same reason as the share's name above.
+    return values, (sec.label or sec.name).strip(), "mean"
 
 
 def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
@@ -1448,8 +1531,24 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     result = _compute_series(question, spec, rows, model)
     if applied:
         result = dataclasses.replace(result, applied_filter=applied)
+    # The legend's own names first — a classifier's groups, a combo's secondary
+    # series — keyed on the names the series was computed with. Before the
+    # category renames, so a group that shares its name with an answer ("Kyllä")
+    # is renamed by its own setting and not by the answer's.
+    series_overrides = (spec.series_label_override_map()
+                        if hasattr(spec, "series_label_override_map") else {})
+    renamed_series: frozenset[str] = frozenset()
+    if series_overrides:
+        before = set(result.segments)
+        # Two classifiers make every series a combination ("Mies · Nuori"),
+        # whether or not the result also records which part is the primary.
+        result = _series_relabelled(
+            result, series_overrides,
+            combinations=bool(getattr(spec, "classifying_var_2", None)))
+        renamed_series = frozenset(set(result.segments) - before)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
-    return _relabelled(result, overrides) if overrides else result
+    return (_relabelled(result, overrides, keep_segments=renamed_series)
+            if overrides else result)
 
 
 def _selected_rows(spec, data: pd.DataFrame,
@@ -1517,23 +1616,134 @@ def _clash_free(names: tuple[str, ...], overrides: dict[str, str]):
     return lambda t: (t if overrides.get(t, t) in clashing else overrides.get(t, t))
 
 
-def _relabelled(result: SeriesResult, overrides: dict[str, str]) -> SeriesResult:
+def _relabelled(result: SeriesResult, overrides: dict[str, str],
+                keep_segments: frozenset[str] = frozenset()) -> SeriesResult:
     """*result* with categories and segments renamed, cells and bases following.
 
     A rename that moved the names and left the cells keyed by the old ones would
     empty the chart, so both move together or neither does.
+
+    `keep_segments` are series the author already named in the legend: an
+    answer's rename must not rename them again because the name they were given
+    happens to be that answer's.
     """
-    name = _clash_free(tuple(result.categories) + tuple(result.segments), overrides)
+    renamer = _clash_free(tuple(result.categories) + tuple(result.segments), overrides)
+
+    def name(label: str) -> str:
+        return renamer(label)
+
+    def seg_name(label: str) -> str:
+        return label if label in keep_segments else renamer(label)
+
     cats = tuple(name(c) for c in result.categories)
-    segs = tuple(name(sg) for sg in result.segments)
+    segs = tuple(seg_name(sg) for sg in result.segments)
     if cats == result.categories and segs == result.segments:
         return result
     return dataclasses.replace(
         result,
         categories=cats,
         segments=segs,
-        cells={(name(c), name(sg)): v for (c, sg), v in result.cells.items()},
+        cells={(name(c), seg_name(sg)): v for (c, sg), v in result.cells.items()},
+        base_n={seg_name(sg): v for sg, v in result.base_n.items()},
+        # Both are keyed by segment, and a renamed secondary that kept its old
+        # name here would stop being found as the secondary half.
+        segment_statistics=(
+            {seg_name(sg): v for sg, v in result.segment_statistics.items()}
+            if result.segment_statistics else None
+        ),
+        secondary_segments=tuple(seg_name(sg) for sg in result.secondary_segments),
+    )
+
+
+def _series_relabelled(result: SeriesResult, overrides: dict[str, str],
+                       combinations: bool = False) -> SeriesResult:
+    """*result* with its SEGMENTS renamed as the author named them in the legend.
+
+    Only segments: the categories are the question's answers and have a setting
+    of their own. Everything keyed by a segment moves with it, or the renamed
+    series loses its numbers, its base, what it measures or — on a combo — its
+    place on the right-hand axis.
+
+    Left alone:
+    * "Total", which is not a group, and whose name the renderers look for.
+    * `applied_filter`, which the editor compares with the SAVED group names.
+
+    A series that is a COMBINATION ("Mies · Nuori" — a cross-tab, a battery split
+    by a classifier) is renamed part by part: see `_combination_parts_relabelled`.
+
+    A rename that would give two series one name is not applied to either — the
+    same rule, and the same renamer, as the category labels. (2026-09-17)
+    """
+    wanted = {k: v for k, v in overrides.items()
+              if k != "Total" and v and v.strip() and v != k}
+    if not wanted:
+        return result
+    if result.segment_primary or combinations:
+        return _combination_parts_relabelled(result, wanted)
+    name = _clash_free(tuple(result.segments), wanted)
+    segs = tuple(name(sg) for sg in result.segments)
+    if segs == result.segments:
+        return result
+    return dataclasses.replace(
+        result,
+        segments=segs,
+        cells={(c, name(sg)): v for (c, sg), v in result.cells.items()},
         base_n={name(sg): v for sg, v in result.base_n.items()},
+        segment_statistics=(
+            {name(sg): v for sg, v in result.segment_statistics.items()}
+            if result.segment_statistics else None
+        ),
+        secondary_segments=tuple(name(sg) for sg in result.secondary_segments),
+        # Only the keys that ARE segments: a row summary can belong to an answer
+        # of the same name, and that is the category setting's to rename.
+        row_summary_keys=tuple(name(k) if k in result.segments else k
+                               for k in result.row_summary_keys),
+    )
+
+
+#: How a combination series joins its parts ("Mies · Nuori").
+_PART_JOIN = " · "
+
+
+def _combination_parts_relabelled(result: SeriesResult,
+                                  wanted: dict[str, str]) -> SeriesResult:
+    """*result*'s combination series renamed PART by part.
+
+    A cross-tab's series is "<group> · <group>", a battery split by a classifier
+    "<statement> · <group>", and `segment_primary` names each one's first part.
+    The parts are what the slide draws — the bar's own label, and the first part
+    once above its bars — so a rename of "Mies" applies to that part wherever it
+    occurs, and `segment_primary` follows with the same names, or the bars fall
+    out of their groups.
+
+    Applied only if the renamed series stay distinct: two combinations that
+    would become one keep every name as it was, as the category rule does.
+    (2026-09-17)
+    """
+    def rename(seg: str) -> str:
+        return _PART_JOIN.join(wanted.get(p, p) for p in seg.split(_PART_JOIN))
+
+    segs = tuple(rename(sg) for sg in result.segments)
+    if segs == result.segments or len(set(segs)) != len(segs):
+        return result
+    keyed = set(result.segments)
+
+    def key(k: str) -> str:
+        return rename(k) if k in keyed else k
+
+    return dataclasses.replace(
+        result,
+        segments=segs,
+        cells={(c, key(sg)): v for (c, sg), v in result.cells.items()},
+        base_n={key(sg): v for sg, v in result.base_n.items()},
+        segment_statistics=(
+            {key(sg): v for sg, v in result.segment_statistics.items()}
+            if result.segment_statistics else None
+        ),
+        secondary_segments=tuple(key(sg) for sg in result.secondary_segments),
+        row_summary_keys=tuple(key(k) for k in result.row_summary_keys),
+        segment_primary=({key(k): rename(v) for k, v in result.segment_primary.items()}
+                         if result.segment_primary else result.segment_primary),
     )
 
 
@@ -1785,7 +1995,12 @@ def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
         return seg_masks
     answered = pd.Series(False, index=data.index)
     for v in vars_:
-        scale = {c: p for c, _lbl, p in scale_levels(v)}
+        # The FRAME, like every other scale question in this module. Without it
+        # an endpoint-labelled rating answers "not a scale", every group looks
+        # unanswered, and this returns None — which `_battery` reads as "drop the
+        # split", drawing the pooled mean of two groups that share no answer.
+        # (Johan, 2026-09-17)
+        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
         answered = answered | pd.to_numeric(
             data[v.name], errors="coerce").map(scale).notna()
     kept = {lbl: m for lbl, m in seg_masks.items() if bool((answered & m).any())}
@@ -1911,7 +2126,7 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
             if vn is None:
                 cells[(attr, ent)] = Cell(pct=None, count=0.0, mean=None)
                 continue
-            scale = {c: p for c, _lbl, p in scale_levels(model.variable(vn))}
+            scale = {c: p for c, _lbl, p in scale_levels(model.variable(vn), data)}
             mapped = pd.to_numeric(data[vn], errors="coerce").map(scale)
             answered = answered | mapped.notna()
             n = int(mapped.notna().sum())

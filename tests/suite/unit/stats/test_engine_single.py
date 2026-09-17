@@ -167,10 +167,10 @@ def _model_qg(qvar, gvar):
             Question(qid="q", kind="single", variables=("q",), text="Q"))
 
 
-def test_tiny_base_segment_not_plotted():
-    """A classifier value with a near-empty base (e.g. 'En halua sanoa', n=1) must
-    not render a misleading 100%. The engine computes it exactly, but the render
-    decompose (series_values) drops it."""
+def test_tiny_base_segment_is_plotted():
+    """A classifier value with a near-empty base (e.g. 'En halua sanoa', n=1) is
+    drawn like any group, its base stated beside it. Dropping it (until
+    2026-09-17) made a small study's split vanish without a word."""
     from reportbuilder.render.image._mpl import series_values
     q = _catvar()
     g = Variable(name="g", label="Gender", measurement="categorical",
@@ -185,7 +185,8 @@ def test_tiny_base_segment_not_plotted():
     r = engine.compute(qq, _spec(classifying_var="g"), df, model)
     assert "Rare" in r.segments              # engine keeps the exact stat
     _cats, segs, _data = series_values(r)
-    assert "Rare" not in segs                # but it is NOT plotted (tiny base)
+    assert "Rare" in segs                    # and it IS plotted
+    assert r.base_n["Rare"] == 1
     assert "M" in segs and "F" in segs
 
 

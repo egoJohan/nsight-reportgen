@@ -20,7 +20,14 @@ from reportbuilder.render.house_style import (
 )
 
 
-def _new_agg_figure(w_in: float, h_in: float, dpi: int = 200) -> Figure:
+#: The resolution every chart is drawn and saved at. Named once because the
+#: PLACEMENT needs it too: it is what one saved pixel is worth on the slide, and
+#: therefore the ceiling on how far a picture may be scaled up. See
+#: `place_picture_square`.
+_RENDER_DPI = 200
+
+
+def _new_agg_figure(w_in: float, h_in: float, dpi: int = _RENDER_DPI) -> Figure:
     """Create a standalone Agg Figure (OO API — NOT pyplot).
 
     Chart rendering runs on FastAPI's threadpool, so figures are created and
@@ -52,14 +59,26 @@ def series_label(ctx, seg: str) -> str:
 
 
 def wants_group_base(ctx) -> bool:
-    """Whether a group states its own base on this slide (`elements.group_base`).
+    """Whether a group states its own base on this slide.
 
-    Read through `getattr` at both steps: a spec from an older report has no
-    such field, and the answer for one of those is the behaviour it already
+    ONE switch for every group's "n", wherever it is drawn: a legend entry, a
+    bar's name, a pie or funnel panel's second line. A row of pies had a switch
+    of its own (`show_panel_base`), so on those slides the one the author found
+    — "Group sizes" — did nothing: "on tilanteita joissa ne ei näytä tekevän
+    mitään" (reported 2026-09-17).
+
+    The old per-panel switch is still obeyed where a saved slide turned it off,
+    so nobody's hidden number comes back; nothing offers it any more.
+
+    Read through `getattr` at every step: a spec from an older report has
+    neither field, and the answer for one of those is the behaviour it already
     had — on. (Johan, 2026-09-16)
     """
-    elements = getattr(getattr(ctx, "spec", None), "elements", None)
-    return bool(getattr(elements, "group_base", True))
+    spec = getattr(ctx, "spec", None)
+    elements = getattr(spec, "elements", None)
+    if not bool(getattr(elements, "group_base", True)):
+        return False
+    return bool(getattr(spec, "show_panel_base", True))
 
 
 def with_base(name: str, base) -> str:
@@ -412,7 +431,7 @@ def render_png(fig) -> str:
     # do not — after the face, since the face decides how wide they are.
     from reportbuilder.render.image import label_fit
     label_fit.fit_category_labels(fig)
-    fig.savefig(path, dpi=200, bbox_inches="tight", pad_inches=0.04,
+    fig.savefig(path, dpi=_RENDER_DPI, bbox_inches="tight", pad_inches=0.04,
                 transparent=True)
     fig.clear()
     return path
@@ -437,9 +456,13 @@ from reportbuilder.render.panels import MIN_SEGMENT_BASE  # noqa: F401
 def series_values(series):
     """Decompose a SeriesResult into (cats, segs, data) for chart rendering.
 
-    Segments computed on a near-empty base are dropped (see MIN_SEGMENT_BASE) so a
-    tiny classifier group never renders a misleading 100%. "Total" and single-series
-    ("Total"-only) charts are always kept.
+    Every group with respondents is drawn, however few. A group under
+    MIN_SEGMENT_BASE used to be dropped so that one person never drew as 100 % —
+    and a study of 41 split by six companies (3–9 each) lost every group, drew
+    the whole sample instead, and read as a classifying variable that did not
+    work. A group states its own base ("Amazon (n=3)"), so the reader sees what a
+    percentage rests on; the editor warns the author about small groups. Decided
+    2026-09-17. Only a group with NO respondents is left out.
 
     Returns:
         cats: list of category labels (x-axis / bar groups)
@@ -449,9 +472,9 @@ def series_values(series):
     cats = list(series.categories)
     segs = [
         s for s in series.segments
-        if s == "Total" or series.base_n.get(s, 0) >= MIN_SEGMENT_BASE
+        if s == "Total" or series.base_n.get(s, 0) > 0
     ]
-    if not segs:  # everything was tiny — fall back to the overall column
+    if not segs:  # no group has anyone in it — fall back to the overall column
         segs = [s for s in series.segments if s == "Total"] or list(series.segments)
     # Drop the "Total" reference series when the chart opts out (show_total=False),
     # unless it is the ONLY series (a single-series 'Total'-only chart). (2026-07-10)
@@ -774,7 +797,20 @@ def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
     slot_w = ctx.slot.width
     slot_h = ctx.slot.height
     # Scale to fit within the slot, preserving aspect ratio (never upscale-distort).
-    scale = min(slot_w / px_w, slot_h / px_h)
+    #
+    # …and never MAGNIFY. Every font in a chart is chosen in points — row labels
+    # clamp at 11.5, value labels at 9.5, against a 13.8pt subtitle — and those
+    # numbers were true of the figure but not of the slide. `bbox_inches="tight"`
+    # trims the drawing to its ink, so a chart with short labels and bars
+    # reaching 25 % saves a PNG far narrower than the figure it came from; this
+    # then stretched it across the whole slot and took every point size with it.
+    # Reported as "why is the chart font so big… it is now bigger than the
+    # question subtitle" — measured at roughly 17pt for an 11.5pt label.
+    #
+    # A chart too big for its slot still shrinks, which is what letterboxing is
+    # for. One that came out small is left at the size it was drawn, so a point
+    # size means on the slide what it says in the builder. (Johan, 2026-09-17)
+    scale = min(slot_w / px_w, slot_h / px_h, _EMU_PER_IN / _RENDER_DPI)
     disp_w = int(round(px_w * scale))
     disp_h = int(round(px_h * scale))
     left = ctx.slot.left + (slot_w - disp_w) // 2

@@ -8,7 +8,7 @@ from __future__ import annotations
 from pptx.chart.data import XyChartData
 from pptx.enum.chart import XL_CHART_TYPE
 from reportbuilder.render.base import RenderContext
-from reportbuilder.stats.series import SeriesResult
+from reportbuilder.stats.series import SeriesResult, shown_segment
 
 
 def xy_chart_data(series: SeriesResult, scatter_xy: tuple[str, str]) -> XyChartData:
@@ -34,7 +34,9 @@ def build_scatter(ctx: RenderContext):
     """
     if ctx.spec.scatter_xy is None:
         raise ValueError("scatter requires scatter_xy (two numeric axis segments)")
-    xd = xy_chart_data(ctx.series, ctx.spec.scatter_xy)
+    # Saved under the groups' own names; the series may carry legend renames.
+    xd = xy_chart_data(ctx.series, tuple(
+        shown_segment(ctx.spec, ctx.series, s) for s in ctx.spec.scatter_xy))
     gf = ctx.slide.shapes.add_chart(
         XL_CHART_TYPE.XY_SCATTER,
         ctx.slot.left,

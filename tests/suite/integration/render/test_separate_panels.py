@@ -253,9 +253,13 @@ def _setup_tiny_second():
 @pytest.mark.parametrize("chart_type", ["horizontal_bar", "vertical_bar",
                                         "stacked_horizontal_bar",
                                         "stacked_vertical_bar"])
-def test_an_all_tiny_panel_is_omitted_not_drawn_empty(chart_type, monkeypatch):
-    """A variable whose every group is below MIN_SEGMENT_BASE contributes no
-    panel at all.
+def test_an_all_tiny_panel_is_drawn_and_does_not_crash(chart_type, monkeypatch):
+    """A variable whose every group is below MIN_SEGMENT_BASE is DRAWN, as its
+    own panel: small groups are shown with their bases since 2026-09-17, where
+    such a panel used to be omitted.
+
+    What stays guarded is the crash below: the stacked renderer once reached
+    `ax.set_ylim(min(y) - 0.7, …)` with an empty bar list.
 
     Pre-fix, the CLUSTERED renderers took their panels from `_primary_groups`
     (every segment) but their values from `series_values` (base-filtered), so the
@@ -287,7 +291,7 @@ def test_an_all_tiny_panel_is_omitted_not_drawn_empty(chart_type, monkeypatch):
     monkeypatch.setattr(bars_mod, "render_png", _spy)
     IMAGE_BUILDERS[chart_type](ctx)
 
-    assert captured["titles"] == ["Sukupuoli"], "the empty panel must not be drawn"
+    assert captured["titles"] == ["Sukupuoli", "Ikäryhmät"], "both panels are drawn"
     assert_single_picture(slide, slot)
 
 

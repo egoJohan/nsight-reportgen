@@ -105,6 +105,12 @@ def _draw_row_summary(ctx, ax, y, bars, axis_max: float = 100.0) -> None:
     # Written as `x * axis_max / 100` (not `x * factor`) so the 100%-stacked case
     # lands on EXACTLY the historical 118 / 109 — no float drift.
     ax.set_xlim(0, 118.0 * axis_max / 100.0)              # reserve ~15% strip on the right
+    # The strip is FURNITURE, not data. Anything that centres itself on this
+    # chart — the legend below it — must centre on the bars, so record where the
+    # bars actually end. Without it the legend anchored at axes x=0.5, which is
+    # 59 % of the way across the data, and sat visibly right of what it names.
+    # (Johan, 2026-09-17)
+    ax._nsight_content_xmax = axis_max
     ax.set_ylim(min(y) - 0.7, max(y) + 1.2)               # room for the header row
     col_x = 109.0 * axis_max / 100.0
     ax.text(col_x, max(y) + 0.9, header, ha="center", va="center",
@@ -422,9 +428,15 @@ def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
     ncol = n_segs if one_row else min(n_segs, 5)
     if not one_row:
         handles, labels = _rowmajor_legend(handles, labels, ncol)
+    # Centred on the CHART, not on the axes. They are the same thing until
+    # something reserves part of the axes for furniture — the row-summary column
+    # does, by 18 % — see `_draw_row_summary`.
+    span = ax.get_xlim()[1] or 1.0
+    content = getattr(ax, "_nsight_content_xmax", None)
+    centre = (content / span) / 2 if content else 0.5
     leg = ax.legend(
         handles, labels,
-        loc="upper center", bbox_to_anchor=(0.5, y),
+        loc="upper center", bbox_to_anchor=(centre, y),
         ncol=ncol, frameon=False, fontsize=9.5,
         handlelength=1.1, columnspacing=1.2, handletextpad=0.5,
     )

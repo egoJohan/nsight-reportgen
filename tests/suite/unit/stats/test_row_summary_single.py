@@ -95,17 +95,18 @@ def test_row_summaries_are_keyed_to_their_bar():
     assert keyed["Total"] == round(top2, 0)
 
 
-def test_dropped_tiny_group_does_not_shift_the_total_bars_summary():
+def test_a_tiny_group_does_not_shift_the_total_bars_summary():
     from reportbuilder.render.image._mpl import MIN_SEGMENT_BASE
     from reportbuilder.render.image.bars import _stacked_layout, _row_summary_by_bar
 
     model, q, df = _setup_with_a_tiny_group()
     r = engine.compute(q, _spec(classifying_var="polku", row_summary_fn="top2_sum"),
                        df, model)
-    assert r.base_n["Muuten"] < MIN_SEGMENT_BASE, "the tiny group is renderer-dropped"
+    assert r.base_n["Muuten"] < MIN_SEGMENT_BASE, "the premise: a tiny group"
 
     bars, _stack, _data = _stacked_layout(r)
-    assert "Muuten" not in bars
+    # Drawn since 2026-09-17. Each bar must still carry its OWN summary.
+    assert "Muuten" in bars
     by_bar = _row_summary_by_bar(r, bars)
     top2 = (r.cell("4", "Total").pct or 0.0) + (r.cell("5", "Total").pct or 0.0)
     assert by_bar[bars.index("Total")] == round(top2, 0), "Total keeps its OWN value"

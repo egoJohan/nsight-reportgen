@@ -29,7 +29,10 @@ export interface NumberFormatChart {
 export function hasTwoMeasures(chart: NumberFormatChart): boolean {
   return (
     chart.chart_type === "combo" &&
-    Boolean(chart.options?.["combo_secondary"])
+    Boolean(chart.options?.["combo_secondary"]) &&
+    // A categorical secondary is the share of one of its groups — a percentage,
+    // so there is no mean on the slide to give decimals to. (2026-09-17)
+    !chart.options?.["combo_secondary_value"]
   );
 }
 

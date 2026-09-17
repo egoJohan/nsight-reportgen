@@ -45,9 +45,16 @@ def test_it_names_what_would_be_drawn(case_with_data):
                    params={"classifying_var": clf})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert set(body) == {"drawn", "thin", "capped", "degraded", "split",
-                         "max_panels"}
+    # `narrowed_to` joined the contract on 2026-09-17: the groups the ENGINE
+    # actually applied. The editor used to infer that by comparing the author's
+    # ticked values against drawn+thin+capped, which cannot disagree with them —
+    # this endpoint computes on the already-narrowed data — so the warning was
+    # dead where it mattered and wrong where it fired.
+    # `sizes` joined on 2026-09-17: how many respondents each small group has.
+    assert set(body) == {"drawn", "thin", "sizes", "capped", "degraded", "split",
+                         "max_panels", "narrowed_to"}
     assert isinstance(body["drawn"], list)
+    assert isinstance(body["narrowed_to"], list)
 
 
 def test_it_never_draws_more_than_the_cap(case_with_data):

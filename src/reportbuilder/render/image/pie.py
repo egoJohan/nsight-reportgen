@@ -48,6 +48,7 @@ from reportbuilder.render.house_style import (
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.render.image._mpl import VALUE_GID, template_palette
+from reportbuilder.render.image._mpl import wants_group_base
 from reportbuilder.render.panels import panel_segments
 
 _EMU_PER_IN = 914400.0
@@ -387,7 +388,7 @@ def _build_pie_figure(ctx, *, donut: bool):
 
     def _panel_base(seg) -> int | None:
         """This panel's base, or None when the author asked for no per-panel n."""
-        if not getattr(ctx.spec, "show_panel_base", True):
+        if not wants_group_base(ctx):
             return None
         return series.base_n.get(seg, 0)
 

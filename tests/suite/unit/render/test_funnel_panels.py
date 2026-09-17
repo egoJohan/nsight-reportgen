@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import pytest
 
+from reportbuilder.model.report import ElementToggles
+
 from reportbuilder.render.charts.funnel import suitability
 from reportbuilder.render.image._mpl import chart_background, chart_furniture, new_figure
 from reportbuilder.render.image.funnel import _draw_one_funnel, build_image_funnel
@@ -245,4 +247,12 @@ def test_funnel_panel_bases_can_be_switched_off(monkeypatch):
     _prs, _slide, _slot, ctx = make_ctx("funnel", _descending_split(),
                                         classifying_var="sex",
                                         show_panel_base=False)
+    assert _panel_titles(ctx, monkeypatch) == ["Naiset", "Miehet"]
+
+
+def test_the_group_sizes_switch_hides_a_funnel_panel_base(monkeypatch):
+    """The same one switch as every other chart's group n. (2026-09-17)"""
+    _prs, _slide, _slot, ctx = make_ctx("funnel", _descending_split(),
+                                        classifying_var="sex",
+                                        elements=ElementToggles(group_base=False))
     assert _panel_titles(ctx, monkeypatch) == ["Naiset", "Miehet"]

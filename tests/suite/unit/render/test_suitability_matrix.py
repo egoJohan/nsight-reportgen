@@ -224,22 +224,19 @@ def test_combo_moderate_for_single_series():
     assert plugin("combo").suitability(B.q(), B.few_short_series()) == 0.45
 
 
-def test_pie_kept_when_a_group_too_thin_to_draw_does_not_partition():
-    """A group that will NOT be drawn cannot veto the chart type.
-
-    The branch's central architectural claim (spec 2026-08-22): feasibility is
-    asked of the panels `panel_segments` will actually render, so a group dropped
-    for a thin base never removes the pie from the picker. Reading
-    `series.segments` instead would hide the pie here.
-    """
+def test_a_small_group_that_does_not_partition_vetoes_the_pie():
+    """Feasibility is asked of the panels `panel_segments` will actually render
+    (spec 2026-08-22). A small group is drawn since 2026-09-17, so a small group
+    whose answers do not add up to a whole is a pie that could not be drawn
+    honestly, and the pie is not offered."""
     s = B.split_with_thin_nonpartition_group_series()
     from reportbuilder.render.panels import panel_segments
 
     sel = panel_segments(s)
-    assert sel.thin == ("Muut",) and "Muut" not in sel.labels
+    assert sel.thin == ("Muut",) and "Muut" in sel.labels
     assert not s.is_partition("Muut")          # it really would not add up
-    assert plugin("pie").suitability(B.q(), s) is not None
-    assert plugin("doughnut").suitability(B.q(), s) is not None
+    assert plugin("pie").suitability(B.q(), s) is None
+    assert plugin("doughnut").suitability(B.q(), s) is None
 
 
 def test_pie_kept_when_a_capped_out_group_does_not_partition():

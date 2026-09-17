@@ -143,6 +143,12 @@ class ChartSpec:
     # which is what every report saved before this existed reads as.
     total_position: str = "auto"
     category_label_overrides: tuple[tuple[str, str], ...] = ()  # (full_label, short_label) display overrides
+    # (series name, shown name) for what a legend shows that is NOT an answer:
+    # a classifier's groups, a combo's secondary series. Apart from the category
+    # overrides because one name can be both ("Kyllä"), and renaming the one must
+    # not rename the other. Empty on every slide saved before it existed.
+    # (Johan, 2026-09-17)
+    series_label_overrides: tuple[tuple[str, str], ...] = ()
     # Right-hand per-row summary column (stacked_horizontal_bar only). Off when
     # row_summary_fn == "none". See spec 2026-07-07-row-summary-column.
     row_summary_fn: str = "none"                 # none|top2_sum|top3_sum|bottom2_sum|bottom3_sum|sum|mean|net
@@ -172,6 +178,10 @@ class ChartSpec:
     def label_override_map(self) -> dict[str, str]:
         """Return the category-label overrides as a {full_label: short_label} lookup dict."""
         return {full: short for full, short in self.category_label_overrides}
+
+    def series_label_override_map(self) -> dict[str, str]:
+        """The series renames as a {series name: shown name} lookup dict."""
+        return {full: short for full, short in self.series_label_overrides}
 
 
 # Special (non-chart) slide types. These ride inside Report.charts as ChartSpecs
@@ -278,9 +288,9 @@ def report_from_json(data: dict | str) -> Report:
             return None
         return tuple(float(x) for x in raw)
 
-    def _label_overrides(c: dict) -> tuple[tuple[str, str], ...]:
-        """Normalize category_label_overrides from a list of [full, short] pairs or a dict."""
-        raw = c.get("category_label_overrides") or ()
+    def _label_overrides(c: dict, key: str = "category_label_overrides") -> tuple[tuple[str, str], ...]:
+        """Normalize a label-override setting from a list of [full, short] pairs or a dict."""
+        raw = c.get(key) or ()
         if isinstance(raw, dict):
             return tuple((str(k), str(v)) for k, v in raw.items())
         return tuple((str(pair[0]), str(pair[1])) for pair in raw)
@@ -328,6 +338,7 @@ def report_from_json(data: dict | str) -> Report:
             show_panel_base=c.get("show_panel_base", True),
             not_answered_codes=_not_answered_codes(c),
             category_label_overrides=_label_overrides(c),
+            series_label_overrides=_label_overrides(c, "series_label_overrides"),
             percent_base=c.get("percent_base", "auto"),
             show_total=c.get("show_total", "auto"),
             total_position=c.get("total_position", "auto"),

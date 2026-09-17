@@ -321,7 +321,17 @@ def _is_constant_marker(name: str, var: "Variable", series) -> bool:
         return False
 
 
-def _is_unlabeled_helper(name: str, var: "Variable") -> bool:
+#: How many distinct codes an unlabelled categorical must hold before it reads
+#: as a RATING somebody answered rather than a working column somebody derived.
+#: A flag holds 0/1, a recode two or three; a 0–10 recommendation score holds ten.
+#: The ceiling is the engine's own (`stats.engine._MAX_UNLABELLED_CODES`): above
+#: it the numbers are a measurement — an age, a spend — and one category per
+#: value says nothing.
+_RATING_MIN_CODES = 5
+_RATING_MAX_CODES = 20
+
+
+def _is_unlabeled_helper(name: str, var: "Variable", series=None) -> bool:
     """Return True for an unlabeled derived helper/recode column — one with no
     human label (label == variable name) and no value labels. Two flavours:
 
@@ -347,7 +357,21 @@ def _is_unlabeled_helper(name: str, var: "Variable") -> bool:
     """
     if var.value_labels or var.measurement in ("text", "scale"):
         return False
-    return (var.label or "").strip() == name
+    if (var.label or "").strip() != name:
+        return False
+    # The DATA tells a rating from a flag. "NPS muuttuja jää puuttumaan": a 0-10
+    # recommendation score exported with no labels of any kind matched this rule
+    # exactly and never became a question, though its distribution is the whole
+    # point of asking it. (2026-09-17)
+    if series is not None:
+        try:
+            codes = pd.to_numeric(series, errors="coerce").dropna().unique()
+        except Exception:  # noqa: BLE001 — an unreadable column stays a helper
+            return True
+        if _RATING_MIN_CODES <= len(codes) <= _RATING_MAX_CODES and all(
+                float(c).is_integer() for c in codes):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +465,7 @@ def read_sav(path: str | pathlib.Path) -> tuple[pd.DataFrame, QuestionModel]:
         if not _is_metadata(name, variables[name].label)
         and not _is_empty_column(df[name])
         and not _is_constant_marker(name, variables[name], df[name])
-        and not _is_unlabeled_helper(name, variables[name])
+        and not _is_unlabeled_helper(name, variables[name], df[name])
     ]
     model = QuestionModel(variables=variables, questions=questions)
     return df, model

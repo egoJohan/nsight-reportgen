@@ -24,7 +24,7 @@ from reportbuilder.render.image.label_fit import register_category_labels
 from reportbuilder.render.image._mpl import (
     apply_axis_titles, new_figure, render_png, place_picture, series_values,
     format_value, chart_background, chart_furniture, colours_by_series,
-    template_palette, chart_accent, series_label,
+    template_palette, chart_accent, series_label, wants_group_base,
 )
 from reportbuilder.render.house_style import TEAL, TEAL_LT, series_colors
 # Whether a clustered column has room for its number, measured rather than
@@ -68,10 +68,58 @@ def split_primary_and_secondary_segments(series, segs: list[str]) -> tuple[list[
     halua vastata` without a word. Whatever is handed here gets drawn.
     (Johan, 2026-09-16)
     """
-    lines = [s for s in segs if series.statistic_of(s) == "mean"]
+    # "Measures something OTHER than the series does", not "is a mean".
+    #
+    # Keying on the literal "mean" read every segment as secondary whenever the
+    # series' own statistic was `mean` — `statistic_of` falls back to it when
+    # there is no second measure — so the chart had no primary half and drew no
+    # bars. `_battery` reports `statistic="mean"` whatever the spec asks, which
+    # made that every combo on every battery, without the author choosing Mean.
+    #
+    # `segment_statistics` is None precisely when there is no second measure, so
+    # this is empty then and the historical fallback below applies.
+    # (Johan, 2026-09-17)
+    # Said outright where the engine knows it. A categorical secondary is the
+    # share of one of its groups — a percentage, like the bars — so the question
+    # below finds nothing for it and the fallback took the first classifier
+    # group as the whole primary half. (Johan, 2026-09-17)
+    named = [s for s in segs if s in (getattr(series, "secondary_segments", ()) or ())]
+    if named:
+        return [s for s in segs if s not in named], named
+    lines = [s for s in segs if series.statistic_of(s) != series.statistic]
     if lines:
         return [s for s in segs if s not in lines], lines
     return list(segs[:1]), list(segs[1:])
+
+
+def _legend_that_fits(fig, ax, handles, labels):
+    """The legend below the axes, its long entries wrapped until it fits.
+
+    An entry is the secondary variable's whole name — a survey question — and
+    it is never cut short, because nothing on the slide lets an author edit it
+    and a cut name leaves the reader unable to tell what the bars measure. So
+    the name is wrapped instead: measured against the picture's width, one
+    narrower line length at a time, rather than guessed from a character count
+    that no font keeps. (Johan, 2026-09-17)
+    """
+    import textwrap
+
+    def build(width: int | None):
+        shown = [textwrap.fill(" ".join(label.split()), width)
+                 if width and len(label) > width else label for label in labels]
+        return ax.legend(handles, shown, fontsize=9.5, frameon=True,
+                         loc="upper center", bbox_to_anchor=(0.5, -0.08),
+                         ncol=min(len(labels), 5), borderaxespad=0.0)
+
+    leg = build(None)
+    renderer = fig.canvas.get_renderer()
+    limit = fig.bbox.width * 0.96
+    width = max(len(label) for label in labels)
+    while leg.get_window_extent(renderer).width > limit and width > 12:
+        width = int(width * 0.8)
+        leg.remove()
+        leg = build(width)
+    return leg
 
 
 def line_label_anchor(
@@ -153,8 +201,14 @@ def build_image_combo(ctx) -> None:
                                        for v in all_vals), key=len, default=""))
               if n_bars > 1 else (9.5, 0.0))
 
+    # The secondary variable drawn as the SHARE of one of its groups: a
+    # percentage like the bars, but of another question and over another base.
+    shares = [s for s in (getattr(ctx.series, "secondary_segments", ()) or ())
+              if s in segs and ctx.series.statistic_of(s) == ctx.series.statistic == "pct"]
+
     def _draw_half(axes, seg_names: list[str], kind: str, *, lone_colour: str,
-                   label_values: bool) -> list:
+                   label_values: bool, secondary: bool = False,
+                   defer_labels: bool = False) -> list:
         """Draw one half of the combo in its chosen shape; return its artists."""
         n = max(1, len(seg_names))
         clrs = colours_by_series(
@@ -174,11 +228,47 @@ def build_image_combo(ctx) -> None:
             # data would have said "Suomi (n=516)". The secondary half is a
             # VARIABLE, not a group, and has no base of its own to state.
             # (Johan, 2026-09-16)
-            if n > 1 and axes is ax:
+            #
+            # "The secondary half", not "the right-hand axis": a share of a
+            # group is a percentage like the bars and shares their axis, and
+            # asking which axis it was drawn on left it with no name at all.
+            # (Johan, 2026-09-17)
+            if secondary and seg in shares:
+                # A share has a base of its own — those who answered the
+                # secondary question — and it is not the slide's N.
+                n_sec = (getattr(ctx.series, "base_n", None) or {}).get(seg)
+                name = (f"{seg} (n={n_sec})"
+                        if n_sec and wants_group_base(ctx) else seg)
+            elif secondary and seg in (getattr(ctx.series, "secondary_segments", ()) or ()):
+                name = seg
+            elif n > 1 and axes is ax:
                 name = series_label(ctx, seg)
+            elif (not (getattr(ctx.series, "secondary_segments", ()) or ())
+                  and len(segs) > 1 and getattr(ctx.series, "segments_are_groups", True)):
+                # No secondary variable, and the series are a classifier's
+                # GROUPS split over the two halves: each is named, with its base
+                # like any group. Before, a single series in each half was named
+                # by neither, and the legend said nothing about which bars were
+                # which group. (Johan, 2026-09-17)
+                name = series_label(ctx, seg)
+            elif not secondary and (getattr(ctx.series, "secondary_segments", ()) or ()):
+                # A lone primary series beside a SECONDARY VARIABLE is named
+                # too. The subtitle names the question, but next to a second
+                # set of bars or a line the reader still has to be told which
+                # of the two is the question: "only one item in the legend".
+                # (Johan, 2026-09-17)
+                name = seg
             else:
                 name = seg if axes is not ax else None
-            if kind == "bar":
+            if kind == "bar" and seg in shares:
+                # Outlined and hatched, so it cannot be read as one more group
+                # of the bars beside it: it is a different question, counted
+                # over a different base. (Johan, 2026-09-17)
+                out.append(axes.bar(
+                    _slot(seg), data[seg], width=bar_w, color=bg,
+                    edgecolor=colour, hatch="////", linewidth=1.4, zorder=3,
+                    label=name))
+            elif kind == "bar":
                 out.append(axes.bar(
                     _slot(seg), data[seg], width=bar_w, color=colour,
                     edgecolor=bg, linewidth=0.8, zorder=3, label=name))
@@ -197,7 +287,7 @@ def build_image_combo(ctx) -> None:
         # there is no column width to measure a fit against the way bars have.
         # Without this, choosing "Line" silently cost the reader every number on
         # that half. (Johan, 2026-09-16)
-        if kind != "bar" and label_values and len(seg_names) == 1:
+        if kind != "bar" and label_values and not defer_labels and len(seg_names) == 1:
             seg = seg_names[0]
             vals = [v for v in data[seg] if v is not None]
             for xi, v in zip(x, data[seg]):
@@ -229,8 +319,13 @@ def build_image_combo(ctx) -> None:
                     )
         return out
 
+    # A line drawn against BARS has its numbers placed by the anchored rule
+    # below, which dodges them. Placed here instead, at a fixed offset above
+    # each point, they landed on the bars' own numbers: "43 %" across "59.1" on
+    # the reported slide. (Johan, 2026-09-17)
+    primary_line_over_bars = primary_kind != "bar" and secondary_kind == "bar"
     _draw_half(ax, list(bar_segs), primary_kind, lone_colour=TEAL,
-               label_values=True)
+               label_values=True, defer_labels=primary_line_over_bars)
 
     # House-style spines for primary axis
     for spine in ax.spines.values():
@@ -252,13 +347,25 @@ def build_image_combo(ctx) -> None:
             ax.axhline(yv, color=grid, lw=0.8, zorder=1)
 
     if line_segs:
-        ax2 = ax.twinx()
+        # A SECOND AXIS is for a second MEASURE. Without one — no
+        # `segment_statistics`, or none of the secondary segments measuring
+        # anything different — every segment is the same quantity on the same
+        # scale, and giving some of them a right-hand axis of their own means a
+        # line at 3.5 can sit below a bar of 3.2. A reader comparing them is
+        # then reading two rulers, which is the one thing this chart type must
+        # not do. (Johan, 2026-09-17)
+        two_measures = any(
+            ctx.series.statistic_of(s) != ctx.series.statistic for s in line_segs)
+        # A share gets a right-hand axis too — its own ruler, visibly apart from
+        # the bars — but one graduated exactly like the left (below), so a 40 %
+        # on either side is the same height and nothing is read off two scales.
+        ax2 = ax.twinx() if (two_measures or shares) else ax
         # Only bars label themselves here. Drawn as a line or an area, the
         # secondary half's numbers are placed by the anchored rule below, which
         # dodges the bars underneath them — letting both run would print every
         # number twice.
         _draw_half(ax2, list(line_segs), secondary_kind, lone_colour=TEAL_LT,
-                   label_values=(secondary_kind == "bar"))
+                   label_values=(secondary_kind == "bar"), secondary=True)
 
         # The line's own values. Without them the bars are labelled and the line
         # is not, so the only way to read it is off the right-hand axis — on the
@@ -277,13 +384,34 @@ def build_image_combo(ctx) -> None:
         labelled = (line_segs[0]
                     if len(line_segs) == 1 and secondary_kind != "bar" else None)
         line_vals = [v for seg in line_segs for v in data[seg] if v is not None]
-        if line_vals:
+        # Only a real second axis gets its own range. Sharing one, the range is
+        # the primary half's and must stay that way, or the bars move.
+        if line_vals and two_measures:
             # Headroom for a label at either extreme. They are drawn in offset
             # POINTS, so matplotlib's autoscaling never sees them and a peak at
             # the end of the series puts its own value outside the figure.
             lo, hi = min(line_vals), max(line_vals)
             span = (hi - lo) or (abs(hi) or 1.0)
-            ax2.set_ylim(lo - span * 0.16, hi + span * 0.16)
+            if secondary_kind == "bar":
+                # A BAR's length is its value, measured from the axis floor, so
+                # suppressing zero makes the picture say something the numbers
+                # do not: means 4.1 / 4.3 / 4.5 on a floor of 4.036 drew as
+                # 0.064 / 0.264 / 0.464 — the tallest 7.25x the shortest, for a
+                # true ratio of 1.10x.
+                #
+                # A LINE is exempt and keeps the tight range below: it carries
+                # no length, only a position relative to its neighbours, and
+                # that range is what makes a flat index readable at all.
+                # (Johan, 2026-09-17)
+                ax2.set_ylim(min(0.0, lo - span * 0.16), hi + span * 0.16)
+            else:
+                ax2.set_ylim(lo - span * 0.16, hi + span * 0.16)
+
+        if shares and not two_measures:
+            every = [v for seg in segs for v in data[seg] if v is not None]
+            top = max(every, default=100.0) * 1.12 or 1.0
+            ax.set_ylim(0.0, top)
+            ax2.set_ylim(0.0, top)
 
         # Which side of the marker the label goes. The line crosses the bars, so
         # a fixed side collides with the bar's own label wherever the two meet —
@@ -299,6 +427,41 @@ def build_image_combo(ctx) -> None:
         tallest = [max((data[s][i] for s in bar_segs if data[s][i] is not None),
                        default=None)
                    for i in range(len(cats))]
+        if primary_line_over_bars:
+            # matplotlib paints a twinned axis over the first one whatever the
+            # artists' zorder, so the QUESTION's line — and every number on it —
+            # ran behind the secondary variable's bars. Raise the line's axis
+            # and let the bars show through its (now transparent) background.
+            # (Johan, 2026-09-17)
+            ax.set_zorder(ax2.get_zorder() + 1)
+            ax.patch.set_visible(False)
+
+        if primary_line_over_bars and len(bar_segs) == 1:
+            # The primary half IS the line here, and the bars under it are the
+            # secondary half on its own axis.
+            line_seg = bar_segs[0]
+            own_vals = [v for v in data[line_seg] if v is not None]
+            bars_under = [max((data[s][i] for s in line_segs if data[s][i] is not None),
+                              default=None)
+                          for i in range(len(cats))]
+            bar_lo, bar_hi = ax2.get_ylim()
+            own_lo, own_hi = ax.get_ylim()
+            for xi, v, bar_v in zip(x, data[line_seg], bars_under):
+                if v is None:
+                    continue
+                y, above = line_label_anchor(v, bar_v, (bar_lo, bar_hi),
+                                             (own_lo, own_hi))
+                ax.annotate(
+                    format_value(v, ctx.series.statistic_of(line_seg),
+                                 ctx.spec.number_format, own_vals),
+                    xy=(xi, y), xytext=(0, 9 if above else -9),
+                    textcoords="offset points", ha="center",
+                    va="bottom" if above else "top", fontsize=9.5,
+                    fontweight="bold", color=ink, zorder=6, gid=VALUE_GID,
+                    bbox={"boxstyle": "round,pad=0.18", "facecolor": bg,
+                          "edgecolor": "none", "alpha": 0.85},
+                )
+
         for xi, v, bar_v in zip(x, data[labelled] if labelled else [], tallest):
             if v is None:
                 continue
@@ -320,12 +483,16 @@ def build_image_combo(ctx) -> None:
                       "edgecolor": "none", "alpha": 0.85},
             )
 
-        for spine in ax2.spines.values():
-            spine.set_visible(False)
-        ax2.spines["right"].set_visible(True)
-        ax2.spines["right"].set_color("#C9C1B4")
-        ax2.spines["right"].set_linewidth(1.0)
-        ax2.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
+        # The right-hand axis line only where there IS a right-hand scale.
+        # Sharing one axis, `ax2` is `ax`: switching its spines round hid the
+        # bottom baseline and drew a bare vertical line with no numbers on it.
+        if ax2 is not ax:
+            for spine in ax2.spines.values():
+                spine.set_visible(False)
+            ax2.spines["right"].set_visible(True)
+            ax2.spines["right"].set_color("#C9C1B4")
+            ax2.spines["right"].set_linewidth(1.0)
+            ax2.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
         if ctx.spec.elements.legend:
             # The line always, because the reader cannot otherwise tell what it
@@ -337,16 +504,17 @@ def build_image_combo(ctx) -> None:
             # Style the frame in place; style_legend() would rebuild the legend
             # from the bar axis and lose the line.
             handles1, labels1 = ax.get_legend_handles_labels()
-            handles2, labels2 = ax2.get_legend_handles_labels()
+            # Sharing one axis (no second measure), `ax2` IS `ax` and would hand
+            # back the same entries again — a legend naming every group twice.
+            handles2, labels2 = (
+                ax2.get_legend_handles_labels() if ax2 is not ax else ([], []))
             handles, labels = handles1 + handles2, labels1 + labels2
             if labels:
                 # BELOW the axes, like radar and the grouped bars. "best" put it
                 # inside the plot, where on a rising line it landed on top of the
                 # last marker and its value — matplotlib picks the emptiest
                 # corner, and on this chart the emptiest corner is still data.
-                leg = ax.legend(handles, labels, fontsize=9.5, frameon=True,
-                                loc="upper center", bbox_to_anchor=(0.5, -0.08),
-                                ncol=min(len(labels), 5), borderaxespad=0.0)
+                leg = _legend_that_fits(fig, ax, handles, labels)
                 leg.get_frame().set_facecolor(bg)
                 leg.get_frame().set_edgecolor(grid)
                 leg.get_frame().set_linewidth(0.8)

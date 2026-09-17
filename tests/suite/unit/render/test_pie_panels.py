@@ -4,6 +4,7 @@ from __future__ import annotations
 from reportbuilder.render.image.pie import _build_pie_figure
 from reportbuilder.stats.series import Cell, SeriesResult
 
+from reportbuilder.model.report import ElementToggles
 from suite._helpers import make_ctx
 
 
@@ -74,27 +75,26 @@ def test_count_statistic_split_draws_no_total_panel():
     assert _names(_pie_axes(fig)) == ["Naiset", "Miehet"]
 
 
-def test_all_groups_thin_degrades_to_one_whole_sample_pie():
+def test_all_groups_small_draw_a_pie_each_with_its_base():
     series = _series(("Naiset", "Miehet", "Total"),
                      {"Naiset": 4, "Miehet": 6, "Total": 10})
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex")
     fig = _build_pie_figure(ctx, donut=False)
-    axes = _pie_axes(fig)
-    assert len(axes) == 1
-    assert axes[0].get_title() == ""
+    axes = list(fig.axes)
+    assert _names(axes) == ["Naiset", "Miehet"]
+    assert _bases(axes) == ["n = 4", "n = 6"]
 
 
-def test_one_surviving_group_draws_a_titled_single_panel():
-    # Distinct from the degraded case: one group survived, so the reader must be
-    # told WHICH group the single circle describes. (spec 2026-08-22)
+def test_a_tiny_group_gets_its_own_titled_panel_beside_a_large_one():
+    # Each circle names its group and its base, so the reader sees that one of
+    # them rests on four people. (2026-09-17)
     series = _series(("Naiset", "Miehet", "Total"),
                      {"Naiset": 512, "Miehet": 4, "Total": 516})
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex")
     fig = _build_pie_figure(ctx, donut=False)
     axes = list(fig.axes)
-    assert len(axes) == 1
-    assert _names(axes) == ["Naiset"]
-    assert _bases(axes) == ["n = 512"]
+    assert _names(axes) == ["Naiset", "Miehet"]
+    assert _bases(axes) == ["n = 512", "n = 4"]
 
 
 def test_panel_percentages_are_the_engine_s_own_numbers():
@@ -219,5 +219,32 @@ def test_the_single_surviving_group_honours_the_switch():
     series = _series(("Naiset", "Total"), {"Naiset": 512, "Total": 998})
     _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
                                         show_panel_base=False)
+    axes = _pie_axes(_build_pie_figure(ctx, donut=False))
+    assert not any("n = " in t.get_text() for ax in axes for t in ax.texts)
+
+
+# ── One switch governs every group's n (2026-09-17) ─────────────────────────
+#
+# "Ryhmien N-lukujen uusi Show-painike näyttää toimivan vielä epävakaasti. On
+# tilanteita joissa ne ei näytä tekevän mitään." There were two switches for the
+# same idea: `elements.group_base` for legends and bar names, `show_panel_base`
+# for a row of pies. On a pie, the one the author found did nothing.
+
+def test_group_sizes_switch_hides_a_panel_base():
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
+                                        elements=ElementToggles(group_base=False))
+    axes = _pie_axes(_build_pie_figure(ctx, donut=False))
+    assert not any("n = " in t.get_text() for ax in axes for t in ax.texts)
+    assert _names(axes) == ["Naiset", "Miehet"], "the group names must stay"
+
+
+def test_a_slide_saved_with_the_old_per_panel_switch_still_hides_it():
+    series = _series(("Naiset", "Miehet", "Total"),
+                     {"Naiset": 512, "Miehet": 486, "Total": 998})
+    _prs, _slide, _slot, ctx = make_ctx("pie", series, classifying_var="sex",
+                                        show_panel_base=False,
+                                        elements=ElementToggles(group_base=True))
     axes = _pie_axes(_build_pie_figure(ctx, donut=False))
     assert not any("n = " in t.get_text() for ax in axes for t in ax.texts)

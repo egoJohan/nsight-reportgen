@@ -29,6 +29,7 @@ from reportbuilder.render.image._mpl import (
 )
 from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.house_style import TEAL
+from reportbuilder.render.image._mpl import wants_group_base
 from reportbuilder.render.panels import panel_segments
 
 
@@ -166,7 +167,7 @@ def build_image_funnel(ctx) -> None:
         # second line rather than under the funnel as it does on a pie. The author
         # can switch that line off; the group's name is not optional.
         name = wrap_label(seg, 20)
-        if not getattr(ctx.spec, "show_panel_base", True):
+        if not wants_group_base(ctx):
             return name
         return f"{name}\nn = {ctx.series.base_n.get(seg, 0)}"
 

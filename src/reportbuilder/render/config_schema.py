@@ -138,6 +138,11 @@ def empty_categories_field() -> ConfigField:
 
 
 def panel_base_field() -> ConfigField:
+    # NOT offered any more (2026-09-17): one switch governs every group's "n",
+    # `elements.group_base` ("Group sizes"). Two switches for one idea meant the
+    # one an author found did nothing on a row of pies. The SETTING is still
+    # read where a saved slide turned it off (`_mpl.wants_group_base`); this
+    # field is kept only so nothing importing it breaks.
     """Whether each panel states its own base.
 
     Only meaningful once a classifying variable splits the chart into panels;
@@ -187,8 +192,12 @@ def combo_secondary_field() -> ConfigField:
         # author's to pick, so naming one of them here would be a label that
         # goes stale the moment they change it. (2026-09-16)
         "combo_secondary", "numeric_variable", "Secondary variable",
-        help="A numeric/rating variable shown as a mean per category on the "
-             "right axis. Shares this question's categories as the x-axis.",
+        # A categorical variable has no mean, so it is drawn as the share of
+        # one of its groups — `combo_secondary_value`, picked in the same
+        # widget, which only asks when the variable needs it. (2026-09-17)
+        help="Another variable, drawn per category of this question: the mean "
+             "of a numeric/rating variable, or the share (%) of one group of a "
+             "categorical variable.",
     )
 
 
@@ -402,7 +411,7 @@ def single_series_schema() -> tuple[ConfigField, ...]:
     to 100% within its own group. (spec 2026-08-22-multi-pie-panels-design)
     """
     return (statistic_field(), classifying_var_field(), classifying_values_field(),
-            panel_base_field(), *_common_tail())
+            *_common_tail())
 
 
 def combo_schema() -> tuple[ConfigField, ...]:

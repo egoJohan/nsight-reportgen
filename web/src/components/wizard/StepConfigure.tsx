@@ -67,6 +67,7 @@ import {
   defaultRowSummaryLabel,
 } from "@/lib/charts";
 import { drawsTotal } from "@/lib/totalPosition";
+import { legendNamesKey, legendRows, withSeriesOverride } from "@/lib/legendLabels";
 
 // The report's grouping override, shared with the leaf preview components so a
 // chart on a manually-grouped question previews the way it renders.
@@ -891,38 +892,117 @@ function NoteWidget({ field }: WidgetProps) {
   );
 }
 
-// Picker for a compatible numeric/rating secondary variable (combo line). Only
-// aggregatable variables are offered, guaranteeing a meaningful mean per category.
-function NumericVarWidget({ field, chart, variables, onChange }: WidgetProps) {
-  const current = (readField(chart, field.key) as string | null) ?? null;
+/** A combo's secondary variable, and — when it needs one — which of its groups.
+ *
+ *  A numeric or rating variable is drawn as its MEAN per category. A
+ *  categorical one has no mean worth drawing, so it is drawn as the SHARE of one
+ *  of its groups ("Kyllä", "Nainen"); only those variables ask for a group.
+ *  Offering the numeric ones alone hid every background variable an author
+ *  would put beside a question as bars. (Johan, 2026-09-17)
+ *
+ *  A variable that is both — an age bracket whose labels start with digits —
+ *  may be drawn either way, so its group list starts with "Mean".
+ */
+function NumericVarWidget({ field, chart, materialId, variables, onChange }: WidgetProps) {
+  const grouping = useContext(GroupingCtx);
+  const saved = (readField(chart, field.key) as string | null) ?? null;
+  // A categorical variable picked but no group yet. Held here rather than
+  // saved: saved on its own it would be drawn as the mean of its codes, which
+  // is the nonsense this picker exists to avoid.
+  const [pending, setPending] = useState<string | null>(null);
+  const current = pending ?? saved;
+  const group = pending
+    ? null
+    : ((chart.options?.["combo_secondary_value"] as string | null | undefined) ?? null);
   const candidates = (variables ?? []).filter(
-    (v) => v.aggregatable || v.name === current
+    (v) => v.aggregatable || v.segmentable || v.name === saved
   );
+  const chosen = candidates.find((v) => v.name === current);
+  // Asked of the question, as the classifier picker asks it, so the groups
+  // offered are the ones the engine will find under the same names.
+  const needsGroups = !!chosen && (!!chosen.segmentable || !chosen.aggregatable);
+  const { data, isPending } = useQuery({
+    queryKey: ["segments", materialId, chart.question_ref, current,
+               JSON.stringify(grouping ?? {})],
+    queryFn: () => api.segments(materialId, chart.question_ref, current!, grouping),
+    enabled: !!materialId && !!current && needsGroups,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const groups = data?.segments ?? [];
+  const canMean = !chosen || !!chosen.aggregatable;
+
+  // One patch for both keys: a group belongs to the variable it was picked
+  // from, and leaving it behind would name a group the new variable lacks.
+  const pickVariable = (v: string | null) => {
+    const name = v === "__none__" ? null : v;
+    const picked = candidates.find((c) => c.name === name);
+    if (picked && !picked.aggregatable) {
+      setPending(name);
+      return;
+    }
+    setPending(null);
+    onChange({ options: { ...(chart.options ?? {}), [field.key]: name,
+                          combo_secondary_value: null } });
+  };
+  const pickGroup = (g: string | null) => {
+    setPending(null);
+    onChange({ options: { ...(chart.options ?? {}), [field.key]: current,
+                          combo_secondary_value: g === "__mean__" ? null : g } });
+  };
+
   return (
-    <Field label={field.label} hint={field.help ?? undefined}>
-      <Select
-        items={{
-          __none__: "None",
-          ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
-        }}
-        value={current ?? "__none__"}
-        onValueChange={(v) =>
-          onChange(patchField(chart, field.key, v === "__none__" ? null : v))
-        }
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="None" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">None</SelectItem>
-          {candidates.map((v) => (
-            <SelectItem key={v.name} value={v.name}>
-              {v.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
+    <>
+      <Field label={field.label} hint={field.help ?? undefined}>
+        <Select
+          items={{
+            __none__: "None",
+            ...Object.fromEntries(candidates.map((v) => [v.name, v.label])),
+          }}
+          value={current ?? "__none__"}
+          onValueChange={pickVariable}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="None" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">None</SelectItem>
+            {candidates.map((v) => (
+              <SelectItem key={v.name} value={v.name}>
+                {v.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {needsGroups && (
+        <Field label="Secondary group"
+               hint="Drawn as the share (%) of each category's respondents in this group.">
+          {isPending ? (
+            <p className="text-xs text-muted-foreground">Reading the groups…</p>
+          ) : (
+            <Select
+              items={{
+                ...(canMean ? { __mean__: "Mean" } : {}),
+                ...Object.fromEntries(groups.map((g) => [g, g])),
+              }}
+              value={group ?? (canMean ? "__mean__" : null)}
+              onValueChange={pickGroup}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose a group" />
+              </SelectTrigger>
+              <SelectContent>
+                {canMean && <SelectItem value="__mean__">Mean</SelectItem>}
+                {groups.map((g) => (
+                  <SelectItem key={g} value={g}>{g}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Field>
+      )}
+    </>
   );
 }
 
@@ -1119,11 +1199,21 @@ function FieldWidget(props: WidgetProps) {
           <NotAnsweredPicker chart={chart} question={question} onChange={onChange} />
         </div>
       );
-    case "category_labels":
-      if (!(question && (question.category_labels?.length ?? 0) > 0)) return null;
+    case "category_labels": {
+      // One place for every name on the slide: the answers, then whatever else
+      // the legend shows. Each half hides itself when it has nothing to list.
+      const answers = !!question && (question.category_labels?.length ?? 0) > 0;
       return (
-        <div className="col-span-2">
-          <CategoryLabelEditor
+        <div className="col-span-2 space-y-3">
+          {answers && (
+            <CategoryLabelEditor
+              chart={chart}
+              question={question}
+              materialId={materialId}
+              onChange={onChange}
+            />
+          )}
+          <LegendLabelEditor
             chart={chart}
             question={question}
             materialId={materialId}
@@ -1131,6 +1221,7 @@ function FieldWidget(props: WidgetProps) {
           />
         </div>
       );
+    }
     default:
       return null;
   }
@@ -1176,15 +1267,11 @@ function ChartControls({
   chart,
   materialId,
   question,
-  panels,
   onChange,
 }: {
   chart: ChartSpec;
   materialId: string;
   question: Question | undefined;
-  /** How this slide actually splits — the backend's own panel decision, already
-   *  fetched for the slide warnings. Undefined while it is in flight. */
-  panels: PanelSelection | undefined;
   onChange: (patch: Partial<ChartSpec>) => void;
 }) {
   const { data: variables } = useVariables(materialId);
@@ -1254,16 +1341,10 @@ function ChartControls({
   if (!drawsTotal(chart)) {
     schema = schema.filter((f) => f.key !== "total_position");
   }
-  // The per-panel base only exists on a slide that actually draws a ROW of
-  // charts. A classifier is not enough: one whose groups all but one are too
-  // thin to report degrades to a single ordinary pie, and there is no
-  // per-panel "n = …" on it to hide. Ask the backend's own panel decision —
-  // the same answer the slide warnings are built from — rather than guess from
-  // the classifier's group count, which does not know what will be dropped.
-  const drawsPanels = !!panels?.split && panels.drawn.length > 1;
-  if (!drawsPanels) {
-    schema = schema.filter((f) => f.key !== "show_panel_base");
-  }
+  // "Show each panel's base" is gone (2026-09-17): every group's "n" is the one
+  // "Group sizes" switch, wherever it is drawn. A slide saved with the old
+  // setting off still hides it — the renderer reads it — but nothing offers it.
+  schema = schema.filter((f) => f.key !== "show_panel_base");
   // The two-variable LAYOUT control only applies once there are two classifiers.
   if (!chart.classifying_var_2) {
     schema = schema.filter((f) => f.key !== "xtab_layout");
@@ -1719,6 +1800,63 @@ function LabelOverrideInput({
   );
 }
 
+// ── Legend names that are not answers (groups, a combo's secondary series) ───
+function LegendLabelEditor({
+  chart,
+  question,
+  materialId,
+  onChange,
+}: {
+  chart: ChartSpec;
+  question: Question | undefined;
+  materialId: string;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  const grouping = useContext(GroupingCtx);
+  // Asked of the server, from the chart as computed: which names a slide draws
+  // depends on its type, its split and its secondary variable, and a list the
+  // editor worked out for itself would disagree with the slide sooner or later.
+  const { data } = useQuery({
+    queryKey: ["legend-names", materialId, legendNamesKey(chart),
+               JSON.stringify(grouping ?? {})],
+    queryFn: () => api.materials.legendNames(materialId, chart, grouping),
+    enabled: !!materialId && !!chart.question_ref,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const rows = legendRows(data?.names ?? [], question?.category_labels ?? []);
+  if (rows.length === 0) return null;
+  const renames = new Map(chart.series_label_overrides ?? []);
+  const setOverride = (full: string, shown: string) =>
+    onChange({ series_label_overrides: withSeriesOverride(chart.series_label_overrides, full, shown) });
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        Legend labels
+        <FieldHint>
+          The names the legend shows besides the answers — the groups of the
+          classifying variable, and a combo&apos;s secondary series. Restoring
+          the original name removes the rename.
+        </FieldHint>
+      </Label>
+      <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+        {rows.map((full) => (
+          <div key={full} className="flex items-center gap-1 pl-5">
+            <div className="min-w-0 flex-1">
+              <LabelOverrideInput
+                full={full}
+                value={renames.get(full) ?? full}
+                onCommit={(v) => setOverride(full, v)}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Category-label editor (editable short labels + Shorten with AI) ──────────
 function CategoryLabelEditor({
   chart,
@@ -2076,7 +2214,7 @@ function SpecialSlideControls({
  *  that, and a second copy of the rule here could disagree with the slide. */
 const PANEL_CHART_TYPES = ["pie", "doughnut", "funnel"];
 
-type SlideProblem = { id: string; title: string; detail: string };
+export type SlideProblem = { id: string; title: string; detail: string };
 
 /** What is wrong with this slide, in the author's terms.
  *
@@ -2099,7 +2237,7 @@ type SlideProblem = { id: string; title: string; detail: string };
  *  numbers on it and no reason given. The slide says nothing now; this is where
  *  the author is told. (Johan, 2026-09-16)
  */
-function renderProblems(facts: previewQueue.ChartFacts): SlideProblem[] {
+export function renderProblems(facts: previewQueue.ChartFacts): SlideProblem[] {
   const out: SlideProblem[] = [];
   if (facts.empty) {
     out.push({
@@ -2194,7 +2332,7 @@ function usePanelSelection(
   });
 }
 
-function slideProblems(
+export function slideProblems(
   chart: ChartSpec | undefined,
   panels: PanelSelection | undefined
 ): SlideProblem[] {
@@ -2219,14 +2357,20 @@ function slideProblems(
     });
   }
   if (panels.thin.length) {
+    // Drawn, with each group's size beside its name on the slide. What the
+    // author needs to know is that some percentages rest on very few people.
+    // (2026-09-17 — these groups used to be left out, silently.)
+    const named = panels.thin
+      .map((g) => (panels.sizes?.[g] !== undefined ? `${g} (n=${panels.sizes[g]})` : g))
+      .join(", ");
     out.push({
       id: "thin-groups",
-      title: `${panels.thin.length} group${panels.thin.length === 1 ? "" : "s"} too small to report`,
+      title: `${panels.thin.length} small group${panels.thin.length === 1 ? "" : "s"}`,
       detail:
-        `Too few respondents to chart: ${panels.thin.join(", ")}. ` +
-        `Their percentages would be noise, so they are left out whatever else ` +
-        `fits. The slide itself says nothing about them — its N counts them, ` +
-        `and no reader of the deck is told which groups went missing.`,
+        `Fewer than 10 respondents: ${named}. They are drawn, with their size ` +
+        `shown on the slide, but their percentages rest on very few people — ` +
+        `one answer moves them a lot. Read them with caution, or split by a ` +
+        `variable with fewer, larger groups.`,
     });
   }
   if (panels.degraded) {
@@ -2234,27 +2378,31 @@ function slideProblems(
       id: "grouping-dropped",
       title: "The split could not be drawn",
       detail:
-        `Every group is too small to report, so the slide falls back to one ` +
-        `chart of the whole sample rather than a blank space. Split by a ` +
-        `variable with fewer, larger groups.`,
+        `No group of this variable has any respondents on this slide, so it ` +
+        `falls back to one chart of the whole sample rather than a blank space.`,
     });
   }
-  // Which groups the slide was NARROWED to. It used to be printed in the
-  // slide's own footer, so the reader of the deck could see that N counted
-  // those respondents and nobody else. That line is gone from the slide
-  // (2026-09-16), which leaves the author as the only one who can notice —
-  // so tell them here, where every other slide problem is raised.
-  const picked = chart.classifying_values ?? [];
-  if (chart.classifying_var && picked.length && panels.split &&
-      picked.length < panels.drawn.length + panels.thin.length + panels.capped.length) {
+  // Which groups the slide was NARROWED to.
+  //
+  // Stated by the server, not inferred here. This used to compare the author's
+  // ticked `classifying_values` against `drawn + thin + capped` — and those can
+  // never disagree, because the endpoint computes on data already narrowed to
+  // those same values, so the warning was dead in the one case it existed for.
+  // Where it did fire it was worse than silent: a slide carrying group names
+  // from a classifier the author had since changed got a confident "this slide
+  // counts Design 1, Design 3 and nobody else" while it was the whole sample
+  // split by sex. `narrowed_to` is what the engine actually applied.
+  // (Johan, 2026-09-17)
+  if (panels.narrowed_to?.length) {
+    const n = panels.narrowed_to.length;
     out.push({
       id: "narrowed-to-groups",
-      title: `Drawn on ${picked.length} group${picked.length === 1 ? "" : "s"} only`,
+      title: `Drawn on ${n} group${n === 1 ? "" : "s"} only`,
       detail:
-        `This slide counts ${picked.join(", ")} and nobody else, and its N says ` +
-        `so without naming them. A reader who is not told reads it as the whole ` +
-        `study. Tick the rest under "Groups on this slide", or say which groups ` +
-        `it covers in the slide title.`,
+        `This slide counts ${panels.narrowed_to.join(", ")} and nobody else, ` +
+        `and its N says so without naming them. A reader who is not told reads ` +
+        `it as the whole study. Tick the rest under "Groups on this slide", or ` +
+        `say which groups it covers in the slide title.`,
     });
   }
   return out;
@@ -2715,7 +2863,6 @@ function StepConfigureInner({
               chart={activeChart}
               materialId={materialId}
               question={questionMap.get(activeChart.question_ref)}
-              panels={activePanels}
               onChange={handleChange}
             />
           )}

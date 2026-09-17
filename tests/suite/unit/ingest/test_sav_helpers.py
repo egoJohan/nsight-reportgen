@@ -472,3 +472,37 @@ def test_read_sav_still_reads_numeric_value_labels(tmp_path):
 
     q1 = model.variables["q1"]
     assert {(vl.value, vl.label) for vl in q1.value_labels} == {(1.0, "Yes"), (2.0, "No")}
+
+
+# ---- a rating with no labels is a question, not a helper (2026-09-17) -------
+#
+# "NPS muuttuja jää puuttumaan": a 0–10 recommendation score exported with no
+# variable label and no value labels looks exactly like a derived flag to the
+# rule above — label == name, no labels — so it never became a question. The
+# data tells them apart: a flag holds two or three codes, a rating holds ten.
+
+def test_an_unlabelled_rating_scale_is_a_question():
+    var = _var("NPS", "NPS")
+    nps = pd.Series([1, 2, 3, 4, 5, 7, 8, 9, 10, 10, 9, 8])
+    assert _is_unlabeled_helper("NPS", var, nps) is False
+
+
+def test_an_unlabelled_binary_flag_is_still_a_helper():
+    var = _var("Perusomistajat", "Perusomistajat")
+    assert _is_unlabeled_helper("Perusomistajat", var, pd.Series([0, 1, 1, 0, 1])) is True
+
+
+def test_a_three_code_working_column_is_still_a_helper():
+    var = _var("contracts_1", "contracts_1")
+    assert _is_unlabeled_helper("contracts_1", var, pd.Series([1, 2, 3, 1, 2])) is True
+
+
+def test_a_column_of_many_distinct_numbers_is_not_a_question():
+    """An age, a spend, an id: one category per value says nothing, and the
+    engine will not read it as codes either (_MAX_UNLABELLED_CODES)."""
+    var = _var("ika", "ika")
+    assert _is_unlabeled_helper("ika", var, pd.Series(range(18, 70))) is True
+
+
+def test_without_the_data_the_rule_is_what_it_was():
+    assert _is_unlabeled_helper("Inhimilli", _var("Inhimilli", "Inhimilli")) is True
