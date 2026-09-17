@@ -25,8 +25,10 @@ from reportbuilder.render.image._mpl import (
     apply_axis_titles, new_figure, render_png, place_picture, series_values,
     format_value, chart_background, chart_furniture, colours_by_series,
     template_palette, chart_accent, series_label, wants_group_base,
+    _value_axis,
 )
-from reportbuilder.render.house_style import TEAL, TEAL_LT, series_colors
+from reportbuilder.render.house_style import (TEAL_LT, ramp_from,
+                                              series_colors)
 # Whether a clustered column has room for its number, measured rather than
 # guessed from a segment count. Borrowed from the clustered bar builder rather
 # than restated here: two answers to "does this number fit" is how one of them
@@ -156,6 +158,61 @@ def line_label_anchor(
     if v > top_here + clearance:
         return v, True
     return max(min(v, top_here - clearance), b_lo + clearance), False
+
+
+def _draw_primary_gridlines(ax, ax2, ctx, grid, primary_max: float) -> None:
+    """Gridlines and ticks on ONE lattice, the deck's shared value-axis ladder.
+
+    This used to draw a fixed 20/40/60/80/100 ladder while the tick LABELS came
+    from matplotlib's autoscale. On a question topping out at 31 % that is one
+    gridline — at 20 — among ticks at every 5: five labelled rungs with nothing
+    drawn at them, which reads as a chart that lost its grid.
+
+    `_value_axis` is the ladder every other value axis in the deck is built
+    from, and it is also where the small-range repair lives (a chart whose
+    biggest bar is under ~12 % steps down instead of printing "0" and nothing
+    else). Calling it here is what gives the combo that repair too — it was
+    made once, on the shared helper, and only the builders that call the helper
+    ever received it.
+
+    Where a SECOND measure owns the right-hand scale the limits are its own and
+    are left exactly as they were; only the lattice is brought into line, so the
+    grid still lands on the numbers the reader can see.
+
+    Run last: several rules above can still move these limits.
+    """
+    if ax2 is ax:
+        ax_max, ticks = _value_axis(primary_max, ctx.series.statistic)
+        ax.set_ylim(0.0, ax_max)
+        ax.set_yticks(ticks)
+    else:
+        lo, hi = ax.get_ylim()
+        ticks = [float(t) for t in ax.get_yticks() if lo <= t <= hi]
+    for yv in ticks:
+        if yv > 0:
+            ax.axhline(yv, color=grid, lw=0.8, zorder=1)
+
+
+def _lead_colours(ctx) -> tuple[str, str]:
+    """The two colours a combo leads with: bars first, line second.
+
+    Both were hard-coded house teals, which was right only while no template
+    could state anything else. On a branded deck that drew the combo in nSight
+    teal beside the same deck's bars in the client's blue, and a reader takes a
+    colour that changes between slides to mean something.
+
+    Bars take `series_colors(1, ...)`, the identical call the bar, line, pie and
+    funnel builders make. The line needs a colour clearly apart from the bars':
+    the client's SECOND accent where there is one, a light shade of a lone
+    stated accent where there is not, and TEAL_LT when no template applies at
+    all — so a house deck renders exactly as before.
+    """
+    palette = template_palette(ctx)
+    accent = chart_accent(ctx)
+    bars = series_colors(1, palette=palette, accent=accent)[0]
+    if palette and len(palette) > 1:
+        return bars, palette[1]
+    return bars, (ramp_from(accent)[1] if accent else TEAL_LT)
 
 
 def build_image_combo(ctx) -> None:
@@ -324,7 +381,8 @@ def build_image_combo(ctx) -> None:
     # each point, they landed on the bars' own numbers: "43 %" across "59.1" on
     # the reported slide. (Johan, 2026-09-17)
     primary_line_over_bars = primary_kind != "bar" and secondary_kind == "bar"
-    _draw_half(ax, list(bar_segs), primary_kind, lone_colour=TEAL,
+    _bar_lone, _line_lone = _lead_colours(ctx)
+    _draw_half(ax, list(bar_segs), primary_kind, lone_colour=_bar_lone,
                label_values=True, defer_labels=primary_line_over_bars)
 
     # House-style spines for primary axis
@@ -339,12 +397,16 @@ def build_image_combo(ctx) -> None:
     register_category_labels(ax, "x", cats)
     ax.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
-    # Grid-tone gridlines
+    # The value the primary axis has to reach. The gridlines themselves are
+    # drawn at the very end, once every rule that can move these limits has
+    # run — see `_draw_primary_gridlines`.
     max_bar = max((v for seg in bar_segs for v in data[seg] if v is not None),
                   default=0.0)
-    for yv in [20, 40, 60, 80, 100]:
-        if yv <= max_bar * 1.20:
-            ax.axhline(yv, color=grid, lw=0.8, zorder=1)
+    primary_max = max_bar
+    # A bars-only combo never reaches the branch that makes a second axis, and
+    # there the primary IS the only scale. Bound here so that is true by
+    # construction rather than by whether a branch happened to run.
+    ax2 = ax
 
     if line_segs:
         # A SECOND AXIS is for a second MEASURE. Without one — no
@@ -364,7 +426,7 @@ def build_image_combo(ctx) -> None:
         # secondary half's numbers are placed by the anchored rule below, which
         # dodges the bars underneath them — letting both run would print every
         # number twice.
-        _draw_half(ax2, list(line_segs), secondary_kind, lone_colour=TEAL_LT,
+        _draw_half(ax2, list(line_segs), secondary_kind, lone_colour=_line_lone,
                    label_values=(secondary_kind == "bar"), secondary=True)
 
         # The line's own values. Without them the bars are labelled and the line
@@ -412,6 +474,9 @@ def build_image_combo(ctx) -> None:
             top = max(every, default=100.0) * 1.12 or 1.0
             ax.set_ylim(0.0, top)
             ax2.set_ylim(0.0, top)
+            # One ruler for bars and line alike, so the ladder has to be built
+            # from what BOTH carry, not from the bars only.
+            primary_max = max(every, default=0.0)
 
         # Which side of the marker the label goes. The line crosses the bars, so
         # a fixed side collides with the bar's own label wherever the two meet —
@@ -521,6 +586,8 @@ def build_image_combo(ctx) -> None:
                 for t in leg.get_texts():
                     t.set_color(ink)
     # Bars-only combo (no secondary line) → no legend: the question is in the subtitle.
+
+    _draw_primary_gridlines(ax, ax2, ctx, grid, primary_max)
 
     # On the PRIMARY axis. The secondary axis is the line's own scale and is
     # named by the legend entry that describes the line.

@@ -258,6 +258,85 @@ def furniture_colors(background: str = "") -> tuple[str, str, str]:
     return ink, muted, grid
 
 
+# How far a derived variant is blended from its accent, and which way (+ toward
+# white, - toward black). Walked in order, so the first wrap past the palette is
+# a clear tint, the second a clear shade, and later ones move further out.
+_VARIANT_STEPS: tuple[float, ...] = (0.42, -0.42, 0.68, -0.68, 0.24, -0.24,
+                                     0.82, -0.82)
+
+# Two colours closer than this in unit-RGB space read as the same colour on a
+# slide. Used only to REJECT a derived variant, never to alter a brand accent.
+_MIN_SEPARATION = 0.15
+
+
+def _hashed(color: str) -> str:
+    """A hex colour matplotlib will parse.
+
+    A template's accents arrive as bare six-digit hex ("4285F4") — that is how
+    the theme XML states them and how every caller has always passed them —
+    while the house constants carry the "#". to_rgb accepts only the second
+    form, so normalise once here rather than at each call.
+    """
+    c = (color or "").strip()
+    return f"#{c}" if c and not c.startswith("#") else c
+
+
+def _separation(a: str, b: str) -> float:
+    """Distance between two colours in unit-RGB space (0 = identical)."""
+    ra, rb = to_rgb(_hashed(a)), to_rgb(_hashed(b))
+    return sum((x - y) ** 2 for x, y in zip(ra, rb)) ** 0.5
+
+
+def _variant(base: str, step: float) -> str:
+    """*base* blended toward white (step > 0) or black (step < 0).
+
+    An accent already at one end of the range is moved the OTHER way: blending
+    a near-black accent toward black, or a near-white one toward white, returns
+    a colour the reader cannot tell from the original, which is the very thing
+    a variant exists to avoid.
+    """
+    base = _hashed(base)
+    lum = _relative_luminance(base)
+    if lum < 0.18 and step < 0:
+        step = -step
+    elif lum > 0.82 and step > 0:
+        step = -step
+    return _mix(base, "#FFFFFF" if step > 0 else "#000000", abs(step))
+
+
+def extend_palette(palette: list[str], n: int) -> list[str]:
+    """*n* colours from *palette*, deriving more when it does not have enough.
+
+    The first pass is the palette itself, untouched: on a branded deck those
+    are the client's accents and nothing may restyle them. Past that, each
+    colour is a lighter or darker variant OF one of them, so an eighth category
+    still reads as the client's chart rather than a borrowed house colour —
+    which is why cycling was chosen originally. Cycling, though, gave category
+    7 category 1's exact colour, and a pie with two identical slices and a
+    legend that cannot separate them is a rendering fault, not a brand choice.
+
+    Each derived colour is checked against everything already chosen and moved
+    further along the ladder until it is far enough away to be told apart.
+    """
+    out: list[str] = []
+    for i in range(n):
+        base = palette[i % len(palette)]
+        cycle = i // len(palette)
+        if cycle == 0:
+            out.append(base)
+            continue
+        first = _variant(base, _VARIANT_STEPS[(cycle - 1) % len(_VARIANT_STEPS)])
+        chosen = first
+        for j in range(len(_VARIANT_STEPS)):
+            cand = _variant(base,
+                            _VARIANT_STEPS[(cycle - 1 + j) % len(_VARIANT_STEPS)])
+            if all(_separation(cand, u) >= _MIN_SEPARATION for u in out):
+                chosen = cand
+                break
+        out.append(chosen)
+    return out
+
+
 def series_colors(n: int, palette: list[str] | None = None,
                   accent: str = "") -> list[str]:
     """Return *n* distinct hex colour strings for CATEGORICAL series (REQ-C-27a).
@@ -277,10 +356,11 @@ def series_colors(n: int, palette: list[str] | None = None,
     if palette:
         if n <= len(palette):
             return list(palette[:n])
-        # More series than the template declares: repeat the accents rather than
-        # mixing in house colours, which would look like a rendering error on a
-        # branded deck.
-        return [palette[i % len(palette)] for i in range(n)]
+        # More series than the template declares. Staying on the client's
+        # accents is right — house colours on a branded deck look like a
+        # rendering error — but REPEATING them gave two categories one colour.
+        # Derive further shades of those same accents instead.
+        return extend_palette(list(palette), n)
     ramp = ramp_from(accent) if accent else _TEAL_RAMP
     if n == 1:
         return [ramp[-1]]
@@ -291,9 +371,9 @@ def series_colors(n: int, palette: list[str] | None = None,
     categorical = ramp + _BLUE_RAMP + _RED_RAMP
     if n <= len(categorical):
         return categorical[:n]
-    # Beyond the palette (11+ categories — rare): interpolate extra shades of the
-    # lead colour so the tail never exactly repeats an earlier colour.
-    out = list(categorical)
-    for i in range(len(categorical), n):
-        out.append(scale_colors(n, accent)[i])
-    return out[:n]
+    # Beyond the palette (13+ categories — rare). This used to take the i-th
+    # step of a length-n gradient, whose tail entries sit a shade apart and can
+    # land on a colour the ramp above already used. Derive from the categorical
+    # list by the same rule the branded path uses, which is checked for
+    # separation against every colour already chosen.
+    return extend_palette(categorical, n)

@@ -1679,6 +1679,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
     for _panel_ax in axes:
+        make_room_for_values(fig, _panel_ax)
         clear_callouts(fig, _panel_ax, along="x")
         shrink_values_until_clear(fig, _panel_ax)
     place_picture(ctx, render_png(fig))
@@ -1827,6 +1828,7 @@ def build_image_column_stacked(ctx) -> None:
     # A called-out number sitting on another moves beside its column first;
     # anything still crowded is shrunk until it stands clear. Nothing is ever
     # taken off the slide — a number with nowhere to go stays and gets smaller.
+    make_room_for_values(fig, ax)
     clear_callouts(fig, ax, along="y")
     shrink_values_until_clear(fig, ax)
 
@@ -2050,6 +2052,89 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
             t.set_fontsize(pt)
         return None
     return min(t.get_fontsize() for t in labels)
+
+
+def make_room_for_values(fig, ax, *, max_grow: float = 0.3,
+                         passes: int = 3) -> bool:
+    """Grow the axis until every value label is inside the plot.
+
+    A number too big for its own piece is called out BESIDE that piece. Where
+    the piece is at the edge of the chart — the top row of a stack, the tallest
+    column, a sliver whose neighbour has already pushed it up a line — the
+    place the callout needs is outside the axis, and `annotation_clip=False`
+    draws it there: a "2 %" floating above the plot frame, joined to its
+    segment by a line crossing the boundary.
+
+    Clipping it would be worse; it takes a figure the chart computed off the
+    slide, and a reader cannot tell a suppressed 2 % from one that was never
+    there. So the chart makes room instead. This is the counterpart of
+    `_STACK_BAR_H_CALLOUT`, which already thins the bars to keep a gap BETWEEN
+    rows for exactly these numbers — the edge is the case that gap logic cannot
+    reach, because there is no neighbouring row to borrow from.
+
+    Runs before `clear_callouts` so the declash pass sees the enlarged area.
+    A panel whose numbers are already inside is left untouched and renders
+    byte-identical, which is what makes this safe to apply everywhere.
+
+    Growth is capped at *max_grow* of each axis's span: enough for a line or
+    two of type, never enough to squash the data into a corner. Returns whether
+    anything moved.
+    """
+    from matplotlib.text import Text
+
+    grew = False
+    for _ in range(max(1, passes)):
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        labels = [t for t in ax.texts
+                  if t.get_gid() == _VALUE_GID and t.get_visible()]
+        if not labels:
+            return grew
+        area = ax.get_window_extent(r)
+        # The number's own box. A callout's window extent also wraps its leader
+        # line, which reaches back to the segment and would ask for room the
+        # text does not need. (Same reason the shrink pass measures this way.)
+        boxes = [Text.get_window_extent(t, r) for t in labels]
+        over = {
+            "top": max((b.y1 - area.y1 for b in boxes), default=0.0),
+            "bottom": max((area.y0 - b.y0 for b in boxes), default=0.0),
+            "right": max((b.x1 - area.x1 for b in boxes), default=0.0),
+            "left": max((area.x0 - b.x0 for b in boxes), default=0.0),
+        }
+        # Half a pixel is rounding, not an escape.
+        if all(v <= 0.5 for v in over.values()):
+            return grew
+
+        # A little more than the overflow, so the number is not left touching
+        # the frame it just cleared.
+        pad = 0.25 * max(t.get_fontsize() for t in labels) * fig.dpi / 72.0
+
+        def _stretch(get, set_, lo_px, hi_px):
+            """Move one axis's limits out by a pixel amount at each end.
+
+            Works in signed data-per-pixel, so an INVERTED axis — which is how
+            a horizontal bar chart puts its first category at the top — grows
+            at the end the overflow is actually on.
+            """
+            nonlocal grew
+            lo, hi = get()
+            span = hi - lo
+            if not span:
+                return
+            per_px = span / max(area.height if set_ is ax.set_ylim
+                                else area.width, 1e-9)
+            cap = abs(max_grow * span)
+            d_lo = min(abs(per_px) * (lo_px + pad), cap) if lo_px > 0.5 else 0.0
+            d_hi = min(abs(per_px) * (hi_px + pad), cap) if hi_px > 0.5 else 0.0
+            if not d_lo and not d_hi:
+                return
+            sign = 1.0 if span > 0 else -1.0
+            set_(lo - sign * d_lo, hi + sign * d_hi)
+            grew = True
+
+        _stretch(ax.get_ylim, ax.set_ylim, over["bottom"], over["top"])
+        _stretch(ax.get_xlim, ax.set_xlim, over["left"], over["right"])
+    return grew
 
 
 def clear_callouts(fig, ax, *, along: str) -> int:
@@ -2435,6 +2520,7 @@ def build_image_bar_stacked(ctx) -> None:
 
     # A called-out number sitting on another moves along its row first;
     # shrinking is the last resort. Nothing is ever taken off the slide.
+    make_room_for_values(fig, ax)
     clear_callouts(fig, ax, along="x")
     shrink_values_until_clear(fig, ax)
 

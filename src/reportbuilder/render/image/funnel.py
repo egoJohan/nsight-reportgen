@@ -5,9 +5,12 @@ narrowest at bottom), which is only achievable in image mode.
 
 House style:
 - Slide-background bg, Liberation Sans font
-- TEAL fill for all funnel stages
-- White bold data labels centred in each bar (contrast against the fixed TEAL
-  fill — unrelated to the slide background, so not slide-derived); a label too
+- One fill for all funnel stages: the template's lead accent, else house TEAL —
+  `series_colors(1, ...)`, the same answer the bar, line and pie builders get,
+  so one deck does not show the client's colour as a bar and ours as a funnel
+- Bold data labels centred in each bar, in whatever contrasts with THAT fill
+  (white on a dark accent, ink on a light one — unrelated to the slide
+  background, so not slide-derived); a label too
   wide for its own bar (a narrow stage in a narrow panel) is instead placed just
   right of the bar in ink tone, never shrunk and never left illegible-white
   outside the fill it was sized for
@@ -25,10 +28,10 @@ from __future__ import annotations
 
 from reportbuilder.render.image._mpl import (
     new_figure, new_figure_grid, render_png, place_picture, format_value, wrap_label,
-    chart_background, chart_furniture,
+    chart_background, chart_furniture, chart_accent, template_palette,
 )
 from reportbuilder.render.image._mpl import VALUE_GID
-from reportbuilder.render.house_style import TEAL
+from reportbuilder.render.house_style import contrast_ink, series_colors
 from reportbuilder.render.image._mpl import wants_group_base
 from reportbuilder.render.panels import panel_segments
 
@@ -61,22 +64,29 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
         max(vals) if vals else 1.0)
     max_val = max_val or 1.0
     bar_h = 0.60
+    # The one colour a single-series chart leads with. Resolved HERE rather than
+    # by each caller so the split-panel row and the un-split slide cannot drift
+    # apart, and identical to what the bar/line/pie builders ask for.
+    fill = series_colors(1, palette=template_palette(ctx),
+                         accent=chart_accent(ctx))[0]
     all_vals = [v for v in vals if v is not None]
 
     value_labels = []  # (Text, left, v, i) — fitted against the real bar width below
     for i, (cat, v) in enumerate(zip(cats, vals)):
         # Centre the bar on the x-axis (symmetric funnel silhouette)
         left = (max_val - v) / 2
-        ax.barh(i, v, left=left, height=bar_h, color=TEAL, edgecolor=bg,
+        ax.barh(i, v, left=left, height=bar_h, color=fill, edgecolor=bg,
                 linewidth=0.8, zorder=3)
 
-        # Data label centred in bar — white on the fixed TEAL fill, same
-        # reasoning as contrast_ink(TEAL), independent of the slide background.
+        # Data label centred in bar, against the FILL rather than the slide:
+        # white on a dark accent, ink on a light one. It was hard-coded white,
+        # which was right only while the fill was hard-coded house teal — a
+        # client whose lead accent is a pale yellow got white on yellow.
         lbl = format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
         text = ax.text(
             left + v / 2, i, lbl,
             ha="center", va="center",
-            fontsize=10.5, fontweight="bold", color="#FFFFFF",
+            fontsize=10.5, fontweight="bold", color=contrast_ink(fill),
             zorder=5, gid=VALUE_GID,
         )
         value_labels.append((text, left, v, i))
