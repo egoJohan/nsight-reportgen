@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
-  useCases,
   useCustomers,
   useCustomerCases,
   useResolvedCase,
@@ -223,7 +222,6 @@ function Breadcrumb() {
   const [searchParams] = useSearchParams();
   const { data: customers } = useCustomers();
   const { data: resolved, isPending: resolving } = useResolvedCase(id);
-  const { data: legacyCases } = useCases();
   const { data: caseReports } = useCaseReports(id ?? null);
 
   const crumbs: { label: string; to?: string }[] = [];
@@ -249,16 +247,15 @@ function Breadcrumb() {
       // page flashed the one label that contradicted where you had just come
       // from. A crumb that is briefly absent reads as loading; a crumb that is
       // briefly WRONG reads as a bug.
-      crumbs.push({
-        label: legacyCases?.find((c) => c.id === id)?.name ?? "…",
-        to: `/cases/${id}`,
-      });
+      crumbs.push({ label: "…", to: `/cases/${id}` });
     } else {
       // Resolved, and there genuinely is no customer: a legacy case. Say so
       // rather than inventing one.
       crumbs.push({ label: "No customer" });
       crumbs.push({
-        label: legacyCases?.find((c) => c.id === id)?.name ?? id,
+        // The id: the whole-tenant /cases list this once looked the name up
+        // in is built from the customers, so a case with none is not in it.
+        label: id,
         to: `/cases/${id}`,
       });
     }

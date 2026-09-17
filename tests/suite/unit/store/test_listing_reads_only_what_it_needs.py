@@ -116,3 +116,58 @@ def test_a_user_with_no_name_falls_back_to_the_email(repo):
                           "name": ""}).encode(),
               content_type="application/json", labels=[P.LABEL_USER])
     assert r.list_user_names(AUTH)["usr-blank"] == "blank@egoiq.com"
+
+
+# ---- counting every customer's cases at once --------------------------------
+#
+# The customers listing (the sidebar, on every page) asked for one listing per
+# customer to count its studies. One listing of every case answers all of them:
+# the customer is the first segment of the path. (2026-09-17)
+
+class ListCountingStore(CountingStore):
+    def __init__(self):
+        super().__init__()
+        self.listings = 0
+
+    def list(self, auth, prefix, labels=None):
+        self.listings += 1
+        return super().list(auth, prefix, labels=labels)
+
+
+@pytest.fixture
+def tenant():
+    store = ListCountingStore()
+    r = Repository(store)
+    ids = []
+    for n, cases in (("A", 3), ("B", 0), ("C", 2)):
+        c = r.create_customer(AUTH, n)
+        ids.append(c.id)
+        for i in range(cases):
+            r.create_case(AUTH, c.id, f"{n}{i}")
+    return r, store, ids
+
+
+def test_counting_all_customers_agrees_with_counting_each(tenant):
+    r, _store, ids = tenant
+    counts = r.count_cases_by_customer(AUTH)
+    assert {cid: counts.get(cid, 0) for cid in ids} == {
+        cid: r.count_cases(AUTH, cid) for cid in ids}
+
+
+def test_counting_all_customers_is_one_listing(tenant):
+    r, store, _ids = tenant
+    store.listings = 0
+    store.reads.clear()
+    r.count_cases_by_customer(AUTH)
+    assert store.listings == 1
+    assert not store.reads
+
+
+def test_counting_all_customers_honours_the_filter(tenant):
+    from reportbuilder.auth.permissions import Grant, User
+    r, _store, ids = tenant
+    one = User(id="usr-y", email="y@example.com", name="Y",
+               grants=(Grant(scope=ids[2], mode="view"),))
+    counts = r.count_cases_by_customer(AUTH, user=one)
+    assert {cid: counts.get(cid, 0) for cid in ids} == {
+        cid: r.count_cases(AUTH, cid, user=one) for cid in ids}

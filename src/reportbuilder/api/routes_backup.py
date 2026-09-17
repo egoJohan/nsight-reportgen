@@ -19,7 +19,7 @@ from starlette.background import BackgroundTask
 
 from reportbuilder.api.deps_auth import require_admin
 from reportbuilder.api.deps_store import get_auth, get_repository
-from reportbuilder.auth import session
+from reportbuilder.auth import keys, session
 from reportbuilder.auth.permissions import User
 from reportbuilder.store import backup
 from reportbuilder.store.repository import Repository
@@ -115,6 +115,7 @@ async def restore_backup(file: UploadFile = File(...),
     # Users, grants and the signing key have all just been replaced. Every
     # cached identity now describes a store that no longer exists.
     session.forget_all()
+    keys.forget_signing_key()
     log.warning("restore: %s restored %s object(s), %s bytes, %s problem(s)",
                 _who(admin), summary.restored, summary.total_bytes,
                 len(summary.problems))

@@ -441,6 +441,25 @@ class Repository:
                                                  labels=[P.LABEL_CASE])
                    if _admits(user, info.path))
 
+    def count_cases_by_customer(self, auth: AuthContext, user=None) -> dict[str, int]:
+        """``{customer_id: cases this caller may see}`` for every customer, from
+        ONE listing.
+
+        `count_cases` per customer was a listing each, and the customers route
+        runs on every page (it fills the sidebar). A case's path begins with its
+        customer's segment, so one listing of every case answers them all. The
+        filter is `count_cases`'s own — `_admits` on the path — so the two cannot
+        disagree about what a caller may know. A customer with no visible case
+        is absent rather than 0. (2026-09-17)
+        """
+        out: dict[str, int] = {}
+        for info in self.store.list(auth, "", labels=[P.LABEL_CASE]):
+            if not _admits(user, info.path):
+                continue
+            customer_id = info.path.split("/", 1)[0]
+            out[customer_id] = out.get(customer_id, 0) + 1
+        return out
+
     def get_case(self, auth: AuthContext, customer_id: str, case_id: str) -> Case:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))
         return Case(id=d["id"], customer_id=customer_id,

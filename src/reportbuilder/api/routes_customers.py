@@ -168,9 +168,9 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     recorded has no owner, and says so by omission rather than by guessing
     at one.
 
-    Cost note: one `list_cases` per customer — a single listing call
-    regardless of study count — so the shape is O(customers) listings for
-    the whole page. `list_users` adds one listing + 2 gets per tenant user,
+    Cost note: ONE listing of every case, counted per customer
+    (`count_cases_by_customer`) — the same number of hive calls however many
+    customers there are. `list_users` adds one listing + 2 gets per tenant user,
     paid once for the page, not once per customer.
     """
     customers = repo.list_customers(auth, user=user)
@@ -180,6 +180,8 @@ def list_customers(auth: AuthContext = Depends(get_auth),
     names = repo.list_user_names(auth)
     # One read for the whole page, not one per row.
     modes = repo.customer_modes(auth)
+    # Every customer's study count from one listing, not one listing each.
+    case_counts = repo.count_cases_by_customer(auth, user=user)
     out = []
     for c in customers:
         owner_name = names.get(c.owner_id)
@@ -187,7 +189,7 @@ def list_customers(auth: AuthContext = Depends(get_auth),
             "id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
             # Counted from the listing; the studies themselves are not read.
-            "case_count": repo.count_cases(auth, c.id, user=user),
+            "case_count": case_counts.get(c.id, 0),
             "permission_mode": modes.get(c.id, "inherit"),
             "owner": ({"id": c.owner_id, "name": owner_name}
                       if owner_name is not None else None),

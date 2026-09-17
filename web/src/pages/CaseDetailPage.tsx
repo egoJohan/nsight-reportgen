@@ -18,7 +18,6 @@ import SensitiveTermsPanel from "@/components/SensitiveTermsPanel";
 import ReportsSection from "@/components/ReportsSection";
 import ReportWizard from "@/components/wizard/ReportWizard";
 import {
-  useCases,
   useRenameCase,
   useResolvedCase,
   useRenameCustomerCase,
@@ -114,9 +113,11 @@ function CaseHeading({
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: cases } = useCases();
-  // A case under a customer is not in the legacy /cases list, so resolve it by
-  // id; without this the heading fell back to rendering the raw case id.
+  // Resolved by id. The flat /cases list used to be fetched here as a fallback
+  // for the name, but every case now lives under a customer — the server builds
+  // that list BY walking the customers — so it could never name a case this
+  // could not, and it cost a hive call per study in the tenant on every open,
+  // queued in front of everything else the page loads. (2026-09-17)
   const { data: resolved } = useResolvedCase(id);
   const templates = useTemplateActions(resolved?.customer_id);
   // What this tutkimus actually renders with — the backend's own answer, which
@@ -125,8 +126,7 @@ export default function CaseDetailPage() {
   // had uploaded a pohja but never bound one showed an empty dropdown while
   // rendering with it.
   const { data: caseTemplate } = useCaseTemplate(resolved?.customer_id, id);
-  const legacyCase = cases?.find((c) => c.id === id);
-  const caseName = resolved?.name ?? legacyCase?.name ?? "";
+  const caseName = resolved?.name ?? "";
   // The one place this page asks "may I write here" — computed server-side
   // from may_write on "{customer_id}/{case_id}" (see routes_customers.py's
   // resolve_case), never from is_admin: admin is the right to manage users,
