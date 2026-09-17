@@ -31,7 +31,8 @@ _LOW = "1- Ei lainkaan ylpeä"
 _HIGH = "7- Erittäin ylpeä"
 
 
-def _series(labels: dict[int, str], chart_type: str = "stacked_horizontal_bar"):
+def _series(labels: dict[int, str], chart_type: str = "stacked_horizontal_bar",
+            overrides: tuple = ()):
     var = Variable(name="q", label="Kuinka ylpeä olet omasta työstäsi?",
                    measurement="nominal", missing_values=[],
                    value_labels=[ValueLabel(value=float(c), label=l)
@@ -51,7 +52,8 @@ def _series(labels: dict[int, str], chart_type: str = "stacked_horizontal_bar"):
     spec = ChartSpec(question_ref="q", chart_type=chart_type, statistic="pct",
                      classifying_var=None, number_format=NumberFormat(),
                      sort=SortSpec(basis="data_order"), template_slot="s1",
-                     elements=ElementToggles())
+                     elements=ElementToggles(),
+                     category_label_overrides=overrides)
     return compute(model.question("q"), spec, pd.DataFrame(rows), model)
 
 
@@ -127,3 +129,30 @@ class TestOnlyWhereTheWordsAreActuallyDropped:
         """It was before this existed, and a plain bar still needs it."""
         for ct in ("horizontal_bar", "pie", "stacked_horizontal_bar"):
             assert _series(UNLABELLED_MIDDLE, ct).caption, ct
+
+
+class TestWhenTheAuthorHasNamedALevelThemselves:
+    """The legend stands down from shortening the moment an author types a
+    category label — "the whole legend stands down together, not just the
+    renamed level" (image/bars._legend_below). The words are then ON the
+    legend, so a caption repeating them is a second copy.
+
+    This is the same rule the caption exists to mirror. Found on the project's
+    own regression report, slide 11b, whose whole point is that an authored
+    name shows: the legend read "1 - Ei lainkaan … 7- Erittäin ylpeä" and the
+    footer repeated "1 = Ei lainkaan ylpeä · 7 = Erittäin ylpeä" beneath it.
+    """
+
+    OVERRIDE = ((_LOW, "1 - Ei lainkaan"),)
+
+    def test_no_caption_when_a_category_label_is_authored(self):
+        assert not _series(NUMBERED_MIDDLE, overrides=self.OVERRIDE).caption
+
+    def test_the_caption_is_still_there_without_an_override(self):
+        """The control: 11a, the same slide with nothing renamed."""
+        assert _series(NUMBERED_MIDDLE).caption
+
+    def test_an_override_naming_something_else_does_not_matter(self):
+        """The legend only stands down for a label it is actually drawing."""
+        assert _series(NUMBERED_MIDDLE,
+                       overrides=(("Ei mikään taso", "x"),)).caption

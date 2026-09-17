@@ -758,8 +758,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # A scale whose middle points are labelled with their own numbers is
         # fully labelled, so `_partial_scale` says nothing about it — while the
         # legend still shortens it to bare numbers. See `_numbered_scale_caption`.
-        scale_caption = _numbered_scale_caption(var, data, eff,
-                                                spec.chart_type)
+        scale_caption = _numbered_scale_caption(var, data, eff, spec)
     drawn_codes: set[float] = ({float(c) for c, _l, _o in scale_entries}
                                if scale_entries is not None
                                else {float(c) for c in labels})
@@ -1155,7 +1154,7 @@ _SCALE_IN_LEGEND: frozenset[str] = frozenset({
 
 
 def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
-                            eff: set[float], chart_type: str) -> str | None:
+                            eff: set[float], spec) -> str | None:
     """The endpoint caption for a scale numbered in its OWN labels.
 
     A stacked bar shortens a numeric rating scale's legend to bare numbers
@@ -1185,7 +1184,7 @@ def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
     `_partial_scale` case is not the same and is untouched: there the middle
     points carry no label at all, so even a plain bar's axis reads "1 2 3 …".)
     """
-    if chart_type not in _SCALE_IN_LEGEND:
+    if getattr(spec, "chart_type", "") not in _SCALE_IN_LEGEND:
         return None
     if var.name not in data.columns:
         return None
@@ -1203,6 +1202,17 @@ def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
         if not m or int(m.group(1)) != code:
             return None
         words[code] = _scale_words(code, label)
+    # An AUTHORED category label stands the whole legend down from shortening
+    # ("not just the renamed level" — image/bars._legend_below), so the words
+    # are on the legend after all and a caption repeats them. Mirroring that
+    # rule is the entire point of this function: the two must agree about when
+    # the words are lost. (Found on the regression report's own slide 11b,
+    # whose subject is that an authored name shows.)
+    authored = {full for full, _short in
+                (getattr(spec, "category_label_overrides", None) or ())}
+    if authored & set(labels.values()):
+        return None
+
     worded = {c: w for c, w in words.items() if w}
     # Some points carry words and some do not — an endpoint-labelled scale.
     # When EVERY level is worded the legend drops all of them, which wants a
