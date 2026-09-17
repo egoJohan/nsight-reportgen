@@ -287,9 +287,11 @@ def test_bullet_prompts_forbid_conversational_meta():
 # all six were rating-scale points ("Tärkeä", "Heikosti", "Ensisijaisesti"),
 # which teaches an analyst the list is not worth reading.
 #
-# The candidates and the question wording are all that is sent. No findings, no
-# percentages, no respondent answers — a bare list of names discloses nothing,
-# which is what makes this call allowed to run unmasked.
+# The candidates and the question wording are all that is sent — and MASKED,
+# like every other call: the terms must never reach a model (2026-09-17). The
+# hive replaces a name it recognises ("Amazon" became "Murtelex"), so the model
+# answers with the candidates' NUMBERS, which need no translating back. Asked for
+# names, it left the substitute out and Amazon was never proposed.
 
 def test_it_asks_about_exactly_the_candidates_given():
     chat = RecordingChat('["Attendo"]')
@@ -323,6 +325,32 @@ def test_a_reply_that_is_not_a_list_raises_rather_than_guessing():
     chat = RecordingChat("Attendo on yritys.")
     with pytest.raises(EgoHiveError):
         T.pick_company_terms(["Attendo"], [], chat=chat)
+
+
+def test_the_model_answers_with_numbers_and_the_names_are_ours():
+    chat = RecordingChat("[1, 3]")
+    picked = T.pick_company_terms(["Amazon", "Pieni", "Aramco"], [], chat=chat)
+    assert picked == ["Amazon", "Aramco"]
+    prompt = chat.prompts[0]
+    assert "1. Amazon" in prompt and "3. Aramco" in prompt
+
+
+def test_a_number_outside_the_list_is_discarded():
+    chat = RecordingChat("[1, 7, 0, -1]")
+    assert T.pick_company_terms(["Amazon", "Pieni"], [], chat=chat) == ["Amazon"]
+
+
+def test_numbers_in_a_fenced_block_are_read():
+    chat = RecordingChat("```json\n[2]\n```")
+    assert T.pick_company_terms(["Pieni", "Amazon"], [], chat=chat) == ["Amazon"]
+
+
+def test_it_goes_through_the_masked_route_by_default():
+    import inspect
+    from reportbuilder.ai import masked_chat as M
+    default = inspect.signature(T.pick_company_terms).parameters["chat"].default
+    assert getattr(default, "masked", False) is True
+    assert default is M.classify
 
 
 def test_no_candidates_asks_nothing():

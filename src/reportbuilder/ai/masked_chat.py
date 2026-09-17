@@ -99,11 +99,8 @@ def datahive_chat(prompt: str, *, purpose: str = PURPOSE,
                 "prompt": prompt,
                 "purpose": purpose,
                 "regulatory_class": regulatory_class,
-                # Masked unless a caller has a reason not to be, and there is
-                # exactly one: `identify` below. Everything that sends the
-                # study's PROSE goes masked and cannot opt out of it here,
-                # because the default is True and only that wrapper passes
-                # False.
+                # Masked. Every entry point below leaves this True; there is
+                # no unmasked one any more (see the note after `classify`).
                 "require_pseudonymization": mask,
                 "timeout_s": timeout,
             },
@@ -185,19 +182,9 @@ rewrite = _bound("rewrite")
 #: Choose among options the caller supplied — the answer is one of the inputs.
 classify = _bound("classify")
 
-#: The one entry point that does NOT mask, and the only one that may.
-#:
-#: It is handed a list of candidate strings read off a study's structure and
-#: asked which of them name a company. Masking it would replace those strings
-#: with surrogates before the model saw them — it would be asked to recognise
-#: names it had been prevented from reading, which is not a stricter version of
-#: the task but a different and impossible one.
-#:
-#: What makes that acceptable is what is NOT sent: no findings, no percentages,
-#: no respondent answers, no open text. A bare list of names, with nothing said
-#: about them, discloses nothing — the sensitivity is in associating a company
-#: with a result, and no result goes with it. (Johan's call, 2026-09-02.)
-identify = _bound("classify", mask=False)
+#: There is no unmasked entry point. `identify` was one, for picking which
+#: candidates name a company; the terms must never reach a model, and the hive
+#: masked it regardless. That work goes through `classify` now. (2026-09-17)
 
 #: Condense supplied material faithfully: says less than the input, and nothing
 #: the input did not say. Background, demographics, open-answer themes.
@@ -211,5 +198,5 @@ synthesise = _bound("synthesise")
 #: Answer a person's question, with that person waiting on the reply.
 converse = _bound("converse")
 
-__all__ = ["datahive_chat", "rewrite", "classify", "identify", "summarise", "synthesise",
+__all__ = ["datahive_chat", "rewrite", "classify", "summarise", "synthesise",
            "converse", "PURPOSE", "REGULATORY_CLASS", "DEFAULT_TIMEOUT"]

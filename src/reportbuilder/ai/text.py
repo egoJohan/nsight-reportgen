@@ -78,13 +78,26 @@ _TITLE_EXAMPLES = (
 # --------------------------------------------------------------------------- #
 # Slide title
 # --------------------------------------------------------------------------- #
-def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -> str:
-    """Compose the Finnish descriptive-headline prompt."""
+def _finding_value(finding) -> str:
+    """A finding's number, compactly (no trailing .0), WITH its unit when it
+    carries one: "22 %", never a bare "22" a model reads as a count."""
+    _label, value = finding
+    v = f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
+    unit = getattr(finding, "unit", "")
+    return f"{v} {unit}" if unit else v
+
+
+def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]],
+                        scale: str = "") -> str:
+    """Compose the Finnish descriptive-headline prompt.
+
+    `scale` is the chart's own scale caption ("1 = Erittäin huonosti · 5 =
+    Erittäin hyvin") when it has one. Without it the findings of a rating
+    question are bare scale points, and which end is good is a guess. (2026-09-17)
+    """
     lines = []
-    for label, value in findings:
-        # Format value compactly (drop trailing .0).
-        v = f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
-        lines.append(f"- {label}: {v}")
+    for finding in findings:
+        lines.append(f"- {finding[0]}: {_finding_value(finding)}")
     findings_block = "\n".join(lines) if lines else "- (ei kärkituloksia)"
     examples_block = "\n".join(f"- {e}" for e in _TITLE_EXAMPLES)
     # A combo carries TWO measures: its bars are percentages and its line is
@@ -101,6 +114,16 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         "Voit halutessasi mainita sen, jos se tuo havaintoon jotain olennaista.\n\n"
         if any("(keskiarvo)" in label for label, _v in findings) else ""
     )
+    # A split slide: its groups are in the findings, each with its base. Said
+    # only then, so every other chart's prompt is unchanged. (2026-09-17)
+    groups_note = (
+        "Huom: kärkituloksissa on myös ryhmien omat tulokset muodossa "
+        "'ryhmä (n=vastaajia) — kategoria: arvo'. Jos ryhmien välillä on "
+        "olennainen ero, kerro se ja nimeä ryhmät. Alle 10 vastaajan ryhmien "
+        "luvut ovat epävarmoja: älä tee niistä vahvoja johtopäätöksiä.\n\n"
+        if any(" (n=" in label for label, _v in findings) else ""
+    )
+    scale_note = f"Asteikko: {scale}.\n\n" if (scale or "").strip() else ""
     return (
         "Olet markkinatutkimuksen analyytikko. Kirjoitat kaaviolle avainviestin "
         "(otsikon), joka kertoo lukijalle, mitä kysyttiin ja mikä on vastausten "
@@ -108,7 +131,9 @@ def _slide_title_prompt(question_text: str, findings: list[tuple[str, float]]) -
         f"Kysymys (mitä kysyttiin): \"{question_text}\".\n"
         "Vastausten kärkitulokset (kategoria: arvo):\n"
         f"{findings_block}\n\n"
+        f"{scale_note}"
         f"{second_measure}"
+        f"{groups_note}"
         "Esimerkkejä hyvän avainviestin tyylistä:\n"
         f"{examples_block}\n\n"
         "Kirjoita YKSI suomenkielinen avainviesti, joka tiivistää kysymyksen aiheen "
@@ -126,6 +151,7 @@ def generate_slide_title(
     question_text: str,
     findings: list[tuple[str, float]],
     *,
+    scale: str = "",
     # `summarise`, not `synthesise`. A headline CONDENSES what the findings
     # already say; it does not reach past them. The distinction is the hive's:
     # synthesise is for output allowed to state something no input sentence
@@ -150,7 +176,7 @@ def generate_slide_title(
     single clean line. ``EgoHiveError`` propagates so the endpoint can map it to
     a 503; on an empty reply we fall back to the question text.
     """
-    prompt = _slide_title_prompt(question_text, findings)
+    prompt = _slide_title_prompt(question_text, findings, scale)
     reply = chat(prompt)
     fallback = (question_text or "").strip()
     raw = (reply or "").strip()
@@ -379,10 +405,7 @@ def _findings_block(findings_by_question: list[tuple[str, list[tuple[str, float]
     for q_text, findings in findings_by_question:
         if not findings:
             continue
-        lines = []
-        for label, value in findings:
-            v = f"{value:.0f}" if float(value).is_integer() else f"{value:.1f}"
-            lines.append(f"    - {label}: {v}")
+        lines = [f"    - {finding[0]}: {_finding_value(finding)}" for finding in findings]
         blocks.append(f"- {q_text}\n" + "\n".join(lines))
     return "\n".join(blocks) if blocks else "- (ei tuloksia)"
 
@@ -393,6 +416,7 @@ def generate_data_chat(
     messages: list[dict],
     total_n: int | None = None,
     *,
+    crossed: list[tuple[str, list[tuple[str, float]]]] | None = None,
     chat=M.converse,
 ) -> str:
     """Answer the user's question about the survey DATA, grounded in the per-question
@@ -416,8 +440,14 @@ def generate_data_chat(
         "koodilohkoja (```), 'question:'-lohkoja tai muita rakenteisia "
         "valikoita.\n\n"
         f"{study}{n_line}\n"
-        "Tutkimusdata (kysymys ja yleisimmät vastaukset / keskiarvot):\n"
+        "Tutkimusdata (kysymys ja vastaukset; % on osuus vastaajista, "
+        "ei vastaajien lukumäärä):\n"
         f"{data}\n\n"
+        + (
+            "Samat kysymykset ryhmittäin (ryhmä (n=vastaajia) — ryhmän yleisin "
+            "vastaus: osuus). Alle 10 vastaajan ryhmien luvut ovat epävarmoja:\n"
+            f"{_findings_block(crossed)}\n\n" if crossed else ""
+        ) +
         "Keskustelu tähän asti:\n"
         f"{convo}\n"
         "Avustaja:"
@@ -579,7 +609,7 @@ __all__ = [
 ]
 
 def pick_company_terms(candidates: list[str], questions: list[str], *,
-                       chat=M.identify) -> list[str]:
+                       chat=M.classify) -> list[str]:
     """Which of *candidates* actually name a company, organisation or brand.
 
     The structural proposer reads the study's shape and offers everything that
@@ -590,32 +620,38 @@ def pick_company_terms(candidates: list[str], questions: list[str], *,
     not worth reading, and an analyst who stops reading it either confirms
     everything or skips the step. Both lose the protection.
 
-    Only the candidate strings and the question wording are sent: no findings,
-    no percentages, no respondent answers. A bare list of names, with nothing
-    said about them, discloses nothing — which is what makes this the one call
-    that runs unmasked (see `M.identify`). Masking it would hand the model
-    surrogates of the very strings it is being asked to recognise.
+    MASKED, like every other call: the terms must never reach a model. This
+    used to be the one unmasked exception, and the hive masked it anyway — it
+    replaced "Amazon" with "Murtelex" before the model saw it. Asked to answer
+    with names, the model left the substitute out and Amazon was never proposed:
+    "Sensitive Terms skippaa Amazon". So the candidates are NUMBERED and the
+    model answers with numbers; a number needs no translating back, and a
+    substitute is still recognisably a company to the model. (2026-09-17)
 
-    The reply must be a JSON list drawn from the candidates. Anything else
+    Only the candidate strings and the question wording are sent: no findings,
+    no percentages, no respondent answers.
+
+    The reply must be a JSON list of numbers from the list. Anything else
     raises, because "no answer" must reach the analyst as an error they can
     retry: an empty list would read as "nothing to mask" and leave the study
-    unprotected without saying so.
+    unprotected without saying so. A list of NAMES is still read, matched
+    exactly against the candidates, for a model that answers that way anyway.
     """
     wanted = [c for c in (candidates or []) if c and c.strip()]
     if not wanted:
         return []
     context = "\n".join(q for q in (questions or []) if q)[:4000]
     prompt = (
-        "Tämä on suomalaisen kyselytutkimuksen rakenteesta poimittu lista "
-        "ehdokasmerkkijonoja. Osa on yritysten, organisaatioiden tai "
+        "Tämä on suomalaisen kyselytutkimuksen rakenteesta poimittu numeroitu "
+        "lista ehdokasmerkkijonoja. Osa on yritysten, organisaatioiden tai "
         "tuotemerkkien nimiä; osa on asteikon vastausvaihtoehtoja, kyselyn "
         "omaa sanastoa tai muuta yleiskieltä.\n\n"
         + (f"Kyselyn kysymyksiä kontekstiksi:\n{context}\n\n" if context else "")
-        + "Ehdokkaat:\n" + "\n".join(f"- {c}" for c in wanted) + "\n\n"
-        "Vastaa JSON-listana, joka sisältää VAIN ne ehdokkaat, jotka ovat "
-        "yrityksen, organisaation tai tuotemerkin nimiä, täsmälleen samassa "
-        "kirjoitusasussa kuin yllä. Jos yksikään ei ole, vastaa []. "
-        "Älä selitä mitään; vastaa pelkkä JSON-lista."
+        + "Ehdokkaat:\n" + "\n".join(f"{i}. {c}" for i, c in enumerate(wanted, 1))
+        + "\n\n"
+        "Vastaa JSON-listana niiden ehdokkaiden NUMEROISTA, jotka ovat "
+        "yrityksen, organisaation tai tuotemerkin nimiä. Jos yksikään ei ole, "
+        "vastaa []. Älä selitä mitään; vastaa pelkkä JSON-lista numeroita."
     )
     reply = (chat(prompt) or "").strip()
     match = re.search(r"\[.*\]", reply, re.S)
@@ -628,12 +664,19 @@ def pick_company_terms(candidates: list[str], questions: list[str], *,
         raise EgoHiveError(f"unreadable list of terms: {exc}") from exc
     if not isinstance(named, list):
         raise EgoHiveError("the model's answer was not a list")
-    # Only ever a subset of what was asked about. A name we never proposed is
-    # invented, and registering it would mask a word the study never used.
+    # Only ever a subset of what was asked about. A number outside the list, or
+    # a name we never proposed, is invented, and registering it would mask a
+    # word the study never used.
     allowed = {c.strip().casefold(): c for c in wanted}
     out: list[str] = []
     for item in named:
-        hit = allowed.get(str(item).strip().casefold())
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int) or (isinstance(item, str) and item.strip().isdigit()):
+            n = int(item)
+            hit = wanted[n - 1] if 1 <= n <= len(wanted) else None
+        else:
+            hit = allowed.get(str(item).strip().casefold())
         if hit and hit not in out:
             out.append(hit)
     return out

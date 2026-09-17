@@ -10,6 +10,8 @@ stay deterministic from the stats engine. The caller stores the results into
 """
 from __future__ import annotations
 
+import dataclasses
+
 import logging
 import os
 import tempfile
@@ -170,23 +172,202 @@ def _kind_spec(question, model) -> ChartSpec:
     )
 
 
+class Finding(tuple):
+    """A (label, value) pair — exactly that to every caller that unpacks or
+    compares it — carrying the UNIT of its value on the side.
+
+    The unit is what stops a share being read as a count. Findings went out bare
+    ("Delta: 22"), and a demographics bullet turned three shares of a
+    41-respondent study into "63 respondents from three companies". (2026-09-17)
+    """
+    def __new__(cls, label: str, value: float, unit: str = ""):
+        self = super().__new__(cls, (label, value))
+        self.unit = unit
+        return self
+
+
+#: The unit a statistic's numbers are written with. A mean has none: its scale
+#: is the question's own, and its label already says "(keskiarvo)".
+_UNITS = {"pct": "%"}
+
+#: Up to this many answers, a question's findings are ALL of them. The top three
+#: of six companies is half a study: the chat named four of six and could not say
+#: anything about the rest.
+ALL_ANSWERS_UP_TO = 8
+
+
+def _answers_to_give(categories, *, top_n: int) -> int:
+    """Every answer when there are few; the top `top_n` when there are many."""
+    n = len(categories)
+    return n if n <= ALL_ANSWERS_UP_TO else top_n
+
+
+def _with_units(series, findings):
+    """*findings* as `Finding`s carrying the unit of the number they state."""
+    out = []
+    for label, value in findings:
+        if "(keskiarvo)" in label:
+            unit = ""
+        elif "(%)" in label:
+            unit = "%"
+        else:
+            unit = _UNITS.get(series.statistic, "")
+        out.append(Finding(label, value, unit))
+    return out
+
+
+#: A group-by-group read is only offered for a split the prompt can hold.
+_MAX_GROUPS = 10
+_MAX_ANSWERS_PER_GROUP = 5
+
+
+def _group_findings(series, *, top_only: bool = False) -> list:
+    """Each GROUP's own result, labelled with its base: "Amazon (n=3) — 4: 33 %".
+
+    A split slide's findings used to be Total's alone — the groups never reached
+    the model, so a slide split by six companies got a headline about "toimija"
+    that compared nothing. Every answer per group when there are few (a rating
+    scale), else each group's strongest answer; `top_only` asks for the latter
+    regardless, for a prompt that carries many questions at once.
+
+    Empty without groups (a Total and nothing else), for a split too wide to
+    read, and for a series with no Total — a comparison, whose segments are
+    already its findings. (2026-09-17)
+    """
+    if "Total" not in series.segments:
+        return []
+    other = set(getattr(series, "secondary_segments", ()) or ())
+    groups = [s for s in series.segments
+              if s != "Total" and s not in other and series.base_n.get(s, 0) > 0
+              and series.statistic_of(s) == series.statistic]
+    if not groups or len(groups) > _MAX_GROUPS:
+        return []
+    unit = _UNITS.get(series.statistic, "")
+    every = not top_only and len(series.categories) <= _MAX_ANSWERS_PER_GROUP
+    out = []
+    for g in groups:
+        scored = []
+        for cat in series.categories:
+            cell = series.cells.get((cat, g))
+            val = cell.value(series.statistic) if cell is not None else None
+            if val is not None:
+                scored.append((cat, float(val)))
+        if not scored:
+            continue
+        chosen = scored if every else [max(scored, key=lambda p: p[1])]
+        n = int(series.base_n.get(g, 0))
+        out.extend(Finding(f"{g} (n={n}) — {cat}", v, unit) for cat, v in chosen)
+    return out
+
+
 def _findings_for_refs(
     refs: list[str], df, model, *, top_n: int = 3, cap: int = 25
 ) -> list[tuple[str, list[tuple[str, float]]]]:
-    """Per-question top findings for the given refs, guarded against compute()
+    """Per-question findings for the given refs, guarded against compute()
     raising on incompatible kinds and skipping questions that yield nothing.
-    Capped to bound egoHive latency.
+    Capped to bound egoHive latency. Every answer when there are few
+    (`_answers_to_give`), each with its unit.
     """
     out: list[tuple[str, list[tuple[str, float]]]] = []
     for ref in refs[:cap]:
         try:
             q = model.question(ref)
             series = compute(q, _kind_spec(q, model), df, model)
-            findings = _findings_from_series(series, top_n)
+            findings = _with_units(series, _findings_from_series(
+                series, _answers_to_give(series.categories, top_n=top_n)))
         except Exception:
             continue  # skip incompatible/empty questions
         if findings:
             out.append((q.text, findings))
+    return out
+
+
+def _background_classifiers(df, model, *, limit: int = 3) -> list[str]:
+    """The study's background variables a reader splits by — the editor's first
+    tier (age, region, the company rated) — with a readable number of groups."""
+    from reportbuilder.api.routes_questions import (  # noqa: PLC0415 — no cycle at import
+        CLASSIFIER_TIER_BACKGROUND, _classifier_tier,
+    )
+    out = []
+    for var in model.variables.values():
+        try:
+            if _classifier_tier(var, df) != CLASSIFIER_TIER_BACKGROUND:
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        n = len(var.value_labels)
+        if 2 <= n <= _MAX_GROUPS:
+            out.append(var.name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _group_comparison(question, spec, series, df, model):
+    """(per-group findings, what they are) for comparing groups of one question.
+
+    A RATING question is compared by its MEAN. Its most common answer is a
+    number on a scale, and the scale's direction is not in it: asked which
+    company was rated most reliable, the model answered "nSight, whose most
+    common rating was 1 (37 %)" — 1 being the worst end. A mean is one
+    comparable number per group, and the scale is named beside it.
+
+    Anything else — a nominal question like "which company" — keeps each group's
+    strongest answer, where a mean would mean nothing. (2026-09-17)
+    """
+    scale = (series.caption or "").strip()
+    numeric = all(str(c).strip().replace(".", "", 1).isdigit() for c in series.categories)
+    if scale or (numeric and len(series.categories) >= 3):
+        try:
+            avg = compute(question, dataclasses.replace(spec, statistic="mean"), df, model)
+        except Exception:  # noqa: BLE001 — fall back to the answers themselves
+            avg = None
+        if avg is not None and avg.statistic == "mean" and avg.categories:
+            cat = avg.categories[0]
+            out = []
+            for g in avg.segments:
+                if g == "Total" or avg.base_n.get(g, 0) <= 0:
+                    continue
+                cell = avg.cells.get((cat, g))
+                val = cell.value("mean") if cell is not None else None
+                if val is not None:
+                    out.append(Finding(f"{g} (n={int(avg.base_n.get(g, 0))})",
+                                       float(val), ""))
+            if out:
+                what = f"keskiarvo ({scale})" if scale else "keskiarvo"
+                return out, what
+    return _group_findings(series, top_only=True), "yleisin vastaus"
+
+
+def _crossed_findings(refs: list[str], df, model, *, cap: int = 25,
+                      max_lines: int = 300) -> list[tuple[str, list]]:
+    """Each question split by each background classifier, each group's strongest
+    answer — for the chat, which is asked things like "which company was rated
+    most reliable" and was given no split data to answer from. Bounded, so a
+    large study cannot grow the prompt without limit. (2026-09-17)
+    """
+    classifiers = _background_classifiers(df, model)
+    out: list[tuple[str, list]] = []
+    lines = 0
+    for clf in classifiers:
+        clf_var = model.variables.get(clf)
+        clf_label = (clf_var.label if clf_var else None) or clf
+        for ref in refs[:cap]:
+            try:
+                q = model.question(ref)
+                if clf in q.variables:
+                    continue
+                spec = dataclasses.replace(_kind_spec(q, model), classifying_var=clf)
+                series = compute(q, spec, df, model)
+                groups, what = _group_comparison(q, spec, series, df, model)
+            except Exception:  # noqa: BLE001 — skip what cannot be split
+                continue
+            if not groups:
+                continue
+            if lines + len(groups) > max_lines:
+                return out
+            out.append((f"{q.text} — {what} ryhmittäin: {clf_label}", groups))
+            lines += len(groups)
     return out
 
 
@@ -231,7 +412,12 @@ def _findings_from_series(
     # aside and reported separately below: a mean and a percentage do not belong
     # in one ranking, and sorting them together put a 6.2 above a 19 % it has no
     # relation to. Empty for every chart but the two-variable combo.
-    other = [s for s in series.segments if _stat_of(s) != series.statistic]
+    # The secondary variable is set aside by name too: drawn as the share of a
+    # group it is a percentage like the bars, but of a different question, and
+    # ranking the two together compares answers that have nothing in common.
+    named = set(getattr(series, "secondary_segments", ()) or ())
+    other = [s for s in series.segments
+             if s in named or _stat_of(s) != series.statistic]
     main = [s for s in series.segments if s not in other]
 
     ref: str | None = None
@@ -269,9 +455,10 @@ def _findings_from_series(
             continue
         hi = max(scored, key=lambda p: p[1])
         lo = min(scored, key=lambda p: p[1])
-        top.append((f"{seg} (keskiarvo) — {hi[0]}", hi[1]))
+        what = f"{seg} (keskiarvo)" if _stat_of(seg) == "mean" else f"{seg} (%)"
+        top.append((f"{what} — {hi[0]}", hi[1]))
         if lo[0] != hi[0]:
-            top.append((f"{seg} (keskiarvo) — {lo[0]}", lo[1]))
+            top.append((f"{what} — {lo[0]}", lo[1]))
     return top
 
 
@@ -392,7 +579,11 @@ def ai_slide_title(
         spec = _kind_spec(question, model) if is_text else _spec_from_title_body(body)
         try:
             series = compute(question, spec, df, model)
-            findings = _findings_from_series(series, body.top_n)
+            # Every answer when there are few, with units, and — on a split
+            # slide — each group's own result, so the headline can compare them.
+            findings = (_with_units(series, _findings_from_series(
+                series, _answers_to_give(series.categories, top_n=body.top_n)))
+                + _group_findings(series))
         except ValueError:
             # An open-ended question with NO answers can't build a word cloud (compute
             # raises). There's nothing to headline → degrade to the question text rather
@@ -404,7 +595,10 @@ def ai_slide_title(
         if not findings:
             return {"title": question.text}
         asked = time.monotonic()
-        title = generate_slide_title(question.text, findings)
+        # The scale the chart prints under itself, so a headline about "5" knows
+        # which end that is.
+        title = generate_slide_title(question.text, findings,
+                                     scale=(getattr(series, "caption", "") or ""))
         log.info("ai title %s %s: %.1fs (data %.1fs, stats %.1fs, llm %.1fs)",
                  material_id, body.question_ref, time.monotonic() - started,
                  loaded - started, asked - loaded, time.monotonic() - asked)
@@ -684,10 +878,11 @@ def ai_chat(
 
     refs = [q.qid for q in model.questions]
     findings = _findings_for_refs(refs, df, model, top_n=4, cap=30)
+    crossed = _crossed_findings(refs, df, model, cap=30)
     try:
         reply = generate_data_chat(
             label, findings, [m.model_dump() for m in body.messages],
-            total_n=int(len(df))
+            total_n=int(len(df)), crossed=crossed,
         )
     except EgoHiveError as exc:
         raise HTTPException(status_code=503, detail=_AI_UNAVAILABLE) from exc
