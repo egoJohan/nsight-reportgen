@@ -115,3 +115,91 @@ def test_the_numbers_sit_between_spokes_not_on_one():
 def test_a_flat_radar_still_answers_something_sane():
     pos = _rlabel_position([100, 100, 100, 100, 100, 100])
     assert 0.0 <= pos < 360.0, pos
+
+
+# ---------------------------------------------------------------------------
+# …and clear of the SPOKE LABELS, not only of the polygon
+# ---------------------------------------------------------------------------
+
+def _label_collisions(pcts: dict) -> list[str]:
+    """Ring numbers printed over a spoke name, as drawn.
+
+    Both are unrotated on a radar, so a plain box intersection is the right
+    instrument here — unlike the rotated tick labels elsewhere in this suite.
+
+    The series is built directly rather than from rows: var8 is a "choose all
+    that apply", so its options sum well past 100 and no single-choice fixture
+    reproduces which gap the data leaves emptiest.
+    """
+    from suite.unit.render import _builders as B
+
+    series = B.build_series(tuple(pcts), statistic="pct", base=1000, pct=pcts)
+    spec = ChartSpec(question_ref="q", chart_type="radar", statistic="pct",
+                     classifying_var=None, number_format=NumberFormat(),
+                     sort=SortSpec(basis="data_order"), template_slot="s1",
+                     elements=ElementToggles())
+    prs = Presentation()
+    ctx = RenderContext(slide=prs.slides.add_slide(prs.slide_layouts[6]),
+                        slot=Slot(slide_index=0, left=Inches(0.5), top=Inches(1.4),
+                                  width=Inches(11.6), height=Inches(4.0), name="s1"),
+                        style=StyleSpec(), spec=spec, series=series,
+                        fmt=spec.number_format)
+    seen: dict = {}
+    original = R.render_png
+
+    def _spy(fig):
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        ax = fig.axes[0]
+        rings = [(t.get_text(), t.get_window_extent(r))
+                 for t in ax.get_yticklabels() if t.get_text()]
+        spokes = [(t.get_text(), t.get_window_extent(r))
+                  for t in ax.get_xticklabels() if t.get_text()]
+        hits = []
+        for rt, rb in rings:
+            for st, sb in spokes:
+                ox = min(rb.x1, sb.x1) - max(rb.x0, sb.x0)
+                oy = min(rb.y1, sb.y1) - max(rb.y0, sb.y0)
+                if ox > 0.5 and oy > 0.5:
+                    hits.append(f"{rt!r} over {st!r} ({ox:.1f}px)")
+        seen["hits"] = hits
+        return original(fig)
+
+    R.render_png = _spy
+    try:
+        R.build_image_radar(ctx)
+    finally:
+        R.render_png = original
+    return seen["hits"]
+
+
+#: HolidayClub's var8, spoke for spoke: thirteen options where the two the
+#: data reaches least far on — 5 % and 12 % — are also where the longest names
+#: are. Choosing that gap because it is emptiest OF DATA prints the ring
+#: numbers straight onto "Musiikkiesitykset tai muu kulttuuritarjonta", whose
+#: five wrapped lines own the perimeter there. Empty of data is not empty.
+_NAMES = [
+    "Aamiaisbuffet", "Lounas- tai illallisbuffet",
+    "Roberts Coffee kahvilapalvelut",
+    "A'la carte-ravintola (esim O'Learys, Classic Pizza)", "R-kioski",
+    "Kylpylä", "Kuntosali tai muut sisäliikuntamahdollisuudet",
+    "Ulkoiluaktiviteetit (esim hiihto, ohjatut luontoretket)",
+    "Hyvinvointi- tai kauneushoidot",
+    "Angry Birds/Superpark tai muut leikkipuistot",
+    "Ohjatut ohjelmat lapsille",
+    "Musiikkiesitykset tai muu kulttuuritarjonta",
+    "En ole käyttänyt mitään näistä",
+]
+_PCTS = dict(zip(_NAMES, [79.0, 39.0, 28.0, 77.0, 63.0, 90.0, 48.0, 43.0,
+                          22.0, 26.0, 5.0, 12.0, 1.0]))
+
+
+def test_the_ring_numbers_do_not_land_on_a_spoke_name():
+    hits = _label_collisions(_PCTS)
+    assert hits == [], f"ring numbers printed on a spoke name: {hits}"
+
+
+def test_short_names_are_unaffected():
+    """The control: the same data with nothing long to avoid."""
+    short = dict(zip([f"S{i}" for i in range(len(_PCTS))], _PCTS.values()))
+    assert _label_collisions(short) == []

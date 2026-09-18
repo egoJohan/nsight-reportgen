@@ -40,35 +40,74 @@ from reportbuilder.render.image._mpl import template_palette
 _EMU_PER_IN = 914400.0
 
 
-def _rlabel_angle(angles: list[float], segs, data) -> float:
-    """Where to print the ring numbers: the gap the data leaves emptiest.
+def _ring_label_candidates(angles: list[float], segs, data) -> list[float]:
+    """Gap midpoints between spokes, the emptiest of DATA first.
 
-    matplotlib puts them on a fixed diagonal and the polygon goes wherever the
-    data goes, so the two met — on the brand radar the "15" was drawn straight
-    through the polygon's edge, its digits crossed by a 2.4pt line. Nothing
-    about that angle was chosen; it is just the default.
-
-    Between two spokes rather than on one, because a spoke line is drawn at its
-    own angle and the numbers would sit along it. Each gap is scored by how far
-    the data reaches on the two spokes bounding it — across every series, since
-    any of them can cross the numbers — and the emptiest gap wins. Ties go to
-    the first, so a flat radar is deterministic.
+    Between spokes rather than on one, because a spoke line is drawn at its own
+    angle and the numbers would lie along it. Each gap is scored by how far the
+    data reaches on the two spokes bounding it, across every series, since any
+    of them can cross the numbers. Ties keep spoke order, so a flat radar is
+    deterministic.
     """
     n = len(angles)
     if n < 2:
-        return 22.5
+        return [22.5]
     reach = []
     for i in range(n):
         vals = [data[seg][i] for seg in segs
                 if data.get(seg) and data[seg][i] is not None]
         reach.append(max(vals) if vals else 0.0)
-    best_i, best_score = 0, None
-    for i in range(n):
-        score = max(reach[i], reach[(i + 1) % n])
-        if best_score is None or score < best_score:
-            best_i, best_score = i, score
     step = 360.0 / n
-    return (math.degrees(angles[best_i]) + step / 2.0) % 360.0
+    scored = []
+    for i in range(n):
+        scored.append((max(reach[i], reach[(i + 1) % n]), i,
+                       (math.degrees(angles[i]) + step / 2.0) % 360.0))
+    scored.sort(key=lambda t: (t[0], t[1]))
+    return [mid for _score, _i, mid in scored]
+
+
+def _rings_cross_a_name(fig, ax) -> bool:
+    """Whether any ring number is printed over a spoke name, as drawn.
+
+    Both are unrotated on a radar, so a plain box intersection is the right
+    instrument — unlike a rotated tick label, whose axis-aligned box is far
+    wider than its ink.
+    """
+    r = fig.canvas.get_renderer()
+    rings = [t.get_window_extent(r) for t in ax.get_yticklabels() if t.get_text()]
+    names = [t.get_window_extent(r) for t in ax.get_xticklabels() if t.get_text()]
+    for a in rings:
+        for b in names:
+            if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
+                    and min(a.y1, b.y1) - max(a.y0, b.y0) > 0.5):
+                return True
+    return False
+
+
+def _place_ring_labels(fig, ax, angles: list[float], segs, data,
+                       tries: int = 6) -> float:
+    """Put the ring numbers where they cross neither the polygon nor a name.
+
+    Emptiest of data is where they belong, but empty of data is not empty: a
+    spoke whose name wraps to five lines owns the perimeter beside it, and on
+    HolidayClub's var8 the two spokes the data reaches least far on are exactly
+    the two carrying the longest names — so the gap chosen for being clear of
+    the polygon printed "100" straight onto "Musiikkiesitykset tai muu
+    kulttuuritarjonta".
+
+    So the candidates are tried in that order and MEASURED, and the first that
+    crosses nothing wins. A radar whose first choice is already clear pays one
+    extra draw; one that is never clear keeps the emptiest gap, which is the
+    best of a bad set rather than an arbitrary one.
+    """
+    candidates = _ring_label_candidates(angles, segs, data)
+    for angle in candidates[:max(1, tries)]:
+        ax.set_rlabel_position(angle)
+        fig.canvas.draw()
+        if not _rings_cross_a_name(fig, ax):
+            return angle
+    ax.set_rlabel_position(candidates[0])
+    return candidates[0]
 
 
 def build_image_radar(ctx) -> None:
@@ -145,7 +184,7 @@ def build_image_radar(ctx) -> None:
     ax.set_yticklabels(
         [str(int(v)) if float(v).is_integer() else f"{v:g}" for v in r_ticks],
         fontsize=8.0, color=muted)
-    ax.set_rlabel_position(_rlabel_angle(angles, segs, data))
+    _place_ring_labels(fig, ax, angles, segs, data)
     ax.grid(color=grid, linewidth=0.8)
     ax.spines["polar"].set_color("#C9C1B4")
     ax.spines["polar"].set_linewidth(1.0)
