@@ -32,7 +32,7 @@ from reportbuilder.render.image._mpl import (
 )
 from reportbuilder.render.image._mpl import VALUE_GID
 from reportbuilder.render.house_style import contrast_ink, series_colors
-from reportbuilder.render.image._mpl import wants_group_base
+from reportbuilder.render.image._mpl import wants_group_base, wrap_label_capped
 from reportbuilder.render.panels import panel_segments
 
 
@@ -44,6 +44,30 @@ from reportbuilder.render.panels import panel_segments
 # pixels in every panel — which is what makes the bar widths comparable.
 _GUTTER_WITH_LABELS = 2.05
 _GUTTER_BARE = 1.20
+
+
+#: Chars per line the stage-name gutter holds at the sizes below.
+_STAGE_WRAP_WIDTH: int = 28
+
+
+def _stage_label_layout(fig, n_rows: int) -> tuple[float, int]:
+    """Type size and line budget for the stage names beside a funnel.
+
+    The names used to be wrapped at a fixed width, at a fixed 11pt, with no
+    limit on how many lines that took — so on a fourteen-stage battery two
+    two-line names landed on top of each other (18.3px, by the overlap oracle).
+
+    A row is worth the figure's height divided by the number of rows, and a
+    name may have as many lines as that band holds. Past it the last line is
+    ellipsised, which is the documented preference: "an ellipsis is preferred
+    over labels overlapping each other" (`wrap_label_capped`). A roomy funnel —
+    four or five stages — has bands deep enough for the full text and is
+    unchanged.
+    """
+    row_pt = float(fig.get_size_inches()[1]) * 72.0 / max(1, n_rows)
+    size = max(8.5, min(11.0, row_pt / 2.2))
+    lines = max(1, int(row_pt // (size * 1.25)))
+    return size, lines
 
 
 def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
@@ -97,11 +121,13 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
     # carries them, so they sit at the row's right edge the way they sit at the
     # un-split funnel's right edge.
     if stage_labels:
+        stage_pt, stage_lines = _stage_label_layout(ax.figure, len(cats))
         for i, cat in enumerate(cats):
             ax.text(
-                max_val * 1.04, i, wrap_label(cat, 28),
+                max_val * 1.04, i,
+                wrap_label_capped(cat, _STAGE_WRAP_WIDTH, stage_lines),
                 va="center", ha="left",
-                fontsize=11.0, color=ink, zorder=5,
+                fontsize=stage_pt, color=ink, zorder=5,
             )
 
     # Widest bar (index 0) at the TOP. `invert_yaxis()` TOGGLES the axis, and a
