@@ -182,8 +182,15 @@ def _set_category_ticks(fig, ax, cats, ink) -> None:
     fs = 11.5
     x0, x1 = ax.get_xlim()
     pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
-    widest = max((_text_extent_px(fig, str(c), fs)[0] for c in cats), default=0.0)
-    if widest <= pitch_px * 0.92:
+    widths = [_text_extent_px(fig, str(c), fs)[0] for c in cats]
+    # Adjacent PAIRS, not the widest name. Each name is centred on its column,
+    # so two neighbours touch when their half-widths together exceed the pitch —
+    # and a long name flanked by short ones ("1- Ei lainkaan ylpeä" between "2"
+    # and "3") has their room to spill into and needs no rotation. Measuring the
+    # widest alone rotated that chart, which had been perfectly legible flat.
+    need = max(((widths[i] + widths[i + 1]) / 2.0
+                for i in range(len(widths) - 1)), default=0.0)
+    if need <= pitch_px * 0.92:
         ax.set_xticklabels(cats, fontsize=fs, color=ink)
         return
     # Rotated, NOT wrapped. Wrapping makes each name a taller block, and a

@@ -110,3 +110,17 @@ def test_short_names_are_left_flat():
     got = _tick_boxes(SHORT)
     assert all(r == 0 for r in got["rotations"]), got["rotations"]
     assert got["collisions"] == []
+
+
+#: One long name among short ones: the long one has its neighbours' room to
+#: spill into, so it does not need rotating. This is the project's own scale,
+#: and it read perfectly well flat before any of this.
+ONE_LONG = ["1- Ei lainkaan ylpeä", "2", "3", "4", "5", "6", "7- Erittäin ylpeä"]
+
+
+def test_one_long_name_among_short_ones_stays_flat():
+    got = _tick_boxes(ONE_LONG)
+    assert all(r == 0 for r in got["rotations"]), (
+        "rotated a chart that was legible flat — the test is adjacent PAIRS, "
+        "not the widest name on its own")
+    assert got["collisions"] == []
