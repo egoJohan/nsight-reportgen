@@ -1564,6 +1564,52 @@ def _code_group_masks(model: QuestionModel, data: pd.DataFrame,
     return {names.get(str(int(c)), str(int(c))): (col == c) for c in codes}
 
 
+def _labels_are_brackets(var: Variable) -> bool:
+    """Whether this variable's labels are RANGES — "18-24", "500-999 €".
+
+    Most of them, not all: an age bracket's top band is open ("75+") and a
+    money bracket's bottom one often is ("alle 500 €"), and one open end at
+    either extreme does not make the rest something else.
+    """
+    vls = [vl for vl in var.value_labels if vl.value not in var.missing_values]
+    if not vls:
+        return False
+    banded = sum(1 for vl in vls if _BANDED_LABEL.match(vl.label or ""))
+    return banded >= max(1, int(len(vls) * 0.6))
+
+
+def _combo_secondary_is_drawable(spec: ChartSpec, model: QuestionModel) -> bool:
+    """Whether the combo's secondary variable can be drawn AS CONFIGURED.
+
+    With a group chosen it is that group's share — a percentage of the people
+    in each category, always drawable.
+
+    With no group it is the variable's MEAN, and only a numeric scale or a
+    1..N rating has one. `_aggregatable` (the questions API) settled that on
+    2026-09-17: a BRACKET is not a scale, because the numbers its labels start
+    with are quantities, and averaging them produced "Ikäluokka 55.1" on a
+    slide nobody could read. The PICKER stopped offering the mean that day.
+    Nothing told the renderer, so a slide saved before it kept drawing one, and
+    the same complaint came back the next morning in the same words — "en
+    ymmärrä ikäluokan kuvaustapaa" (2026-09-18).
+
+    So the two now agree. There is nothing honest to draw for such a variable
+    until a group is named, and guessing one would be inventing the author's
+    intent — the editor's own group picker, sitting there unanswered, is
+    already asking for it. The question's own bars are unaffected.
+    """
+    name = spec.options.get("combo_secondary")
+    if not name:
+        return False
+    if spec.options.get("combo_secondary_value"):
+        return True
+    try:
+        var = model.variable(name)
+    except Exception:  # noqa: BLE001 — a name the model no longer has
+        return False
+    return not _labels_are_brackets(var)
+
+
 def _combo_secondary_values(spec: ChartSpec, data: pd.DataFrame, model: QuestionModel,
                             sec_name: str) -> tuple[pd.Series, str, str]:
     """(one value per respondent, the series' name, what it measures) for a
@@ -1853,7 +1899,7 @@ def _compute_series(question: Question, spec: ChartSpec, data: pd.DataFrame,
                     model: QuestionModel) -> SeriesResult:
     """Compute the SeriesResult for one question + chart spec (R1 spine)."""
     # Two-variable combo: question distribution (bars) + secondary var mean (line).
-    if spec.chart_type == "combo" and spec.options.get("combo_secondary"):
+    if spec.chart_type == "combo" and _combo_secondary_is_drawable(spec, model):
         try:
             return _finish_series(
                 _combo_two_var(question, spec, data, model), spec, model)
