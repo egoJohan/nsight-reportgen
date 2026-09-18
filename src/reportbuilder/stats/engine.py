@@ -2467,6 +2467,39 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
         else:
             bars = sorted(bars, key=_topbox, reverse=spec.sort.descending)
 
+    # "Mean" orders the statements by their own mean on the shared scale — the
+    # ordinary way a rating battery is read, best statement first. It is in the
+    # Sort list for every chart type, and a battery's SUGGESTED chart is this
+    # one, so before this the commonest battery slide in the product offered a
+    # sort that did nothing: the statements came back in survey order however
+    # the control was set. The same battery as a PLAIN bar has always sorted by
+    # mean correctly, which is what made the stacked one read as broken rather
+    # than as a limitation.
+    #
+    # Weighted by the shares actually drawn, so the number the sort uses is the
+    # one the stack shows. Split by a group, statements move as a BLOCK ranked
+    # by the block's mean, exactly as the box sums above do, so a statement's
+    # groups stay together.
+    elif spec.sort.basis == "mean" and points and len(levels) >= 2:
+        def _stmt_mean(bar: str) -> float:
+            num = den = 0.0
+            for lvl, pt in zip(levels, points):
+                share = cells[(lvl, bar)].pct or 0.0
+                num += share * pt
+                den += share
+            return num / den if den else 0.0
+
+        if segment_primary:
+            by_stmt: dict[str, list[str]] = {}
+            for bar in bars:
+                by_stmt.setdefault(segment_primary[bar], []).append(bar)
+            order = sorted(by_stmt,
+                           key=lambda st: sum(_stmt_mean(b) for b in by_stmt[st]) / len(by_stmt[st]),
+                           reverse=spec.sort.descending)
+            bars = [b for st in order for b in by_stmt[st]]
+        else:
+            bars = sorted(bars, key=_stmt_mean, reverse=spec.sort.descending)
+
     # "Percentage", on a chart that carries a row-summary column, means THAT
     # percentage. The two controls have always had different vocabularies — the
     # Sort list stores `topbox_sum`, the Row summary list stores `top2_sum` — so
