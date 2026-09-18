@@ -33,7 +33,9 @@ from reportbuilder.render.house_style import (TEAL_LT, ramp_from,
 # guessed from a segment count. Borrowed from the clustered bar builder rather
 # than restated here: two answers to "does this number fit" is how one of them
 # ends up wrong. (Johan, 2026-09-16)
-from reportbuilder.render.image.bars import _value_label_layout
+from reportbuilder.render.image.bars import (_value_label_layout,
+                                             _text_extent_px,
+                                             _XTICK_ROTATION)
 
 
 #: How each half of a combo may be drawn. "bar" and "line" are what the chart
@@ -158,6 +160,40 @@ def line_label_anchor(
     if v > top_here + clearance:
         return v, True
     return max(min(v, top_here - clearance), b_lo + clearance), False
+
+
+def _set_category_ticks(fig, ax, cats, ink) -> None:
+    """The names along the bottom: flat where they fit, wrapped and rotated
+    where they do not.
+
+    This used to set them flat at full length whatever they were. On Attendo's
+    brand battery — fourteen statements like "Mahdollistaa hyvän arjen" and
+    "Tarjoaa laadukkaita hoivapalveluita" — that prints an unreadable smear
+    along the axis, each name straight through its neighbour, measured at 19px
+    of overlap on every battery combo in the study.
+
+    Every bar builder already knows this: `build_image_column` wraps and
+    rotates, `build_image_column_stacked` measures the widest name against the
+    column pitch first. The measured form is the one taken here, so a combo
+    whose names already fit is drawn exactly as before — rotation costs
+    vertical room and a little legibility, and is only worth it for names that
+    need it.
+    """
+    fs = 11.5
+    x0, x1 = ax.get_xlim()
+    pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
+    widest = max((_text_extent_px(fig, str(c), fs)[0] for c in cats), default=0.0)
+    if widest <= pitch_px * 0.92:
+        ax.set_xticklabels(cats, fontsize=fs, color=ink)
+        return
+    # Rotated, NOT wrapped. Wrapping makes each name a taller block, and a
+    # taller block at 30 degrees reaches further sideways — three pairs still
+    # grazed by 5.4px that way. Rotated single lines are parallel, so what
+    # separates them is the column pitch, which wrapping does not change.
+    # `build_image_column_stacked` rotates without wrapping for the same reason.
+    ax.set_xticklabels([str(c) for c in cats],
+                       fontsize=fs, color=ink, rotation=_XTICK_ROTATION,
+                       ha="right", rotation_mode="anchor")
 
 
 def _draw_primary_gridlines(ax, ax2, ctx, grid, primary_max: float) -> None:
@@ -393,7 +429,7 @@ def build_image_combo(ctx) -> None:
     ax.spines["bottom"].set_linewidth(1.0)
     ax.tick_params(axis="both", length=0)
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, fontsize=11.5, color=ink)
+    _set_category_ticks(fig, ax, cats, ink)
     register_category_labels(ax, "x", cats)
     ax.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
