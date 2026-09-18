@@ -1960,15 +1960,46 @@ def _finish_series(result: SeriesResult, spec: ChartSpec,
     return result
 
 
+#: A label that states a RANGE — two numbers with a dash between them:
+#: "18-24", "1000 – 1999", "1-2 kertaa viikossa". A rating label has ONE number
+#: and then words ("5 - Vastaa erittäin hyvin"), so it never matches this.
+_BANDED_LABEL = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*[-\u2013\u2014]\s*(\d+(?:[.,]\d+)?)")
+
+
 def _rating_scale(var: Variable) -> dict[float, float]:
-    """Map a rating variable's value codes to their 1..N scale point, parsed from
-    the leading integer of each value label ("5 - Vastaa erittäin hyvin" -> 5,
-    "3" -> 3). Codes whose label has no leading integer (e.g. "En osaa sanoa")
-    are omitted -> treated as no-answer."""
+    """Map a variable's value codes to the number each label stands for.
+
+    A rating label's leading integer IS its scale point ("5 - Vastaa erittäin
+    hyvin" -> 5, "3" -> 3), and that is what this was written for.
+
+    A BANDED label states a range, and the number it stands for is the middle
+    of that range, not the number it starts with. Read as a leading integer,
+    "55-64" came back as 55 — the band's floor — so a mean over age bands was
+    the mean of the band START values: "Ikäluokka (keskiarvo)" on the
+    mobiilivarmenne slide read 59.6, about four and a half years below the
+    truth, on an axis that says nowhere what the number is. The same applies to
+    any banded variable: income, spend, visits per week.
+
+    An open-ended band ("75+") has no upper end to take a middle of, so it
+    keeps its stated bound. Inventing a ceiling would be inventing data, and it
+    is the one band where the reader can see the number is a floor.
+
+    Codes whose label has no leading number at all ("En osaa sanoa") are
+    omitted -> treated as no-answer, unchanged.
+    """
     scale: dict[float, float] = {}
     for vl in var.value_labels:
-        m = re.match(r"\s*(\d+)", vl.label or "")
-        if m and vl.value not in var.missing_values:
+        if vl.value in var.missing_values:
+            continue
+        label = vl.label or ""
+        band = _BANDED_LABEL.match(label)
+        if band:
+            lo = float(band.group(1).replace(",", "."))
+            hi = float(band.group(2).replace(",", "."))
+            scale[vl.value] = (lo + hi) / 2.0
+            continue
+        m = re.match(r"\s*(\d+)", label)
+        if m:
             scale[vl.value] = float(m.group(1))
     return scale
 
