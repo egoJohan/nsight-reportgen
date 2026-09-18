@@ -350,6 +350,47 @@ def render_to_file(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+#: Room left between the header and the chart. The QUESTION goes in this gap —
+#: the subtitle's bottom is pinned a fixed distance above the chart, so if the
+#: chart does not leave the gap there is nowhere for the question to be drawn
+#: and it lands on top of the bars.
+_HEADER_GAP = Inches(0.70)
+
+
+def lowered_for_header(top: int, height: int, profile, title: str,
+                       content_is_authored: bool = False) -> tuple[int, int]:
+    """(top, height) for a chart area that must start BELOW the header.
+
+    The customer's own title box was drawn for the headline THEY wrote. Ours is
+    an AI headline or a question, it runs longer, and the question text has to
+    go somewhere — so the chart starts under whichever is lower, the rectangle
+    or the title as it actually falls, and keeps `_HEADER_GAP` clear for the
+    question. The BOTTOM edge does not move, so the customer's own margin is
+    kept.
+
+    Not when somebody has placed the content area themselves: that rectangle was
+    dragged while watching the result, and no rule of ours should move it.
+
+    Used by BOTH slot paths. It lived only in the layout-placeholder branch, and
+    `_resolve_slot` returns a template's NAMED slot on its first line without
+    ever reaching it — so on a template that names its slots the chart never
+    moved down. Biocodex names a slot at 1.90in under a title band running to
+    2.13in: the chart started inside the header and the question text was drawn
+    behind the bars on 87 of 98 slides. ("Kysymysteksti näkyy nyt graafien
+    päällä, graafien sijainti tulee muuttaa hieman alemmas sivulla")
+    """
+    if profile is None or content_is_authored:
+        return top, height
+    title_box = getattr(profile, "title", None)
+    if title_box is None or not getattr(title_box, "positioned", False):
+        return top, height
+    _l, t_top, _w, t_height = harvested_title_box(profile, title)
+    wanted = int(t_top + t_height + _HEADER_GAP)
+    if wanted <= top:
+        return top, height
+    return wanted, max(int(Inches(1.0)), height - (wanted - top))
+
+
 def _resolve_slot(prs: Presentation, style, slot_name: str,
                   render_mode: str = "native", title: str = "") -> Slot:
     """Return a Slot for *slot_name*, falling back to a new blank slide.
@@ -362,9 +403,19 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
     house-style title / accent chrome added by add_image_slide_chrome.
     """
     try:
-        return style.slot(slot_name)
+        named = style.slot(slot_name)
     except (KeyError, AttributeError):
-        pass
+        named = None
+    if named is not None:
+        # The template names this rectangle, exactly as a layout placeholder
+        # names one below — so it yields to the header by the same rule.
+        top, height = lowered_for_header(
+            int(named.top), int(named.height), getattr(style, "profile", None),
+            title, bool(getattr(style, "content_is_authored", False)))
+        if (top, height) == (int(named.top), int(named.height)):
+            return named
+        return Slot(slide_index=named.slide_index, left=named.left, top=top,
+                    width=named.width, height=height, name=named.name)
 
     # Preferred: build the slide from the template's OWN chart layout, using the
     # content placeholder the client's designer positioned. Only when a template
@@ -391,13 +442,9 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
         # below the title is how a LAYOUT's content box is kept clear of a
         # headline that runs longer than the customer's own — it has no business
         # moving a rectangle an author dragged while watching the result.
-        if (profile is not None and profile.title.positioned
-                and not getattr(style, "content_is_authored", False)):
-            _l, t_top, _w, t_height = harvested_title_box(profile, title)
-            wanted = t_top + t_height + int(Inches(0.70))
-            if wanted > top:
-                height -= wanted - top
-                top = wanted
+        top, height = lowered_for_header(
+            top, height, profile, title,
+            bool(getattr(style, "content_is_authored", False)))
         return Slot(slide_index=len(prs.slides) - 1, left=chart_slot.left,
                     top=top, width=chart_slot.width,
                     height=max(int(Inches(1.0)), height), name=slot_name)
@@ -433,12 +480,27 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
                     width=width, height=height, name=slot_name)
     if render_mode == "image":
         # Leave ~1.9" at top for house-style title chrome (REQ-C-24a, REQ-D-04)
+        top, height = int(Inches(1.9)), sh - int(Inches(2.6))
+        # …but 1.9" is a guess about OUR chrome, and a template can put its
+        # title band lower than that. Biocodex's design lives in a LAYOUT (so
+        # `harvested_profile` declines it, there being nothing to redraw) and
+        # that layout carries no chart placeholder (so `chart_slot` is None and
+        # the branch above is skipped) — leaving this guess as the only case
+        # left, with the template's own title running to 2.13". The chart began
+        # inside the header and the question text was drawn behind the bars.
+        #
+        # The style still KNOWS where that title sits, whether or not the design
+        # is ours to redraw, so the same rule the other two paths use applies
+        # here as well.
+        top, height = lowered_for_header(
+            top, height, getattr(style, "profile", None), title,
+            bool(getattr(style, "content_is_authored", False)))
         return Slot(
             slide_index=slide_index,
             left=int(Inches(0.62)),
-            top=int(Inches(1.9)),
+            top=top,
             width=sw - int(Inches(1.24)),
-            height=sh - int(Inches(2.6)),
+            height=height,
             name=slot_name,
         )
     return Slot(
