@@ -350,11 +350,12 @@ def render_to_file(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-#: Room left between the header and the chart. The QUESTION goes in this gap —
-#: the subtitle's bottom is pinned a fixed distance above the chart, so if the
-#: chart does not leave the gap there is nowhere for the question to be drawn
-#: and it lands on top of the bars.
-_HEADER_GAP = Inches(0.70)
+#: Clear space between the header and the CONTENT AREA. A plain visual margin,
+#: not room for the question: since the question is anchored inside the content
+#: box (slide_chrome.content_box) and the chart starts below IT, reserving the
+#: question's height here as well counted the same space twice and left a band
+#: of empty slide between the headline and the question.
+_HEADER_GAP = Inches(0.25)
 
 
 def lowered_for_header(top: int, height: int, profile, title: str,

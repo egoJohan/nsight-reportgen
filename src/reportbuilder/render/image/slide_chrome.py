@@ -18,6 +18,9 @@ Slide-text polish (R2):
 """
 from __future__ import annotations
 
+import dataclasses
+from dataclasses import dataclass
+
 import logging
 
 from pptx.util import Inches, Pt
@@ -352,6 +355,65 @@ def harvested_title_box(profile, text: str) -> tuple[int, int, int, int]:
     return int(st.left), int(st.top), int(st.width), height
 
 
+#: Clear space between the question and the chart, and between the chart and the
+#: footer. One number, so the content box is symmetrical top and bottom.
+_CONTENT_MARGIN = Inches(0.18)
+#: Line height of the question, as a multiple of its type size.
+_QUESTION_LINE_SPACING = 1.22
+
+
+@dataclass(frozen=True)
+class ContentBox:
+    """Where the question, the chart and nothing else go inside the content area."""
+    question_left: int
+    question_top: int
+    chart_top: int
+    chart_height: int
+
+
+def question_height(text: str, width_emu: int, size_pt: float, font: str) -> int:
+    """How tall the question really is at this width — measured with the host's
+    own font, the same `measured_line_count` the title and the bullets use."""
+    if not (text or "").strip() or width_emu <= 0:
+        return 0
+    from types import SimpleNamespace
+
+    st = SimpleNamespace(font=font, caps=False, bold=False,
+                         line_spacing=_QUESTION_LINE_SPACING)
+    lines = measured_line_count(text, int(width_emu), size_pt, st)
+    return int(lines * Pt(size_pt * _QUESTION_LINE_SPACING))
+
+
+def content_box(box, question_height: int, footer_top: int) -> ContentBox:
+    """Lay the content area out: question at the TOP-LEFT, chart beneath it,
+    both above the footer.
+
+    Johan, 2026-09-18: "subtitle anchors to the content's top left corner,
+    footer (N=xxx) anchors to the bottom right corner. Naturally with correct
+    margin (subtitle's bottom is used for anchoring, footer's top is used for
+    anchoring)."
+
+    A RESTORATION. Until 649c6bd (2026-08-23) the templated question was
+    TOP-anchored under the header and grew down. That commit pinned it to the
+    chart's top edge, bottom-anchored, growing UPWARD, so the question-to-chart
+    gap would be identical on every slide. Growing upward needs room, and a
+    template with a tall header leaves none — the arithmetic fell through to
+    `max(Inches(0.20), <negative>)` and put the question inside the bars.
+
+    Anchored at the top and growing down, that cannot happen: the question's top
+    never moves, a longer question pushes the CHART down instead of climbing
+    into the title, and the chart is bounded from below by the footer.
+    """
+    q_top = int(box.top)
+    chart_top = q_top + int(question_height)
+    if question_height:
+        chart_top += int(_CONTENT_MARGIN)
+    floor = int(footer_top) - int(_CONTENT_MARGIN)
+    height = max(int(Inches(1.0)), floor - chart_top)
+    return ContentBox(question_left=int(box.left), question_top=q_top,
+                      chart_top=chart_top, chart_height=height)
+
+
 def content_floor(slide, sw: int, sh: int) -> int:
     """The lowest point our own content may reach on *slide*.
 
@@ -443,7 +505,9 @@ def harvested_chart_box(profile, text: str, sw: int, sh: int,
     the chart is the footer's.
     """
     left, top, width, height = harvested_title_box(profile, text)
-    chart_top = top + height + int(Inches(0.70))
+    # A margin under the title, not the question's room: the question is drawn
+    # inside this box now (see `content_box`), and the chart starts below it.
+    chart_top = top + height + int(Inches(0.25))
     bottom = (sh if floor is None else floor) - int(Inches(0.70))
     return left, chart_top, width, max(int(Inches(1.0)), bottom - chart_top)
 
@@ -1017,52 +1081,15 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # slide however long the question is. Placing it under the TITLE
             # instead made that gap depend on the headline's height, and a
             # two-line headline pushed the subtitle straight through it.
-            anchor = MSO_ANCHOR.BOTTOM
+            # TOP-anchored at the content's own top-left corner, growing DOWN.
+            # The question's top never moves; a longer one pushes the CHART down
+            # instead of climbing into the title. See `content_box`.
+            anchor = MSO_ANCHOR.TOP
             if templated or profile is not None:
-                sub_bottom = int(ctx.slot.top) - int(_SUBTITLE_GAP)
-                sub_h = min(int(_SUBTITLE_MAX_H), max(int(Inches(0.30)), sub_bottom))
-                sub_top = max(0, sub_bottom - sub_h)
-                # The BOTTOM is the fixed thing — a constant gap above the chart,
-                # so that space never changes with the question's length. Growing
-                # upward stops at whatever the header already occupies: the title
-                # itself, and any rule the template draws under it (Synsam's).
-                # Without the clamp a long question climbed through both.
-                ceiling = 0
-                title_profile = getattr(ctx.style, "profile", None)
-                if title_profile is not None and title_profile.title.positioned:
-                    _l, t_top, _w, t_h = harvested_title_box(title_profile, title)
-                    ceiling = max(ceiling, int(t_top + t_h))
-                    ceiling = max(ceiling, header_furniture_floor(
-                        title_profile, int(ctx.slot.top), sw, sh))
-                # The REAL headline, not the harvested box it was sized from:
-                # the placeholder was raised and given the top margin's space, so
-                # a two-line title ends well below where the harvest says. Using
-                # the harvested bottom left the subtitle under the first line and
-                # the second line came down across it.
-                try:
-                    tph = slide.shapes.title
-                except (AttributeError, KeyError):
-                    tph = None
-                if tph is not None and title:
-                    ceiling = max(ceiling, int(tph.top or 0)
-                                  + _rendered_title_height(tph, title))
-                if ceiling:
-                    ceiling += int(Inches(0.06))     # a hair of clearance
-                # Push the box DOWN to clear the header — `min` capped it instead,
-                # which left it exactly where it had been overlapping.
-                sub_top = max(sub_top, ceiling)
-                sub_h = max(int(Inches(0.20)), sub_bottom - sub_top)
-                # Left edge and width from the TITLE, so the two line up — until
-                # somebody places the content area themselves, when the question
-                # belongs to the rectangle it introduces rather than to the
-                # headline above it. Its bottom already sits a fixed gap above
-                # that rectangle; this makes the corner agree.
-                if getattr(ctx.style, "content_is_authored", False):
-                    sub_left, sub_w = int(ctx.slot.left), int(ctx.slot.width)
-                else:
-                    t_left, t_width = title_left_width(slide, ctx.style, title)
-                    sub_left = t_left or int(ctx.slot.left)
-                    sub_w = t_width or int(ctx.slot.width)
+                sub_left = int(ctx.slot.left)
+                sub_w = int(ctx.slot.width)
+                sub_top = int(ctx.slot.top)
+                sub_h = int(_SUBTITLE_MAX_H)      # replaced once the size is known
             else:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
@@ -1075,6 +1102,20 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             s_font = getattr(ctx.style, "subtitle_font", "") or s_font
             s_size = (getattr(ctx.style, "subtitle_size_pt", 0.0)
                       or _spec_subtitle_pt(ctx.style, s_font) or 13.0)
+            if templated or profile is not None:
+                # Measured, so the CHART knows exactly where this ends. The box
+                # is only as tall as the text: a top-anchored box's unused
+                # height is not invisible, it is space taken from the chart.
+                sub_h = max(int(Inches(0.20)),
+                            question_height(secondary, sub_w, s_size, s_font))
+                layout = content_box(ctx.slot, sub_h,
+                                     footer_top(slide, sh, sw))
+                sub_left, sub_top = layout.question_left, layout.question_top
+                # Hand the chart what is left between the question and the
+                # footer. RenderContext is mutable and this runs BEFORE the
+                # builder draws, which is the whole reason the chrome goes first.
+                ctx.slot = dataclasses.replace(ctx.slot, top=layout.chart_top,
+                                               height=layout.chart_height)
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
@@ -1147,12 +1188,17 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
         # template's own foot furniture, which is what footer_top protects.
         foot_top = min(foot_top, int(ctx.slot.top) + int(ctx.slot.height)
                        + int(_SUBTITLE_GAP))
+    # BOTTOM-RIGHT, anchored to the content's right edge — the opposite corner
+    # from the question, so the two bracket the chart between them.
+    # (Johan, 2026-09-18: "footer (N=xxx) anchors to the bottom right corner")
+    foot_right = int(ctx.slot.left) + int(ctx.slot.width)
+    foot_w = int(Inches(4.0))
     _textbox(
         slide,
-        foot_left, foot_top,
-        sw - Inches(4.0), Inches(0.40),
+        max(0, foot_right - foot_w), foot_top,
+        foot_w, Inches(0.40),
         [(footer_text, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
-        align=PP_ALIGN.LEFT,
+        align=PP_ALIGN.RIGHT,
         font=_footer_font(ctx),
     )
     # Scale endpoint legend for a partially-labelled numeric scale (e.g. "1 = täysin
@@ -1162,12 +1208,16 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     if caption:
         # Right-aligned on the footer row (below the plot) so it never overlaps the
         # chart's x-axis; shares the line with the left-aligned methodology footer.
+        # LEFT of the footer row, where the methodology line used to sit: the
+        # footer now owns the right corner, and two right-aligned texts on one
+        # line would print through each other.
         _textbox(
             slide,
-            sw - Inches(6.4), foot_top,
-            Inches(6.0), Inches(0.40),
+            foot_left, foot_top,
+            max(int(Inches(2.0)), (foot_right - foot_w) - foot_left - int(Inches(0.20))),
+            Inches(0.40),
             [(caption, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
-            align=PP_ALIGN.RIGHT,
+            align=PP_ALIGN.LEFT,
             font=_footer_font(ctx),
         )
     # n is shown once, in the methodology footer above (it already reads

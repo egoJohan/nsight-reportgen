@@ -50,10 +50,19 @@ def test_a_tall_header_pushes_the_chart_down():
     assert top + height == _TOP + _HEIGHT
 
 
-def test_room_is_left_between_the_header_and_the_chart():
-    """Not flush against the title: the QUESTION goes in that gap."""
+def test_a_margin_is_left_between_the_header_and_the_content():
+    """A visual margin, not the question's room.
+
+    This asserted >= 0.5in while the question was drawn in this gap, pinned
+    above the chart. Since the question is anchored INSIDE the content box
+    (slide_chrome.content_box) and the chart starts below it, reserving the
+    question's height here too counted the same space twice and left a dead
+    band under the headline. What is left is the margin itself.
+    """
     top, _h = lowered_for_header(_TOP, _HEIGHT, _profile(0.30, 1.83), "Otsikko")
-    assert top - int(Inches(2.13)) >= int(Inches(0.5))
+    gap = top - int(Inches(2.13))
+    assert gap >= int(Inches(0.20)), "the content is flush against the title"
+    assert gap <= int(Inches(0.40)), "a dead band under the headline"
 
 
 def test_a_slot_that_already_clears_the_header_is_untouched():
