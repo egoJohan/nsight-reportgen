@@ -194,6 +194,68 @@ _LEVEL_GLYPH = {0: "•", 1: "–", 2: "·", 3: "·"}
 _LEVEL_PT = {0: 16, 1: 14, 2: 13, 3: 13}
 
 
+#: Hanging indent, and how far each nesting level steps right. Module level so
+#: the fitter measures against the SAME usable width the drawing code uses.
+_HANG = Inches(0.30)
+_STEP = Inches(0.34)
+#: Line height as a multiple of the type size, and the gap after a paragraph.
+_BULLET_LINE_SPACING = 1.22
+_BULLET_SPACE_AFTER_PT = {0: 10, 1: 4, 2: 4, 3: 4}
+#: Below this the text is too small to be worth reading; an author is better
+#: served by visible overflow than by a slide nobody can read.
+_BULLET_MIN_PT = 9.0
+
+
+def _bullet_plain(text: str) -> str:
+    """The bullet's text without its markdown, for measuring."""
+    return "".join(seg for seg, _b, _i in _md_runs(text))
+
+
+def bullets_height(bullets, width_emu: int, font: str, scale: float) -> int:
+    """How tall this bullet list really is at *scale*, measured with the host's
+    own font — the same measurement the title fitter uses, so the two agree."""
+    from types import SimpleNamespace
+
+    from reportbuilder.render.image.slide_chrome import measured_line_count
+
+    total = 0
+    for level, text in bullets:
+        pt = _LEVEL_PT.get(level, 13) * scale
+        # The hanging indent and the level's step both eat usable width.
+        usable = int(width_emu) - int(_HANG) - level * int(_STEP)
+        st = SimpleNamespace(font=font, caps=False, bold=False,
+                             line_spacing=_BULLET_LINE_SPACING)
+        lines = measured_line_count(_bullet_plain(text), max(usable, 1), pt, st)
+        total += int(lines * Pt(pt * _BULLET_LINE_SPACING))
+        total += int(Pt(_BULLET_SPACE_AFTER_PT.get(level, 4)))
+    return total
+
+
+def fit_bullet_scale(bullets, width_emu: int, height_emu: int,
+                     font: str) -> float:
+    """The factor to draw this list at so it fits its box.
+
+    1.0 whenever the list already fits, which is the common case — a themes
+    slide of four short points never moves off its own type size. Otherwise the
+    size steps down until the measured text fits, stopping at `_BULLET_MIN_PT`.
+
+    Taffel's five-theme slide overflowed the slide's bottom edge: the fifth
+    theme was cut off mid-sentence and the footer was pushed off entirely, with
+    nothing on the slide saying that text was missing. The box height and the
+    type sizes were both fixed and nothing measured the text against them.
+    """
+    if not bullets or width_emu <= 0 or height_emu <= 0:
+        return 1.0
+    biggest = max(_LEVEL_PT.get(lvl, 13) for lvl, _t in bullets)
+    floor = _BULLET_MIN_PT / biggest if biggest else 1.0
+    scale = 1.0
+    while scale > floor:
+        if bullets_height(bullets, width_emu, font, scale) <= height_emu:
+            return scale
+        scale -= 0.04
+    return max(floor, round(floor, 4))
+
+
 def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]],
                 top: int | None = None, floor: int | None = None,
                 accent=PX_TEAL, ink=PX_INK, font: str = _FONT) -> None:
@@ -216,12 +278,12 @@ def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]],
     # whole paragraph right by _STEP per level; marL is the text start (offset by
     # level), indent = -_HANG pulls the glyph back, and a left TAB STOP at marL
     # snaps the first line's text to the same x as its wrapped continuation lines.
-    _HANG = Inches(0.30)
-    _STEP = Inches(0.34)
+    scale = fit_bullet_scale(bullets, int(sw - Inches(1.6)),
+                             max(int(Inches(1.0)), bottom - top), font)
     for i, (level, text) in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.LEFT
-        p.space_after = Pt(10 if level == 0 else 4)
+        p.space_after = Pt(_BULLET_SPACE_AFTER_PT.get(level, 4))
         pPr = p._p.get_or_add_pPr()
         mar_l = int(_HANG) + level * int(_STEP)
         pPr.set("marL", str(mar_l))
@@ -229,7 +291,7 @@ def _bullet_box(slide, sw, sh, bullets: list[tuple[int, str]],
         tab_lst = pPr.makeelement(qn("a:tabLst"), {})
         tab_lst.append(pPr.makeelement(qn("a:tab"), {"pos": str(mar_l), "algn": "l"}))
         pPr.append(tab_lst)
-        pt = _LEVEL_PT.get(level, 13)
+        pt = _LEVEL_PT.get(level, 13) * scale
         # Teal bullet glyph + tab (snaps body text to the marL tab stop).
         dot = p.add_run()
         dot.text = f"{_LEVEL_GLYPH.get(level, '·')}\t"
