@@ -362,18 +362,14 @@ _CONTENT_MARGIN = Inches(0.18)
 _QUESTION_LINE_SPACING = 1.22
 
 
-@dataclass(frozen=True)
-class ContentBox:
-    """Where the question, the chart and nothing else go inside the content area."""
-    question_left: int
-    question_top: int
-    chart_top: int
-    chart_height: int
-
-
 def question_height(text: str, width_emu: int, size_pt: float, font: str) -> int:
     """How tall the question really is at this width — measured with the host's
-    own font, the same `measured_line_count` the title and the bullets use."""
+    own font, the same `measured_line_count` the title and the bullets use.
+
+    The box is only as tall as the text: it hangs BOTTOM-anchored off the
+    content's top edge, so every unused inch of it reaches further up toward
+    the headline for no reason.
+    """
     if not (text or "").strip() or width_emu <= 0:
         return 0
     from types import SimpleNamespace
@@ -384,45 +380,21 @@ def question_height(text: str, width_emu: int, size_pt: float, font: str) -> int
     return int(lines * Pt(size_pt * _QUESTION_LINE_SPACING))
 
 
-def content_box(box, question_height: int, footer_top: int) -> ContentBox:
-    """Lay the content area out: question at the TOP-LEFT, chart beneath it,
-    both above the footer.
-
-    Johan, 2026-09-18: "subtitle anchors to the content's top left corner,
-    footer (N=xxx) anchors to the bottom right corner. Naturally with correct
-    margin (subtitle's bottom is used for anchoring, footer's top is used for
-    anchoring)."
-
-    A RESTORATION. Until 649c6bd (2026-08-23) the templated question was
-    TOP-anchored under the header and grew down. That commit pinned it to the
-    chart's top edge, bottom-anchored, growing UPWARD, so the question-to-chart
-    gap would be identical on every slide. Growing upward needs room, and a
-    template with a tall header leaves none — the arithmetic fell through to
-    `max(Inches(0.20), <negative>)` and put the question inside the bars.
-
-    Anchored at the top and growing down, that cannot happen: the question's top
-    never moves, a longer question pushes the CHART down instead of climbing
-    into the title, and the chart is bounded from below by the footer.
-    """
-    q_top = int(box.top)
-    chart_top = q_top + int(question_height)
-    if question_height:
-        chart_top += int(_CONTENT_MARGIN)
-    floor = int(footer_top) - int(_CONTENT_MARGIN)
-    height = max(int(Inches(1.0)), floor - chart_top)
-    return ContentBox(question_left=int(box.left), question_top=q_top,
-                      chart_top=chart_top, chart_height=height)
-
-
-def content_floor(slide, sw: int, sh: int) -> int:
+def content_floor(slide, sw: int, sh: int, include_right: bool = False) -> int:
     """The lowest point our own content may reach on *slide*.
 
     A template's furniture usually includes something at the foot of the slide,
     and it arrives by inheritance so it is invisible to `slide.shapes`. Synsam's
     master puts its logo at 6.73in on a 7.5in slide, exactly where the "N = ..."
     footer goes, and the two printed on top of each other. A full-slide backdrop
-    is not a floor, and neither is anything in the right half — the footer is
-    left-aligned, and Attendo's brand icons live bottom-right.
+    is not a floor.
+
+    Furniture in the RIGHT half is ignored by default — that exclusion was made
+    when the footer was left-aligned and Attendo's brand icons live bottom-right,
+    where nothing of ours went. The footer has since moved to the bottom-right
+    corner (Johan, 2026-09-18), so whoever is placing IT asks with
+    `include_right=True`: on the Alflorex template's layout 7 the footer landed
+    straight on the nSight mark. The chart keeps the old, more generous floor.
     """
     floor = sh
     layout = getattr(slide, "slide_layout", None)
@@ -445,7 +417,9 @@ def content_floor(slide, sw: int, sh: int) -> int:
                 continue
             if width * height >= 0.75 * sw * sh:
                 continue
-            if top + height < sh * 0.8 or left > sw * 0.5:
+            if top + height < sh * 0.8:
+                continue
+            if not include_right and left > sw * 0.5:
                 continue
             floor = min(floor, top)
     return floor
@@ -490,8 +464,12 @@ def _footer_ink(style, fallback):
 
 
 def footer_top(slide, sh: int, sw: int) -> int:
-    """Where the methodology footer's box starts: above the template's own foot."""
-    return content_floor(slide, sw, sh) - int(Inches(0.45))
+    """Where the methodology footer's box starts: above the template's own foot.
+
+    Asks about the right half too, because that is the corner the footer now
+    occupies — see `content_floor`.
+    """
+    return content_floor(slide, sw, sh, include_right=True) - int(Inches(0.45))
 
 
 def harvested_chart_box(profile, text: str, sw: int, sh: int,
@@ -1081,15 +1059,35 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             # slide however long the question is. Placing it under the TITLE
             # instead made that gap depend on the headline's height, and a
             # two-line headline pushed the subtitle straight through it.
-            # TOP-anchored at the content's own top-left corner, growing DOWN.
-            # The question's top never moves; a longer one pushes the CHART down
-            # instead of climbing into the title. See `content_box`.
-            anchor = MSO_ANCHOR.TOP
+            # The question sits ABOVE the content area and grows UPWARD: its
+            # BOTTOM is anchored to the content's top-left corner, at the
+            # content's own left edge. The content area never moves to
+            # accommodate it — the chart fills the rectangle the template
+            # settings specify, and the question and footer place themselves
+            # against its edges. (Johan, 2026-09-18)
+            anchor = MSO_ANCHOR.BOTTOM
             if templated or profile is not None:
-                sub_left = int(ctx.slot.left)
-                sub_w = int(ctx.slot.width)
-                sub_top = int(ctx.slot.top)
+                # x and width from the TITLE: a question indented differently
+                # from the headline directly above it reads as a mistake, and
+                # the content rectangle is a separate thing an author can drag
+                # anywhere. The BOTTOM is the anchor — the question grows upward
+                # from it, so its length moves nothing but its own top edge and
+                # it can never reach down into the chart. (Johan, 2026-09-18)
+                t_left, t_width = title_left_width(slide, ctx.style, title)
+                sub_left = t_left or int(ctx.slot.left)
+                sub_w = t_width or int(ctx.slot.width)
+                sub_bottom = int(ctx.slot.top) - int(_CONTENT_MARGIN)
+                # …unless the author has placed SUB themselves in the layout
+                # editor, in which case that box says where it goes and its own
+                # bottom edge is the anchor.
+                own = getattr(ctx.style, "subtitle_rect", None)
+                if own and int(own[3] or 0) > 0:
+                    o_left, o_top, o_w, o_h = (int(v) for v in own)
+                    if o_w > 0:
+                        sub_left, sub_w = o_left, o_w
+                    sub_bottom = o_top + o_h
                 sub_h = int(_SUBTITLE_MAX_H)      # replaced once the size is known
+                sub_top = max(0, sub_bottom - sub_h)
             else:
                 sub_h, sub_top = int(Inches(0.92)), int(Inches(0.92))
                 sub_left, sub_w = int(Inches(0.80)), int(sw - Inches(1.0))
@@ -1103,19 +1101,49 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
             s_size = (getattr(ctx.style, "subtitle_size_pt", 0.0)
                       or _spec_subtitle_pt(ctx.style, s_font) or 13.0)
             if templated or profile is not None:
-                # Measured, so the CHART knows exactly where this ends. The box
-                # is only as tall as the text: a top-anchored box's unused
-                # height is not invisible, it is space taken from the chart.
+                # Only as tall as the text, so a bottom-anchored box does not
+                # reach further up than the question actually needs — the space
+                # above it belongs to the headline.
                 sub_h = max(int(Inches(0.20)),
                             question_height(secondary, sub_w, s_size, s_font))
-                layout = content_box(ctx.slot, sub_h,
-                                     footer_top(slide, sh, sw))
-                sub_left, sub_top = layout.question_left, layout.question_top
-                # Hand the chart what is left between the question and the
-                # footer. RenderContext is mutable and this runs BEFORE the
-                # builder draws, which is the whole reason the chrome goes first.
-                ctx.slot = dataclasses.replace(ctx.slot, top=layout.chart_top,
-                                               height=layout.chart_height)
+                sub_top = max(0, sub_bottom - sub_h)
+                # Growing upward stops at whatever the header already occupies:
+                # the headline as it actually falls, and any rule the template
+                # draws under it (Synsam's). Without this a long question climbs
+                # through both.
+                # Where the headline's TEXT ends, not where its box does. A
+                # template parks a title box a third of the way down the slide
+                # and a one-line headline fills the top of it; treating the box
+                # as the ceiling handed the question the 0.20in minimum on every
+                # template we have, whatever it said. The empty band under a
+                # short headline is room, and the question may use it.
+                ceiling = 0
+                title_profile = getattr(ctx.style, "profile", None)
+                if title_profile is not None and title_profile.title.positioned:
+                    _l, t_top, _w, t_h = harvested_title_box(title_profile, title)
+                    ceiling = max(ceiling, header_furniture_floor(
+                        title_profile, int(ctx.slot.top), sw, sh))
+                    if not title:
+                        # No headline: the box is all there is to go on.
+                        ceiling = max(ceiling, int(t_top + t_h))
+                # The REAL headline, not the harvested box it was sized from.
+                try:
+                    tph = slide.shapes.title
+                except (AttributeError, KeyError):
+                    tph = None
+                if tph is not None and title:
+                    ceiling = max(ceiling, int(tph.top or 0)
+                                  + _rendered_title_height(tph, title))
+                if ceiling:
+                    ceiling += int(Inches(0.06))     # a hair of clearance
+                # Clamped from BOTH sides. The header pushes the top down; the
+                # content's edge stops it there, so the box can never reach past
+                # its own bottom into the chart. That last clamp is the whole
+                # defect of 2026-09-18: `max(Inches(0.20), <negative>)` put a
+                # fifth of an inch of question inside the bars.
+                sub_top = min(max(sub_top, ceiling),
+                              sub_bottom - int(Inches(0.20)))
+                sub_h = max(int(Inches(0.20)), sub_bottom - sub_top)
             _textbox(
                 slide,
                 sub_left, sub_top, sub_w, sub_h,
@@ -1180,7 +1208,17 @@ def add_image_slide_chrome(ctx: RenderContext) -> None:
     # margins are the customer's, and a footer 0.08in off from the chart above
     # it reads as a mistake rather than as a choice.
     foot_left = int(ctx.slot.left) if (templated or profile is not None) else int(Inches(0.62))
-    foot_top = footer_top(slide, sh, sw)
+    # The footer's TOP is anchored to the content's BOTTOM, the opposite corner
+    # from the question. The content does not move for it; it places itself
+    # against the rectangle the template settings specify. Never below the
+    # template's own foot furniture, which is what `footer_top` protects — and
+    # that now includes the right half, since this is the corner the footer
+    # occupies. (Johan, 2026-09-18)
+    foot_top = int(ctx.slot.top) + int(ctx.slot.height) + int(_CONTENT_MARGIN)
+    if templated or profile is not None:
+        foot_top = min(foot_top, footer_top(slide, sh, sw))
+    else:
+        foot_top = footer_top(slide, sh, sw)
     if getattr(ctx.style, "content_is_authored", False):
         # Under the chart the author placed, not at a height fixed by the
         # template — the x already followed the chart and only the y did not,

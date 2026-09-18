@@ -215,6 +215,31 @@ def load_style_spec(template_path: str,
             # in colours that appear nowhere in their template.
             spec.background = spec.profile.background or spec.background
             spec.accent = spec.accent or spec.profile.accent
+        if spec.profile.layout_index is not None:
+            # The ground this LAYOUT states, which the theme does not describe.
+            try:
+                stated = layout_background(
+                    prs.slide_layouts[spec.profile.layout_index],
+                    _theme_colours(prs))
+            except Exception:  # noqa: BLE001 — never fail a style over a colour
+                stated = ""
+            if stated:
+                spec.background = stated
+            # …and the colours that layout writes its own text in. An author's
+            # override still wins: these are only set where nobody has said.
+            try:
+                from pptx.enum.shapes import PP_PLACEHOLDER as _PP
+
+                _layout = prs.slide_layouts[spec.profile.layout_index]
+                _theme = _theme_colours(prs)
+                if not spec.chart_text_colour:
+                    spec.chart_text_colour = layout_text_colour(
+                        _layout, {_PP.OBJECT, _PP.BODY}, _theme)
+                if not getattr(spec, "footer_colour", ""):
+                    spec.footer_colour = layout_text_colour(
+                        _layout, {_PP.FOOTER}, _theme)
+            except Exception:  # noqa: BLE001 — never fail a style over a colour
+                pass
         if (spec.profile.layout_index is not None
                 and spec.profile.layout_content_is_chart_area):
             content = _largest_content_placeholder(
@@ -226,6 +251,107 @@ def load_style_spec(template_path: str,
                     width=int(content.width or 0), height=int(content.height or 0),
                     name="chart")
     return spec
+
+
+#: The theme slot a `<a:schemeClr>` in a background refers to. bg1/tx1 are the
+#: light/dark pair swapped by the slide master; lt1/dk1 name them directly.
+_BG_SCHEME_SLOT = {"bg1": "lt1", "tx1": "dk1", "bg2": "lt2", "tx2": "dk2",
+                   "lt1": "lt1", "dk1": "dk1", "lt2": "lt2", "dk2": "dk2"}
+
+
+def _theme_colours(prs) -> dict:
+    """{slot: RRGGBB} for the theme's own colour scheme, so a `<a:schemeClr>`
+    in a layout's background can be resolved to a colour."""
+    import xml.etree.ElementTree as _ET
+
+    _A = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    out: dict[str, str] = {}
+    try:
+        part = prs.slide_masters[0].part.part_related_by(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme")
+        root = _ET.fromstring(part.blob)
+    except Exception:  # noqa: BLE001 — no theme is no colours, not a failure
+        return out
+    slots = ["lt1", "dk1", "lt2", "dk2"] + [f"accent{i}" for i in range(1, 7)]
+    for slot in slots:
+        el = root.find(f".//a:clrScheme/a:{slot}", _A)
+        if el is None:
+            continue
+        srgb = el.find("a:srgbClr", _A)
+        sysc = el.find("a:sysClr", _A)
+        value = srgb.get("val") if srgb is not None else (
+            sysc.get("lastClr") if sysc is not None else None)
+        if value:
+            out[slot] = value.upper()
+    return out
+
+
+def layout_text_colour(layout, wanted, theme: dict) -> str:
+    """The colour a LAYOUT states for one of its placeholders, or "".
+
+    A template says what colour its own text is, and on a layout with a ground
+    of its own it is the only thing that does: Alflorex's "Sisältö_tumma2"
+    writes its title and content in `schemeClr accent2` (FAEA90) over a navy
+    background, while "Sisältö_valkoinen" writes both in `tx2` (31415A). We
+    were deriving a colour from the ground instead — legible, but not theirs —
+    so a deck came back in colours that appear nowhere in the template.
+    (Johan, 2026-09-18: "Correct the coloring.")
+
+    Read in the order PowerPoint resolves it: a run's own colour, the
+    paragraph's, then the placeholder's list style.
+    """
+    import re as _re
+
+    for shape in getattr(layout, "placeholders", []):
+        try:
+            if shape.placeholder_format.type not in wanted:
+                continue
+            xml = shape._element.xml
+        except Exception:  # noqa: BLE001
+            continue
+        literal = _re.search(r'<a:(?:solidFill)>\s*<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)
+        named = _re.search(r'<a:(?:solidFill)>\s*<a:schemeClr val="(\w+)"', xml)
+        if literal:
+            return literal.group(1).upper()
+        if named:
+            slot = _BG_SCHEME_SLOT.get(named.group(1), named.group(1))
+            value = (theme or {}).get(slot, "")
+            if value:
+                return str(value).lstrip("#").upper()
+    return ""
+
+
+def layout_background(layout, theme: dict) -> str:
+    """The ground a LAYOUT states for itself, or "" when it inherits one.
+
+    A layout may override the master's background outright — Alflorex's
+    "Sisältö_tumma2" states `srgbClr 31415A` while "Sisältö_valkoinen" inherits
+    `schemeClr bg1`. Both were described as the theme's lt1, so a dark layout
+    was drawn with the ink, muted and grid of a light one, and the text came out
+    dark on a dark slide. (Johan, 2026-09-18)
+
+    Only what the layout itself says. An inherited background is the master's
+    and the theme already answers for it.
+    """
+    import re as _re
+
+    try:
+        xml = layout.element.xml
+    except Exception:  # noqa: BLE001 — a layout we cannot read states nothing
+        return ""
+    found = _re.search(r"<p:bg>.*?</p:bg>", xml, _re.S)
+    if not found:
+        return ""
+    frag = found.group(0)
+    literal = _re.search(r'srgbClr val="([0-9A-Fa-f]{6})"', frag)
+    if literal:
+        return literal.group(1).upper()
+    named = _re.search(r'schemeClr val="(\w+)"', frag)
+    if named:
+        slot = _BG_SCHEME_SLOT.get(named.group(1))
+        if slot:
+            return str((theme or {}).get(slot, "") or "").lstrip("#").upper()
+    return ""
 
 
 def _largest_content_placeholder(layout):
@@ -344,6 +470,7 @@ def apply_template_overrides(spec, overrides: dict | None) -> None:
         spec.subtitle_size_pt = _num(subtitle["size"])
     if _hex(subtitle.get("colour")):
         spec.subtitle_colour = _hex(subtitle["colour"])
+    _apply_subtitle_box(spec, subtitle)
 
     # The footer is the "n = 3144" line. It is a font role already, so its size
     # and face go where every other chart-text size goes.
@@ -453,6 +580,31 @@ def effective_content_rect(spec) -> tuple[int, int, int, int]:
     left = max(0, min(left, (sw or left + width) - width))
     top = max(0, min(top, (sh or top + height) - height))
     return left, top, width, height
+
+
+def _apply_subtitle_box(spec, given: dict) -> None:
+    """The question's own rectangle — the SUB area in the layout editor.
+
+    It had none until 2026-09-18: it was placed relative to the content, a fixed
+    gap above the chart, sharing the title's left and width. That is still the
+    DEFAULT and stays exactly as it was when nobody has dragged SUB — absence
+    here means the derivation, not a blank rectangle.
+
+    Only the BOTTOM edge of this box is an anchor. The question is drawn
+    bottom-anchored inside it and grows upward, so its length moves nothing but
+    its own top edge, and it can never reach down into the content.
+    """
+    edges = {k: _num(given.get(k)) for k in ("x", "y", "w", "h")}
+    if all(v is None for v in edges.values()):
+        return
+    current = getattr(spec, "subtitle_rect", None)
+    left, top, width, height = current or (0, 0, 0, 0)
+    spec.subtitle_rect = (
+        int(edges["x"] * _EMU_PER_INCH) if edges["x"] is not None else int(left),
+        int(edges["y"] * _EMU_PER_INCH) if edges["y"] is not None else int(top),
+        int(edges["w"] * _EMU_PER_INCH) if edges["w"] is not None else int(width),
+        int(edges["h"] * _EMU_PER_INCH) if edges["h"] is not None else int(height),
+    )
 
 
 def _apply_slot(spec, given: dict) -> None:

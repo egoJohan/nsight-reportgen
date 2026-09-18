@@ -28,13 +28,27 @@ import { toast } from "sonner";
 
 type AreaKey = "title" | "content" | "subtitle" | "footer";
 
-/** The two with a box of their own, and the only two drawn on the sample.
+/** The areas with a box of their own, which are the ones drawn on the sample.
  *
- *  The subtitle and the footer are placed RELATIVE to these — a fixed gap above
- *  the chart, a fixed gap above the template's own foot — so there is nothing
- *  about them to drag, and an outline that cannot be moved is furniture sitting
- *  on top of the picture it obscures. They keep their font, size and colour. */
-const PLACED: AreaKey[] = ["title", "content"];
+ *  The SUBTITLE has its own rectangle since 2026-09-18. It used to be placed
+ *  relative to the content — a fixed gap above the chart — which meant a
+ *  template whose content area starts high left it nowhere to go, and it was
+ *  drawn over the chart. It anchors to the BOTTOM of its own box now and grows
+ *  upward from there, so its length changes nothing but its own top edge.
+ *
+ *  The FOOTER is still relative: its top follows the content's bottom edge, and
+ *  an outline that cannot be moved is furniture sitting on the picture it
+ *  obscures. It keeps its font, size and colour. */
+const PLACED: AreaKey[] = ["title", "subtitle", "content"];
+
+/** What each area is called on the slide. "SUB" rather than "subtitle": the
+ *  chip sits in the gutter beside a box that can be a quarter-inch tall. */
+const AREA_LABEL: Record<AreaKey, string> = {
+  title: "Title",
+  subtitle: "Sub",
+  content: "Content",
+  footer: "Footer",
+};
 
 const TONE: Record<AreaKey, { border: string; fill: string; chip: string }> = {
   title: { border: "border-sky-500", fill: "bg-sky-500/10", chip: "bg-sky-500" },
@@ -291,11 +305,19 @@ export function TemplateSlidePreview({ state }: { state: State }) {
               }}
               title={`${key} — drag to move, pull an edge to resize`}
             >
+              {/* In the LEFT gutter, reading downward, with the label's TOP on
+                  the area's top edge. Stacked above the box the chips covered
+                  the area above them — three areas now sit one under another —
+                  and a rotation anchored at the bottom grew the label upward
+                  off its own edge.
+
+                  Rounded both ends. (Johan, 2026-09-18) */}
               <span
-                className={"absolute left-0 top-0 -translate-y-full rounded-t px-1.5 py-0.5 "
-                  + `text-[10px] font-medium uppercase tracking-wide text-white ${tone.chip}`}
+                className={"absolute right-full top-0 rounded px-1 py-1.5 "
+                  + "text-[10px] font-medium tracking-wide text-white "
+                  + `[writing-mode:vertical-rl] rotate-180 ${tone.chip}`}
               >
-                {key}
+                {AREA_LABEL[key]}
               </span>
               {busy === key && (
                 <span className="absolute right-1 top-1 rounded bg-background/90 px-1 py-0.5 text-[10px] font-mono">

@@ -301,6 +301,37 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
 
     title_left = int(getattr(title, "left", 0) or slot_left)
     title_width = int(getattr(title, "width", 0) or slot_w)
+    # Where SUB lands when nobody has placed it: the band BELOW THE TITLE and
+    # above the content. It used to be reported as a fixed 0.55in hugging the
+    # content's top edge, which on a template whose title runs low put the
+    # default box straight through the headline. Its BOTTOM is the anchor — the
+    # question grows upward from there — so the band's bottom is what the
+    # renderer uses, and the top is what an author sees it start from.
+    # (Johan, 2026-09-18)
+    # The colours the RENDERER would use for each piece of text on this layout,
+    # so the editor shows what the slide will look like and they follow the
+    # layout dropdown. content/subtitle/footer reported none at all — content's
+    # was the literal "", subtitle's echoed a saved override or nothing — so
+    # those swatches sat blank and never moved however the layout changed.
+    # (Johan, 2026-09-18)
+    from reportbuilder.render.resolved_style import furniture as _furniture
+
+    try:
+        _ink, _muted, _grid = _furniture(style)
+    except Exception:  # noqa: BLE001 — a style we cannot read shows no swatch
+        _ink, _muted = "", ""
+    _ink = (_ink or "").lstrip("#").upper()
+    _muted = (_muted or "").lstrip("#").upper()
+    _margin = int(0.18 * 914400)
+    _title_bottom = int(getattr(title, "top", 0) or 0) + int(getattr(title, "height", 0) or 0)
+    # The BOTTOM is the anchor and it is never negotiable: a box that reaches
+    # past it puts the question in the chart, which is the defect this whole
+    # layout came from. The top then starts under the title where the band
+    # allows, and reaches up into the title's own box where it does not —
+    # which is where a long question renders anyway, the box being mostly the
+    # empty space under a one-line headline.
+    _sub_bottom = max(0, slot_top - _margin)
+    _sub_top = max(0, min(_title_bottom, _sub_bottom - int(0.20 * 914400)))
     # Where the "n = 100" line really goes, from the function that puts it
     # there — a guess of "near the bottom" drew the box somewhere the text was
     # not. content_floor reads the template's own foot furniture, which is why
@@ -361,27 +392,29 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
                 "w": _in(slot_w), "h": _in(slot_h),
                 "font": getattr(style, "body_font", "") or "",
                 "size": (getattr(style, "fonts", {}) or {}).get("category_names", ("", 0))[1],
-                "colour": "",
+                "colour": _ink,
             },
-            # Derived, not placed: the subtitle sits a fixed gap above the
-            # chart sharing the title's left and width, and the footer a fixed
-            # gap above the template's own foot. Reported so an author can SEE
-            # where they land — and restyle them — without being offered a drag
-            # that would do nothing.
+            # SUB is PLACED since 2026-09-18 — it has a box of its own, and the
+            # numbers below are only where it lands when nobody has moved it: a
+            # fixed gap above the content, sharing the title's left and width.
+            # Its BOTTOM edge is the anchor; the question grows upward from it.
+            # The FOOTER is still derived — its top follows the content's bottom
+            # edge — and is reported so an author can see where it lands and
+            # restyle it, without being offered a drag that would do nothing.
             "subtitle": {
-                "x": _in(title_left), "y": _in(max(0, slot_top - int(0.18 * 914400)
-                                                   - int(0.55 * 914400))),
-                "w": _in(title_width), "h": 0.55,
+                "x": _in(title_left), "y": _in(_sub_top),
+                "w": _in(title_width), "h": _in(_sub_bottom - _sub_top),
                 "font": getattr(style, "body_font", "") or "",
                 "size": getattr(style, "subtitle_size_pt", 0) or 13,
-                "colour": getattr(style, "subtitle_colour", "") or "",
-                "derived": True,
+                "colour": (getattr(style, "subtitle_colour", "") or "").lstrip("#").upper()
+                          or _muted,
             },
             "footer": {
                 "x": _in(title_left), "y": _in(footer_y), "w": _in(title_width), "h": 0.35,
                 "font": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[0],
                 "size": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[1],
-                "colour": getattr(style, "footer_colour", "") or "",
+                "colour": (getattr(style, "footer_colour", "") or "").lstrip("#").upper()
+                          or _muted,
                 "derived": True,
             },
             "accent": getattr(style, "accent", "") or "",

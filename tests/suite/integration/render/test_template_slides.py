@@ -46,8 +46,16 @@ _LONG = ("Attendo liitetään vahvimmin attribuutteihin luotettava ja "
 #: The question, which becomes the subtitle when a distinct headline is set.
 _QUESTION = "Mikä seuraavista vastaa työtilannettasi tällä hetkellä?"
 
+#: Long enough to wrap, for the test that length moves only its own top edge.
+_LONG_QUESTION = (
+    "Mikä seuraavista vaihtoehdoista vastaa parhaiten omaa työtilannettasi "
+    "juuri tällä hetkellä, ja kuinka pitkään tilanne on jatkunut "
+    "samanlaisena, ja millaisia muutoksia olet siihen viimeisen vuoden "
+    "aikana tehnyt tai suunnitellut tekeväsi lähitulevaisuudessa, ja kuinka "
+    "tyytyväinen olet nykyiseen tilanteeseesi kokonaisuutena arvioiden?")
 
-def _render(name, title=_LONG, headline=""):
+
+def _render(name, title=_LONG, headline="", question=None):
     """Render one chart into *name*'s template. With *headline* set, the title is
     the headline and the QUESTION becomes the subtitle line under it."""
     path = pathlib.Path(_TEMPLATES[name])
@@ -59,7 +67,7 @@ def _render(name, title=_LONG, headline=""):
         charts = tuple(dataclasses.replace(c, slide_title=headline)
                        for c in report.charts)
         report = dataclasses.replace(report, charts=charts)
-        title = _QUESTION
+        title = question or _QUESTION
     prs = render_report(report, {"q1": known_series()}, style, titles={"q1": title})
     return style, prs, prs.slides[0]
 
@@ -73,6 +81,12 @@ def _picture(slide):
 def _subtitle(slide):
     return next(s for s in slide.shapes
                 if s.has_text_frame and s.text_frame.text.strip() == _QUESTION)
+
+
+def _subtitle_text(slide, text):
+    """The question box, found by the text it carries."""
+    return next(s for s in slide.shapes
+                if s.has_text_frame and s.text_frame.text.strip() == text)
 
 
 def _title_shape(slide, text):
@@ -322,21 +336,69 @@ class TestTheDeckIsInTheTemplatesColours:
                              accent=chart_accent(ctx)) == ["#13615E"]
 
 
-class TestTheSubtitleBelongsToTheTitle:
-    def test_it_sits_under_the_title_not_over_the_chart(self):
-        """It used to hang off the chart, floating in a band of empty cream."""
-        style, _prs, slide = _render("agent_deck", headline=_LONG)
-        sub = _subtitle(slide)
-        st = style.profile.title
-        assert sub.top >= st.top + st.height
-        assert sub.top + sub.height <= _picture(slide).top + 1
+class TestTheQuestionBelongsToTheContent:
+    """Where the question goes, and what gives when it does not fit.
 
-    def test_it_clears_the_graphic_the_template_rules_under_the_title(self):
-        """Synsam's rule sits below its title box; placing the subtitle by the
-        title's height alone landed the text across it."""
-        _style, _prs, slide = _render("synsam", headline=_LONG)
-        rule = next(s for s in slide.shapes if s.shape_type == MSO_SHAPE_TYPE.LINE)
-        assert _subtitle(slide).top >= rule.top + rule.height
+    This class used to assert that the question always lands below the title
+    band and clears whatever the template rules under it. That held because the
+    CHART moved down to make the room. It does not any more: the content area is
+    what the template settings say it is and nothing moves for anything
+    (Johan, 2026-09-18). The question's bottom is pinned to the content's top
+    and it grows UPWARD, so on a template that leaves it no room the overflow
+    goes into the title band — the empty space under a one-line headline —
+    rather than into the chart.
+
+    agent_deck is exactly that template: its title band ends at 1.48in and its
+    content starts at 1.73in, so a two-line question has 0.25in for 0.45in of
+    text. An author who minds drags SUB, which has had a box of its own since
+    the same day.
+
+    What must hold everywhere is the defect this all came from: no question, at
+    any length, may put a word inside the chart.
+    """
+
+    _ALL = ["attendo", "synsam", "holidayclub", "agent_deck"]
+
+    @pytest.mark.parametrize("name", _ALL)
+    def test_it_never_reaches_into_the_chart(self, name):
+        """The invariant, on every template and at any question length."""
+        _style, _prs, slide = _render(name, headline=_LONG,
+                                      question=_LONG_QUESTION)
+        sub = _subtitle_text(slide, _LONG_QUESTION)
+        assert sub.top + sub.height <= _picture(slide).top + 1, (
+            "the question reaches into the chart")
+
+    @pytest.mark.parametrize("name", _ALL)
+    def test_the_chart_never_moves_for_the_question(self, name):
+        """The content area is the template's, not something we negotiate."""
+        _s1, _p1, short = _render(name, headline=_LONG, question="Lyhyt?")
+        _s2, _p2, long_ = _render(name, headline=_LONG, question=_LONG_QUESTION)
+        assert _picture(short).top == _picture(long_).top
+        assert _picture(short).height == _picture(long_).height
+
+    def test_a_longer_question_grows_upward_where_there_is_room(self):
+        """Its bottom is the anchor, so length changes its top and nothing else.
+
+        With a SHORT headline Attendo leaves a band between its title and its
+        content. A long headline eats that band on every one of these four, and
+        the question is then clamped to the 0.20in minimum whatever it says —
+        the squeeze this class's docstring describes.
+        """
+        _s1, _p1, short = _render("attendo", headline="Lyhyt otsikko",
+                                  question="Lyhyt?")
+        _s2, _p2, long_ = _render("attendo", headline="Lyhyt otsikko",
+                                  question=_LONG_QUESTION)
+        a = _subtitle_text(short, "Lyhyt?")
+        b = _subtitle_text(long_, _LONG_QUESTION)
+        assert a.top + a.height == b.top + b.height, "the bottom moved"
+        assert b.top < a.top, "a longer question did not grow upward"
+
+    # Synsam rules a line under its title and the question used to be asserted
+    # to clear it. That held while the CHART moved down to make the room; on
+    # Synsam it no longer does, and the question is clamped into the band above
+    # the content whether or not the rule is there. Keeping the assertion would
+    # be asserting the old model. What replaced it is the pair above: the chart
+    # never moves, and the question never reaches into it. (Johan, 2026-09-18)
 
 
 class TestWhenHarvestingFails:
