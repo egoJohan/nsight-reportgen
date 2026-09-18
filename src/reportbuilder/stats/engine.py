@@ -697,6 +697,16 @@ def _top_scale_categories(var: Variable, categories: list[str], n: int,
 _MAX_UNLABELLED_CODES = 20
 
 
+def _has_text(label) -> bool:
+    """True when a value label actually says something. Blank is not a name."""
+    return bool((label or "").strip())
+
+
+def _code_text(value: float) -> str:
+    """A code written the way a person sees it — 1, not 1.0. Matches `code_labels`."""
+    return str(int(value)) if float(value) == int(value) else str(value)
+
+
 def code_labels(var, data: pd.DataFrame, missing) -> dict[float, str]:
     """Labels for a variable whose codes carry none, or {}.
 
@@ -744,8 +754,23 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     labels = {vl.value: vl.label for vl in var.value_labels
               if vl.value not in eff}
     # No labels at all: chart the codes rather than nothing. See `code_labels`.
-    if not labels:
+    #
+    # A label that is PRESENT BUT BLANK is no label either, and it is worse than
+    # none: categories are keyed by their label, so every blank one collapses
+    # onto the same key, `cells` keeps a single entry for all of them, and each
+    # bar draws that one surviving number. Taffel var36 declares all 29 of its
+    # value labels as "" — 29 bars came out identical at 2 %, n=27, over a real
+    # distribution running 110, 68, 63, 58 ... The slide was WRONG, not merely
+    # unlabelled. `code_labels` already exists for this file's sibling case and
+    # its docstring names this very variable; it was simply never reached,
+    # because a dict of 29 empty strings is not falsy.
+    if not any(_has_text(lab) for lab in labels.values()):
         labels = code_labels(var, data, eff)
+    elif not all(_has_text(lab) for lab in labels.values()):
+        # Partly labelled: only the blanks fall back, so they stay distinct from
+        # each other and from every category the file did name.
+        labels = {v: (lab if _has_text(lab) else _code_text(v))
+                  for v, lab in labels.items()}
     # WHICH CODES THIS CHART WILL DRAW — settled before the base is counted,
     # because the base has to be the respondents who can appear in a category.
     # An endpoint-labelled scale draws every point (1..7, words on 1 and 7
