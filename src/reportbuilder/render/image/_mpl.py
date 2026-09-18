@@ -689,7 +689,13 @@ def auto_decimals(values: list[float], statistic: str) -> int:
         return 1 if statistic == "mean" else 0
     if statistic == "pct":
         all_large = all(v >= 10.0 for v in clean)
-        frac_trivial = all(abs(v % 1) < 0.05 for v in clean)
+        # Distance to the NEAREST integer, not the fraction above the floor:
+        # a share recomputed as v/total*100 lands a hair either side of a
+        # whole number, and `v % 1` reads 28.999999999999996 as 0.99999 --
+        # a large fraction -- so one binary artefact put a decimal on every
+        # number of the slide. See test_auto_decimals_pct_whole_numbers_a
+        # _hair_BELOW_the_integer_zero.
+        frac_trivial = all(abs(v - round(v)) < 0.05 for v in clean)
         if all_large or frac_trivial:
             return 0
         sorted_vals = sorted(clean)

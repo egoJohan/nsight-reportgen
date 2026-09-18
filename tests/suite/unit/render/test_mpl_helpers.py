@@ -122,6 +122,27 @@ def test_auto_decimals_pct_all_large_zero_even_with_nontrivial_fraction():
     assert _mpl.auto_decimals([50.2, 50.7], "pct") == 0
 
 
+def test_auto_decimals_pct_whole_numbers_a_hair_BELOW_the_integer_zero():
+    """A share computed as v/total*100 lands either side of the integer.
+
+    Real slide (Attendo "Mainio-kodit", n=219): the engine produced whole
+    percentages 12, 50, 9, 29, and the pie recomputed each wedge's share as
+    v/total*100 — which in binary gives 28.999999999999996 for the 29. The
+    "is this effectively an integer" test measured the fraction UP FROM THE
+    FLOOR (`v % 1`), so 0.99999... read as a large fraction, the whole slide
+    fell through to one decimal and printed "29.0 %" beside sister slides
+    printing "29 %". Distance to the NEAREST integer is what was meant.
+    """
+    assert _mpl.auto_decimals([12.0, 50.0, 9.000000000000002,
+                               28.999999999999996], "pct") == 0
+
+
+def test_auto_decimals_pct_genuinely_fractional_small_value_still_one():
+    """The guard above must not swallow a real fraction: .8 is not a rounding
+    artefact, and a value under 10 with one still earns its decimal."""
+    assert _mpl.auto_decimals([12.0, 50.0, 8.8, 29.2], "pct") == 1
+
+
 def test_auto_decimals_pct_small_value_with_tight_spread_one():
     # A value < 10 (not all_large) with a non-trivial fraction -> one decimal.
     assert _mpl.auto_decimals([8.2, 8.9], "pct") == 1
