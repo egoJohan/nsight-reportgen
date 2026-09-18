@@ -124,3 +124,20 @@ def test_one_long_name_among_short_ones_stays_flat():
         "rotated a chart that was legible flat — the test is adjacent PAIRS, "
         "not the widest name on its own")
     assert got["collisions"] == []
+
+
+#: Five statements of the length a real battery has. The shared fitter wraps
+#: these onto two lines and they stand clear, which reads better than rotating
+#: them — so rotation must not fire here. (nsight_regressiot, the employer
+#: battery: an earlier version of this rule rotated it from raw label widths.)
+FIVE_REAL = ["Työni on merkityksellistä", "Palkkani on oikeudenmukainen",
+             "Saan tukea esihenkilöltäni", "Työvälineeni toimivat hyvin",
+             "Voin kehittyä työssäni"]
+
+
+def test_names_the_fitter_can_wrap_are_not_rotated():
+    got = _tick_boxes(FIVE_REAL)
+    assert got["collisions"] == []
+    assert all(r == 0 for r in got["rotations"]), (
+        "rotated names the shared label fitter had already made fit — rotation "
+        "is the last resort, not the first")

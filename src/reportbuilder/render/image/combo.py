@@ -19,6 +19,7 @@ Returns None.
 from __future__ import annotations
 
 from reportbuilder.render.image._mpl import VALUE_GID
+from reportbuilder.render.image import label_fit
 from reportbuilder.render.image.label_fit import register_category_labels
 
 from reportbuilder.render.image._mpl import (
@@ -162,45 +163,54 @@ def line_label_anchor(
     return max(min(v, top_here - clearance), b_lo + clearance), False
 
 
+def _names_collide(fig, ax) -> bool:
+    """Whether two category names are printed over each other, as drawn.
+
+    Unrotated at the point this is asked, so a plain box intersection is the
+    right instrument; a rotated label would need the oriented test the overlap
+    oracle uses.
+    """
+    r = fig.canvas.get_renderer()
+    boxes = [t.get_window_extent(r) for t in ax.get_xticklabels() if t.get_text()]
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
+                    and min(a.y1, b.y1) - max(a.y0, b.y0) > 0.5):
+                return True
+    return False
+
+
 def _set_category_ticks(fig, ax, cats, ink) -> None:
-    """The names along the bottom: flat where they fit, wrapped and rotated
-    where they do not.
+    """The names along the bottom, rotated only if they cannot be fitted flat.
 
-    This used to set them flat at full length whatever they were. On Attendo's
-    brand battery — fourteen statements like "Mahdollistaa hyvän arjen" and
-    "Tarjoaa laadukkaita hoivapalveluita" — that prints an unreadable smear
-    along the axis, each name straight through its neighbour, measured at 19px
-    of overlap on every battery combo in the study.
+    The combo used to set them flat at full length whatever they were. On
+    Attendo's brand battery — fourteen statements like "Mahdollistaa hyvän
+    arjen" — that prints an unreadable smear, each name through its neighbour,
+    measured at 19px of overlap on every battery combo in the study.
 
-    Every bar builder already knows this: `build_image_column` wraps and
-    rotates, `build_image_column_stacked` measures the widest name against the
-    column pitch first. The measured form is the one taken here, so a combo
-    whose names already fit is drawn exactly as before — rotation costs
-    vertical room and a little legibility, and is only worth it for names that
-    need it.
+    Rotation is the LAST resort, not the first. `label_fit` already re-wraps
+    registered category names until they stand clear, and it succeeds on the
+    ordinary chart: five statements come out flat on two lines with nothing
+    touching. Deciding from raw label widths instead — which an earlier version
+    of this did — rotated those too, which is worse to read than what the
+    fitter had already achieved. So the fitter is given its turn first and only
+    what it cannot resolve is rotated.
+
+    `fit_category_labels` runs again inside `render_png`; it measures before it
+    changes anything, so a second call on settled labels does nothing.
     """
     fs = 11.5
-    x0, x1 = ax.get_xlim()
-    pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
-    widths = [_text_extent_px(fig, str(c), fs)[0] for c in cats]
-    # Adjacent PAIRS, not the widest name. Each name is centred on its column,
-    # so two neighbours touch when their half-widths together exceed the pitch —
-    # and a long name flanked by short ones ("1- Ei lainkaan ylpeä" between "2"
-    # and "3") has their room to spill into and needs no rotation. Measuring the
-    # widest alone rotated that chart, which had been perfectly legible flat.
-    need = max(((widths[i] + widths[i + 1]) / 2.0
-                for i in range(len(widths) - 1)), default=0.0)
-    if need <= pitch_px * 0.92:
-        ax.set_xticklabels(cats, fontsize=fs, color=ink)
+    ax.set_xticklabels(cats, fontsize=fs, color=ink)
+    register_category_labels(ax, "x", cats)
+    fig.canvas.draw()
+    label_fit.fit_category_labels(fig)
+    if not _names_collide(fig, ax):
         return
-    # Rotated, NOT wrapped. Wrapping makes each name a taller block, and a
-    # taller block at 30 degrees reaches further sideways — three pairs still
-    # grazed by 5.4px that way. Rotated single lines are parallel, so what
-    # separates them is the column pitch, which wrapping does not change.
-    # `build_image_column_stacked` rotates without wrapping for the same reason.
-    ax.set_xticklabels([str(c) for c in cats],
-                       fontsize=fs, color=ink, rotation=_XTICK_ROTATION,
-                       ha="right", rotation_mode="anchor")
+    # Rotated, not wrapped: a wrapped name is a taller block, and a taller
+    # block at 30 degrees reaches further sideways. Rotated single lines are
+    # parallel, so what separates them is the column pitch.
+    ax.set_xticklabels([str(c) for c in cats], fontsize=fs, color=ink,
+                       rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor")
 
 
 def _draw_primary_gridlines(ax, ax2, ctx, grid, primary_max: float) -> None:
@@ -437,7 +447,6 @@ def build_image_combo(ctx) -> None:
     ax.tick_params(axis="both", length=0)
     ax.set_xticks(x)
     _set_category_ticks(fig, ax, cats, ink)
-    register_category_labels(ax, "x", cats)
     ax.yaxis.set_tick_params(labelcolor=muted, labelsize=9.5)
 
     # The value the primary axis has to reach. The gridlines themselves are
