@@ -49,7 +49,7 @@ from reportbuilder.render.base import note
 from reportbuilder.render.house_style import (
     series_colors, scale_colors, contrast_ink, MUTED, register_fonts,
 )
-from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
+from reportbuilder.stats.engine import NOT_ANSWERED_LABEL, _BANDED_LABEL
 from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 from reportbuilder.model.report import default_label
 from reportbuilder.render.image._mpl import template_palette
@@ -358,6 +358,32 @@ def _leading_number(label: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _labels_are_a_numeric_scale(labels) -> bool:
+    """True when these legend labels are a RATING SCALE, safe to print as bare
+    numbers ("1 - Täysin eri mieltä", "2", … "7 - …" -> "1 2 … 7").
+
+    A rating scale's point is a single number that stands for itself. A BAND
+    states a range, and its first number is not a name for it: Prima Pet's
+    "20–40 euroa / kuukausi" shortened to "20", so the slide showed 82 % against
+    a bare 20 with nothing saying it meant twenty to forty euros a month. The
+    words were not moved to a caption — they were gone.
+
+    The series legend learned this in 2026-09-09, when Finnish age bands drew
+    "18 25 35 45"; that fix switched shortening off for the classifier's groups
+    and left the CATEGORY legend shortening anything that opens with a figure.
+    The band test is the general answer, so both legends now ask the same
+    question. Shares `_BANDED_LABEL` with the engine, which reads the same
+    shapes when it decides what a banded answer is worth.
+    """
+    labels = list(labels)
+    if len(labels) < 3:
+        return False
+    nums = [_leading_number(l) for l in labels]
+    if any(n is None for n in nums):
+        return False
+    return not any(_BANDED_LABEL.match(str(l)) for l in labels)
+
+
 #: How far below the plot the legend row sits, as a share of the axes height.
 #: Was 0.08, which left about 7pt between an x-axis TITLE and the legend — the
 #: two read as one crowded block. ("Maybe add a bit space between the legend and
@@ -405,8 +431,8 @@ def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
     authored = {short for _full, short in
                 (getattr(ctx.spec, "category_label_overrides", None) or ())}
     nums = [_leading_number(l) for l in labels]
-    numeric_scale = (shorten_numeric and len(nums) >= 3
-                     and all(n is not None for n in nums)
+    numeric_scale = (shorten_numeric
+                     and _labels_are_a_numeric_scale(labels)
                      and not any(l in authored for l in labels))
     if numeric_scale:
         labels = [str(n) for n in nums]
