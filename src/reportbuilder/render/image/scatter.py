@@ -21,9 +21,9 @@ from reportbuilder.stats.series import shown_segment
 
 from reportbuilder.render.image._mpl import (
     apply_axis_titles, new_figure, render_png, place_picture, series_values,
-    chart_background, chart_furniture,
+    chart_background, chart_furniture, chart_accent, template_palette,
 )
-from reportbuilder.render.house_style import TEAL
+from reportbuilder.render.house_style import series_colors
 
 
 def build_image_scatter(ctx) -> None:
@@ -45,7 +45,15 @@ def build_image_scatter(ctx) -> None:
     fig, ax = new_figure(ctx)
     bg = chart_background(ctx)
     ink, muted, grid = chart_furniture(ctx)
-    ax.scatter(xs, ys, color=TEAL, s=70, edgecolors=bg, linewidths=0.8, zorder=3)
+    # The dots ARE the data, so they take the deck's own colour: the template's
+    # lead accent where there is one, house TEAL where there is not. This was
+    # hard-coded teal, so on a client template the points came out in nSight's
+    # green while the typeface, title and footer around them were the client's.
+    # The same `series_colors(1, …)` call the bar, line, pie and funnel builders
+    # make — see test_branded_single_series.
+    fill = series_colors(1, palette=template_palette(ctx),
+                         accent=chart_accent(ctx))[0]
+    ax.scatter(xs, ys, color=fill, s=70, edgecolors=bg, linewidths=0.8, zorder=3)
 
     if ctx.spec.elements.data_labels:
         # Room for the labels. They are drawn in offset POINTS, so matplotlib's

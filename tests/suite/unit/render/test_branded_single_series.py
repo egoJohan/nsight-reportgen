@@ -132,3 +132,67 @@ def test_no_template_is_still_house_teal(chart_type, mod, builder):
     """The house deck must not change; this is what makes the fix safe."""
     colours = _pixels(chart_type, mod, builder, branded=False)
     assert _near(colours, TEAL), f"{chart_type} lost the house teal"
+
+
+# ---------------------------------------------------------------------------
+# Scatter, which needs two segments and so has its own fixture
+# ---------------------------------------------------------------------------
+
+def _scatter_pixels(*, branded: bool):
+    """A scatter of attributes, two groups on the two axes."""
+    from collections import Counter
+
+    from PIL import Image
+
+    import reportbuilder.render.image.scatter as mod
+    from reportbuilder.stats.series import Cell, SeriesResult
+
+    cats = ("Luotettava", "Inhimillinen", "Ahne", "Kodikas")
+    segs = ("Mieheksi", "Naiseksi")
+    cells = {(c, s): Cell(mean=3.0 + 0.1 * i + (0.2 if s == segs[1] else 0.0))
+             for i, c in enumerate(cats) for s in segs}
+    series = SeriesResult(categories=cats, segments=segs, cells=cells,
+                          base_n={s: 400 for s in segs}, statistic="mean")
+    spec = ChartSpec(question_ref="q", chart_type="scatter", statistic="mean",
+                     classifying_var="g", number_format=NumberFormat(),
+                     sort=SortSpec(basis="data_order"), template_slot="s1",
+                     elements=ElementToggles(), scatter_xy=segs)
+    style = StyleSpec()
+    if branded:
+        style.from_template = True
+        style.brand_palette = list(BRAND)
+        style.accent = BRAND[0]
+    prs = Presentation()
+    ctx = RenderContext(slide=prs.slides.add_slide(prs.slide_layouts[6]),
+                        slot=Slot(slide_index=0, left=Inches(0.5), top=Inches(1.4),
+                                  width=Inches(11.6), height=Inches(4.0), name="s1"),
+                        style=style, spec=spec, series=series, fmt=spec.number_format)
+    seen: dict = {}
+    original = mod.render_png
+
+    def _spy(fig):
+        path = original(fig)
+        with Image.open(path) as img:
+            seen["colours"] = Counter(img.convert("RGB").getdata())
+        return path
+
+    mod.render_png = _spy
+    try:
+        mod.build_image_scatter(ctx)
+    finally:
+        mod.render_png = original
+    return seen["colours"]
+
+
+def test_a_branded_scatter_draws_the_brands_colour():
+    """The dots are the data. On a client template they were house teal while
+    everything around them — typeface, title, footer — was the client's."""
+    assert _near(_scatter_pixels(branded=True), BRAND[0], least=200)
+
+
+def test_a_branded_scatter_shows_no_house_teal():
+    assert not _near(_scatter_pixels(branded=True), TEAL, least=200)
+
+
+def test_an_untemplated_scatter_is_still_house_teal():
+    assert _near(_scatter_pixels(branded=False), TEAL, least=200)

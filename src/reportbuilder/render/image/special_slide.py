@@ -98,7 +98,10 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
             1, Inches(0.55), Inches(0.42), Inches(0.10), bar_h
         )
         acc.fill.solid()
-        acc.fill.fore_color.rgb = PX_TEAL
+        # The TEMPLATE's accent, like the bullet glyphs below already use — this
+        # was PX_TEAL, so a branded deck carried the client's colour on its
+        # chart slides and nSight's green beside its section headings.
+        acc.fill.fore_color.rgb = _theme_accent
         acc.line.fill.background()
         acc.shadow.inherit = False
 

@@ -35,13 +35,16 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
     # template's stated colours otherwise, ink derived from the background
     # (house_style.furniture_colors) when only a background is stated — so a
     # dark, un-owned background gets a legible panel instead of a cream one.
-    theme_bg, ink, _accent = theme_colours(style)
+    theme_bg, ink, accent = theme_colours(style)
     if not owned:
         bg = slide.shapes.add_shape(1, 0, 0, sw, sh)
         bg.fill.solid(); bg.fill.fore_color.rgb = theme_bg
         bg.line.fill.background(); bg.shadow.inherit = False
         acc = slide.shapes.add_shape(1, Inches(0.55), Inches(0.40), Inches(0.10), Inches(0.62))
-        acc.fill.solid(); acc.fill.fore_color.rgb = PX_TEAL
+        # The TEMPLATE's accent, which `theme_colours` has just resolved — this
+        # discarded it and painted the bar house teal, so a branded deck's
+        # demographics slide did not match its own chart slides.
+        acc.fill.solid(); acc.fill.fore_color.rgb = accent
         acc.line.fill.background(); acc.shadow.inherit = False
     face = body_font(style)
     heading = (getattr(spec, "slide_title", None) or "Vastaajat").strip()
