@@ -1567,6 +1567,7 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
     cells: dict[tuple[str, str], Cell] = {}
     secondary_n = 0
+    secondary_group_n = 0
     for cat in base.categories:
         if spec.classifying_var:
             for seg in bar_segments:
@@ -1581,6 +1582,9 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         code = label_to_code.get(cat)
         vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
         secondary_n += len(vals)
+        # A share's values are 100 for a respondent in the group and 0 for one
+        # who is not (`_combo_secondary_values`).
+        secondary_group_n += int((vals >= 100.0).sum())
         cells[(cat, secondary_label)] = Cell(
             pct=(float(vals.mean()) if len(vals) else None)
         )
@@ -1608,6 +1612,7 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         segment_statistics={
             **{s: "pct" for s in bar_segments}, secondary_label: secondary_statistic},
         secondary_segments=(secondary_label,),
+        secondary_group_n=(secondary_group_n if secondary_statistic == "pct" else None),
     )
 
 

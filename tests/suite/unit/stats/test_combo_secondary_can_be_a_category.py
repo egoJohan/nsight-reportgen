@@ -188,13 +188,28 @@ def test_the_share_has_a_right_hand_axis_graduated_like_the_left():
     assert len(seen["ylims"]) == 2 and seen["ylims"][0] == pytest.approx(seen["ylims"][1])
 
 
-def test_the_legend_states_the_shares_own_base():
+def test_the_share_keeps_its_own_base():
+    """Everyone who answered the secondary question — not the slide's N."""
     model, q, df = _study()
     spec = _spec(combo_secondary_value="Kyllä")
     r = engine.compute(q, spec, df, model)
     answered = int((df["had"] != 9.0).sum())
     assert r.base_n[r.secondary_segments[0]] == answered
-    assert any(f"n={answered}" in t for t in _drawn(spec, r)["legend"])
+
+
+def test_the_legend_states_how_many_are_in_the_group():
+    """"Kyllä (n=…)" is read as how many said Kyllä. It stated the share's
+    base, everyone who answered — "ei ole Kyllä-vastausten N, vaan kaikkien
+    vastausten N-luku", reported from staging. (2026-09-19)"""
+    model, q, df = _study()
+    spec = _spec(combo_secondary_value="Kyllä")
+    r = engine.compute(q, spec, df, model)
+    said_yes = int((df["had"] == 1.0).sum())
+    answered = int((df["had"] != 9.0).sum())
+    assert r.secondary_group_n == said_yes
+    legend = _drawn(spec, r)["legend"]
+    assert any(f"n={said_yes}" in t for t in legend), legend
+    assert not any(f"n={answered}" in t for t in legend), legend
 
 
 def test_a_combo_without_a_secondary_draws_no_bare_right_hand_line():

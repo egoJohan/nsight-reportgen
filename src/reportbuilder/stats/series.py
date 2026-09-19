@@ -60,6 +60,13 @@ class SeriesResult:
     # else" finds nothing and the renderer fell back to guessing by position.
     # Empty for every chart that has no secondary variable. (Johan, 2026-09-17)
     secondary_segments: tuple[str, ...] = ()
+    # How many respondents are IN the group a combo's secondary share is of —
+    # the "Kyllä" of "% Kyllä". The legend states it: "Kyllä (n=…)" is read as
+    # that many saying Kyllä, and it printed the share's base instead, everyone
+    # who answered the question (reported from staging, 2026-09-19). The base
+    # itself stays in `base_n`, where the renderer's mechanics read it. None
+    # for every chart without a secondary share.
+    secondary_group_n: int | None = None
     # Optional caption rendered under the chart — e.g. the endpoint legend of a
     # partially-labelled numeric scale ("1 = täysin eri mieltä · 7 = …"). (REQ-C-24c)
     caption: str | None = None

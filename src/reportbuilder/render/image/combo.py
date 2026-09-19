@@ -344,9 +344,14 @@ def build_image_combo(ctx) -> None:
             # asking which axis it was drawn on left it with no name at all.
             # (Johan, 2026-09-17)
             if secondary and seg in shares:
-                # A share has a base of its own — those who answered the
-                # secondary question — and it is not the slide's N.
-                n_sec = (getattr(ctx.series, "base_n", None) or {}).get(seg)
+                # "Kyllä (n=…)" is read as how many said Kyllä, so that is
+                # the number stated: the respondents IN the share's group. It
+                # printed the share's base — everyone who answered the
+                # secondary question — which reads as every one of them
+                # having said Kyllä. (2026-09-19)
+                n_sec = getattr(ctx.series, "secondary_group_n", None)
+                if n_sec is None:
+                    n_sec = (getattr(ctx.series, "base_n", None) or {}).get(seg)
                 name = (f"{seg} (n={n_sec})"
                         if n_sec and wants_group_base(ctx) else seg)
             elif secondary and seg in (getattr(ctx.series, "secondary_segments", ()) or ()):
