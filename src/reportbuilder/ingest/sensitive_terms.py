@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass, field
 
 from reportbuilder.model.question import QuestionModel
 
@@ -45,6 +46,11 @@ MAX_TERM_CHARS = 40
 #: The `1=` an SPSS export writes in front of a value label. Stripped before
 #: anything else looks at the label; see `_candidate`.
 _CODE_PREFIX = re.compile(r"^\d+\s*=\s*")
+
+#: A web address: `mobiilivarmenne.fi`, `Suomi.fi`, `synsam.com`. Not after
+#: an `@`, which would make it the tail of an e-mail address.
+_DOMAIN = re.compile(
+    r"(?<![\w.@-])(?:[\w-]+\.)+(?:fi|com|net|org|se|de|dk|no|eu|io)\b", re.IGNORECASE)
 
 #: Openers that mark a non-answer, a scale point or an instruction rather than
 #: a name. Matched at the start, case-insensitively, on a word boundary.
@@ -153,6 +159,13 @@ def _candidate(text: str) -> str | None:
     # `1=Erittäin epätodennäköistä` got past the opener that already refuses
     # `Erittäin`. Judge the label it carries. (Johan, 2026-09-15)
     t = _CODE_PREFIX.sub("", t).strip()
+    # A web address inside a label is the name, and the rest of the label is
+    # the study's own wording. "Katsomalla apua mobiilivarmenne.fi:stä" was
+    # offered whole, the model rightly saw an organisation in it, and the
+    # analyst was asked to mask a sentence. (2026-09-19)
+    domain = _DOMAIN.search(t)
+    if domain:
+        return domain.group(0)
     if not t or len(t) > MAX_TERM_CHARS:
         return None
     # A capital SOMEWHERE, not necessarily first. Requiring the first character
@@ -224,7 +237,23 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     Repetition is the signal in each case: a brand recurs because the study
     asks about it several times, while the study's own wording does not.
     """
+    counts, _lists, _sources = _structure(model)
+    proposed = list(counts)
+    # Frequent first: the brand a tracker is ABOUT appears in every grid, so
+    # the analyst reads the likeliest candidates before the marginal ones.
+    proposed.sort(key=lambda t: (-counts[t], t.lower()))
+    return proposed
+
+
+def _structure(model: QuestionModel
+               ) -> tuple[Counter[str], list[tuple[str, ...]], dict[str, str]]:
+    """The candidates the study's structure offers, the LISTS it offers them
+    in — one battery, one question's options, one variable's categories — and
+    the question each candidate is an option of. The lists are what
+    `with_siblings` reads; the sources are what the model reads."""
     counts: Counter[str] = Counter()
+    lists: list[tuple[str, ...]] = []
+    sources: dict[str, str] = {}
 
     # --- battery members -------------------------------------------------
     # Within a group of variables sharing one side of the colon, the members
@@ -235,7 +264,7 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     by_head: dict[str, set[str]] = {}
     for var in model.variables.values():
         label = (var.label or "").strip()
-        if ":" not in label:
+        if ":" not in label or _is_location(var):
             continue
         head, _, tail = label.partition(":")
         head, tail = head.strip(), tail.strip()
@@ -244,13 +273,17 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
             by_head.setdefault(head, set()).add(tail)
 
     for grouped in (by_tail, by_head):
-        for _shared, members in grouped.items():
+        for shared, members in grouped.items():
             if len(members) < 2:
                 continue        # not a battery, just one labelled variable
+            terms = []
             for m in members:
                 term = _candidate(m)
                 if term:
                     counts[term] += len(members)
+                    terms.append(term)
+                    sources.setdefault(term, shared)
+            lists.append(tuple(sorted(set(terms))))
 
     # --- multi-response options -------------------------------------------
     # SPSS writes a multi-response question as one indicator variable per
@@ -264,16 +297,22 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     for question in getattr(model, "questions", ()) or ():
         if getattr(question, "kind", "") != "multi":
             continue
+        if _LOCATION.search(getattr(question, "text", "") or ""):
+            continue
         options = [(model.variables[v].label or "").strip()
                    for v in getattr(question, "variables", ()) or ()
                    if v in model.variables]
         options = [o for o in options if o]
         if len(options) < 2:
             continue            # one indicator is not a list of options
+        terms = []
         for option in options:
             term = _candidate(option)
             if term:
                 counts[term] += len(options)
+                terms.append(term)
+                sources.setdefault(term, question.text or "")
+        lists.append(tuple(dict.fromkeys(terms)))
 
     # --- answer categories ------------------------------------------------
     # "Which of these do you use" carries its brands as value labels, and ONE
@@ -292,18 +331,355 @@ def propose_sensitive_terms(model: QuestionModel) -> list[str]:
     # (Johan, 2026-09-15)
     value_counts: Counter[str] = Counter()
     for var in model.variables.values():
+        if _is_location(var):
+            continue            # a Country or City field: places, never names
+        terms = []
         for vl in var.value_labels:
             term = _candidate(vl.label or "")
             if term:
                 value_counts[term] += 1
+                terms.append(term)
+                sources.setdefault(term, var.label or "")
+        lists.append(tuple(dict.fromkeys(terms)))
     for term, n in value_counts.items():
         counts[term] += n
 
-    proposed = list(counts)
-    # Frequent first: the brand a tracker is ABOUT appears in every grid, so
-    # the analyst reads the likeliest candidates before the marginal ones.
-    proposed.sort(key=lambda t: (-counts[t], t.lower()))
-    return proposed
+    return counts, [lst for lst in dict.fromkeys(lists) if len(lst) >= 2], sources
+
+
+# ---------------------------------------------------------------------------
+# Reading wider: the study's prose and what its respondents wrote
+# ---------------------------------------------------------------------------
+#
+# The structure is where a tracker ENUMERATES its brands, but not the only
+# place a study names one. Measured on eight studies against the names found by
+# reading each of them (2026-09-19), the structure alone offered 55 of 98 to
+# the model:
+#
+#   * the client itself is often only in the WORDING — "DNA:n mobiilivarmenne",
+#     "Holiday Clubin omistajana" — never an option;
+#   * a brand inside a long option ("Kyllä, minulla on Elisa Mobiilivarmenne")
+#     was refused as a sentence;
+#   * the competitors respondents name unprompted are in the open answers:
+#     Mehiläinen, Pihlajalinna and Terveystalo on the Attendo study, eighteen
+#     medicines on Alflorex, Keops and Lensway on Synsam.
+#
+# Reading those as well offered 98 of 98. The model judges; an extra
+# candidate costs it a line, a missing one leaves the study unmasked.
+
+#: A word must be written by this many respondents to be offered. One or two is
+#: a respondent's own spelling or a person's name; three is a name the study's
+#: population shares.
+MIN_RESPONDENTS = 3
+
+#: At most this many open-answer words, most-written first. Keeps the model's
+#: list near 250 lines on the widest study measured.
+MAX_OPEN_TERMS = 200
+
+#: Variables that cannot name a company, matched on the variable's name or label.
+#:
+#: What a survey tool writes about the SESSION, not the respondent's answer:
+#: the browser's user agent alone offered "Mozilla" and "AppleWebKit".
+#:
+#: And WHERE the respondent is — the tool's geo-IP fields (`Country`, `City`,
+#: `URL_Region`) and the study's own residence questions. A place is never a
+#: company, and the model cannot be relied on to say so: the hive masks place
+#: names as personal data before the model sees them, so "Tampere" and "Kemi"
+#: reached it as invented words and it called them companies. Read here, they
+#: are never offered. (2026-09-19)
+#:
+#: The session words apply to FREE TEXT only: "Which device do you use?" asked
+#: with options is a question whose options may well be brands.
+_SESSION = re.compile(
+    r"user.?agent|referr?er|ip.?addr|session|\burl\b|link|longitude|latitude|"
+    r"browser|device|tracking|utm_|e-?mail|sähköposti|puhelin|phone",
+    re.IGNORECASE)
+_LOCATION = re.compile(
+    r"country|\bcity\b|region|postal|zip.?code|postinumero|municipality|"
+    r"kaupunki|\bkunta\b|paikkakun|maakunta|lääni|\bnuts ?\d|"
+    r"bundesland|\blän\b|asuinpaikka|asuinkunta|kotikunta|asuinalue|"
+    r"missä (?:maakunnassa|läänissä|kunnassa|kaupungissa|maassa) asut|missä asut",
+    re.IGNORECASE)
+
+
+def _is_location(var) -> bool:
+    return bool(_LOCATION.search(var.name or "") or _LOCATION.search(var.label or ""))
+
+
+def _is_metadata(var) -> bool:
+    return _is_location(var) or bool(
+        _SESSION.search(var.name or "") or _SESSION.search(var.label or ""))
+
+#: Finnish case endings, to fold an inflected mention onto its name when the
+#: name itself occurs: Synsamista -> Synsam, Telian -> Telia. Longest first.
+_ENDINGS = tuple(sorted({
+    "n", "a", "ä", "ta", "tä", "sta", "stä", "ssa", "ssä", "lla", "llä", "lta",
+    "ltä", "lle", "ksi", "in", "iin", "hin", "seen", "na", "nä", "t", "ineen",
+    "tta", "ttä", "ista", "istä", "illa", "illä", "ille", "ilta", "iltä",
+    "issa", "issä", "ien", "jen",
+}, key=len, reverse=True))
+
+#: Function words and the instructions a questionnaire opens with, capitalised
+#: only because they open an answer or a question.
+_FUNCTION_WORDS = frozenset("""
+en ei et emme se sen ne niitä ja tai sekä että mutta kun jos koska vaan vain
+myös mikä mitä miten missä minkä millä mihin miksi kuinka kuka ketä onko ovat
+on oli olen olisi voisi voi tämä tuo nämä ne ne siinä siellä täällä nyt no joo
+kyllä ehkä en tiedä eos emt minä mä mulla minulla meillä
+kerro kerroit arvioi valitse vastaa listaa kuvaile tarkastele mieti entä huom
+the a an and or of to in on for is it i we you yes no not
+""".split())
+
+#: Where one run of capitalised words ends and the next begins.
+_SENTENCE = re.compile(r"(?<=[.?!])\s+|\n+")
+_CLAUSE_BREAK = re.compile(r"[,;:()\[\]/\\\"«»“”]|\s[-–—]\s")
+
+
+def _word(w: str) -> str:
+    return w.strip(".!?'’`*…")
+
+
+def _is_capitalised(w: str) -> bool:
+    return (any(c.isupper() for c in w) and not any(c.isdigit() for c in w)
+            and w.casefold() not in _FUNCTION_WORDS)
+
+
+def _is_question_verb(word: str) -> bool:
+    """A Finnish yes/no question opens on its verb, marked -ko/-kö: "Oletko",
+    "Tiedätkö", "Käytätkö"."""
+    low = word.casefold()
+    return len(low) > 4 and low.endswith(("ko", "kö"))
+
+
+def capital_runs(text: str, *, skip_opener: bool) -> list[str]:
+    """Each maximal run of capitalised words in *text*; see `_runs`."""
+    return [run for run, _opens in _runs(text, skip_opener=skip_opener)]
+
+
+def _runs(text: str, *, skip_opener: bool) -> list[tuple[str, bool]]:
+    """Each maximal run of capitalised words in *text*.
+
+    MAXIMAL, never its sub-phrases: "One Tallink Silja" is offered, "One" is
+    not — a model shown the parts picked "One", "Line", "Plus" and "Club",
+    and an accepted term is masked for the whole tenant.
+
+    `skip_opener` drops a word that opens a sentence ALONE, which the study's
+    own wording capitalises for grammar ("Tuotteet ovat vanhanaikaisia"). An
+    opener followed by another capital starts a name and is kept: dropping it
+    offered "Hotels Club", "Friends" and "Line Club" for Lapland Hotels Club,
+    Scandic Friends and Viking Line Club. An open answer is often a single
+    name, so there the opener is always kept.
+    """
+    out: list[tuple[str, bool]] = []
+    for sentence in _SENTENCE.split(text or ""):
+        first = True
+        for clause in _CLAUSE_BREAK.split(sentence):
+            run: list[str] = []
+            opens = False
+            for raw in clause.split() + [""]:
+                w = _word(raw)
+                if w and _is_capitalised(w):
+                    opens = opens or (first and not run)
+                    run.append(w)
+                    first = False
+                    continue
+                if w:
+                    first = False
+                if skip_opener and opens and len(run) > 1 and _is_question_verb(run[0]):
+                    run = run[1:]           # "Oletko Holiday Club -omistaja?"
+                    opens = False
+                if run and len(run) <= 3 and not (skip_opener and opens and len(run) == 1):
+                    out.append((" ".join(run), opens))
+                run, opens = [], False
+    return out
+
+
+def _fold(counts: Counter[str], known: list[str] = (),
+          openers: set[str] = frozenset()) -> Counter[str]:
+    folded: Counter[str] = Counter()
+    for term, target in _fold_map(counts, known, openers).items():
+        folded[target] += counts[term]
+    return folded
+
+
+def _fold_map(counts: Counter[str], known: list[str] = (),
+              openers: set[str] = frozenset()) -> dict[str, str]:
+    """Count an inflected mention toward its name when the name also occurs —
+    here, or among the *known* candidates already found elsewhere. Only the
+    last word inflects: "Holiday Clubin" -> "Holiday Club"."""
+    by_fold = {t.casefold(): t for t in known}
+    by_fold.update((t.casefold(), t) for t in counts)
+
+    def uninflected(low: str) -> str | None:
+        for ending in _ENDINGS:
+            if low.endswith(ending) and len(low) - len(ending) >= 3:
+                stem = by_fold.get(low[: -len(ending)])
+                if stem:
+                    return stem
+        return None
+
+    folded: dict[str, str] = {}
+    for term in counts:
+        low = term.casefold()
+        target = uninflected(low)
+        if target is None and term in openers:
+            # A verb opening the sentence, glued to a name the study also
+            # writes on its own: "Sanoit Alflorexin", "Nouse Holiday Clubin".
+            # Only a run that OPENED a sentence: "Suomen Seniorihoiva" is a
+            # name even though "Seniorihoiva" is written on its own too.
+            tail = low.split(" ", 1)[1]
+            target = by_fold.get(tail) or uninflected(tail)
+        folded[term] = target or term
+    return folded
+
+
+def _prose_candidates(model: QuestionModel, known: list[str] = ()) -> Counter[str]:
+    """Names in the study's own wording: question texts, variable labels and
+    option labels, where a capital not opening a sentence is a name."""
+    counts: Counter[str] = Counter()
+    openers: set[str] = set()
+    texts = [q.text for q in getattr(model, "questions", ()) or ()]
+    for var in model.variables.values():
+        if _is_metadata(var):
+            continue            # "IP Address" is the survey tool's, not a name
+        texts.append(var.label)
+        texts.extend(vl.label for vl in var.value_labels)
+    for text in texts:
+        for run, opens in _runs(_CODE_PREFIX.sub("", text or ""), skip_opener=True):
+            counts[run] += 1
+            if opens and " " in run:
+                openers.add(run)
+        counts.update(m.group(0) for m in _DOMAIN.finditer(text or ""))
+    return _fold(counts, known, openers)
+
+
+def _open_answer_candidates(model: QuestionModel, df, known: list[str] = ()
+                            ) -> tuple[Counter[str], dict[str, str]]:
+    """Names respondents wrote, counted once per answer that mentions them, and
+    the question each was written most in answer to."""
+    counts: Counter[str] = Counter()
+    where: dict[str, Counter[str]] = {}
+    if df is None:
+        return counts, {}
+    for var in model.variables.values():
+        if var.measurement != "text" or var.name not in df.columns:
+            continue
+        if _is_metadata(var):
+            continue
+        for answer in df[var.name].dropna().astype(str):
+            found = set(capital_runs(answer, skip_opener=False))
+            found.update(m.group(0) for m in _DOMAIN.finditer(answer))
+            # A word SHOUTED is a place typed with caps lock ("HELSINKI"), not a
+            # name; an acronym (DNA, OP, OLW) is short and kept.
+            for t in found:
+                if not (t.isupper() and len(t) > 4):
+                    counts[t] += 1
+                    where.setdefault(t, Counter())[var.label or var.name] += 1
+    folded: Counter[str] = Counter()
+    folded_where: dict[str, Counter[str]] = {}
+    for term, target in _fold_map(counts, known).items():
+        folded[target] += counts[term]
+        folded_where.setdefault(target, Counter()).update(where[term])
+    return folded, {t: w.most_common(1)[0][0] for t, w in folded_where.items()}
+
+
+def _is_fragment(term: str, n: int, common: list[tuple[str, int]]) -> bool:
+    """A one-word term that is the start of a longer, more-written one: an
+    answer cut short ("Syns", "Instru") rather than a name of its own.
+    *common* is the (casefolded term, count) of every term written often
+    enough to be offered — only those can make another one a fragment."""
+    if " " in term:
+        return False
+    low = term.casefold()
+    return any(m > n and len(o) > len(low) and o.startswith(low) for o, m in common)
+
+
+@dataclass(frozen=True)
+class Candidates:
+    """What to put to the model, the lists the structure offered it in, and
+    where each candidate came from (see `pick_company_terms`)."""
+
+    terms: list[str]
+    lists: tuple[tuple[str, ...], ...]
+    #: term -> (kind, text): ("options", the question it is an option of),
+    #: ("answers", the open question respondents wrote it in answer to) or
+    #: ("wording", "") for a name in the study's own text.
+    sources: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+
+def propose_candidates(grouped: QuestionModel, raw: QuestionModel,
+                       df=None) -> Candidates:
+    """Everything that could name a company, for `ai.text.pick_company_terms`.
+
+    The structural proposal first (`propose_from_models`), then names in the
+    study's wording, then names respondents wrote in open answers. Recall is
+    the point: the model drops what is not a name.
+    """
+    structural = propose_from_models(grouped, raw)
+    _gc, g_lists, g_sources = _structure(grouped)
+    _rc, r_lists, r_sources = _structure(raw)
+    lists = g_lists + r_lists
+
+    prose = _prose_candidates(raw, structural)
+    written, answered_in = _open_answer_candidates(raw, df, structural + list(prose))
+    common = [(t.casefold(), n) for t, n in written.items() if n >= MIN_RESPONDENTS]
+    open_terms: list[str] = []
+    for t, n in written.most_common():
+        if n < MIN_RESPONDENTS or len(open_terms) >= MAX_OPEN_TERMS:
+            break
+        if _open_term_ok(t) and not _is_fragment(t, n, common):
+            open_terms.append(t)
+
+    terms: dict[str, str] = {}
+    sources: dict[str, tuple[str, str]] = {}
+    for t in structural:
+        terms.setdefault(t.casefold(), t)
+        sources.setdefault(t, ("options", g_sources.get(t) or r_sources.get(t, "")))
+    for t in (t for t, _n in prose.most_common() if _open_term_ok(t)):
+        if t.casefold() not in terms:
+            terms[t.casefold()] = t
+            sources[t] = ("wording", "")
+    for t in open_terms:
+        if t.casefold() not in terms:
+            terms[t.casefold()] = t
+            sources[t] = ("answers", answered_in.get(t, ""))
+    return Candidates(terms=list(terms.values()),
+                      lists=tuple(dict.fromkeys(lists)), sources=sources)
+
+
+def _open_term_ok(term: str) -> bool:
+    if len(term) < 2:
+        return False
+    if _DOMAIN.fullmatch(term):
+        return True
+    return _candidate(term) == term
+
+
+#: The share of a list the model must have picked before the rest is offered
+#: with it; see `with_siblings`.
+SIBLING_SHARE = 0.5
+
+
+def with_siblings(picked: list[str], candidates: Candidates) -> list[str]:
+    """The model's picks, plus the rest of any list it mostly picked.
+
+    The model is not consistent about long lists: on Synsam it kept 11 of 15
+    names in one run and 7 in the next, dropping Instagram and YouTube beside
+    Facebook, and on Taffel it dropped Estrella and Red Head from a brand
+    list whose other fourteen members it kept. A list whose members are mostly
+    names is a brand list, and its remaining members are offered with it. The
+    analyst still ticks each one; nothing is accepted here.
+    """
+    out = list(picked)
+    have = {t.casefold() for t in picked}
+    for lst in candidates.lists:
+        hits = sum(1 for t in lst if t.casefold() in have)
+        if hits >= 2 and hits >= SIBLING_SHARE * len(lst):
+            for t in lst:
+                if t.casefold() not in have:
+                    have.add(t.casefold())
+                    out.append(t)
+    return out
 
 
 # ---------------------------------------------------------------------------

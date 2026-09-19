@@ -2476,16 +2476,16 @@ def get_sensitive_terms(
     before that (see routes_reports.create_report).
     """
     from reportbuilder.api.model_loader import (
-        model_for_material, raw_model_for_material,
+        df_model_for_material, raw_model_for_material,
     )
-    from reportbuilder.ingest.sensitive_terms import propose_from_models
+    from reportbuilder.ingest.sensitive_terms import propose_candidates, with_siblings
 
     from nsight.agent.egohive_client import EgoHiveError
     from reportbuilder.ai import text as ai_text
 
     unavailable = False
     try:
-        grouped = model_for_material(material_id, client)
+        df, grouped = df_model_for_material(material_id, client)
         model = raw_model_for_material(material_id, client)
     except Exception:  # noqa: BLE001 — an unreadable file proposes nothing
         proposed: list[str] | None = []
@@ -2494,13 +2494,18 @@ def get_sensitive_terms(
         # finds every candidate, and no list of Finnish rules told a company
         # from a rating scale: one study offered six terms and all six were
         # scale points, which is how an analyst learns to stop reading them.
-        candidates = propose_from_models(grouped, model)
-        if not candidates:
+        #
+        # Structure, wording and open answers all propose (see
+        # `propose_candidates`), and a list the model mostly picked is offered
+        # whole, because it drops members of long lists inconsistently.
+        candidates = propose_candidates(grouped, model, df)
+        if not candidates.terms:
             proposed = []
         else:
             try:
-                proposed = ai_text.pick_company_terms(
-                    candidates, [q.text for q in grouped.questions][:60])
+                proposed = with_siblings(ai_text.pick_company_terms(
+                    candidates.terms, [q.text for q in grouped.questions][:60],
+                    sources=candidates.sources), candidates)
             except EgoHiveError:
                 # No list at all, and the caller is told why. An empty one
                 # reads as "nothing to mask" and leaves the study unprotected

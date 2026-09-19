@@ -609,6 +609,7 @@ __all__ = [
 ]
 
 def pick_company_terms(candidates: list[str], questions: list[str], *,
+                       sources: dict[str, tuple[str, str]] | None = None,
                        chat=M.classify) -> list[str]:
     """Which of *candidates* actually name a company, organisation or brand.
 
@@ -629,7 +630,32 @@ def pick_company_terms(candidates: list[str], questions: list[str], *,
     substitute is still recognisably a company to the model. (2026-09-17)
 
     Only the candidate strings and the question wording are sent: no findings,
-    no percentages, no respondent answers.
+    no percentages, no respondent answers. A candidate may be a single name
+    that three or more respondents wrote in an open answer (`ingest.
+    sensitive_terms`) — the name alone, never the answer around it.
+
+    The candidates are generous — a study's wording and its open answers are
+    read as well as its structure. A misspelled brand IS a name: the hive masks
+    inflections but not misspellings, so "Specksavers" must be registered to be
+    masked. (2026-09-19)
+
+    WHAT THE MODEL SEES IS DISGUISED. The hive masks what it recognises as
+    personal data or an entity before the model sees it, and the stand-in does
+    not keep its kind: "Tampere" and "Kemi" arrived as words the model called
+    companies, and "Telia", "DNA" and "Activia" as words it called places. No
+    wording of a "places are not names" rule could work on that — four prompts
+    and three thinking budgets all kept about four places per study — and the
+    blanket rule also dropped Telia. What survives the masking is the QUESTION
+    a candidate belongs to. So:
+
+    * location fields never reach this call (`ingest.sensitive_terms`
+      drops Country, City, region and residence questions at the source);
+    * *sources* group the candidates under their question, and the prompt
+      says to judge each by it — a residence question's options are places,
+      and a place-like word in a question about products may be a company.
+
+    Measured on eight studies, three runs each: names kept 91 % -> 98 %,
+    places proposed per study 4.2 -> 0.2.
 
     The reply must be a JSON list of numbers from the list. Anything else
     raises, because "no answer" must reach the analyst as an error they can
@@ -640,19 +666,7 @@ def pick_company_terms(candidates: list[str], questions: list[str], *,
     wanted = [c for c in (candidates or []) if c and c.strip()]
     if not wanted:
         return []
-    context = "\n".join(q for q in (questions or []) if q)[:4000]
-    prompt = (
-        "Tämä on suomalaisen kyselytutkimuksen rakenteesta poimittu numeroitu "
-        "lista ehdokasmerkkijonoja. Osa on yritysten, organisaatioiden tai "
-        "tuotemerkkien nimiä; osa on asteikon vastausvaihtoehtoja, kyselyn "
-        "omaa sanastoa tai muuta yleiskieltä.\n\n"
-        + (f"Kyselyn kysymyksiä kontekstiksi:\n{context}\n\n" if context else "")
-        + "Ehdokkaat:\n" + "\n".join(f"{i}. {c}" for i, c in enumerate(wanted, 1))
-        + "\n\n"
-        "Vastaa JSON-listana niiden ehdokkaiden NUMEROISTA, jotka ovat "
-        "yrityksen, organisaation tai tuotemerkin nimiä. Jos yksikään ei ole, "
-        "vastaa []. Älä selitä mitään; vastaa pelkkä JSON-lista numeroita."
-    )
+    prompt, wanted = company_terms_prompt(wanted, questions, sources)
     reply = (chat(prompt) or "").strip()
     match = re.search(r"\[.*\]", reply, re.S)
     if not match:
@@ -680,3 +694,65 @@ def pick_company_terms(candidates: list[str], questions: list[str], *,
         if hit and hit not in out:
             out.append(hit)
     return out
+
+#: Longest question text shown as a group's heading.
+_SOURCE_CHARS = 200
+
+
+def company_terms_prompt(candidates: list[str], questions: list[str],
+                         sources: dict[str, tuple[str, str]] | None = None,
+                         ) -> tuple[str, list[str]]:
+    """The prompt for `pick_company_terms`, and the candidates in the order it
+    numbers them — grouped by where each came from when *sources* are given."""
+    context = "\n".join(q for q in (questions or []) if q)[:4000]
+    if sources:
+        groups: dict[tuple[str, str], list[str]] = {}
+        for c in candidates:
+            kind, text = sources.get(c, ("wording", ""))
+            groups.setdefault((kind, " ".join((text or "").split())[:_SOURCE_CHARS]), []).append(c)
+        ordered: list[str] = []
+        blocks: list[str] = []
+        for (kind, text), members in groups.items():
+            if kind == "options" and text:
+                head = f"Kysymyksen «{text}» vastausvaihtoehdot:"
+            elif kind == "options":
+                head = "Kysymysten vastausvaihtoehtoja:"
+            elif kind == "answers":
+                head = f"Vastaajien omin sanoin kirjoittamia vastauksia kysymykseen «{text}»:"
+            else:
+                head = "Kyselyn omasta tekstistä (kysymykset ja ohjeet):"
+            lines = []
+            for c in members:
+                ordered.append(c)
+                lines.append(f"{len(ordered)}. {c}")
+            blocks.append(head + "\n" + "\n".join(lines))
+        listing = "\n\n".join(blocks)
+    else:
+        ordered = list(candidates)
+        listing = "\n".join(f"{i}. {c}" for i, c in enumerate(ordered, 1))
+    prompt = (
+        "Tämä on suomalaisen kyselytutkimuksen rakenteesta, sanamuodoista ja "
+        "avovastauksista poimittu numeroitu lista ehdokasmerkkijonoja. Osa on "
+        "yritysten, organisaatioiden tai tuotemerkkien nimiä; osa on asteikon "
+        "vastausvaihtoehtoja, paikkoja, kyselyn omaa sanastoa tai muuta yleiskieltä. "
+        "Tietosuojan vuoksi osa merkkijonoista on korvattu keksityillä sanoilla, "
+        "joten ratkaise jokainen sen perusteella, mihin kysymykseen se liittyy.\n\n"
+        + (f"Kyselyn kysymyksiä kontekstiksi:\n{context}\n\n" if context else "")
+        + "Ehdokkaat:\n" + listing + "\n\n"
+        "Vastaa JSON-listana niiden ehdokkaiden NUMEROISTA, jotka ovat "
+        "yrityksen, organisaation, palvelun tai tuotemerkin nimiä — myös "
+        "kirjoitusvirheellisinä tai taivutettuina ja myös verkko-osoitteina. "
+        "Jos kysymys koskee asuinpaikkaa, maata, osavaltiota, lääniä, "
+        "maakuntaa, aluetta, kuntaa tai kaupunkia, sen vaihtoehdot ja "
+        "vastaukset ovat paikkoja eivätkä nimiä. Muualla paikalta tai henkilön "
+        "nimeltä näyttävä merkkijono voi olla korvattu yrityksen nimi: jos se "
+        "esiintyy yrityksiä, tuotteita tai palveluita koskevassa kohdassa, "
+        "valitse se. Alueen mukaan nimetty organisaatio — esimerkiksi "
+        "hyvinvointialue tai sairaanhoitopiiri palveluntarjoajana — on "
+        "organisaatio. "
+        "Myöskään tavalliset sanat millään kielellä (esimerkiksi saksan "
+        "substantiivit) eivät ole nimiä. Jos yksikään ei ole, vastaa []. Älä "
+        "selitä mitään; vastaa pelkkä JSON-lista numeroita."
+    )
+    return prompt, ordered
+
