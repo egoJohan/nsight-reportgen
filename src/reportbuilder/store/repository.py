@@ -23,7 +23,7 @@ import json
 import re
 import secrets
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
@@ -97,6 +97,10 @@ class Material:
     customer_id: str
     name: str
     size: int = 0
+    #: The curation stored in the same record, when `find_material` has just
+    #: read it — so a request does not read that file a second time for it.
+    #: None when unknown. Not part of equality: it is a by-product of the read.
+    config: dict | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -633,7 +637,8 @@ class Repository:
                 return Material(id=material_id, case_id=case_id,
                                 customer_id=customer_id,
                                 name=d.get("name") or material_id,
-                                size=int(d.get("size") or 0))
+                                size=int(d.get("size") or 0),
+                                config=d.get("config") or {})
 
         for info in self.store.list(auth, "", labels=[P.LABEL_CONFIG]):
             segments = info.path.split("/")
@@ -651,7 +656,8 @@ class Repository:
                 return Material(id=material_id, case_id=segments[1],
                                 customer_id=segments[0],
                                 name=d.get("name") or material_id,
-                                size=int(d.get("size") or 0))
+                                size=int(d.get("size") or 0),
+                                config=d.get("config") or {})
         # A miss is NOT cached: the id may be attached a moment from now.
         return None
 
@@ -2144,7 +2150,8 @@ class Repository:
             return set()
 
     def resolve_case_template(self, auth: AuthContext, customer_id: str,
-                              case_id: str) -> tuple[str, str]:
+                              case_id: str, *, templates: list | None = None
+                              ) -> tuple[str, str]:
         """What a tutkimus renders with absent any report-level choice.
 
         This is the inheritance half of `resolve_template`, split out because
@@ -2156,8 +2163,18 @@ class Repository:
         without anyone binding it: a customer who has exactly one is the common
         case, and having to upload it AND then select it read as the upload not
         having worked.
+
+        `templates` is the asiakas's listing when the caller already has it.
+        Resolution listed them three times — here twice and once in
+        `resolve_template` — and every listing reads each template's record,
+        about 200 ms a time against the hive. (perf, 2026-09-19)
         """
-        live = self._live_template_ids(auth, customer_id)
+        if templates is None:
+            try:
+                templates = self.list_templates(auth, customer_id)
+            except Exception:  # noqa: BLE001 — as `_live_template_ids`
+                templates = None
+        live = {t.id for t in templates} if templates is not None else set()
         for path, level in ((P.case_meta_path(customer_id, case_id), "case"),
                             (P.customer_meta_path(customer_id), "customer")):
             try:
@@ -2166,7 +2183,7 @@ class Repository:
                 continue
             if d.get("template_id") in live:
                 return d["template_id"], level
-        first = self.list_templates(auth, customer_id)
+        first = templates if templates is not None else self.list_templates(auth, customer_id)
         if first:
             return first[0].id, "first"
         return "", "default"
@@ -2190,7 +2207,12 @@ class Repository:
         "report" | "pinned" | "case" | "customer" | "default". An empty
         template_id means the house default.
         """
-        live = self._live_template_ids(auth, customer_id)
+        # Listed ONCE for the whole resolution — see `resolve_case_template`.
+        try:
+            templates = self.list_templates(auth, customer_id)
+        except Exception:  # noqa: BLE001 — resolution must not fail on a listing
+            templates = None
+        live = {t.id for t in templates} if templates is not None else set()
         try:
             report = json.loads(self.load_report(auth, customer_id, case_id, report_id))
             if report.get("template_ref") in live:
@@ -2214,7 +2236,7 @@ class Repository:
             pass
 
         inherited, inherited_level = self.resolve_case_template(
-            auth, customer_id, case_id)
+            auth, customer_id, case_id, templates=templates)
 
         # Specificity beats recency. A template set on the TUTKIMUS is a more
         # specific decision than one on the asiakas, so it wins even over a pin

@@ -189,11 +189,21 @@ def _material_guard(write: bool):
     returns None for a material the user may not see, so the 404 arrives before
     any SAV is read.
     """
-    def guard(material_id: str,
+    def guard(request: Request,
+              material_id: str,
               user: User = Depends(current_user),
               auth: AuthContext = Depends(get_auth),
               repo: Repository = Depends(get_repository)) -> User:
-        material = repo.find_material(auth, material_id, user=user)
+        # Shared with the storage client built for this same request, as the
+        # case guard's lookup is: a preview resolved the same material five
+        # times, and each is a round-trip to the hive. (perf, 2026-09-19)
+        from reportbuilder.api.deps import request_scope  # noqa: PLC0415
+        scope = request_scope(request, "material")
+        material = scope.get(material_id)
+        if material is None:
+            material = repo.find_material(auth, material_id, user=user)
+            if material is not None:
+                scope[material_id] = material
         if material is None:
             raise HTTPException(404, f"Material '{material_id}' not found")
         _check(user, f"{material.customer_id}/{material.case_id}", write)

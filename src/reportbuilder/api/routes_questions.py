@@ -1980,17 +1980,21 @@ def _preview_headline(body) -> str:
     return (getattr(body, "slide_title", None) or "").strip()
 
 
-def _template_overrides(repo, auth, material_id: str, template_id: str) -> dict:
+def _template_overrides(repo, auth, material_id: str, template_id: str,
+                        material=None) -> dict:
     """An author's corrections to this template, or {} — never an error.
 
     Styling must not be able to stop a preview: a template whose corrections
     cannot be read renders as the harvester decided, which is what it did
     before anybody could correct anything.
+
+    `material`: the record when the caller has already resolved it this
+    request, so it is not looked up again. (perf, 2026-09-19)
     """
     if not template_id or template_id == "default":
         return {}
     try:
-        m = repo.find_material(auth, material_id)
+        m = material if material is not None else repo.find_material(auth, material_id)
         if m is None:
             return {}
         return repo.template_layout(auth, m.customer_id, template_id)
@@ -1999,17 +2003,22 @@ def _template_overrides(repo, auth, material_id: str, template_id: str) -> dict:
 
 
 def _styled_template(repo, auth, material_id: str, template_path: str,
-                     template_id: str):
+                     template_id: str, overrides: dict | None = None):
     """The template's style with this customer's corrections applied.
 
     Applied to a COPY: template_cache.resolve is keyed on the FILE, and the
     corrections are not in the file. Mutating the cached style would serve one
     customer's corrections to everyone rendering on the same template.
+
+    `overrides`: the corrections when the caller has already read them this
+    request — the preview reads them for its cache key, and reading them again
+    here was a second round-trip for the same small file. (perf, 2026-09-19)
     """
     from reportbuilder.render.template_cache import style_with_overrides
 
-    return style_with_overrides(
-        template_path, _template_overrides(repo, auth, material_id, template_id))
+    if overrides is None:
+        overrides = _template_overrides(repo, auth, material_id, template_id)
+    return style_with_overrides(template_path, overrides)
 
 
 def _preview_template_filename(template_id: str, *, identity: str) -> str:
@@ -2031,7 +2040,8 @@ def _preview_template_filename(template_id: str, *, identity: str) -> str:
 
 
 def _preview_template(repo, auth, material_id: str, report_id: str = "",
-                      chosen: str | None = None) -> tuple[str | None, str]:
+                      chosen: str | None = None,
+                      material=None) -> tuple[str | None, str]:
     """(path, id) of the template a preview of *material_id* should use.
 
     *report_id* is the report the preview belongs to, when the caller has one
@@ -2045,7 +2055,8 @@ def _preview_template(repo, auth, material_id: str, report_id: str = "",
     style: a styling problem must not stop an analyst seeing their chart.
     """
     try:
-        m = repo.find_material(auth, material_id)
+        # The record already resolved this request, when the caller has it.
+        m = material if material is not None else repo.find_material(auth, material_id)
         if m is None:
             return None, ""
         if chosen is None:
@@ -2196,8 +2207,15 @@ def preview_chart(
     # here so the Design preview matches the deck — a preview built on the house
     # default while the deck comes out in the client's template is a WYSIWYG
     # guarantee that quietly stopped being true.
+    # The material as this request's guard already resolved it: every helper
+    # below used to look it up again, a round-trip to the hive each time.
+    try:
+        _material = client._material(material_id)
+    except Exception:  # noqa: BLE001 — the helpers resolve it themselves then
+        _material = None
     template_path, template_id = _preview_template(
-        repo, auth, material_id, body.report_id or "", body.template_id)
+        repo, auth, material_id, body.report_id or "", body.template_id,
+        material=_material)
 
     # The template is part of the cache identity by its CONTENT, not its id.
     # `_preview_template` names its temp copy `<id>.<content-hash>.pptx`, so
@@ -2210,7 +2228,8 @@ def preview_chart(
     # corrections to it. Those are stored beside the template, not in it, so
     # without them here a layout change or a resized chart area produced the
     # same key and the cache served the picture from before it.
-    _overrides = _template_overrides(repo, auth, material_id, template_id)
+    _overrides = _template_overrides(repo, auth, material_id, template_id,
+                                     material=_material)
     _template_identity = (os.path.basename(template_path) if template_path else "none")
     if _overrides:
         _template_identity += "." + hashlib.sha256(
@@ -2238,7 +2257,8 @@ def preview_chart(
     style = None
     if not body.render_title and template_path:
         try:
-            style = _styled_template(repo, auth, material_id, template_path, template_id)
+            style = _styled_template(repo, auth, material_id, template_path, template_id,
+                                     overrides=_overrides)
             # The headline this slide will carry, so the reported size is the
             # one the deck would use for THIS text rather than the template's
             # nominal size — see title_box_headers.
@@ -2301,7 +2321,8 @@ def preview_chart(
         # case, render_title=False) rather than parsing the template twice.
         if style is None and template_path:
             try:
-                style = _styled_template(repo, auth, material_id, template_path, template_id)
+                style = _styled_template(repo, auth, material_id, template_path, template_id,
+                                         overrides=_overrides)
             except Exception:  # noqa: BLE001
                 style = None
 

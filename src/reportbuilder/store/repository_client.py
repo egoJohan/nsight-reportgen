@@ -82,6 +82,9 @@ class RepositoryClient:
         # acceptance), so this memo must be droppable and must not be shared
         # with a scope that outlives the writes. (Johan, 2026-09-16)
         self._config_memo: dict = {}
+        # Configs this request has written: the material record's own copy of
+        # its config predates the write and must not be served again.
+        self._config_written: set = set()
 
     # -- resolution -------------------------------------------------------
 
@@ -106,12 +109,21 @@ class RepositoryClient:
         hit = self._config_memo.get(m.id)
         if hit is not None:
             return hit
+        # `find_material` read the very same record a moment ago, and carries
+        # its config: reading the file again was a second round-trip on every
+        # preview. Not after a write in this request — then the store says.
+        # (perf, 2026-09-19)
+        carried = getattr(m, "config", None)
+        if carried is not None and m.id not in self._config_written:
+            self._config_memo[m.id] = carried
+            return carried
         cfg = self.repo.load_material_config(self.auth, m.customer_id, m.case_id, m.id)
         self._config_memo[m.id] = cfg
         return cfg
 
     def _forget_config(self, material_id: str) -> None:
         self._config_memo.pop(material_id, None)
+        self._config_written.add(material_id)
 
     def _case(self, case_id: str):
         """The case record, resolved ONCE per request.

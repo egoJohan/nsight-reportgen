@@ -13,6 +13,7 @@ JSON: the serde tests rest on a byte-exact round trip.
 """
 from __future__ import annotations
 
+import threading
 from typing import Sequence
 
 import httpx
@@ -28,16 +29,31 @@ class DataHiveObjectStore:
     def __init__(self, base_url: str, *, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._http: httpx.Client | None = None
+        self._http_lock = threading.Lock()
 
-    def _client(self, auth: AuthContext) -> httpx.Client:
-        # A client per call: the bearer IS the caller's identity, so a shared
-        # client would have to mutate its own auth header per request — one
-        # missed reset and a user reads with another user's rights.
-        return httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {auth.token}"},
-            timeout=self._timeout,
-        )
+    def _pool(self) -> httpx.Client:
+        """One connection pool for every call, and NO identity in it.
+
+        A client per call opened a fresh connection per call: 55 ms a GET
+        against 41 ms kept alive, and a preview makes a dozen. The client
+        was per call because the bearer IS the caller's identity, and a
+        shared client would have had to mutate its auth header per request —
+        one missed reset and a user reads with another user's rights. So the
+        shared client carries no Authorization at all; every request passes
+        its own (`_auth`), and there is nothing to reset. httpx clients are
+        safe to share across threads. (perf, 2026-09-19)
+        """
+        if self._http is None:
+            with self._http_lock:
+                if self._http is None:
+                    self._http = httpx.Client(base_url=self.base_url,
+                                              timeout=self._timeout)
+        return self._http
+
+    @staticmethod
+    def _auth(auth: AuthContext) -> dict[str, str]:
+        return {"Authorization": f"Bearer {auth.token}"}
 
     @staticmethod
     def _raise(resp: httpx.Response, path: str) -> None:
@@ -71,16 +87,15 @@ class DataHiveObjectStore:
             # A repeated field, not a comma-joined string: datahive expands each
             # label separately ("nsight:report" -> ["nsight", "nsight:report"]).
             form["labels"] = list(labels)
-        with self._client(auth) as c:
-            r = c.put("/api/v1/objects",
-                      files={"file": (path.rsplit("/", 1)[-1], data, content_type)},
-                      data=form)
+        r = self._pool().put("/api/v1/objects",
+                             files={"file": (path.rsplit("/", 1)[-1], data, content_type)},
+                             data=form, headers=self._auth(auth))
         self._raise(r, path)
         return r.json().get("object_id", "")
 
     def get(self, auth: AuthContext, path: str) -> bytes:
-        with self._client(auth) as c:
-            r = c.get("/api/v1/objects", params={"path": path})
+        r = self._pool().get("/api/v1/objects", params={"path": path},
+                             headers=self._auth(auth))
         self._raise(r, path)
         return r.content
 
@@ -90,8 +105,8 @@ class DataHiveObjectStore:
         if path_prefix:
             params.append(("path_prefix", path_prefix))
         params += [("label", l) for l in labels]
-        with self._client(auth) as c:
-            r = c.get("/api/v1/objects/list", params=params)
+        r = self._pool().get("/api/v1/objects/list", params=params,
+                             headers=self._auth(auth))
         self._raise(r, path_prefix or "/")
         return [
             ObjectInfo(
@@ -106,6 +121,6 @@ class DataHiveObjectStore:
         ]
 
     def delete(self, auth: AuthContext, path: str) -> None:
-        with self._client(auth) as c:
-            r = c.request("DELETE", "/api/v1/objects", params={"path": path})
+        r = self._pool().request("DELETE", "/api/v1/objects", params={"path": path},
+                                 headers=self._auth(auth))
         self._raise(r, path)
