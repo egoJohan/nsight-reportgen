@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { settleDelay } from "../../lib/editSettle";
 import {
   useCallback,
   useEffect,
@@ -103,25 +104,8 @@ function replaceSpecialGroup(
   return inserted ? out : null;
 }
 
-/** How long an edit has to stop moving before its slide is queued to render.
- *
- *  A render is a CPU-bound pipeline — LibreOffice, PDF, raster — and staging
- *  gives it one core. So this is not sized to coalesce KEYSTROKES, which
- *  anything over ~50ms does; it is sized to coalesce the PAUSES a person
- *  leaves inside a sentence. Typing a headline is bursts of words with
- *  300-900ms gaps and a second or two of thinking somewhere in the middle, and
- *  every gap longer than this window renders a half-written sentence that
- *  nobody asked to see. At 350ms, one seven-word headline cost SEVEN renders;
- *  at this value it costs one.
- *
- *  The cost of raising it is paid by the discrete controls — a chart type, a
- *  toggle — where nothing follows the change and the author simply waits the
- *  window out before anything moves. Measured at 1.0s to first picture at
- *  350ms against 2.6s here. That is the trade, and it is worth it: the slow
- *  case is one click, and the fast case was spending six renders of a
- *  one-core machine on sentences that were never finished.
- */
-const EDIT_SETTLE_MS = 2000;
+// How long an edit waits before its slide is queued to render: 2s for typed
+// text, 250ms for everything else. See `settleDelay` in lib/editSettle.ts.
 
 const STEPS = [
   { id: "select", label: "Select" },
@@ -876,6 +860,8 @@ export default function ReportWizard({
   );
   const resolvedCount = questionByRef.size;
   const lastSeen = useRef<Map<string, string>>(new Map());
+  // The same, as objects: what the wait is decided from (`settleDelay`).
+  const lastSeenCharts = useRef<Map<string, Record<string, unknown>>>(new Map());
   useEffect(() => {
     // Not before the questions have resolved. A headline is written ABOUT the
     // question as the current grouping resolves it, so starting earlier means
@@ -883,7 +869,12 @@ export default function ReportWizard({
     // nothing to write about and are recorded as needing nothing. That is how
     // the first four slides of a sixty-slide report came out untitled.
     if (!resolvedCount) return;
-    // Debounced, so a burst of edits queues one render rather than one each.
+    // Debounced, so a burst of edits queues one render rather than one each —
+    // long for typed text, short for a control. See lib/editSettle.ts.
+    const delay = settleDelay(
+      lastSeenCharts.current,
+      (draftRef.current?.charts ?? []).filter((c) => !c.excluded) as unknown as Record<string, unknown>[]
+    );
     const h = setTimeout(() => {
       // Hidden slides are left out: the queue would otherwise spend a render
       // and a headline call on each of them, on a render host with one core,
@@ -898,7 +889,10 @@ export default function ReportWizard({
         if (lastSeen.current.get(id) !== sig) previewQueue.enqueue(id);
       }
       lastSeen.current = next;
-    }, EDIT_SETTLE_MS);
+      lastSeenCharts.current = new Map(
+        charts.map((c) => [c.slide_id ?? "", c as unknown as Record<string, unknown>])
+      );
+    }, delay);
     return () => clearTimeout(h);
   }, [chartsSignature, resolvedCount]);
 

@@ -121,11 +121,18 @@ function ChartPreview({
   // The queue draws this slide's headline before its picture, so there is no
   // "render now, title later" to guard against any more. `priority` promotes the
   // selected slide to the head of that one queue.
-  const { data, error: qError, isFetching: loading } = useChartPreview(
+  const { data, error: qError, isFetching: loading, isPlaceholderData } = useChartPreview(
     materialId,
     debounced,
     { renderTitle: false, priority: true, grouping, reportId, templateRef }
   );
+  // The picture on screen is the one from BEFORE the latest edit: the edit is
+  // still inside this pane's own debounce, or its slide is waiting to be
+  // queued and the previous picture is standing in. Said at once — shown
+  // undimmed, the old picture read as the new one for up to two seconds.
+  // (perf, 2026-09-19)
+  const debouncedKey = useMemo(() => JSON.stringify(debounced), [debounced]);
+  const stale = isPlaceholderData || editKey !== debouncedKey;
   const url = data?.dataUrl;
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
@@ -141,7 +148,7 @@ function ChartPreview({
   const busyState = (s?: string) => s === "running" || s === "pending";
   const producing =
     busyState(queued.title) || busyState(queued.bullets) || busyState(queued.chart);
-  const busy = loading || producing || titlePending || labelsPending;
+  const busy = loading || producing || titlePending || labelsPending || stale;
 
   return (
     // Full-width preview: no padding — the border frames the slide itself. The
@@ -2059,7 +2066,7 @@ function SpecialPreview({
   // PNG (renderTitle:true) and show it plainly.
   const grouping = useContext(GroupingCtx);
   const { reportId, templateRef } = useContext(PreviewTemplateCtx);
-  const { data, error: qError, isFetching: loading } = useChartPreview(
+  const { data, error: qError, isFetching: loading, isPlaceholderData } = useChartPreview(
     materialId,
     chart,
     { renderTitle: false, priority: true, grouping, reportId, templateRef }
@@ -2068,8 +2075,9 @@ function SpecialPreview({
   const error =
     qError instanceof Error ? qError.message : qError ? "Preview failed" : null;
   // Re-rendering OR bullet (re)generation → the single "Updating…" animation over a
-  // dimmed slide, instead of a separate region placeholder.
-  const busy = loading || bulletsPending;
+  // dimmed slide, instead of a separate region placeholder. The previous
+  // picture standing in for an edit not yet drawn counts too — see ChartPreview.
+  const busy = loading || bulletsPending || isPlaceholderData;
   return (
     // Full-width, no padding — the border frames the slide; height follows the
     // slide's aspect ratio. (SLIDE_ASPECT)
