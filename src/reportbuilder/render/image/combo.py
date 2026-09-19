@@ -207,7 +207,7 @@ def _set_category_ticks(fig, ax, cats, ink) -> None:
     fs = 11.5
     ax.set_xticklabels(cats, fontsize=fs, color=ink)
     register_category_labels(ax, "x", cats)
-    fig.canvas.draw()
+    fig.draw_without_rendering()
     label_fit.fit_category_labels(fig)
     if not _names_collide(fig, ax):
         return

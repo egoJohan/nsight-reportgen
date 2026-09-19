@@ -8,6 +8,10 @@ render_to_file: convenience wrapper that saves to disk and returns the path
 """
 from __future__ import annotations
 
+import functools
+import io
+import os
+
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.exc import PackageNotFoundError
@@ -100,6 +104,30 @@ def _strip_slides(prs) -> int:
                 pass
         removed += 1
     return removed
+
+
+@functools.lru_cache(maxsize=8)
+def _stripped_bytes(path: str, size: int, mtime_ns: int) -> bytes:
+    # size/mtime_ns are the cache identity only: changed bytes are a new key.
+    prs = Presentation(path)
+    _strip_slides(prs)
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+def open_stripped_template(path: str):
+    """The template at *path* with its slides removed, as a fresh Presentation.
+
+    Every preview and every deck opened the customer's whole file — Attendo's is
+    56 slides, 3.3 MB — only to delete the slides again: 183 ms before anything
+    was drawn, 660 ms on Synsam's. The stripped deck is saved once per file
+    version and each caller opens its own copy of those bytes (25-80 ms), so no
+    two renders ever share an object. Keyed on size and modification time like
+    `template_cache.resolve`: a replaced template is a new key. (perf, 2026-09-19)
+    """
+    st = os.stat(path)
+    return Presentation(io.BytesIO(_stripped_bytes(path, st.st_size, st.st_mtime_ns)))
 
 
 def _count_chart_shapes(prs: Presentation) -> tuple[int, int]:
@@ -224,20 +252,19 @@ def render_report(
     # A safe heuristic: try Presentation(spec_source) and fall back on any error.
     prs = None
     if spec_source and spec_source not in ("generic", "attendo-interim-proxy"):
+        # A client "template" is usually a FINISHED deck — Attendo's is 56
+        # slides of last year's report. Using their template means inheriting
+        # their look, not their content, so the slides go while the masters,
+        # layouts, theme, fonts and page size stay.
+        #
+        # Dropping the relationship as well as the sldIdLst entry matters: left
+        # related, the slide parts survive the save and every generated deck
+        # would carry megabytes of somebody else's finished report.
+        # `open_stripped_template` does both, once per template version.
         try:
-            prs = Presentation(spec_source)
+            prs = open_stripped_template(spec_source)
         except (FileNotFoundError, PackageNotFoundError):
             prs = None
-        if prs is not None:
-            # A client "template" is usually a FINISHED deck — Attendo's is 56
-            # slides of last year's report. Using their template means
-            # inheriting their look, not their content, so the slides go while
-            # the masters, layouts, theme, fonts and page size stay.
-            #
-            # Dropping the relationship as well as the sldIdLst entry matters:
-            # left related, the slide parts survive the save and every generated
-            # deck would carry megabytes of somebody else's finished report.
-            _strip_slides(prs)
 
     if prs is None:
         # Wizard/generic reports render on a blank deck at 16:9 (13.333"×7.5"), the

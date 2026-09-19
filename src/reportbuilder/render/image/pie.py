@@ -47,7 +47,7 @@ from reportbuilder.render.house_style import (
     register_fonts, series_colors, contrast_ink, MUTED,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
-from reportbuilder.render.image._mpl import VALUE_GID, figure_floor_in, template_palette
+from reportbuilder.render.image._mpl import VALUE_GID, figure_floor_in, settle_axes, template_palette
 from reportbuilder.render.image.bars import _rowmajor_legend
 from reportbuilder.render.image._mpl import wants_group_base
 from reportbuilder.render.panels import panel_segments
@@ -115,7 +115,7 @@ def callout_overhang(fig, axes) -> float:
     """
     from matplotlib.text import Annotation
 
-    fig.canvas.draw()
+    fig.draw_without_rendering()
     renderer = fig.canvas.get_renderer()
     worst = 0.0
     for ax in axes:
@@ -166,7 +166,7 @@ def _legend_height_frac(fig, leg) -> float:
     the reservation can be grown to fit it, rather than letting it overlap the
     panels above.
     """
-    fig.canvas.draw()
+    fig.draw_without_rendering()
     bbox = leg.get_window_extent(fig.canvas.get_renderer())
     return bbox.height / fig.bbox.height
 
@@ -239,9 +239,9 @@ def _text_width(ax, text: str) -> float:
     "4 % of a pie" is a different number of pixels on a full-width slide and in
     a row of three panels.
     """
+    settle_axes(ax)
     art = ax.text(0, 0, text, fontsize=10.0, fontweight="bold", alpha=0.0)
     try:
-        ax.figure.canvas.draw()
         box = art.get_window_extent(ax.figure.canvas.get_renderer())
         x0, x1 = ax.transData.inverted().transform([(0, 0), (box.width, 0)])[:, 0]
         return abs(x1 - x0)

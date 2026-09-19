@@ -126,7 +126,7 @@ def _place_ring_labels(fig, ax, angles: list[float], segs, data,
     candidates = _ring_label_candidates(angles, segs, data)
     for angle in candidates[:max(1, tries)]:
         ax.set_rlabel_position(angle)
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         if not _rings_cross_a_name(fig, ax):
             return angle
     ax.set_rlabel_position(candidates[0])

@@ -178,7 +178,7 @@ def _fit_value_labels(ax, value_labels, max_val: float, ink: str) -> None:
     if not value_labels:
         return
     fig = ax.figure
-    fig.canvas.draw()
+    fig.draw_without_rendering()
     renderer = fig.canvas.get_renderer()
     gap = max_val * 0.02
     for text, left, v, i in value_labels:

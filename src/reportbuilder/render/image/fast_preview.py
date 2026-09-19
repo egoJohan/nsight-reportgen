@@ -89,7 +89,7 @@ def ground_image(style, dpi: int = 110):
     from pptx import Presentation
     from pptx.util import Inches
 
-    from reportbuilder.render.deck import _resolve_slot, _strip_slides
+    from reportbuilder.render.deck import _resolve_slot, open_stripped_template
     from reportbuilder.render.image.slide_chrome import template_ground
 
     source = getattr(style, "spec_source", None)
@@ -98,8 +98,7 @@ def ground_image(style, dpi: int = 110):
         prs = None
         if source and source not in ("generic", "attendo-interim-proxy"):
             try:
-                prs = Presentation(source)
-                _strip_slides(prs)
+                prs = open_stripped_template(source)
             except Exception:  # noqa: BLE001 — unreadable template: no fast path
                 prs = None
         if prs is None:

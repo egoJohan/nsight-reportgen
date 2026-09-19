@@ -59,7 +59,7 @@ def spread_values_in_columns(fig, ax) -> int:
               if t.get_gid() == VALUE_GID and t.get_visible() and hasattr(t, "xyann")]
     if len(labels) < 2:
         return 0
-    fig.canvas.draw()
+    fig.draw_without_rendering()
     r = fig.canvas.get_renderer()
     pt = fig.dpi / 72.0
     gap = _STACK_GAP_PT * pt

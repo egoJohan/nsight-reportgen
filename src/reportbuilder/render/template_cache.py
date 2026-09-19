@@ -89,6 +89,15 @@ def _resolve(path: str, size: int, mtime_ns: int) -> ResolvedTemplate:
     return ResolvedTemplate(style=style, spec=spec)
 
 
+@lru_cache(maxsize=16)
+def _with_layout(path: str, size: int, mtime_ns: int, layout_index: int):
+    # size/mtime_ns are the cache identity only, as in `_resolve`. Handed out
+    # only as a deep copy: overrides are applied to what the caller receives.
+    from reportbuilder.render.style_spec import load_style_spec
+
+    return load_style_spec(path, force_layout=layout_index)
+
+
 def resolve(template_path: str) -> ResolvedTemplate:
     """The resolved template at *template_path*, computed once per file.
 
@@ -116,12 +125,13 @@ def style_with_overrides(template_path: str, overrides: dict | None):
     if isinstance(chosen, int):
         # A chosen layout changes what there is to harvest, so it cannot be
         # patched onto an already-resolved style — the title box, the title
-        # colour and the content area all come from the layout. Not cached: it
-        # is one author's choice for one template, and the cache is keyed on the
-        # file alone.
-        from reportbuilder.render.style_spec import load_style_spec
-
-        style = load_style_spec(template_path, force_layout=chosen)
+        # colour and the content area all come from the layout. Parsed once per
+        # (file version, layout) and copied, like the default: parsing it on
+        # every request — cached previews included — cost 0.8 s (Attendo) to
+        # 1.9 s (Holiday Club, Synsam) each time. (perf, 2026-09-19)
+        st = os.stat(template_path)
+        style = copy.deepcopy(
+            _with_layout(template_path, st.st_size, st.st_mtime_ns, chosen))
     else:
         style = copy.deepcopy(resolve(template_path).style)
     apply_template_overrides(style, overrides)

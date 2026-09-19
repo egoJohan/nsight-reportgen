@@ -136,7 +136,7 @@ def names_flat_unless_they_cannot_be(fig, ax, raw: Sequence[str], *, fontsize: f
     registry = getattr(fig, _ATTR)
     entry = registry[-1]
     if _usable(entry):
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         r = fig.canvas.get_renderer()
         _refit(fig, [entry], r)
         clear = _touching([entry], _obstacles(fig, [entry], r), r) == 0

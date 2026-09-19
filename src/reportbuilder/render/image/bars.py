@@ -42,7 +42,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     series_label, with_base, place_total, colours_by_series,
     place_picture_square, series_values, format_value, label_floor, default_label_floor,
     author_label_floor, style_legend,
-    force_break_token, whole_or_broken, wrap_label, wrap_label_capped,
+    force_break_token, settle_axes, whole_or_broken, wrap_label, wrap_label_capped,
     VALUE_GID,
     _new_agg_figure, _EMU_PER_IN, wants_group_base, _value_axis,
 )
@@ -2016,9 +2016,9 @@ def build_image_column_stacked(ctx) -> None:
 def text_size_in_data(ax, text: str, *, fontsize: float,
                       weight: str = "bold") -> tuple[float, float]:
     """(width, height) of `text` in the axes' own units."""
+    settle_axes(ax)
     art = ax.text(0, 0, text, fontsize=fontsize, fontweight=weight, alpha=0.0)
     try:
-        ax.figure.canvas.draw()
         box = art.get_window_extent(ax.figure.canvas.get_renderer())
         inv = ax.transData.inverted()
         (x0, y0), (x1, y1) = inv.transform([(0, 0), (box.width, box.height)])
@@ -2036,9 +2036,9 @@ def text_width_in_data(ax, text: str, *, fontsize: float, weight: str = "bold") 
     prints ones that collide with their neighbour — which is what a reader saw
     as a smear of digits at the foot of a scale.
     """
+    settle_axes(ax)
     art = ax.text(0, 0, text, fontsize=fontsize, fontweight=weight, alpha=0.0)
     try:
-        ax.figure.canvas.draw()
         box = art.get_window_extent(ax.figure.canvas.get_renderer())
         x0, x1 = ax.transData.inverted().transform([(0, 0), (box.width, 0)])[:, 0]
         return abs(x1 - x0)
@@ -2115,7 +2115,7 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
         of their own type size between them, which is the same rule names
         already keep. (Johan, 2026-09-13)
         """
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         r = fig.canvas.get_renderer()
         boxed = [(t, Text.get_window_extent(t, r)) for t in labels]
         for i, (ta, a) in enumerate(boxed):
@@ -2132,7 +2132,7 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
 
     def crowded_pairs():
         """The pairs that are too close, worst first — not a yes/no."""
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         r = fig.canvas.get_renderer()
         boxed = [(t, Text.get_window_extent(t, r)) for t in labels]
         out = []
@@ -2158,7 +2158,7 @@ def shrink_values_until_clear(fig, ax, *, min_pt: float = _VALUE_MIN_PT,
         overlap just as stubbornly, and shrinking buys nothing at all. The area
         falling tells one from the other. (Johan, 2026-09-13)
         """
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         r = fig.canvas.get_renderer()
         boxed = [Text.get_window_extent(t, r) for t in labels]
         total = 0.0
@@ -2257,7 +2257,7 @@ def make_room_for_values(fig, ax, *, max_grow: float = 0.3,
 
     grew = False
     for _ in range(max(1, passes)):
-        fig.canvas.draw()
+        fig.draw_without_rendering()
         r = fig.canvas.get_renderer()
         labels = [t for t in ax.texts
                   if t.get_gid() == _VALUE_GID and t.get_visible()]
