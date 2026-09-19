@@ -175,3 +175,43 @@ def test_value_labels_never_overlap_each_other(groups):
             assert b0 >= a1 - 0.5, (
                 f"{groups} groups: labels overlap at y={y} "
                 f"({a0:.0f}-{a1:.0f} then {b0:.0f})")
+
+
+def test_a_number_on_its_side_stands_on_its_own_bar():
+    """Turned for a crowded chart, a number still sits ABOVE its bar and over
+    its middle. Aligned before turning (`rotation_mode="anchor"`), the middle
+    of the upright number sat on the bar top and it was pushed to the left:
+    half of "43 %" inside a dark bar, reported from staging as "pylväiden
+    numeroiden formaatissa on jotain outoa". (2026-09-19)"""
+    import matplotlib.patches as mpatches
+
+    found: dict = {}
+    original = B.render_png
+
+    def _spy(fig):
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        ax = fig.axes[0]
+        bars = [p.get_window_extent(r) for p in ax.patches
+                if isinstance(p, mpatches.Rectangle)]
+        texts = [t for t in ax.texts if "%" in t.get_text()]
+        found["pairs"] = []
+        for t in texts:
+            box = t.get_window_extent(r)
+            cx = (box.x0 + box.x1) / 2
+            bar = min(bars, key=lambda b: abs((b.x0 + b.x1) / 2 - cx))
+            found["pairs"].append((t.get_rotation(), box, bar, t.get_text()))
+        return original(fig)
+
+    B.render_png = _spy
+    try:
+        _labels(8, n_cats=4)
+    finally:
+        B.render_png = original
+
+    turned = [p for p in found["pairs"] if p[0] == 90]
+    assert turned, "the crowded chart should turn its numbers"
+    for _rot, box, bar, text in turned:
+        assert box.y0 >= bar.y1 - 1, f"{text!r} starts inside its bar"
+        assert bar.x0 - 1 <= (box.x0 + box.x1) / 2 <= bar.x1 + 1, (
+            f"{text!r} is not over its bar")

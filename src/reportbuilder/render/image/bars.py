@@ -1353,8 +1353,14 @@ def _render_column_v(ctx, cats, segs, data) -> None:
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                    # Aligned AFTER turning (matplotlib's default mode): the
+                    # turned number's box stands on the bar, centred on it.
+                    # `rotation_mode="anchor"` aligned it before turning, so
+                    # "center" put the MIDDLE of the upright number on the bar
+                    # top and "bottom" pushed it left — half of "43 %" inside a
+                    # dark bar, reported as "pylväiden numeroiden formaatissa on
+                    # jotain outoa". (2026-09-19)
                     ha="center", va="bottom", rotation=_rot,
-                    rotation_mode="anchor" if _rot else None,
                     fontsize=_pt, fontweight="bold", color=ink, zorder=5,
                     gid=VALUE_GID,
                 )
