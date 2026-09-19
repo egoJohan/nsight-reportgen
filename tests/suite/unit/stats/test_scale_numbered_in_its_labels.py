@@ -156,3 +156,39 @@ class TestWhenTheAuthorHasNamedALevelThemselves:
         """The legend only stands down for a label it is actually drawing."""
         assert _series(NUMBERED_MIDDLE,
                        overrides=(("Ei mikään taso", "x"),)).caption
+
+
+def _series_coded(labels: dict[float, str], chart_type: str = "stacked_horizontal_bar"):
+    """A scale whose value CODES are not its points — responses on every code."""
+    var = Variable(name="q", label="Kuinka hyvin koet?", measurement="nominal",
+                   missing_values=[],
+                   value_labels=[ValueLabel(value=c, label=l) for c, l in labels.items()])
+    rows = [{"q": c} for i, c in enumerate(labels) for _ in range(20 + 10 * i)]
+    model = QuestionModel(
+        variables={"q": var},
+        questions=[Question(qid="q", text=var.label, kind="single", variables=("q",))])
+    spec = ChartSpec(question_ref="q", chart_type=chart_type, statistic="pct",
+                     classifying_var=None, number_format=NumberFormat(),
+                     sort=SortSpec(basis="data_order"), template_slot="s1",
+                     elements=ElementToggles())
+    return compute(model.question("q"), spec, pd.DataFrame(rows), model)
+
+
+#: Holiday Club's export: the middle points are coded 2..6, the ENDPOINTS far
+#: away at 10086 and 10088, and "=" between the number and the words.
+ENDPOINTS_CODED_ELSEWHERE = {2.0: "2", 3.0: "3", 4.0: "4", 5.0: "5", 6.0: "6",
+                             10086.0: "1=Erittäin huonosti",
+                             10088.0: "7= Erittäin hyvin"}
+
+
+def test_endpoints_coded_away_from_their_points_are_still_named():
+    """The legend shortens these seven labels to "1 … 7" from the labels alone,
+    so the caption has to come from the labels too, not from the codes.
+    (visual QA, 2026-09-19)"""
+    caption = _series_coded(ENDPOINTS_CODED_ELSEWHERE).caption
+    assert caption == "1 = Erittäin huonosti · 7 = Erittäin hyvin", caption
+
+
+def test_two_levels_claiming_one_point_is_not_a_scale():
+    labels = {1.0: "1 kerta", 2.0: "1 kerta tai enemmän", 3.0: "3", 4.0: "4"}
+    assert not _series_coded(labels).caption

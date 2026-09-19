@@ -1159,7 +1159,7 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
 #: The point number a scale label may begin with, and the punctuation that
 #: separates it from the words: "1- Ei lainkaan ylpeä", "1 - …", "1. …", "1) …".
-_SCALE_POINT_PREFIX = re.compile(r"^\s*(\d+)\s*[-\u2013\u2014.:)]*\s*")
+_SCALE_POINT_PREFIX = re.compile(r"^\s*(\d+)\s*[-\u2013\u2014.:)=]*\s*")
 
 
 def _scale_words(code: int, label: str) -> str:
@@ -1257,20 +1257,32 @@ def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
         return None
     if var.name not in data.columns:
         return None
-    labels = {int(vl.value): vl.label for vl in var.value_labels
-              if float(vl.value).is_integer() and vl.value not in eff}
-    if len(labels) < 3:
+    shown = [vl.label or "" for vl in var.value_labels if vl.value not in eff]
+    if len(shown) < 3:
         return None
-    # Every level opens with its own point number: the same test the legend
-    # applies before it shortens. If one does not, the legend keeps the words
-    # and there is nothing to preserve.
-    words = {}
-    for code, label in labels.items():
-        t = (label or "").strip()
+    # Every level opens with a point number and none is a band: the same test
+    # the legend applies before it shortens (`image/bars._labels_are_a_numeric
+    # _scale`). If one does not, the legend keeps the words and there is
+    # nothing to preserve.
+    #
+    # The POINT is the number the label opens with, not the value code — as in
+    # `scale_levels`. An export may code its endpoints anywhere: Holiday Club's
+    # 1..7 has "1=Erittäin huonosti" on code 10086 and "7= Erittäin hyvin" on
+    # 10088. Requiring the code to match left the caption unbuilt while the
+    # legend shortened all seven to "1 … 7" regardless, and nothing on the slide
+    # said which end was good. (visual QA, 2026-09-19)
+    words: dict[int, str] = {}
+    labels: dict[int, str] = {}
+    for label in shown:
+        t = label.strip()
         m = _SCALE_POINT_PREFIX.match(t)
-        if not m or int(m.group(1)) != code:
+        if not m or _BANDED_LABEL.match(t):
             return None
-        words[code] = _scale_words(code, label)
+        point = int(m.group(1))
+        if point in words:
+            return None          # two levels claiming one point is not a scale
+        labels[point] = label
+        words[point] = _scale_words(point, label)
     # An AUTHORED category label stands the whole legend down from shortening
     # ("not just the renamed level" — image/bars._legend_below), so the words
     # are on the legend after all and a caption repeats them. Mirroring that
@@ -1527,7 +1539,24 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
     base_spec = dataclasses.replace(
         spec, options={}, statistic="pct", chart_type="vertical_bar",
     )
-    base = _single(question, base_spec, data, model)
+    # A MULTI-response question's categories are its options, one variable each.
+    # This read `question.variables[0]` whatever the question was, so a combo on
+    # "Mitä seuraavista … tunnet" drew its first brand's "Unchecked" and
+    # "Checked" instead of the nine brands, the moment a secondary variable was
+    # chosen. (visual QA, 2026-09-19)
+    multi_masks: dict[str, pd.Series] | None = None
+    if question.kind == "multi" and len(question.variables) > 1:
+        base = _multi(question, base_spec, data, model)
+        members = [model.variable(n) for n in question.variables]
+        _display = _clash_free(tuple(v.label for v in members),
+                               spec.label_override_map()
+                               if hasattr(spec, "label_override_map") else {})
+        multi_masks = {}
+        for v in members:
+            col = pd.to_numeric(data[v.name], errors="coerce")
+            multi_masks[_display(v.label)] = (col == 1.0) & ~col.isin(v.missing_values)
+    else:
+        base = _single(question, base_spec, data, model)
     pcol = pd.to_numeric(data[var.name], errors="coerce")
     scol, secondary_label, secondary_statistic = _combo_secondary_values(
         spec, data, model, sec_name)
@@ -1555,7 +1584,9 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         if full in label_to_code:
             label_to_code.setdefault(short, label_to_code[full])
     # Uncut: it is a legend entry, and a cut name cannot be read or edited.
-    primary_label = (var.label or var.name).strip()
+    # A multi's first member is one option, not the question.
+    primary_label = ((question.text or var.label or var.name) if multi_masks is not None
+                     else (var.label or var.name)).strip()
 
     # The bars. With no classifier that is the question's own distribution, in
     # one series named after the question. With one, it is that classifier's
@@ -1577,8 +1608,12 @@ def _combo_two_var(question: Question, spec: ChartSpec, data: pd.DataFrame,
         # rather than per group. The secondary variable is chosen once, as a
         # single "Secondary variable (line)", and a line per group on top of a
         # bar per group is a chart nobody can read.
-        code = label_to_code.get(cat)
-        vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
+        if multi_masks is not None:
+            mask = multi_masks.get(cat)
+            vals = scol[mask].dropna() if mask is not None else scol.iloc[0:0]
+        else:
+            code = label_to_code.get(cat)
+            vals = scol[pcol == code].dropna() if code is not None else scol.iloc[0:0]
         secondary_n += len(vals)
         cells[(cat, secondary_label)] = Cell(
             pct=(float(vals.mean()) if len(vals) else None)
