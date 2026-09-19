@@ -135,3 +135,34 @@ def test_an_axis_that_is_not_drawn_contributes_no_obstacles():
     counted = [t.get_text() for t in overlap._texts(fig)]
 
     assert counted == [], f"phantom obstacles from an axis that is not drawn: {counted}"
+
+
+def test_it_finds_two_legends_printed_over_each_other():
+    """Two panels' legends, each wider than its panel, side by side: the
+    small-multiples defect the census could not see while it left legends out.
+    (visual QA, 2026-09-19)"""
+    from matplotlib.patches import Patch
+
+    fig = Figure(figsize=(6.0, 3.0), dpi=100)
+    FigureCanvasAgg(fig)
+    left, right = fig.subplots(1, 2)
+    handles = [Patch(color="k")] * 2
+    left.legend(handles, ["Pääkaupunkiseudulla (n=118)", "Länsi-Suomessa (n=145)"],
+                loc="upper left", bbox_to_anchor=(0.2, -0.1), ncol=2, fontsize=9)
+    right.legend(handles, ["Pääkaupunkiseudulla (n=122)", "Länsi-Suomessa (n=179)"],
+                 loc="upper right", bbox_to_anchor=(0.8, -0.1), ncol=2, fontsize=9)
+    fig.canvas.draw()
+
+    assert overlap.collisions(fig), "two legends printed through each other went unseen"
+
+
+def test_a_twin_axes_hidden_axis_is_not_counted():
+    """`twinx` hides the twin's x axis; its tick labels still say they are
+    visible, and sit exactly on the parent's."""
+    fig, ax = _fig()
+    ax.set_xticks([20, 50, 80])
+    ax.set_xticklabels(["25-34 vuotias", "35-44 vuotias", "45-54 vuotias"])
+    ax.twinx()
+    fig.canvas.draw()
+
+    assert overlap.collisions(fig) == []

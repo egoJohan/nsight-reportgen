@@ -31,11 +31,28 @@ def drawn_texts(fig) -> list:
             out.append(ax.title)
         if not ax.axison:
             continue
-        for labels in (ax.get_xticklabels(), ax.get_yticklabels()):
+        # An axis can be switched off on its own while its axes stays on: a
+        # twin axes (`twinx`) hides its x axis, whose tick labels still report
+        # themselves visible and sit exactly on the parent's — every combo
+        # "collided" with itself, name for name. (visual QA, 2026-09-19)
+        for axis, labels in ((ax.xaxis, ax.get_xticklabels()),
+                             (ax.yaxis, ax.get_yticklabels())):
+            if not axis.get_visible():
+                continue
             for artist in labels:
                 if artist.get_visible() and artist.get_text().strip():
                     out.append(artist)
     for artist in fig.texts:
         if artist.get_visible() and artist.get_text().strip():
             out.append(artist)
+    # Legends are text on the picture like any other. Left out, the census was
+    # blind to the one collision that made a small-multiples slide unreadable:
+    # four panels' legends printed through each other. (visual QA, 2026-09-19)
+    legends = [ax.get_legend() for ax in fig.axes] + list(fig.legends)
+    for legend in legends:
+        if legend is None or not legend.get_visible():
+            continue
+        for artist in legend.get_texts():
+            if artist.get_visible() and artist.get_text().strip():
+                out.append(artist)
     return out
