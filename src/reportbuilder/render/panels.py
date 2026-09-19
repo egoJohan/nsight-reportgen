@@ -66,13 +66,22 @@ def panel_segments(series) -> PanelSelection:
         return PanelSelection(labels=("Total",), thin=thin, degraded=True,
                               split=True)
 
+    # The whole study as a panel of its own, when the author asks for it —
+    # "Total next to 25–34-vuotiaat". First, where a reader looks for the
+    # reference, and always kept: it is the one panel the author named for
+    # itself rather than picked from a list, so a group gives way to it.
+    # (2026-09-19)
+    total = ("Total",) if (getattr(series, "total_panel", False)
+                           and "Total" in series.segments) else ()
+    room = MAX_PANELS - len(total)
+
     capped: tuple[str, ...] = ()
-    if len(kept) > MAX_PANELS:
+    if len(kept) > room:
         order = {s: i for i, s in enumerate(series.segments)}
         largest = set(sorted(kept, key=lambda s: (-series.base_n.get(s, 0),
-                                                  order[s]))[:MAX_PANELS])
+                                                  order[s]))[:room])
         capped = tuple(s for s in kept if s not in largest)
         kept = [s for s in kept if s in largest]
 
-    return PanelSelection(labels=tuple(kept), thin=thin, capped=capped,
+    return PanelSelection(labels=total + tuple(kept), thin=thin, capped=capped,
                           split=True)

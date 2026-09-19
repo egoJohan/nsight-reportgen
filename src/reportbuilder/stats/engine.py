@@ -10,6 +10,7 @@ import os
 import re
 import pandas as pd
 from reportbuilder.ingest.sav_reader import string_categories
+from reportbuilder.model.chart_types import PANEL_CHART_TYPES
 from reportbuilder.model.question import Question, QuestionModel, Variable
 from reportbuilder.model.report import ChartSpec, SortSpec
 from reportbuilder.stats.aggregate import aggregate_counts
@@ -1745,9 +1746,20 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     only way to say what the scale meant was to type it into the subtitle.
     """
     rows, applied = _selected_rows(spec, data, model)
-    result = _compute_series(question, spec, rows, model)
+    if applied and _total_panel_asked(spec):
+        # A pie's Total panel beside some of the groups is the WHOLE study —
+        # "25–34-vuotiaat next to everyone" is the comparison it is asked for.
+        # Narrowed, the Total would be the ticked groups themselves, and beside
+        # one group it would repeat that group under another name. So the slide
+        # is computed on everyone and the unticked groups are left out; each
+        # group's own numbers are its own respondents either way. (2026-09-19)
+        result = _only_groups(_compute_series(question, spec, data, model), applied)
+    else:
+        result = _compute_series(question, spec, rows, model)
     if applied:
         result = dataclasses.replace(result, applied_filter=applied)
+    if _total_panel_asked(spec):
+        result = dataclasses.replace(result, total_panel=True)
     # The legend's own names first — a classifier's groups, a combo's secondary
     # series — keyed on the names the series was computed with. Before the
     # category renames, so a group that shares its name with an answer ("Kyllä")
@@ -1766,6 +1778,23 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
     return (_relabelled(result, overrides, keep_segments=renamed_series)
             if overrides else result)
+
+
+def _total_panel_asked(spec) -> bool:
+    return (getattr(spec, "chart_type", "") in PANEL_CHART_TYPES
+            and getattr(spec, "show_total", "auto") == "on")
+
+
+def _only_groups(result: SeriesResult, groups: tuple[str, ...]) -> SeriesResult:
+    """*result* with only *groups* and the Total left in it."""
+    keep = set(groups) | {"Total"}
+    return dataclasses.replace(
+        result,
+        segments=tuple(s for s in result.segments if s in keep),
+        cells={k: v for k, v in result.cells.items() if k[1] in keep},
+        base_n={s: n for s, n in result.base_n.items() if s in keep},
+        segment_primary=({s: p for s, p in result.segment_primary.items() if s in keep}
+                         if result.segment_primary else result.segment_primary))
 
 
 def _selected_rows(spec, data: pd.DataFrame,

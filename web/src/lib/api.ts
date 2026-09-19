@@ -1865,10 +1865,15 @@ export const api = {
            /** The groups the SLIDE draws. Answering for the whole variable while
             *  the slide is drawn on part of it makes the warning describe a
             *  different chart than the one on screen. */
-           classifyingValues?: string[]): Promise<PanelSelection> => {
+           classifyingValues?: string[],
+           /** A pie's Total panel takes one of its three places. */
+           chartType?: string,
+           showTotal?: string): Promise<PanelSelection> => {
     const q = new URLSearchParams({ classifying_var: classifyingVar });
     if (grouping && Object.keys(grouping).length) q.set("grouping", JSON.stringify(grouping));
     for (const v of classifyingValues ?? []) q.append("classifying_values", v);
+    if (chartType) q.set("chart_type", chartType);
+    if (showTotal) q.set("show_total", showTotal);
     return fetch(
       `${API_BASE}/materials/${materialId}/questions/${encodeURIComponent(qid)}/panels?${q}`
     ).then((r) => json<PanelSelection>(r));

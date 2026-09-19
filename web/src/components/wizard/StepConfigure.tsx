@@ -1142,9 +1142,26 @@ function ClassifierValuesWidget({ field, chart, materialId, onChange }: WidgetPr
     onChange({ classifying_values: all || next.length === 0 ? [] : next });
   };
 
+  // A chart drawn one panel per group can give the whole study a panel of its
+  // own — "Total next to 25–34-vuotiaat", asked for from the field. It is not
+  // one of the groups: it counts everyone, whichever groups are ticked, so it
+  // is its own tick and its own setting. (2026-09-19)
+  const totalPanel = PANEL_CHART_TYPES.includes(chart.chart_type);
+  const totalOn = chart.show_total === "on";
+
   return (
     <Field label={field.label}>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {totalPanel && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={totalOn}
+              onChange={() => onChange({ show_total: totalOn ? "off" : "on" })}
+            />
+            Total (all respondents)
+          </label>
+        )}
         {groups.map((g) => (
           <label key={g} className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={on(g)} onChange={() => toggle(g)} />
@@ -2320,10 +2337,11 @@ function usePanelSelection(
     // this slide no longer is.
     queryKey: ["panels", materialId, chart?.question_ref, chart?.classifying_var,
                (chart?.classifying_values ?? []).join("|"),
+               chart?.chart_type, chart?.show_total ?? "auto",
                JSON.stringify(grouping ?? {})],
     queryFn: () =>
       api.panels(materialId, chart!.question_ref, chart!.classifying_var!, grouping,
-                 chart!.classifying_values),
+                 chart!.classifying_values, chart!.chart_type, chart!.show_total ?? "auto"),
     enabled: applies && !!materialId,
     // The answer changes only when the data or the classifier does, and a
     // warning is not worth re-fetching on every focus.
@@ -2393,7 +2411,9 @@ export function slideProblems(
   // counts Design 1, Design 3 and nobody else" while it was the whole sample
   // split by sex. `narrowed_to` is what the engine actually applied.
   // (Johan, 2026-09-17)
-  if (panels.narrowed_to?.length) {
+  // Not when the slide also draws the Total: that panel IS the whole study,
+  // so the slide says so itself. (2026-09-19)
+  if (panels.narrowed_to?.length && !panels.drawn.includes("Total")) {
     const n = panels.narrowed_to.length;
     out.push({
       id: "narrowed-to-groups",

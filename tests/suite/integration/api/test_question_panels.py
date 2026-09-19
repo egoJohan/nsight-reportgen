@@ -161,3 +161,17 @@ def test_the_warning_answers_for_the_GROUPS_THE_SLIDE_DRAWS(five_group_case):
     assert body["thin"] == [], body
 
 
+
+
+def test_a_pies_total_panel_is_named_first(case_with_data):
+    """The warning must count the Total panel the slide will draw: it takes one
+    of the three places, so it changes which groups are left out. (2026-09-19)"""
+    client, mid = case_with_data
+    qid, clf = _first_classifiable(client, mid)
+    params = {"classifying_var": clf, "chart_type": "pie"}
+    without = client.get(f"/materials/{mid}/questions/{qid}/panels", params=params).json()
+    with_total = client.get(f"/materials/{mid}/questions/{qid}/panels",
+                            params={**params, "show_total": "on"}).json()
+    assert "Total" not in without["drawn"]
+    assert with_total["drawn"][0] == "Total"
+    assert len(with_total["drawn"]) <= with_total["max_panels"]

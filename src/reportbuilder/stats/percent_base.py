@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from reportbuilder.model.chart_types import PANEL_CHART_TYPES
+
 # Respondent-background concepts (age/gender/region/income/education/…). Matched on
 # the question text OR the variable label. Kept in sync with routes_questions.
 _DEMOGRAPHIC_RE = re.compile(
@@ -87,6 +89,11 @@ def resolve_show_total(spec, has_real_classifier: bool) -> bool:
     if mode == "on":
         return True
     if mode == "off":
+        return False
+    if (has_real_classifier
+            and getattr(spec, "chart_type", "") in PANEL_CHART_TYPES):
+        # A pie's Total is a whole extra PANEL, taking one of three places on
+        # the slide — never added to a saved slide unasked. (2026-09-19)
         return False
     if not has_real_classifier:
         return True                       # single series → the Total is the series

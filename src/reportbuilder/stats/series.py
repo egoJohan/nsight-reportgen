@@ -77,6 +77,12 @@ class SeriesResult:
     # "Total" segment (unless it's the only series). Resolved by the engine from
     # ChartSpec.show_total + the percentage direction. (2026-07-10)
     show_total: bool = True
+    # Whether a one-panel-per-group chart (pie, doughnut, funnel) draws the
+    # whole study as a panel of its own. Explicit rather than read off
+    # `show_total`, whose default is True for every series built without the
+    # engine: a pie gains a panel only when its author ticked the Total.
+    # (2026-09-19)
+    total_panel: bool = False
     # The classifier groups the rows were actually NARROWED to, or (). Recorded
     # by the engine because only it knows: a selection naming a group the data
     # no longer has is ignored and the slide is the whole sample, and a slide

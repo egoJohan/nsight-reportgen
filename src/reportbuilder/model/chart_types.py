@@ -19,6 +19,12 @@ class ChartType(str, Enum):
     WORDCLOUD = "wordcloud"
 
 
+#: Charts that draw ONE PANEL PER GROUP (see `render/panels.py`). On these a
+#: Total is not a reference series beside the groups but a panel of its own,
+#: and it is drawn only when the author asks for it.
+PANEL_CHART_TYPES: frozenset[str] = frozenset({"pie", "doughnut", "funnel"})
+
+
 @dataclass(frozen=True)
 class Capability:
     native: bool

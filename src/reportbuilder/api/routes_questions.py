@@ -1439,6 +1439,8 @@ def question_panels(
     classifying_var: str,
     grouping: str | None = None,
     classifying_values: list[str] | None = Query(None),
+    chart_type: str | None = None,
+    show_total: str = "auto",
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_material),
 ) -> dict:
@@ -1482,6 +1484,11 @@ def question_panels(
         # three, and named three of its own choosing.
         spec = replace(_summary_spec(q.qid), classifying_var=classifying_var,
                        classifying_values=tuple(classifying_values or ()))
+        # A pie's Total panel takes one of the three places, so it changes
+        # which groups are capped — the chart type and the setting are part
+        # of the question. (2026-09-19)
+        if chart_type:
+            spec = replace(spec, chart_type=chart_type, show_total=show_total)
         series = compute(q, spec, df, model)
         sel = panel_segments(series)
         # What the ENGINE narrowed to, not what the spec asked for. The two

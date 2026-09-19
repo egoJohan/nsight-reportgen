@@ -42,6 +42,13 @@ describe("narrowed to some groups", () => {
     expect(ids(slideProblems(CHART, panels()))).not.toContain("narrowed-to-groups");
   });
 
+  it("is silent when the slide also draws the Total", () => {
+    // A pie's Total panel is the whole study, whichever groups are ticked, so
+    // the slide already says it is not only those groups. (2026-09-19)
+    expect(ids(slideProblems(CHART, panels({ drawn: ["Total", "Mies"], narrowed_to: ["Mies"] }))))
+      .not.toContain("narrowed-to-groups");
+  });
+
   it("is silent when the ticked names resolve to nothing", () => {
     // Stale `classifying_values` left behind by a change of classifying
     // variable. The engine ignores names it cannot resolve and charts the whole
