@@ -353,6 +353,22 @@ def test_it_goes_through_the_masked_route_by_default():
     assert default is M.classify
 
 
+def test_candidates_are_shown_under_the_question_they_answer():
+    """Place names reach the model masked as invented words; what survives is
+    the question, so the prompt groups each candidate under it."""
+    chat = RecordingChat("[2]")
+    sources = {"Attendo": ("options", "Mitä hoivayrityksiä tunnet?"),
+               "Kymen lääni": ("options", "Missä asut?"),
+               "Esperi": ("options", "Mitä hoivayrityksiä tunnet?")}
+    picked = T.pick_company_terms(["Attendo", "Kymen lääni", "Esperi"], [],
+                                  sources=sources, chat=chat)
+    prompt = chat.prompts[0]
+    assert "«Mitä hoivayrityksiä tunnet?»" in prompt and "«Missä asut?»" in prompt
+    # numbered in the order shown, so the reply's numbers mean what the model saw
+    assert "1. Attendo\n2. Esperi" in prompt and "3. Kymen lääni" in prompt
+    assert picked == ["Esperi"]
+
+
 def test_no_candidates_asks_nothing():
     chat = RecordingChat("[]")
     assert T.pick_company_terms([], ["Mitä tunnet?"], chat=chat) == []
