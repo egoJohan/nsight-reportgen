@@ -99,6 +99,61 @@ def register_category_labels(ax, axis: str, raw: Sequence[str], *,
     entries.append(_Entry(ax, axis, raw, wrap, max(1, int(base))))
 
 
+def names_flat_unless_they_cannot_be(fig, ax, raw: Sequence[str], *, fontsize: float,
+                                     color, width: int,
+                                     wrap: Callable[[str, int], str] = wrap_label,
+                                     rotation: float = 30.0,
+                                     rotated_fontsize: float | None = None) -> bool:
+    """Name the columns along `ax`'s x axis flat, and rotate them only as a last resort.
+
+    Every column builder rotated its names unconditionally: two names,
+    "Mieheksi" and "Naiseksi", under columns half the slide wide, were printed
+    at 30 degrees, and "Muualla Etelä-Suomessa" came out wrapped AND rotated.
+    The combo stopped doing that first (it tries flat and lets the fitter have
+    its turn); this is the same rule in one place, for every builder.
+
+    Flat is kept only when the fitter makes every name stand clear WITHOUT
+    cutting one — a flat row of "Alennukset…" x5 is worse than the rotated
+    names in full. Otherwise the names are set exactly as the builders always
+    set them: wrapped at `width`, rotated by `rotation`. Either way they are
+    registered, so `render_png` fits them once more. Returns True when flat.
+    (visual QA, 2026-09-19)
+    """
+    raw = tuple("" if s is None else str(s) for s in raw)
+    shown = [wrap(s, width) if s else "" for s in raw]
+    # Flat, a name is wrapped to its COLUMN: as many characters as fit in most
+    # of one column's width. `width` is the rotated names' wrap, and the fitter
+    # tries wider before narrower — started from it, a row of one-line names
+    # was accepted a hair apart, "…lääni Oulun lääni Mikkelin lääni…", which
+    # reads as one name running along the axis.
+    x0, x1 = ax.get_xlim()
+    pitch_px = ax.bbox.width / max(abs(x1 - x0), 1e-6)
+    char_px = 0.55 * fontsize * fig.dpi / 72.0
+    flat_width = max(6, int(0.85 * pitch_px / char_px))
+    ax.set_xticklabels([wrap(s, flat_width) if s else "" for s in raw],
+                       fontsize=fontsize, color=color, rotation=0, ha="center")
+    register_category_labels(ax, "x", raw, wrap=wrap, width=flat_width)
+    registry = getattr(fig, _ATTR)
+    entry = registry[-1]
+    if _usable(entry):
+        fig.canvas.draw()
+        r = fig.canvas.get_renderer()
+        _refit(fig, [entry], r)
+        clear = _touching([entry], _obstacles(fig, [entry], r), r) == 0
+        # Cut short, or a word chopped in two by the narrowest wraps
+        # ("Ammatt / itaito / inen"): either way a name the reader cannot read.
+        cut = any(("…" in t.get_text() and "…" not in s)
+                  or not set(s.split()) <= set(t.get_text().replace("-\n", "-").split())
+                  for t, s in zip(_axis(entry).get_ticklabels(), raw))
+        if clear and not cut:
+            return True
+    registry.remove(entry)
+    ax.set_xticklabels(shown, fontsize=rotated_fontsize or fontsize, color=color,
+                       rotation=rotation, ha="right", rotation_mode="anchor")
+    register_category_labels(ax, "x", raw, wrap=wrap, width=width)
+    return False
+
+
 def fit_category_labels(fig) -> None:
     """Set the registered category names again if any of them collide, then
     lower any legend they still run into. See module."""

@@ -36,7 +36,9 @@ from reportbuilder.render.house_style import (TEAL_LT, ramp_from,
 # ends up wrong. (Johan, 2026-09-16)
 from reportbuilder.render.image.bars import (_value_label_layout,
                                              _text_extent_px,
-                                             _XTICK_ROTATION)
+                                             _XTICK_ROTATION,
+                                             _rowmajor_legend,
+                                             value_label_transform)
 
 
 #: How each half of a combo may be drawn. "bar" and "line" are what the chart
@@ -112,9 +114,12 @@ def _legend_that_fits(fig, ax, handles, labels):
     def build(width: int | None):
         shown = [textwrap.fill(" ".join(label.split()), width)
                  if width and len(label) > width else label for label in labels]
-        return ax.legend(handles, shown, fontsize=9.5, frameon=True,
+        # Row by row in the series' own order (matplotlib fills columns first).
+        ncol = min(len(labels), 5)
+        ordered, names = _rowmajor_legend(list(handles), shown, ncol)
+        return ax.legend(ordered, names, fontsize=9.5, frameon=True,
                          loc="upper center", bbox_to_anchor=(0.5, -0.08),
-                         ncol=min(len(labels), 5), borderaxespad=0.0)
+                         ncol=ncol, borderaxespad=0.0)
 
     leg = build(None)
     renderer = fig.canvas.get_renderer()
@@ -241,6 +246,12 @@ def _draw_primary_gridlines(ax, ax2, ctx, grid, primary_max: float) -> None:
     else:
         lo, hi = ax.get_ylim()
         ticks = [float(t) for t in ax.get_yticks() if lo <= t <= hi]
+    # Written the way every other chart's value axis is — "20", not "20.0" —
+    # which matplotlib's own formatter does not do once one rung is 2.5.
+    # (visual QA, 2026-09-19)
+    from matplotlib.ticker import FuncFormatter
+    from reportbuilder.render.image.bars import _tick_text
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _pos: _tick_text(v)))
     for yv in ticks:
         if yv > 0:
             ax.axhline(yv, color=grid, lw=0.8, zorder=1)
@@ -280,6 +291,18 @@ def build_image_combo(ctx) -> None:
 
     x = list(range(len(cats)))
     all_vals = [v for seg in segs for v in data[seg] if v is not None]
+
+    def _peers(seg: str) -> list[float]:
+        """The numbers *seg*'s own are formatted among: those of the same MEASURE.
+
+        Automatic decimals are chosen from a pool, so that a row of shares all
+        carry the same precision. Pooled across both halves, a secondary mean
+        of 2.8-3.4 put a decimal on every whole percentage of the bars ("21.0 %").
+        (visual QA, 2026-09-19)"""
+        stat = ctx.series.statistic_of(seg)
+        return [v for s in segs if ctx.series.statistic_of(s) == stat
+                for v in data[s] if v is not None]
+
     bar_segs, line_segs = split_primary_and_secondary_segments(ctx.series, segs)
     primary_kind = combo_kind(ctx.spec, "combo_primary_type", PRIMARY_DEFAULT)
     secondary_kind = combo_kind(ctx.spec, "combo_secondary_type", SECONDARY_DEFAULT)
@@ -420,9 +443,10 @@ def build_image_combo(ctx) -> None:
                         continue
                     axes.text(
                         bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() + max(0.5, bar.get_height() * 0.01),
+                        bar.get_height(),
                         format_value(v, ctx.series.statistic_of(seg),
-                                     ctx.spec.number_format, all_vals),
+                                     ctx.spec.number_format, _peers(seg)),
+                        transform=value_label_transform(axes, along="y"),
                         ha="center", va="bottom", rotation=rot,
                         fontsize=value_fs, fontweight="bold", color=ink, zorder=5,
                         gid=VALUE_GID,
@@ -498,6 +522,12 @@ def build_image_combo(ctx) -> None:
         labelled = (line_segs[0]
                     if len(line_segs) == 1 and secondary_kind != "bar" else None)
         line_vals = [v for seg in line_segs for v in data[seg] if v is not None]
+        if ax2 is ax and line_vals:
+            # ONE ruler for both halves, so it is built from both. From the bars
+            # alone, a classifier's other groups — lines on the same scale —
+            # ran off the top wherever they out-reached the first group: 50 %
+            # and 100 % drawn on an axis ending at 30 %. (visual QA, 2026-09-19)
+            primary_max = max(primary_max, max(line_vals))
         # Only a real second axis gets its own range. Sharing one, the range is
         # the primary half's and must stay that way, or the bars move.
         if line_vals and two_measures:

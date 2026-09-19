@@ -145,13 +145,34 @@ def force_break_token(token: str, width: int) -> list[str]:
     return [token[i:i + width] for i in range(0, len(token), width)]
 
 
+def whole_or_broken(line: str, width: int) -> list[str]:
+    """A wrapped line as it may be printed: whole, unless it is unreadable anyway.
+
+    A line longer than *width* is one word that would not break at a space. Up
+    to twice *width* it is a real word — Finnish runs to them — and it stays
+    whole, overhanging its line; past that it is erroneous data with no spaces,
+    and `force_break_token` chops it so it cannot run off the chart. See
+    `wrap_label`. (visual QA, 2026-09-19)
+    """
+    return [line] if len(line) <= 2 * width else force_break_token(line, width)
+
+
 def wrap_label(text: str, width: int) -> str:
     """Wrap *text* at word boundaries onto lines of at most *width* chars.
 
     Never truncates and never adds an ellipsis. Hyphenated compounds are kept
-    intact at word level; a single token longer than *width* is force-broken
-    mid-character (the only case a word is split) so erroneous long labels can't
-    run off the chart. Returns the text with embedded newlines.
+    intact at word level. A word may overhang its line rather than be cut: up
+    to twice *width* it keeps a line of its own, whole. Only a token longer than
+    that — erroneous data with no spaces, which would otherwise run off the
+    chart — is force-broken mid-character. Returns the text with embedded
+    newlines.
+
+    The overhang is the point. Finnish runs to long single words, and a width
+    of 16 cut "Pääkaupunkiseudulla" into "Pääkaupunkiseu / dulla" and a battery's
+    "Mahdollistaa" into "Mahdolli / staa" — no hyphen, the word unreadable in
+    both halves. Every caller that places names measures them afterwards
+    (`label_fit`), so a whole word that does crowd a neighbour is set again.
+    (visual QA, 2026-09-19)
     """
     text = (text or "").strip()
     if len(text) <= width:
@@ -160,7 +181,7 @@ def wrap_label(text: str, width: int) -> str:
     for ln in textwrap.wrap(
         text, width=width, break_long_words=False, break_on_hyphens=True
     ):
-        out.extend(force_break_token(ln, width))
+        out.extend(whole_or_broken(ln, width))
     return "\n".join(out) if out else text
 
 
@@ -292,6 +313,29 @@ def _value_axis(max_val: float, statistic: str) -> tuple[float, list[float]]:
     ticks = [round(i * step, 6) for i in range(n + 1)]
     return top, ticks
 
+#: The smallest figure a chart on a slide of its own is drawn on, in inches.
+_SLIDE_FLOOR_IN: tuple[float, float] = (9.0, 4.5)
+#: …and one drawn into a CELL of a grid slide.
+_CELL_FLOOR_IN: tuple[float, float] = (4.0, 2.0)
+
+
+def figure_floor_in(ctx) -> tuple[float, float]:
+    """The smallest (width, height) a chart's figure is drawn at, in inches.
+
+    Every builder floors its figure at 9 x 4.5 inches: the type sizes are chosen
+    for that, and a figure drawn larger than its slot is scaled DOWN onto it. On
+    a slide of its own that costs a few percent. In a demographics grid's cell —
+    a 6 x 1.2 inch box — it drew a 9 x 4.5 figure and placed it at a third of
+    that, so every 9pt label reached the slide at 3pt. A cell is drawn at about
+    its own size instead, where the fitters' 7.5pt floor is a floor on the
+    slide too. (visual QA, 2026-09-19)
+    """
+    slot = getattr(ctx, "slot", None)
+    if getattr(slot, "name", "") == "cell":
+        return _CELL_FLOOR_IN
+    return _SLIDE_FLOOR_IN
+
+
 def new_figure(ctx):
     """Create a matplotlib Figure/Axes sized to ctx.slot, with nSight house style applied.
 
@@ -299,8 +343,8 @@ def new_figure(ctx):
     Minimum size enforced to maintain legibility at any slot dimension.
     """
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
+    h_in = max(figure_floor_in(ctx)[1], ctx.slot.height / _EMU_PER_IN)
     fig = _new_agg_figure(w_in, h_in)
     _remember_font(fig, ctx)
     ax = fig.subplots()
@@ -340,7 +384,7 @@ def new_figure_grid(ctx, n: int, *, tall_in: float | None = None, rows: int = 1,
     pixels in every panel — which is what makes the funnel widths comparable
     across groups. (spec 2026-08-22)"""
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
     # Capped for the same reason a single tall figure is — a grid is placed by
     # the same letterboxing rule, so anything more portrait than the slot is
     # scaled away. Per STACKED BAND, not per figure: see `_capped_height`.
@@ -390,7 +434,7 @@ def new_tall_figure(ctx, h_in: float):
     loss starts at 7 categories. Past the cap the rows compress and the
     builders' font floors take over. (Johan, 2026-09-16)"""
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
     h_in = _capped_height(ctx, w_in, h_in)
     fig = _new_agg_figure(w_in, h_in)
     _remember_font(fig, ctx)
@@ -834,8 +878,8 @@ def new_square_figure(ctx):
     Axes (caller replaces ax with a polar Axes if needed).
     """
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
+    h_in = max(figure_floor_in(ctx)[1], ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
     fig = _new_agg_figure(sq, sq)
     _remember_font(fig, ctx)

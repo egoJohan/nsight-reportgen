@@ -17,7 +17,7 @@ from reportbuilder.render.base import RenderContext, Slot
 from reportbuilder.render.house_style import PX_TEAL
 from reportbuilder.render.image.slide_chrome import (
     _slide_dims, _textbox, body_font, content_floor, draw_template_heading,
-    template_ground, theme_colours,
+    template_ground, theme_colours, wrapped_line_count,
 )
 import reportbuilder.render.plugins as _plugins
 
@@ -67,11 +67,33 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
     area_w = sw - Inches(1.1)
     area_h = max(int(Inches(1.0)),
                  content_floor(slide, sw, sh) - int(Inches(0.30)) - area_t)
-    cols = _COLS if len(charts) > 1 else 1
+    # Five or more charts go three to a row: two columns of three rows made
+    # cells wider than a slide and a fifth as tall, and each chart was scaled
+    # down to fit the height. (visual QA, 2026-09-19)
+    cols = 1 if len(charts) == 1 else (3 if len(charts) >= 5 else _COLS)
     rows = -(-len(charts) // cols)  # ceil
     cell_w, cell_h = area_w // cols, area_h // rows
     pad = Inches(0.14)
-    title_h = Inches(0.32)
+    text_w = int(cell_w - 2 * pad)
+
+    def _title(ref) -> tuple[str, float, int]:
+        """(text, size, lines) for a cell's question. A long question takes the
+        lines it needs — its chart starts below it — at a step smaller once it
+        runs past two. A fixed 0.32in band let a three-line question print
+        straight over its own chart. (visual QA, 2026-09-19)"""
+        text = titles.get(ref) or ref
+        lines = wrapped_line_count(text, text_w, 11)
+        if lines <= 2:
+            return text, 11.0, lines
+        return text, 9.5, wrapped_line_count(text, text_w, 9.5)
+
+    cell_titles = [_title(c["question_ref"]) for c in charts]
+    # One band per ROW, as tall as its longest question, so the charts of a row
+    # start level.
+    band = {}
+    for i, (_t, size, lines) in enumerate(cell_titles):
+        r = i // cols
+        band[r] = max(band.get(r, 0), int(Inches(lines * size * 1.25 / 72 + 0.08)))
 
     placed = 0
     for i, c in enumerate(charts):
@@ -79,15 +101,16 @@ def render_demographics_grid(slide, slot, style, spec, series_by_ref, titles) ->
         ctype = c.get("chart_type") or "vertical_bar"
         r, col = divmod(i, cols)
         cx, cy = area_l + col * cell_w, area_t + r * cell_h
+        title_h = band[r]
+        text, size, _lines = cell_titles[i]
         # Cell title (the question).
-        _textbox(slide, int(cx + pad), int(cy), int(cell_w - 2 * pad), int(title_h),
-                 [((titles.get(ref) or ref), 11, ink, True)], align=PP_ALIGN.LEFT,
-                 font=face)
+        _textbox(slide, int(cx + pad), int(cy), text_w, int(title_h),
+                 [(text, size, ink, True)], align=PP_ALIGN.LEFT, font=face)
         # Chart placed in the cell area below the title.
         cell_slot = Slot(
             slide_index=slot.slide_index,
             left=int(cx + pad), top=int(cy + title_h),
-            width=int(cell_w - 2 * pad), height=int(cell_h - title_h - pad),
+            width=text_w, height=int(cell_h - title_h - pad),
             name="cell",
         )
         cell_spec = dataclasses.replace(spec, chart_type=ctype, options={})

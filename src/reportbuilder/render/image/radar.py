@@ -35,9 +35,32 @@ from reportbuilder.render.image._mpl import (
     chart_background, chart_furniture, _value_axis,
 )
 from reportbuilder.render.house_style import register_fonts, series_colors
-from reportbuilder.render.image._mpl import template_palette
+from reportbuilder.render.image._mpl import figure_floor_in, template_palette
+from reportbuilder.render.image.label_fit import register_category_labels
+from reportbuilder.render.image.bars import _rowmajor_legend
 
 _EMU_PER_IN = 914400.0
+
+
+def _align_spoke_names(ax, angles) -> None:
+    """Set every spoke's name to grow AWAY from the circle.
+
+    Matplotlib centres a polar tick label on its anchor, a fixed pad outside
+    the ring. A name on the right-hand spoke — "Pääkaupunkiseudulla" — reached
+    back across the ring by half its own width, and a multi-line name above or
+    below the circle by half its height, so the outer ring was drawn through
+    "läheisenä" and "henkilökohtaista", and a series reaching 100 % ran through
+    the name at the end of its spoke. Anchored at its inner edge instead — left
+    on the right, right on the left, bottom on top, top at the bottom — a name
+    of any length starts where the pad ends. (visual QA, 2026-09-19)
+    """
+    for t, a in zip(ax.get_xticklabels(), angles):
+        theta = a * ax.get_theta_direction() + ax.get_theta_offset()
+        c, s = math.cos(theta), math.sin(theta)
+        ha = "left" if c > 0.2 else ("right" if c < -0.2 else "center")
+        t.set_horizontalalignment(ha)
+        t.set_multialignment(ha)
+        t.set_verticalalignment("bottom" if s > 0.2 else ("top" if s < -0.2 else "center"))
 
 
 def _ring_label_candidates(angles: list[float], segs, data) -> list[float]:
@@ -129,8 +152,8 @@ def build_image_radar(ctx) -> None:
     ink, muted, grid = chart_furniture(ctx)
 
     # Square figure: min slot dimension → circular polar axes, not oval
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
+    h_in = max(figure_floor_in(ctx)[1], ctx.slot.height / _EMU_PER_IN)
     sq = min(w_in, h_in)
     fig = Figure(figsize=(sq, sq), dpi=200)
     _remember_font(fig, ctx)
@@ -162,7 +185,12 @@ def build_image_radar(ctx) -> None:
             linewidth=2.4 if len(segs) == 1 else 2.0,
             zorder=4,
         )
-        ax.fill(closed_angles, closed_vals, alpha=0.15, color=clrs[i], zorder=3)
+        # The fills stack: eight brands at 15 % each painted the middle of the
+        # brand-image radar a solid grey that hid the rings and their numbers.
+        # One or two polygons keep the tint they always had; more share it.
+        # (visual QA, 2026-09-19)
+        ax.fill(closed_angles, closed_vals, alpha=0.15 if len(segs) <= 2 else 0.30 / len(segs),
+                color=clrs[i], zorder=3)
 
     # Spoke labels — wrap long category labels onto multiple lines (and
     # force-break pathological unbroken long words) so they don't overlap the
@@ -170,7 +198,12 @@ def build_image_radar(ctx) -> None:
     fs = 10.0 if n_cats <= 8 else (9.0 if n_cats <= 12 else 8.0)
     ax.set_xticks(angles)
     ax.set_xticklabels([wrap_label(c, 16) for c in cats], fontsize=fs, color=ink)
-    ax.tick_params(axis="x", pad=10)
+    ax.tick_params(axis="x", pad=6)
+    _align_spoke_names(ax, angles)
+    # Measured like every other chart's names: many long spokes printed
+    # through each other ("Omistajatapahtumat…" over "Oma palvelutiski…") and
+    # nothing ever looked. See `label_fit`. (visual QA, 2026-09-19)
+    register_category_labels(ax, "x", cats, wrap=wrap_label, width=16)
 
     # Radial grid
     ax.set_ylim(0, r_max)
@@ -192,9 +225,13 @@ def build_image_radar(ctx) -> None:
     if ctx.spec.elements.legend and len(segs) > 1:
         # Place the entity legend BELOW the chart so it never covers the
         # perimeter attribute labels that ring the radar.
+        # Row by row in the series' own order (matplotlib fills columns first).
+        ncol = min(len(segs), 4)
+        handles, names = _rowmajor_legend(*ax.get_legend_handles_labels(), ncol)
         leg = ax.legend(
+            handles, names,
             loc="upper center", bbox_to_anchor=(0.5, -0.06),
-            ncol=min(len(segs), 4), frameon=False, fontsize=9.0,
+            ncol=ncol, frameon=False, fontsize=9.0,
             handlelength=1.1, columnspacing=1.4, handletextpad=0.5,
         )
         if leg is not None:

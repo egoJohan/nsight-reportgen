@@ -47,7 +47,8 @@ from reportbuilder.render.house_style import (
     register_fonts, series_colors, contrast_ink, MUTED,
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
-from reportbuilder.render.image._mpl import VALUE_GID, template_palette
+from reportbuilder.render.image._mpl import VALUE_GID, figure_floor_in, template_palette
+from reportbuilder.render.image.bars import _rowmajor_legend
 from reportbuilder.render.image._mpl import wants_group_base
 from reportbuilder.render.panels import panel_segments
 
@@ -79,8 +80,8 @@ def _make_square_fig_ax(ctx, bg: str):
     pinning the pie to the left lets it grow to the full slot HEIGHT and uses the
     whole width (pie + legend)."""
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
+    h_in = max(figure_floor_in(ctx)[1], ctx.slot.height / _EMU_PER_IN)
     fig = Figure(figsize=(w_in, h_in), dpi=200)
     _remember_font(fig, ctx)
     FigureCanvasAgg(fig)
@@ -136,8 +137,8 @@ def _make_panel_axes(ctx, bg: str, n_panels: int):
     preserves that geometry in the slot.
     """
     register_fonts()
-    w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
-    h_in = max(4.5, ctx.slot.height / _EMU_PER_IN)
+    w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
+    h_in = max(figure_floor_in(ctx)[1], ctx.slot.height / _EMU_PER_IN)
     fig = Figure(figsize=(w_in, h_in), dpi=200)
     _remember_font(fig, ctx)
     FigureCanvasAgg(fig)
@@ -418,8 +419,16 @@ def _build_pie_figure(ctx, *, donut: bool):
         # ONE legend for the row: the categories are identical in every panel, so a
         # legend per panel would be the same list three times.
         handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(cats))]
-        leg = fig.legend(handles, [_wrap_legend_label(c) for c in cats],
-                         loc="lower center", ncol=min(len(cats), 4),
+        # Read left to right, a row at a time, in the categories' own order.
+        # Matplotlib fills a legend's COLUMNS first, so five categories in four
+        # columns put the second one alone on the second row: a scale read
+        # "Erittäin huono, Hyvä, Erittäin hyvä, En osaa sanoa … Huono".
+        # (visual QA, 2026-09-19)
+        ncol = min(len(cats), 4)
+        handles, names = _rowmajor_legend(handles, [_wrap_legend_label(c) for c in cats],
+                                          ncol)
+        leg = fig.legend(handles, names,
+                         loc="lower center", ncol=ncol,
                          frameon=True, fontsize=10.5, bbox_to_anchor=(0.5, 0.01))
         leg.get_frame().set_facecolor(bg)
         leg.get_frame().set_edgecolor(grid)

@@ -102,3 +102,14 @@ def test_a_short_funnel_keeps_its_names_in_full():
     joined = " ".join(got["texts"])
     for name in FEW:
         assert name.split()[-1] in joined, f"{name!r} was cut on a roomy funnel"
+
+
+def test_many_stages_keep_their_names_in_full_when_the_gutter_holds_them():
+    """Fourteen one-line rows, and a gutter half the slide wide: a name like
+    "Tarjoaa laadukkaita hoivapalveluita" fits on its line. It was wrapped at a
+    fixed 28 characters and then capped to the row's one line, so it came out
+    "Tarjoaa laadukkaita…" with the rest of the gutter empty.
+    (visual QA, 2026-09-19)"""
+    texts = _render(MANY)["texts"]
+    names = [t for t in texts if not t.endswith("%")]
+    assert not any("…" in t for t in names), [t for t in names if "…" in t]

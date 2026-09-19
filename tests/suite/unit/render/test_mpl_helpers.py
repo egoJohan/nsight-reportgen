@@ -236,3 +236,11 @@ def test_new_figure_grid_always_returns_plain_axes(n, rows):
     finally:
         import matplotlib.pyplot as plt
         plt.close(fig)
+
+
+def test_wrap_label_keeps_an_ordinary_long_word_whole():
+    """A Finnish word a little wider than the line overhangs it rather than being
+    cut in two with no hyphen ("Pääkaupunkiseu / dulla"). (visual QA, 2026-09-19)"""
+    out = _mpl.wrap_label("Asun Pääkaupunkiseudulla nyt", 16)
+    assert "Pääkaupunkiseudulla" in out.split("\n")
+    assert _mpl.wrap_label("Mahdollistaa hyvän arjen", 8).split("\n")[0] == "Mahdollistaa"

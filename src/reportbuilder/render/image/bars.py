@@ -33,7 +33,8 @@ import re
 import textwrap
 
 from reportbuilder.render.shape import ADDITIVE_STATISTICS
-from reportbuilder.render.image.label_fit import register_category_labels
+from reportbuilder.render.image.label_fit import (names_flat_unless_they_cannot_be,
+                                                  register_category_labels)
 
 import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
@@ -41,7 +42,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     series_label, with_base, place_total, colours_by_series,
     place_picture_square, series_values, format_value, label_floor, default_label_floor,
     author_label_floor, style_legend,
-    force_break_token, wrap_label, wrap_label_capped,
+    force_break_token, whole_or_broken, wrap_label, wrap_label_capped,
     VALUE_GID,
     _new_agg_figure, _EMU_PER_IN, wants_group_base, _value_axis,
 )
@@ -52,7 +53,7 @@ from reportbuilder.render.house_style import (
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL, _BANDED_LABEL
 from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 from reportbuilder.model.report import default_label
-from reportbuilder.render.image._mpl import template_palette
+from reportbuilder.render.image._mpl import figure_floor_in, template_palette
 
 
 def _format_summary(val: float, fn: str, nf) -> str:
@@ -203,11 +204,12 @@ def _wrap_label(text: str, width: int = _LABEL_WRAP_WIDTH) -> str:
         if len(_wrap(w)) <= n_lines:
             target = w
             break
-    # Last resort: a single token still wider than the gutter (a pathological
-    # unbroken long word) is force-broken so it can't run off the chart.
+    # Last resort: a single token far wider than the gutter (a pathological
+    # unbroken long word) is force-broken so it can't run off the chart. An
+    # ordinary long word stays whole — see `whole_or_broken`.
     out: list[str] = []
     for ln in _wrap(target):
-        out.extend(force_break_token(ln, width))
+        out.extend(whole_or_broken(ln, width))
     return "\n".join(out)
 
 
@@ -266,8 +268,12 @@ _VALUE_LABEL_PT: float = 9.5
 _VALUE_LABEL_MIN_PT: float = 7.5
 
 
+#: The share of its width a plot keeps once a legend is set down its right side.
+_RIGHT_LEGEND_SHARE: float = 0.72
+
+
 def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
-                        widest: str) -> tuple[float, float] | None:
+                        widest: str, *, width_share: float = 1.0) -> tuple[float, float] | None:
     """(fontsize, rotation) for a column's value label, or None if it cannot fit.
 
     Replaces a bare segment count. A count cannot tell a roomy chart from a
@@ -289,13 +295,22 @@ def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
     # while the arithmetic says they fit. `bar_w` is in data units and one
     # category slot is 1, so this converts exactly, and it is right for the
     # cross-tab layout too, where the widths differ.
-    plot_w_in = ax.get_position().width * fig.get_size_inches()[0]
+    # `width_share`: what is left of the plot once furniture drawn LATER takes
+    # its part — a legend down the right side keeps the plot to 72 % of this
+    # width, and measured before it, six groups' "58 %" and "59 %" were judged
+    # to fit bars that ended up a quarter narrower, and printed through each
+    # other. (visual QA, 2026-09-19)
+    plot_w_in = ax.get_position().width * fig.get_size_inches()[0] * width_share
     per_bar_in = bar_w * plot_w_in / max(n_cats, 1)
     for pt in (_VALUE_LABEL_PT, _VALUE_LABEL_MIN_PT):
         if _measure_max_label_width_in([widest], pt) <= per_bar_in * 0.92:
             return pt, 0.0
-    # On its side the number needs only its LINE HEIGHT across the column.
-    if (_VALUE_LABEL_MIN_PT / 72.0) * 1.35 <= per_bar_in:
+    # On its side the number needs only its LINE HEIGHT across the column. The
+    # 1.35 of a line allowed for it has always been generous enough to absorb
+    # the right legend's narrowing — eight groups set on their side beside one
+    # measured clear of each other by the overlap oracle — so this test is the
+    # one it always was, against the width before that narrowing.
+    if (_VALUE_LABEL_MIN_PT / 72.0) * 1.35 * width_share <= per_bar_in:
         return _VALUE_LABEL_MIN_PT, 90.0
     return None
 
@@ -309,17 +324,23 @@ def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
     its height instead of being squeezed by a wide multi-row legend below."""
     n = len(segs)
     if n <= _LEGEND_BELOW_MAX:
+        # A horizontal chart draws each group's bars bottom-up, so its legend is
+        # read in reverse to match them: first in the legend is the TOP bar.
+        # Read the other way the clustered bar listed "Mieheksi" first and drew
+        # it last, under "En halua sanoa". (visual QA, 2026-09-19)
         _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08,
-                      shorten_numeric=False)
+                      shorten_numeric=False, reverse=not vertical)
         return
     # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
     # so long combo labels (e.g. gender × a long life-situation label) can't balloon
     # the legend column and shrink the plot. The axes shrink to make room within the
     # figure; the font steps down as the series count grows so a long list still fits.
     handles, labels = ax.get_legend_handles_labels()
+    if not vertical:
+        handles, labels = handles[::-1], labels[::-1]
     wrapped = [_wrap_legend_label(lbl) for lbl in labels]
     box = ax.get_position()
-    ax.set_position([box.x0, box.y0, box.width * 0.72, box.height])
+    ax.set_position([box.x0, box.y0, box.width * _RIGHT_LEGEND_SHARE, box.height])
     fs = 9.0 if n <= 12 else (8.0 if n <= 20 else 7.0)
     leg = ax.legend(
         handles, wrapped,
@@ -394,7 +415,7 @@ _LEGEND_GAP_WITH_AXIS_TITLE: float = 0.20
 
 
 def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
-                  shorten_numeric: bool = True) -> None:
+                  shorten_numeric: bool = True, reverse: bool = False) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
@@ -407,6 +428,10 @@ def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
         has_axis_title = bool((getattr(ctx.spec, "axis_x_title", "") or "").strip())
         y = -(_LEGEND_GAP_WITH_AXIS_TITLE if has_axis_title else _LEGEND_GAP)
     handles, labels = ax.get_legend_handles_labels()
+    if reverse:
+        # The series were drawn bottom-up (a grouped horizontal bar stacks each
+        # group's bars upwards), so the reader meets the LAST one first.
+        handles, labels = handles[::-1], labels[::-1]
     # A numeric rating scale (every level starts with its point number, e.g. "1 - Täysin
     # eri mieltä", "2", … "7 - …") shows JUST the numbers in the legend — the endpoint
     # wording moves to the subtitle. Keeps the legend short and even (no ragged gaps from
@@ -521,9 +546,24 @@ def _apply_column_style(ax, ctx, max_val: float = 100.0, statistic: str = "pct")
     apply_axis_titles(ax, ctx.spec, _ink)
 
 
-def _label_offset(max_val: float) -> float:
-    """Small positive offset for data labels (proportional to axis range)."""
-    return max(0.5, max_val * 0.01)
+#: The clear space between the end of a bar and its number, on the PAGE.
+_VALUE_GAP_PT: float = 3.5
+
+
+def value_label_transform(ax, *, along: str = "y"):
+    """Data coordinates, pushed `_VALUE_GAP_PT` past the bar's end on the page.
+
+    The gap used to be added to the VALUE: `max(0.5, max * 0.01)` data units,
+    sized for a 0-100 axis. On a mean's 0-5 axis that is a tenth of the scale
+    and every number floated a finger's width above its bar; on a share topping
+    out at 4 % it was an eighth. A distance on the page is the same on every
+    axis. `along` is the direction the bar grows. (visual QA, 2026-09-19)
+    """
+    from matplotlib.transforms import offset_copy
+
+    return offset_copy(ax.transData, fig=ax.figure, units="points",
+                       x=_VALUE_GAP_PT if along == "x" else 0.0,
+                       y=_VALUE_GAP_PT if along == "y" else 0.0)
 
 
 def _grouped_offsets(segs, segment_primary, cluster_w: float = 0.82):
@@ -724,10 +764,24 @@ def _wrap_into(fig, text: str, width_px: float, height_px: float, *,
         while _text_extent_px(fig, wrapped, fs)[0] > width_px and chars > 8:
             chars = int(chars * 0.92)
             wrapped = wrap_label(flat, chars)
-        if wrapped.count("\n") + 1 <= allowed:
+        fits = _text_extent_px(fig, wrapped, fs)[0] <= width_px
+        if fits and wrapped.count("\n") + 1 <= allowed:
             return wrapped, fs
         if fs == sizes[-1]:
-            return wrap_label_capped(flat, chars, allowed), fs
+            # The floor, and a word still wider than its columns: only here is
+            # one cut mid-word, as every word used to be. Above it a whole word
+            # that does not fit means "a size smaller" — `wrap_label` keeps
+            # words whole now, so width has to be checked, not assumed.
+            # (visual QA, 2026-09-19)
+            if not fits:
+                wrapped = "\n".join(chunk for ln in wrapped.split("\n")
+                                     for chunk in force_break_token(ln, chars))
+            lines = wrapped.split("\n")
+            if len(lines) <= allowed:
+                return wrapped, fs
+            kept = lines[:allowed]
+            kept[-1] = kept[-1][: max(1, chars - 1)].rstrip() + "…"
+            return "\n".join(kept), fs
     return flat, sizes[-1]                                   # pragma: no cover
 
 
@@ -861,9 +915,19 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     groups = _primary_groups(series)
     _c, _s, data = series_values(series)
     n_cat = len(cats)
-    n_sec = max((len(segs) for _p, segs in groups), default=1)
-    clrs = series_colors(n_sec, palette=template_palette(ctx),
-                          accent=chart_accent(ctx))
+    # One colour per SECOND-variable group, the same in every panel. Keyed by
+    # position within each panel, a panel missing a group shifted every colour
+    # after it: "Länsi-Suomessa" was the Muuksi panel's second colour and
+    # "Muualla Etelä-Suomessa" the Mieheksi panel's — one colour, two meanings on
+    # one slide. (visual QA, 2026-09-19)
+    keys: list[str] = []
+    for _p, segs in groups:
+        for seg in segs:
+            if _secondary_tick(seg) not in keys:
+                keys.append(_secondary_tick(seg))
+    _palette = series_colors(max(1, len(keys)), palette=template_palette(ctx),
+                             accent=chart_accent(ctx))
+    colour_of = {k: _palette[j] for j, k in enumerate(keys)}
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
     max_val = max(all_vals, default=0.0)
     ink, _muted, _grid = chart_furniture(ctx)
@@ -877,8 +941,8 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
                 off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
-                ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
-                       edgecolor="none", zorder=3)
+                ax.bar(x + off, [v or 0.0 for v in vals], width=w,
+                       color=colour_of[_secondary_tick(seg)], edgecolor="none", zorder=3)
             ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_xticks(x)
             ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
@@ -896,8 +960,8 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
                 off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
-                ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
-                        edgecolor="none", zorder=3)
+                ax.barh(y + off, [v or 0.0 for v in vals], height=h,
+                        color=colour_of[_secondary_tick(seg)], edgecolor="none", zorder=3)
             ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
             ax.set_yticks(y)
             _apply_bar_style(ax, ctx, max_val, series.statistic)
@@ -909,18 +973,59 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                                          wrap=_wrap_label, width=_LABEL_WRAP_WIDTH)
             ax.tick_params(axis="y", labelleft=(k == 0))
 
+    fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
+                        left=0.12 if vertical else 0.2)
     if ctx.spec.elements.legend:
         # One legend PER PANEL. "Naiset" is 240 people in one panel and 261 in
         # the next, and a legend shared by the row can say only one of them.
-        # Colours stay keyed by position, the same in every panel.
-        for ax, (_p, segs) in zip(axes, groups):
-            names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
-            handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
-            ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-                      ncol=min(len(names), 3), frameon=False, fontsize=9)
-    fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
-                        left=0.12 if vertical else 0.2)
+        # Colours are keyed by the group, the same in every panel.
+        _panel_legends(fig, [
+            (ax, [Patch(facecolor=colour_of[_secondary_tick(s)], edgecolor="none")
+                  for s in segs],
+             [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs])
+            for ax, (_p, segs) in zip(axes, groups)], max_ncol=3)
     place_picture(ctx, render_png(fig))
+
+
+def _panel_legends(fig, legends, *, max_ncol: int, fontsize: float = 9.0) -> None:
+    """Give every panel its legend, each no wider than its own panel.
+
+    `legends` is [(axes, handles, names)]. A panel's legend is its own — one
+    group is 240 people in one panel and 261 in the next — but it was set in as
+    many as four columns whatever the panel's width, and entries like
+    "Pääkaupunkiseudulla (n=118)" made each legend wider than its panel: side by
+    side, every legend was printed through its neighbours'. Fewer columns first,
+    then smaller type down to the names' own floor. Call once the panels are laid
+    out (`subplots_adjust`), since that is the width being fitted to.
+    (visual QA, 2026-09-19)
+    """
+    from reportbuilder.render.image.label_fit import _MIN_PT
+
+    r = fig.canvas.get_renderer()
+    sizes = [fontsize]
+    while sizes[-1] * 0.9 >= _MIN_PT:
+        sizes.append(sizes[-1] * 0.9)
+    for ax, handles, names in legends:
+        # The panel plus its half of the gutter on each side is the room there is.
+        others = [a.bbox for a in fig.axes if a is not ax and a.get_visible()]
+        right = min((b.x0 for b in others if b.x0 >= ax.bbox.x1), default=fig.bbox.x1)
+        left = max((b.x1 for b in others if b.x1 <= ax.bbox.x0), default=fig.bbox.x0)
+        limit = min(ax.bbox.x0 - left, right - ax.bbox.x1) + ax.bbox.width
+        leg = None
+        for fs in sizes:
+            for ncol in range(min(len(names), max_ncol), 0, -1):
+                if leg is not None:
+                    leg.remove()
+                leg = ax.legend(*_rowmajor_legend(handles, names, ncol),
+                                loc="upper center",
+                                bbox_to_anchor=(0.5, -0.12), ncol=ncol,
+                                frameon=False, fontsize=fs)
+                if leg.get_window_extent(r).width <= limit:
+                    break
+            else:
+                continue
+            break
+
 
 
 def _measure_max_label_width_in(labels: list[str], fontsize: float, *,
@@ -1128,7 +1233,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     groups = [(p, place_total(segs, _total_position(ctx), top_is_last=not vertical))
               for p, segs in groups]
     n_cat = len(cats)
-    fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    fig_w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
     # fontsize matches the ACTUAL y/x-tick label fontsize set below (9.0 for the
     # horizontal left-gutter, 8.5 for the vertical rotated x-axis) so the fit
     # test measures the labels at the size they will really be drawn at.
@@ -1182,6 +1287,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                                 rows=rows)
     ink, _muted, _grid = chart_furniture(ctx)
 
+    panel_legends: list = []
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
         clrs = colours_by_series(series_colors(n, palette=template_palette(ctx),
@@ -1235,12 +1341,13 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
         ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
         if ctx.spec.elements.legend:
             names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
-            handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
-            ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-                      ncol=min(len(names), 4), frameon=False, fontsize=9)
+            panel_legends.append(
+                (ax, [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))],
+                 names))
 
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
+    _panel_legends(fig, panel_legends, max_ncol=4)
     place_picture(ctx, render_png(fig))
 
 
@@ -1336,7 +1443,6 @@ def _render_column_v(ctx, cats, segs, data) -> None:
             label=series_label(ctx, seg), color=bar_clrs,
             edgecolor="none", zorder=3,
         )
-        off = _label_offset(max_val)
         # Measured once for the whole chart, against the WIDEST number it will
         # draw, so every column is labelled the same way or none is — a row
         # where some carry a number and others do not reads as a fault.
@@ -1344,31 +1450,33 @@ def _render_column_v(ctx, cats, segs, data) -> None:
             _widest = max((format_value(v, ctx.series.statistic,
                                         ctx.spec.number_format, all_vals)
                            for v in all_vals), key=len, default="")
-            _value_fit = _value_label_layout(fig, ax, n_cats, bwidth, _widest) or ()
+            _right_legend = ctx.spec.elements.legend and n_segs > _LEGEND_BELOW_MAX
+            _value_fit = _value_label_layout(
+                fig, ax, n_cats, bwidth, _widest,
+                width_share=_RIGHT_LEGEND_SHARE if _right_legend else 1.0) or ()
         _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
         for bar, v in zip(bars, vals):
             if v is not None and _value_fit and v >= _floor:
                 _pt, _rot = _value_fit
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + off,
+                    bar.get_height(),
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                    transform=value_label_transform(ax, along="y"),
                     ha="center", va="bottom", rotation=_rot,
                     rotation_mode="anchor" if _rot else None,
                     fontsize=_pt, fontweight="bold", color=ink, zorder=5,
                     gid=VALUE_GID,
                 )
 
-    # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-    display_cats = _category_ticks(cats, _wrap_xtick_label, ctx.series.statistic)
-    ax.set_xticks(x)
-    ax.set_xticklabels(
-        display_cats, fontsize=10.5, color=ink,
-        rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
-    )
-    register_category_labels(ax, "x", _category_ticks(cats, str, ctx.series.statistic),
-                             wrap=_wrap_label, width=_XLABEL_WRAP_WIDTH)
     _apply_column_style(ax, ctx, max_val, ctx.series.statistic)
+    # Flat when they fit in full, rotated only when they cannot — never a name
+    # lost either way. See `names_flat_unless_they_cannot_be`.
+    ax.set_xticks(x)
+    names_flat_unless_they_cannot_be(
+        fig, ax, _category_ticks(cats, str, ctx.series.statistic),
+        fontsize=10.5, color=ink, width=_XLABEL_WRAP_WIDTH, wrap=_wrap_label,
+        rotation=_XTICK_ROTATION)
 
     if ctx.spec.elements.legend and n_segs > 1:
         _place_series_legend(fig, ax, segs, ctx, vertical=True)
@@ -1463,6 +1571,14 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     chosen_pt = _explicit_label_pt(ctx)
     if chosen_pt:
         ylabel_fs = chosen_pt
+    # A long label may use the lines its row actually has room for at that
+    # size, not only the three the figure was sized for. A slide of three
+    # 127-character statements has rows over an inch tall, and the middle one
+    # was still cut at three lines — "…päivittäin tai lähes…" — with the rest of
+    # the row empty. (visual QA, 2026-09-19)
+    needed = max((w.count("\n") + 1 for w in wrapped_full), default=1)
+    room = int(row_pt / (ylabel_fs * 1.3))
+    max_lines = max(max_lines, min(needed, room))
     # Scale the value-label font to a SINGLE BAR's height (which shrinks as segments
     # multiply — a two-classifier cross-tab packs many thin bars per row), so the
     # label stays a bit smaller than the bar and never touches its neighbours.
@@ -1479,7 +1595,6 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     if not labelled and all_vals:
         note(ctx, "unlabelled", n_cats)
 
-    off = _label_offset(max_val)
     for i, seg in enumerate(segs):
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
@@ -1488,8 +1603,9 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
         for yi, v in zip(ys, vals):
             if v is not None and labelled and v >= _floor:
                 ax.text(
-                    v + off, yi,
+                    v, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                    transform=value_label_transform(ax, along="x"),
                     va="center", ha="left",
                     fontsize=value_fs, fontweight="bold", color=ink, zorder=5,
                     gid=VALUE_GID,
@@ -1661,7 +1777,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
     # Each panel keeps its own "<variable> · Total"; it goes where the author said.
     groups = [(p, place_total(bars, _total_position(ctx))) for p, bars in groups]
     clrs = scale_colors(len(stack), chart_accent(ctx))                 # the stack is the shared scale
-    fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
+    fig_w_in = max(figure_floor_in(ctx)[0], ctx.slot.width / _EMU_PER_IN)
     # Each panel's OWN bar labels (the classifier's own group names, via
     # `_secondary_tick`), measured PER PANEL rather than flattened into one
     # global list: panel 0's labels only need to fit the figure's LEFT
@@ -1866,17 +1982,18 @@ def build_image_column_stacked(ctx) -> None:
         _draw_group_labels_under(fig, ax, grouped[1],
                                  _group_sizes(cats, ctx.series.segment_primary), ink,
                                  names_depth_px=depth_px)
-    else:
-        # Wrap + rotate x-axis labels so they are shown in full and never overlap.
-        names = _bar_names(ctx.series, cats, short=False, show_base=wants_group_base(ctx))
-        ax.set_xticklabels(
-            [_wrap_xtick_label(c) for c in names], fontsize=10.5, color=ink,
-            rotation=_XTICK_ROTATION, ha="right", rotation_mode="anchor",
-        )
-        register_category_labels(ax, "x", names, wrap=_wrap_label, width=_XLABEL_WRAP_WIDTH)
     # Normalised → the axis IS the 0-100 composition scale, whatever statistic the
     # columns carry. True heights → the axis must read the data's own statistic.
     _apply_column_style(ax, ctx, axis_max, "pct" if normalise else ctx.series.statistic)
+    if not grouped:
+        # Flat when they fit in full, rotated only when they cannot — the rule
+        # every column builder now shares. "Mieheksi (n=478)" under a column a
+        # sixth of the slide wide was printed at 30 degrees.
+        # See `names_flat_unless_they_cannot_be`. (visual QA, 2026-09-19)
+        names = _bar_names(ctx.series, cats, short=False, show_base=wants_group_base(ctx))
+        names_flat_unless_they_cannot_be(
+            fig, ax, names, fontsize=10.5, color=ink, width=_XLABEL_WRAP_WIDTH,
+            wrap=_wrap_label, rotation=_XTICK_ROTATION)
 
     if ctx.spec.elements.legend and len(segs) > 1:
         _legend_below(ax, len(segs), ctx)
@@ -2407,6 +2524,20 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
     def _width(seg, j) -> float:
         return (data[seg][j] or 0.0) * norm[j]
 
+    # How thick a bar is on the page, in points, from the rows' own spread (the
+    # caller pins the y limits later, to about this). A number is never set
+    # taller than its bar: on a battery split four ways — 56 rows — the bars
+    # were 4.5pt thick, a wide segment's "35 %" was printed at 9pt across its
+    # neighbours, and the crowded ones beside it had been shrunk to 5pt.
+    # (visual QA, 2026-09-19)
+    _span = (max(y) - min(y) + 1.2) if len(y) else 1.0
+    _bar_pt = (min(_STACK_BAR_H, _STACK_BAR_H_CALLOUT) * ax.bbox.height / _span
+               * 72.0 / ax.figure.dpi)
+    # A number's DIGITS are about 0.72 of its size tall, so a 9pt "35 %" sits in
+    # a 10pt bar with room to spare; the cap is on the digits, with a little
+    # slack because this is measured before the figure's final layout.
+    _tallest = max(_VALUE_MIN_PT, _bar_pt / 0.72)
+
     def _size(seg, j) -> float | None:
         """The size this cell's number is printed INSIDE its segment at, or None
         when it does not fit even at the floor and must be called out.
@@ -2419,9 +2550,9 @@ def _draw_stacked_panel(ax, bars, stack, data, clrs, ctx, y, flat_vals, *,
         (Johan, 2026-09-11)"""
         w, need = _width(seg, j), room[said[(seg, j)]]
         if w >= need:
-            return 9.0
+            return min(9.0, _tallest)
         size = 9.0 * w / need                # a number's width scales with its size
-        return size if size >= _VALUE_MIN_PT else None
+        return min(size, _tallest) if size >= _VALUE_MIN_PT else None
 
     def _fits(seg, j) -> bool:
         return _size(seg, j) is not None

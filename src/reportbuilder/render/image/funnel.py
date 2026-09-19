@@ -122,10 +122,18 @@ def _draw_one_funnel(ax, cats, vals, ctx, bg: str, ink: str, *,
     # un-split funnel's right edge.
     if stage_labels:
         stage_pt, stage_lines = _stage_label_layout(ax.figure, len(cats))
+        # As many characters a line as the gutter reserved for the names holds —
+        # never fewer than the fixed width they always had. Wrapped at a fixed 28,
+        # a fourteen-stage battery's one-line names were cut short ("Tarjoaa
+        # laadukkaita…") with most of the gutter, half the slide, empty beside
+        # them. (visual QA, 2026-09-19)
+        gutter_pt = (ax.bbox.width * (_GUTTER_WITH_LABELS - 1.04) / _GUTTER_WITH_LABELS
+                     * 72.0 / ax.figure.dpi)
+        wrap_w = max(_STAGE_WRAP_WIDTH, int(0.9 * gutter_pt / (0.55 * stage_pt)))
         for i, cat in enumerate(cats):
             ax.text(
                 max_val * 1.04, i,
-                wrap_label_capped(cat, _STAGE_WRAP_WIDTH, stage_lines),
+                wrap_label_capped(cat, wrap_w, stage_lines),
                 va="center", ha="left",
                 fontsize=stage_pt, color=ink, zorder=5,
             )

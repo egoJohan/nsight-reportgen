@@ -22,11 +22,18 @@ def _empty_series(statistic: str) -> SeriesResult:
 
 
 def _cell_spec(ref: str, chart_type: str) -> ChartSpec:
-    """A minimal spec for one demographics-grid cell chart."""
+    """A minimal spec for one demographics-grid cell chart.
+
+    The same defaults a fresh chart gets in the editor (`makeChart`): survey
+    order and no empty categories. Sorted by percentage, a grid's age bands
+    read "45-54, 55-64, 65-74, 25-34, 35-44, 18-24", and every level nobody
+    chose was printed as a 0 % row. (visual QA, 2026-09-19)
+    """
     return ChartSpec(
         question_ref=ref, chart_type=chart_type, statistic="pct",
         classifying_var=None, number_format=NumberFormat(),
-        sort=SortSpec(basis="pct"), template_slot="cell", elements=ElementToggles(),
+        sort=SortSpec(basis="data_order"), template_slot="cell",
+        elements=ElementToggles(), show_empty_categories=False,
     )
 
 
