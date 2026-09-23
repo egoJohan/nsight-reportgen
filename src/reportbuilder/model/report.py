@@ -22,6 +22,12 @@ class SortSpec:
     #: control always says why the chart is in the order it is in, and going
     #: back to "Percentage" leaves the dragged list intact for later.
     manual_order: tuple[str, ...] = ()
+    #: Survey order, run backwards. With "data_order" the direction control
+    #: reads ASCENDING (the data's own order) by default and DESCENDING reverses
+    #: it. Its own flag rather than `descending`, which every slide has always
+    #: stored as True: read by survey order, it would have flipped every
+    #: existing survey-order slide the day this shipped. (Johan, 2026-09-23)
+    survey_descending: bool = False
 
 
 @dataclass(frozen=True)
@@ -321,6 +327,7 @@ def report_from_json(data: dict | str) -> Report:
                 topbox_codes=tuple(so.get("topbox_codes", ())),
                 descending=so.get("descending", True),
                 manual_order=tuple(so.get("manual_order", ()) or ()),
+                survey_descending=bool(so.get("survey_descending", False)),
             ),
             template_slot=c["template_slot"],
             elements=ElementToggles(**el),

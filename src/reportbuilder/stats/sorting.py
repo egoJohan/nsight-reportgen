@@ -22,6 +22,8 @@ def sort_categories(rows: list[tuple[str, float, dict]], spec: SortSpec) -> list
         # data_order, or a stacked-only basis (e.g. top3_sum) that doesn't apply to these
         # categories → keep data order (the bar reorder happens in the engine).
         ordered = sorted(rows, key=lambda r: r[2]["data_index"])
+        if spec.basis == "data_order" and getattr(spec, "survey_descending", False):
+            ordered.reverse()
         return [r[0] for r in ordered]
     key = _KEY[spec.basis]
     base = sorted(rows, key=lambda r: r[2]["data_index"])

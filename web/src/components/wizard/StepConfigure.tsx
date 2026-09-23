@@ -706,8 +706,14 @@ function SortWidget({ field, chart, question, onChange }: WidgetProps) {
     (o) => !orderIsFixed || o.value === "data_order" || o.value === "manual"
   );
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
-  const dirDisabled =
-    chart.sort.basis === "data_order" || chart.sort.basis === "manual";
+  // Survey order has a direction of its own: Ascending lists the entries as
+  // the data has them, Descending reverses them — so a region coded 0/1 can
+  // put its 1 first. Only a DRAGGED order has none: it is the order.
+  const survey = chart.sort.basis === "data_order";
+  const dirDisabled = chart.sort.basis === "manual";
+  const dirValue = survey
+    ? (chart.sort.survey_descending ? "desc" : "asc")
+    : (chart.sort.descending ? "desc" : "asc");
   return (
     <>
       <Field label={field.label}>
@@ -716,7 +722,12 @@ function SortWidget({ field, chart, question, onChange }: WidgetProps) {
           value={chart.sort.basis}
           onValueChange={(v) =>
             onChange({
-              sort: { ...chart.sort, basis: v as ChartSpec["sort"]["basis"] },
+              sort: {
+                ...chart.sort,
+                basis: v as ChartSpec["sort"]["basis"],
+                // Choosing Survey order starts where the data does.
+                ...(v === "data_order" ? { survey_descending: false } : {}),
+              },
             })
           }
         >
@@ -733,14 +744,18 @@ function SortWidget({ field, chart, question, onChange }: WidgetProps) {
         </Select>
       </Field>
 
-      {/* Sort direction — separate control; descending is the default. Not
-          applicable to "Data order" (keeps the source order as-is). */}
+      {/* Sort direction — separate control; descending is the default for a
+          value sort, ascending (the data's own order) for Survey order. */}
       <Field label="Sort direction">
         <Select
           items={Object.fromEntries(SORT_DIRECTIONS.map((s) => [s.id, s.label]))}
-          value={chart.sort.descending ? "desc" : "asc"}
+          value={dirValue}
           onValueChange={(v) =>
-            onChange({ sort: { ...chart.sort, descending: v === "desc" } })
+            onChange({
+              sort: survey
+                ? { ...chart.sort, survey_descending: v === "desc" }
+                : { ...chart.sort, descending: v === "desc" },
+            })
           }
           disabled={dirDisabled}
         >

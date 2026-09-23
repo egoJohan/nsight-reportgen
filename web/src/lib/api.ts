@@ -184,6 +184,11 @@ export interface SortSpec {
    *  only when `basis` is "manual"; kept when it is not, so switching back to
    *  "Manual (dragged)" restores the arrangement. */
   manual_order: string[];
+  /** Survey order, run backwards. With "data_order" the direction control reads
+   *  Ascending (the data's own order) by default and Descending reverses it.
+   *  Its own flag: `descending` is stored as true on every existing slide, so
+   *  reading survey order off it would flip them all. */
+  survey_descending?: boolean;
 }
 
 export interface ChartElements {

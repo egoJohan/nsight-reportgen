@@ -1623,6 +1623,7 @@ class _SortSpecBody(BaseModel):
     topbox_codes: list[float] = []
     descending: bool = True
     manual_order: list[str] = []
+    survey_descending: bool = False
 
 
 class _ElementTogglesBody(BaseModel):
@@ -1746,6 +1747,7 @@ def _chart_spec_from_body(body: ChartSpecBody) -> ChartSpec:
             topbox_codes=tuple(body.sort.topbox_codes),
             descending=body.sort.descending,
             manual_order=tuple(body.sort.manual_order),
+            survey_descending=body.sort.survey_descending,
         ),
         template_slot="preview",
         elements=ElementToggles(

@@ -1145,6 +1145,25 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 reals.sort(key=lambda b: by_bar.get(b, 0.0), reverse=spec.sort.descending)
             segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
+    # …and Survey order, DESCENDING: the groups in reverse of the order they are
+    # coded, so "Itäinen Suomi" (1) can lead "Muu Suomi" (0). Total stays last,
+    # and in the side-by-side layout each panel reverses on its own with its own
+    # "· Total" last, as the sorts above keep them. (Johan, 2026-09-23)
+    if (_bars_are_segments and spec.sort.basis == "data_order"
+            and getattr(spec.sort, "survey_descending", False)):
+        reals = [s for s in segments if s != "Total"]
+        if separate is not None:
+            _sp = separate[1]
+            order = []
+            for panel in dict.fromkeys(_sp[s] for s in reals):
+                panel_segs = [s for s in reals if _sp[s] == panel]
+                totals = [s for s in panel_segs if s == f"{_sp[s]} · Total"]
+                order += [s for s in reversed(panel_segs) if s not in totals] + totals
+            reals = order
+        else:
+            reals.reverse()
+        segments = tuple(reals) + (("Total",) if "Total" in segments else ())
+
     base_n = {s: denom.get(s, 0) for s in segments}
     base_n.setdefault("Total", denom_total)
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
@@ -2102,25 +2121,6 @@ def _scale_from_data(var: Variable, df) -> list[tuple[float, str, float]]:
         seen = pd.to_numeric(df[var.name], errors="coerce").dropna().unique().tolist()
     except Exception:  # noqa: BLE001 — a column we cannot read is not a scale
         return []
-    codes = sorted(c for c in seen
-                   if float(c).is_integer() and c not in var.missing_values)
-    if not codes:
-        return []
-    ints = [int(c) for c in codes]
-    if ints != list(range(ints[0], ints[0] + len(ints))):
-        return []
-    return _levels(ints[0], ints[-1])
-
-
-def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, str]]:
-    """The shared rating-scale ``(point, label)`` pairs a STACKED battery stacks by,
-    ascending by point.
-
-    Members share one scale, so the levels come from the FIRST member with a
-    parseable one. Empty when no member has a scale."""
-    level_label: dict[float, str] = {}
-    for v in vars_:
-        lv = scale_levels(v, df)
     # A column holding FRACTIONS is a score averaged over items — an index on
     # 1..10 — and its range is where its values lie, rounded outward to whole
     # points. Reading it off the whole numbers alone made the answer depend on
@@ -2131,15 +2131,15 @@ def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, st
     answered = [c for c in seen if c not in var.missing_values]
     if any(not float(c).is_integer() for c in answered):
         return _levels(math.floor(min(answered)), math.ceil(max(answered)))
-        if lv:
-            for _code, label, point in lv:
-                level_label.setdefault(point, label)
-            break
-    return [(p, level_label[p]) for p in sorted(level_label)]
+    codes = sorted(c for c in seen
+                   if float(c).is_integer() and c not in var.missing_values)
+    if not codes:
+        return []
+    ints = [int(c) for c in codes]
+    if ints != list(range(ints[0], ints[0] + len(ints))):
+        return []
+    return _levels(ints[0], ints[-1])
 
-
-def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
-    """Remove segments in which NOBODY answered this battery.
 
 def scale_points(var: Variable, data: pd.DataFrame) -> pd.Series:
     """Each respondent's position on *var*'s scale; NaN where there is none.
@@ -2162,6 +2162,25 @@ def scale_points(var: Variable, data: pd.DataFrame) -> pd.Series:
             return raw.where(raw.between(lo, hi) & ~raw.isin(var.missing_values))
     return raw.map({c: p for c, _l, p in lv})
 
+
+def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, str]]:
+    """The shared rating-scale ``(point, label)`` pairs a STACKED battery stacks by,
+    ascending by point.
+
+    Members share one scale, so the levels come from the FIRST member with a
+    parseable one. Empty when no member has a scale."""
+    level_label: dict[float, str] = {}
+    for v in vars_:
+        lv = scale_levels(v, df)
+        if lv:
+            for _code, label, point in lv:
+                level_label.setdefault(point, label)
+            break
+    return [(p, level_label[p]) for p in sorted(level_label)]
+
+
+def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
+    """Remove segments in which NOBODY answered this battery.
 
     Some studies ask each path its own variable set (Houkuttelevuus_1 for path 1,
     Houkuttelevuus_2 for path 2), so cross-tabbing one of those batteries by the
@@ -2617,6 +2636,15 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
 
         bars = [b for _k, b in sorted(((_placed((i, b)), b)
                                        for i, b in enumerate(bars)))]
+
+    # Survey order, DESCENDING: the statements last to first. Split by a group,
+    # each statement's block moves whole, its groups kept in their own order.
+    # (Johan, 2026-09-23)
+    if spec.sort.basis == "data_order" and getattr(spec.sort, "survey_descending", False):
+        blocks: dict[str, list[str]] = {}
+        for bar in bars:
+            blocks.setdefault(segment_primary.get(bar, bar), []).append(bar)
+        bars = [b for st in reversed(list(blocks)) for b in blocks[st]]
 
     base_n = {"Total": int(answered_any.sum()), **base_by_bar}
     return SeriesResult(
