@@ -6,8 +6,10 @@ SeriesResult — the spine output (R1). REQ-C-14/15/16, M-03.
 from __future__ import annotations
 import collections
 import dataclasses
+import math
 import os
 import re
+import numpy as np
 import pandas as pd
 from reportbuilder.ingest.sav_reader import string_categories
 from reportbuilder.model.chart_types import PANEL_CHART_TYPES
@@ -2119,6 +2121,16 @@ def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, st
     level_label: dict[float, str] = {}
     for v in vars_:
         lv = scale_levels(v, df)
+    # A column holding FRACTIONS is a score averaged over items — an index on
+    # 1..10 — and its range is where its values lie, rounded outward to whole
+    # points. Reading it off the whole numbers alone made the answer depend on
+    # how many items were averaged: over three items an index steps 1, 2.5, 4 …
+    # and hits only 1, 4, 7, 10, so four of Suomalainen Työ's seven indices were
+    # never offered for grouping ("se tunnistaa indekseistä vain kaksi").
+    # (Johan, 2026-09-23)
+    answered = [c for c in seen if c not in var.missing_values]
+    if any(not float(c).is_integer() for c in answered):
+        return _levels(math.floor(min(answered)), math.ceil(max(answered)))
         if lv:
             for _code, label, point in lv:
                 level_label.setdefault(point, label)
@@ -2128,6 +2140,28 @@ def battery_scale_levels(vars_: list[Variable], df=None) -> list[tuple[float, st
 
 def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
     """Remove segments in which NOBODY answered this battery.
+
+def scale_points(var: Variable, data: pd.DataFrame) -> pd.Series:
+    """Each respondent's position on *var*'s scale; NaN where there is none.
+
+    A rating's answer is a CODE that stands for a point, so it is looked up in
+    `scale_levels`. An index's answer IS the point: 6.33 on a 1..10 score. Looked
+    up, 6.33 matched no level and the respondent vanished — a battery of
+    Suomalainen Työ's indices counted only those whose index happened to be a
+    whole number, 705 of 3140, and printed a mean of 8.34 against a true 7.19.
+    So where every level's code is its own point and the data holds fractions,
+    the value is taken as it stands, within the scale's range.
+    (Johan, 2026-09-23)
+    """
+    raw = pd.to_numeric(data[var.name], errors="coerce")
+    lv = scale_levels(var, data)
+    if lv and all(c == p for c, _l, p in lv):
+        answered = raw[raw.notna() & ~raw.isin(var.missing_values)]
+        if (answered % 1 != 0).any():
+            lo, hi = lv[0][2], lv[-1][2]
+            return raw.where(raw.between(lo, hi) & ~raw.isin(var.missing_values))
+    return raw.map({c: p for c, _l, p in lv})
+
 
     Some studies ask each path its own variable set (Houkuttelevuus_1 for path 1,
     Houkuttelevuus_2 for path 2), so cross-tabbing one of those batteries by the
@@ -2142,9 +2176,7 @@ def _drop_empty_segments(seg_masks, vars_: list[Variable], data: pd.DataFrame):
         # unanswered, and this returns None — which `_battery` reads as "drop the
         # split", drawing the pooled mean of two groups that share no answer.
         # (Johan, 2026-09-17)
-        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
-        answered = answered | pd.to_numeric(
-            data[v.name], errors="coerce").map(scale).notna()
+        answered = answered | scale_points(v, data).notna()
     kept = {lbl: m for lbl, m in seg_masks.items() if bool((answered & m).any())}
     return kept or None
 
@@ -2176,8 +2208,7 @@ def _battery(question: Question, spec: ChartSpec, data: pd.DataFrame,
     _display = _clash_free(tuple(v.label for v in vars_), overrides)
     for idx, v in enumerate(vars_):
         display = _display(v.label)
-        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
-        mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
+        mapped = scale_points(v, data)
         answered_any = answered_any | mapped.notna()
         for seg, mask in segs.items():
             sub = mapped[mask]
@@ -2268,8 +2299,7 @@ def _battery_comparison(question: Question, spec: ChartSpec, data: pd.DataFrame,
             if vn is None:
                 cells[(attr, ent)] = Cell(pct=None, count=0.0, mean=None)
                 continue
-            scale = {c: p for c, _lbl, p in scale_levels(model.variable(vn), data)}
-            mapped = pd.to_numeric(data[vn], errors="coerce").map(scale)
+            mapped = scale_points(model.variable(vn), data)
             answered = answered | mapped.notna()
             n = int(mapped.notna().sum())
             cells[(attr, ent)] = Cell(
@@ -2467,8 +2497,9 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     bars: list[str] = []
     answered_any = pd.Series(False, index=data.index)
     for v, stmt in zip(vars_, statements):
-        scale = {c: p for c, _lbl, p in scale_levels(v, data)}
-        mapped = pd.to_numeric(data[v.name], errors="coerce").map(scale)
+        # A stack has one segment per whole point, so an index's 6.5 is counted
+        # on its nearest point (half up), not dropped. See `scale_points`.
+        mapped = np.floor(scale_points(v, data) + 0.5)
         answered_any = answered_any | mapped.notna()
         for seg_label, mask in seg_items:
             bar = stmt if seg_label is None or sole_group else f"{stmt} · {seg_label}"
