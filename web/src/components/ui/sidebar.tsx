@@ -307,7 +307,14 @@ function SidebarInset({ className, ...props }: React.ComponentProps<"main">) {
     <main
       data-slot="sidebar-inset"
       className={cn(
-        "relative flex w-full flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
+        // `min-w-0`, never `w-full`: the sidebar is a 16rem box in the same
+        // flex row, so a pane asked to be 100% of the row is 16rem wider than
+        // the space left for it. It ran off the right edge — a horizontal
+        // scrollbar on every page, and content that looked shifted with a gap
+        // on the left once you scrolled. `flex-1` already gives it exactly
+        // what is free. Long study and report names made it visible; they were
+        // never the cause. (Johan, 2026-09-22)
+        "relative flex min-w-0 flex-1 flex-col bg-background md:peer-data-[variant=inset]:m-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow-sm md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-2",
         className
       )}
       {...props}
