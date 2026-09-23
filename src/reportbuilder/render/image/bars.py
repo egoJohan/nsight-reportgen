@@ -29,7 +29,6 @@ existed), flipped for legibility on a dark one.
 from __future__ import annotations
 
 import math
-import re
 import textwrap
 
 from reportbuilder.render.shape import ADDITIVE_STATISTICS
@@ -49,7 +48,7 @@ from reportbuilder.render.base import note
 from reportbuilder.render.house_style import (
     series_colors, scale_colors, contrast_ink, MUTED, register_fonts,
 )
-from reportbuilder.stats.engine import NOT_ANSWERED_LABEL, _BANDED_LABEL
+from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.stats.series import PARTITION_UNDERSHOOT_TOL_PCT
 from reportbuilder.model.report import default_label
 from reportbuilder.render.image._mpl import template_palette
@@ -309,8 +308,7 @@ def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
     its height instead of being squeezed by a wide multi-row legend below."""
     n = len(segs)
     if n <= _LEGEND_BELOW_MAX:
-        _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08,
-                      shorten_numeric=False)
+        _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08)
         return
     # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
     # so long combo labels (e.g. gender × a long life-situation label) can't balloon
@@ -351,39 +349,6 @@ def _rowmajor_legend(handles, labels, ncol):
     return [handles[k] for k in order], [labels[k] for k in order]
 
 
-def _leading_number(label: str) -> int | None:
-    """The integer a legend label starts with ('1 - Täysin eri mieltä' → 1, '2' → 2), or
-    None when it doesn't begin with a number (a categorical group like 'Uusimaa')."""
-    m = re.match(r"\s*(\d+)", str(label))
-    return int(m.group(1)) if m else None
-
-
-def _labels_are_a_numeric_scale(labels) -> bool:
-    """True when these legend labels are a RATING SCALE, safe to print as bare
-    numbers ("1 - Täysin eri mieltä", "2", … "7 - …" -> "1 2 … 7").
-
-    A rating scale's point is a single number that stands for itself. A BAND
-    states a range, and its first number is not a name for it: Prima Pet's
-    "20–40 euroa / kuukausi" shortened to "20", so the slide showed 82 % against
-    a bare 20 with nothing saying it meant twenty to forty euros a month. The
-    words were not moved to a caption — they were gone.
-
-    The series legend learned this in 2026-09-09, when Finnish age bands drew
-    "18 25 35 45"; that fix switched shortening off for the classifier's groups
-    and left the CATEGORY legend shortening anything that opens with a figure.
-    The band test is the general answer, so both legends now ask the same
-    question. Shares `_BANDED_LABEL` with the engine, which reads the same
-    shapes when it decides what a banded answer is worth.
-    """
-    labels = list(labels)
-    if len(labels) < 3:
-        return False
-    nums = [_leading_number(l) for l in labels]
-    if any(n is None for n in nums):
-        return False
-    return not any(_BANDED_LABEL.match(str(l)) for l in labels)
-
-
 #: How far below the plot the legend row sits, as a share of the axes height.
 #: Was 0.08, which left about 7pt between an x-axis TITLE and the legend — the
 #: two read as one crowded block. ("Maybe add a bit space between the legend and
@@ -393,8 +358,7 @@ _LEGEND_GAP: float = 0.13
 _LEGEND_GAP_WITH_AXIS_TITLE: float = 0.20
 
 
-def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
-                  shorten_numeric: bool = True) -> None:
+def _legend_below(ax, n_segs: int, ctx, y: float | None = None) -> None:
     """Place a chart's legend in a horizontal row BELOW the plot (an in-axes legend
     would cover the bars). `y` is the bbox anchor offset — push it lower for charts
     with rotated x-axis tick labels (clustered vertical bars) so it clears them.
@@ -407,38 +371,21 @@ def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
         has_axis_title = bool((getattr(ctx.spec, "axis_x_title", "") or "").strip())
         y = -(_LEGEND_GAP_WITH_AXIS_TITLE if has_axis_title else _LEGEND_GAP)
     handles, labels = ax.get_legend_handles_labels()
-    # A numeric rating scale (every level starts with its point number, e.g. "1 - Täysin
-    # eri mieltä", "2", … "7 - …") shows JUST the numbers in the legend — the endpoint
-    # wording moves to the subtitle. Keeps the legend short and even (no ragged gaps from
-    # long endpoint labels stacking under bare numbers).
-    # …and ONLY for a scale. `shorten_numeric=False` is passed by the SERIES
-    # legend, whose labels are the classifier's groups: Finnish age bands all
-    # begin with a digit, so this fired on them and drew "18", "25", "35", "45"
-    # — losing the band names, and with them the "(n=…)" each group now
-    # carries. A group list is not a scale, whatever its labels start with.
-    # (Johan, 2026-09-09)
-    # …and never over a label the AUTHOR wrote. Shortening is a default for
-    # labels nobody chose; once somebody types one in Category labels, throwing
-    # it away is the editor doing nothing. Reported as "Category labels
-    # määritykset jäävät joissain tilanteissa päivittymättä kuvaan": the engine
-    # applied the rename and this discarded it a moment later, and a rename that
-    # kept its leading number ("1 - Ei kovin tärkeä" → "1 - Ei tärkeä") shortened
-    # to the same "1", so the slide never moved however often it was retyped.
+    # The legend draws its labels exactly as they are: what Category labels
+    # lists is what the slide says.
     #
-    # The whole legend stands down together, not just the renamed level: half
-    # named and half numbered is one chart telling its levels two ways.
-    # (Johan, 2026-09-16)
-    authored = {short for _full, short in
-                (getattr(ctx.spec, "category_label_overrides", None) or ())}
-    nums = [_leading_number(l) for l in labels]
-    numeric_scale = (shorten_numeric
-                     and _labels_are_a_numeric_scale(labels)
-                     and not any(l in authored for l in labels))
-    if numeric_scale:
-        labels = [str(n) for n in nums]
+    # It used to cut a numeric rating scale ("1 - Erittäin huono", "2", …
+    # "7 - Erittäin hyvä") to bare 1…7 and move the endpoint words to a
+    # caption at the foot. The editor went on listing the words, so the slide
+    # and its settings disagreed, and retyping a label did nothing because a
+    # label equal to the data's own is not stored: "Category labels määritys
+    # ei siirry oikein legendiin". Every exception it grew — the series
+    # legend's age bands, Prima Pet's money bands, an authored rename — was
+    # the shortener throwing away words somebody needed. (Johan, 2026-09-23)
+    #
     # Does the row FIT? Measured, not counted.
     #
-    # This was `n_segs <= 7 and (numeric_scale or n_segs <= 5)`, so six short
+    # This was a count (`n_segs <= 5`, seven for a shortened scale), so six short
     # words went onto two rows across the full width of a slide with room for
     # all six, and a count could never tell that from six long ones that do not
     # fit. `_value_label_layout` already carries this lesson about value labels:
@@ -450,18 +397,30 @@ def _legend_below(ax, n_segs: int, ctx, y: float | None = None, *,
     # just fits off the very edge. (Johan, 2026-09-16)
     _LEGEND_FS = 9.5
     entry_in = (1.1 + 0.5 + 1.2) * _LEGEND_FS / 72.0      # handle + pad + gap
-    text_in = sum(_measure_max_label_width_in([l], _LEGEND_FS) for l in labels)
-    fig_w_in = ax.get_figure().get_size_inches()[0]
-    one_row = text_in + entry_in * n_segs <= fig_w_in - 0.1
-    ncol = n_segs if one_row else min(n_segs, 5)
-    if not one_row:
-        handles, labels = _rowmajor_legend(handles, labels, ncol)
+    widths = [_measure_max_label_width_in([l], _LEGEND_FS) for l in labels]
     # Centred on the CHART, not on the axes. They are the same thing until
     # something reserves part of the axes for furniture — the row-summary column
     # does, by 18 % — see `_draw_row_summary`.
     span = ax.get_xlim()[1] or 1.0
     content = getattr(ax, "_nsight_content_xmax", None)
     centre = (content / span) / 2 if content else 0.5
+    # The room is what lies either side of that centre, not the figure's whole
+    # width: the plot sits right of middle behind its group labels, so a row
+    # that fits the figure can still run off its right edge. Nothing found this
+    # while a numbered scale was cut to 1…7; a worded one drawn in full in a
+    # half-width slot did.
+    fig_w_in = ax.get_figure().get_size_inches()[0]
+    box = ax.get_position()
+    centre_in = (box.x0 + centre * box.width) * fig_w_in
+    room_in = 2 * min(centre_in, fig_w_in - centre_in) - 0.1
+
+    def row_in(ncol: int) -> float:
+        # Reading order is row-major, so column k holds entries k, k+ncol, …
+        return sum(max(widths[k::ncol]) for k in range(ncol)) + entry_in * ncol
+
+    ncol = next((c for c in range(n_segs, 0, -1) if row_in(c) <= room_in), 1)
+    if ncol < n_segs:
+        handles, labels = _rowmajor_legend(handles, labels, ncol)
     leg = ax.legend(
         handles, labels,
         loc="upper center", bbox_to_anchor=(centre, y),

@@ -1,16 +1,11 @@
-"""A BATTERY on a numbered scale must also say which end is which.
+"""A BATTERY on a numbered scale says which end is which in its own legend.
 
-`_numbered_scale_caption` was added for the single-variable path: a stacked bar
-shortens a numeric rating scale's legend to bare numbers, so the endpoint
-wording moves to a caption above the footer. The battery path builds its own
-SeriesResult and never asked for one — so Attendo's brand-image batteries, 14
-statements over "1 - Ei vastaa lainkaan" … "5 - Vastaa täysin", drew a legend
-reading "1 2 3 4 5" with nothing anywhere on the slide saying whether 5 was
-good or bad. A battery is where a numbered scale is MOST common, and it was the
-one path that lost the words.
-
-Same rule as the single path, deliberately: the caption appears only where the
-legend actually drops the words.
+Attendo's brand-image batteries, 14 statements over "1 - Ei vastaa lainkaan"
+… "5 - Vastaa täysin", once drew a legend reading "1 2 3 4 5" with nothing on
+the slide saying whether 5 was good or bad; a footer caption was added to put
+the words back. The legend no longer shortens a scale (2026-09-23, see
+render/test_an_authored_label_is_not_shortened_away.py), so the words are the
+legend's own levels and a caption would only repeat them.
 """
 from __future__ import annotations
 
@@ -56,33 +51,25 @@ def _spec(chart_type="stacked_horizontal_bar") -> ChartSpec:
                      template_slot="s1", elements=ElementToggles())
 
 
-def _caption(scale, chart_type="stacked_horizontal_bar"):
+def _series(scale, chart_type="stacked_horizontal_bar"):
     model, df = _model(scale)
-    return compute(model.questions[0], _spec(chart_type), df, model).caption
+    return compute(model.questions[0], _spec(chart_type), df, model)
 
 
-def test_a_battery_on_an_endpoint_labelled_scale_captions_its_ends():
-    assert _caption(_ENDPOINT) == "1 = Ei vastaa lainkaan · 5 = Vastaa täysin"
-
-
-def test_no_caption_when_every_level_carries_its_own_words():
-    """The legend keeps the words there, so a caption would repeat them."""
-    assert _caption(_ALL_WORDED) is None
+def test_a_battery_on_an_endpoint_labelled_scale_keeps_its_words():
+    got = _series(_ENDPOINT)
+    assert got.categories == ("1 - Ei vastaa lainkaan", "2", "3", "4", "5 - Vastaa täysin")
+    assert got.caption is None, "the legend already names the ends"
 
 
 def test_the_scale_point_is_read_from_the_LABEL_not_the_sav_code():
     """Attendo's own export, var102: the middle points are coded 2, 3, 4 but the
     two ENDPOINTS sit on codes 10346 and 10350, with "En osaa sanoa" on 10351.
-    The scale point is what the label says ("1 - ..."), which is how
-    `battery_scale_levels` reads it; keying the caption on the SAV code instead
-    asked 10346 to begin with "10346", and the real slide got no caption at all.
-    """
+    The levels are ordered by the point the label states, not the SAV code."""
     scale = {2: "2", 3: "3", 4: "4",
              10346: "1 - Ei vastaa lainkaan", 10350: "5 - Vastaa erittäin hyvin",
              10351: "En osaa sanoa"}
-    assert _caption(scale) == "1 = Ei vastaa lainkaan · 5 = Vastaa erittäin hyvin"
-
-
-def test_no_caption_for_a_chart_type_that_does_not_shorten_its_legend():
-    """A plain bar prints the scale on the category axis in full."""
-    assert _caption(_ENDPOINT, chart_type="horizontal_bar") is None
+    got = _series(scale)
+    assert got.categories == ("1 - Ei vastaa lainkaan", "2", "3", "4",
+                              "5 - Vastaa erittäin hyvin")
+    assert got.caption is None

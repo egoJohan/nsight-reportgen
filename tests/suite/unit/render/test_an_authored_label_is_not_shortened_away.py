@@ -1,25 +1,18 @@
-"""A label the author typed is drawn as the author typed it.
+"""The legend draws the category labels as they are, never bare scale points.
 
-"Category labels määritykset jäävät joissain tilanteissa päivittymättä kuvaan
-(ainakin stacked horizontal barissa)."
+"Legendin arvojen teksteissä on vielä pientä epätarkkuutta. Category labelsin
+määritys ei siirry oikein legendiin." (Suomalainen Työ, 2026-09-23)
 
-`_legend_below` shortens a legend to bare scale points when EVERY label begins
-with a digit — "1 - Ei kovin tärkeä", "2", … "7 - Erittäin tärkeä" becomes
-1 2 3 4 5 6 7, which keeps the legend short and even and moves the endpoint
-wording to the subtitle. Good default, and it was eating the author's work: the
-engine applied their renaming and the renderer discarded it a moment later.
-Retype "1 - Ei kovin tärkeä" as "1 - Ei tärkeä" and the picture does not move,
-because both shorten to "1".
-
-Found on the real slide (Suomalainen Työ, stacked horizontal bar split by
-country): the engine computed
-('1 - Ei kovin tärkeä', '2', … '7 - Erittäin tärkeä') and the legend drew
-1 2 3 4 5 6 7.
-
-So: the moment the author names ANY category themselves, the shortener stands
-down for that chart. Not just for the renamed one — a legend reading
-"Ei tärkeä, 2, 3" would be the same chart telling its levels two different ways.
-(Johan, 2026-09-16)
+`_legend_below` used to cut a numeric rating scale — "1 - Erittäin huono",
+"2", … "7 - Erittäin hyvä" — to 1 2 3 4 5 6 7 and move the endpoint words to a
+caption at the foot. Category labels went on listing the words, so the slide
+and its settings disagreed, and retyping a label changed nothing: a label equal
+to the data's own is not stored as an override, so the shortener never stood
+down. Every exception the rule grew was a place where it had thrown away words
+somebody needed: the series legend's age bands (2026-09-09), Prima Pet's money
+bands ("20–40 euroa / kuukausi" drawn as "20"), an author's rename
+(2026-09-16). Now nothing is shortened, and what Category labels lists is what
+the legend says.
 """
 from __future__ import annotations
 
@@ -90,38 +83,43 @@ def _legend_texts(levels=_LEVELS, overrides=()) -> list[str]:
     return seen
 
 
-def test_an_untouched_numeric_scale_is_still_shortened():
-    """The default that earns its keep — seven long labels would not fit."""
-    assert _legend_texts() == ["1", "2", "3", "4", "5", "6", "7"]
+def test_the_reported_scale_keeps_its_words():
+    """The reported slide: endpoints worded, middle points their own number."""
+    levels = ("1 - Erittäin huono", "2", "3", "4", "5", "6", "7 - Erittäin hyvä")
+    assert _legend_texts(levels=levels) == list(levels)
+
+
+def test_an_untouched_numeric_scale_is_drawn_as_its_labels():
+    assert _legend_texts() == list(_LEVELS)
 
 
 def test_a_renamed_level_is_shown_as_the_author_wrote_it():
-    """The defect: the wording was discarded at draw time."""
     texts = _legend_texts(
         levels=("Ei tärkeä", "2", "3", "4", "5", "6", "7 - Erittäin tärkeä"),
         overrides=[["1 - Ei kovin tärkeä", "Ei tärkeä"]])
-    assert "Ei tärkeä" in texts, texts
+    assert texts == ["Ei tärkeä", "2", "3", "4", "5", "6", "7 - Erittäin tärkeä"]
 
 
 def test_a_rename_that_keeps_its_number_still_shows():
-    """The sharpest form: both old and new shorten to "1", so nothing moved on
-    the slide however many times the author retyped it."""
+    """Both old and new used to shorten to "1", so the slide never moved."""
     texts = _legend_texts(
         levels=("1 - Ei tärkeä", "2", "3", "4", "5", "6", "7 - Erittäin tärkeä"),
         overrides=[["1 - Ei kovin tärkeä", "1 - Ei tärkeä"]])
-    assert "1 - Ei tärkeä" in texts, texts
+    assert texts[0] == "1 - Ei tärkeä", texts
 
 
-def test_the_whole_legend_stops_shortening_together():
-    """One level named and the rest numbers would say the same thing two ways."""
-    texts = _legend_texts(
-        levels=("1 - Ei tärkeä", "2", "3", "4", "5", "6", "7 - Erittäin tärkeä"),
-        overrides=[["1 - Ei kovin tärkeä", "1 - Ei tärkeä"]])
-    assert "7 - Erittäin tärkeä" in texts, texts
+@pytest.mark.parametrize("levels", [
+    ("20–40 euroa / kuukausi", "40–60 euroa / kuukausi", "60–100 euroa / kuukausi"),
+    ("alle 20 euroa", "20–40 euroa", "40–60 euroa", "yli 60 euroa"),
+    ("18-24 vuotias", "25-34 vuotias", "35-44 vuotias", "45-54 vuotias"),
+])
+def test_bands_keep_their_ranges(levels):
+    """A band's first number is not its name: "20–40 euroa" is not "20"."""
+    assert _legend_texts(levels=levels) == list(levels)
 
 
-def test_an_override_for_another_chart_does_not_disable_it():
-    """Overrides are stored per slide but name categories; one that matches
-    nothing on THIS chart must not turn the shortener off."""
-    texts = _legend_texts(overrides=[["Jokin aivan muu", "Muu"]])
-    assert texts == ["1", "2", "3", "4", "5", "6", "7"]
+def test_a_scale_the_data_numbers_itself_stays_numbers():
+    """1..7 labelled only at the ends is charted as its points and the editor
+    lists "1".."7" (`_partial_scale`), so the legend drawing them agrees."""
+    levels = tuple(str(n) for n in range(1, 8))
+    assert _legend_texts(levels=levels) == list(levels)

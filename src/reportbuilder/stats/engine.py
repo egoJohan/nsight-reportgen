@@ -786,11 +786,6 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
     # only the home block labelled — made a 100 % stack reach 33 %.
     # (Johan, 2026-09-08)
     scale_entries, scale_caption = _partial_scale(var, data, eff)
-    if scale_caption is None:
-        # A scale whose middle points are labelled with their own numbers is
-        # fully labelled, so `_partial_scale` says nothing about it — while the
-        # legend still shortens it to bare numbers. See `_numbered_scale_caption`.
-        scale_caption = _numbered_scale_caption(var, data, eff, spec)
     drawn_codes: set[float] = ({float(c) for c, _l, _o in scale_entries}
                                if scale_entries is not None
                                else {float(c) for c in labels})
@@ -1156,141 +1151,6 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                         row_summaries=row_summaries,
                         row_summary_keys=tuple(statements),
                         segment_primary=(separate[1] if separate is not None else None))
-
-
-#: The point number a scale label may begin with, and the punctuation that
-#: separates it from the words: "1- Ei lainkaan ylpeä", "1 - …", "1. …", "1) …".
-_SCALE_POINT_PREFIX = re.compile(r"^\s*(\d+)\s*[-\u2013\u2014.:)]*\s*")
-
-
-def _scale_words(code: int, label: str) -> str:
-    """What a value label says BEYOND its own point number.
-
-    "1- Ei lainkaan ylpeä" → "Ei lainkaan ylpeä"; "2" → "". Only a number that
-    MATCHES the point is stripped, so a label that genuinely opens with a
-    different figure ("5 vuotta tai enemmän" on code 3) keeps it.
-    """
-    t = (label or "").strip()
-    m = _SCALE_POINT_PREFIX.match(t)
-    if m and int(m.group(1)) == code:
-        t = t[m.end():].strip()
-    return t
-
-
-#: Chart types whose LEGEND carries the scale, and which therefore shorten it
-#: to bare numbers. Everywhere else the scale is on the category axis and every
-#: label is printed in full, so there is nothing for a caption to rescue.
-_SCALE_IN_LEGEND: frozenset[str] = frozenset({
-    "stacked_horizontal_bar", "stacked_vertical_bar",
-})
-
-
-def _scale_points_caption(scale_pts, spec) -> str | None:
-    """The endpoint caption for a scale already resolved to POINTS.
-
-    Same rule as `_numbered_scale_caption`, keyed on the scale point rather
-    than the SAV code — because that is what a battery's levels are. Attendo's
-    var102 codes its middle points 2, 3, 4 and its two ENDPOINTS 10346 and
-    10350; the point is what the label says, which is how `battery_scale_levels`
-    reads it, and asking code 10346 to begin with "10346" silently dropped the
-    caption from every battery in the deck.
-
-    `scale_pts` is [(point, label)] ascending, as `battery_scale_levels` returns.
-    """
-    if getattr(spec, "chart_type", "") not in _SCALE_IN_LEGEND:
-        return None
-    if len(scale_pts) < 3:
-        return None
-    words: dict[int, str] = {}
-    for point, label in scale_pts:
-        t = (label or "").strip()
-        m = _SCALE_POINT_PREFIX.match(t)
-        if not m or int(m.group(1)) != int(point):
-            # This level does not open with its own number, so the legend keeps
-            # the words and there is nothing for a caption to rescue.
-            return None
-        words[int(point)] = _scale_words(int(point), label)
-    # An authored category name stands the whole legend down from shortening,
-    # exactly as in the single-variable path — the two must agree about when the
-    # words are lost.
-    authored = {full for full, _short in
-                (getattr(spec, "category_label_overrides", None) or ())}
-    if authored & {lbl for _p, lbl in scale_pts}:
-        return None
-    worded = {p: w for p, w in words.items() if w}
-    if not worded or len(worded) == len(words):
-        return None
-    return " \u00b7 ".join(f"{p} = {worded[p]}" for p in sorted(worded))
-
-
-def _numbered_scale_caption(var: Variable, data: pd.DataFrame,
-                            eff: set[float], spec) -> str | None:
-    """The endpoint caption for a scale numbered in its OWN labels.
-
-    A stacked bar shortens a numeric rating scale's legend to bare numbers
-    (`image/bars._legend_below`) because the endpoint wording is supposed to
-    move to the caption above the footer. `_partial_scale` builds that caption
-    only when some point carries no value label at all — and an SPSS export
-    that labels its middle points with their own number ("1- Ei lainkaan
-    ylpeä", "2", "3" … "7- Erittäin ylpeä") has a label on every point. So the
-    legend dropped the words and nothing caught them: a seven-point scale drawn
-    as "1 2 3 4 5 6 7" with nothing on the slide saying which end was which.
-    The same question as a PIE kept its words, because a pie does not shorten.
-
-    A point labelled with nothing but its own number says no more than an
-    unlabelled one does, so this is the same case and gets the same caption.
-
-    Deliberately separate from `_partial_scale` rather than folded into it:
-    that function also decides the scale's ENTRIES, and so its category ORDER
-    (high→low). Reclassifying this variable there would silently flip every
-    such chart top to bottom, which is not what a missing caption asks for.
-    Returns None — leaving the chart exactly as it was — unless the caption is
-    the only thing that was missing.
-
-    Only for a chart that actually drops the words. A plain bar, a pie and the
-    rest put this scale on the CATEGORY axis and print "1- Ei lainkaan ylpeä"
-    in full beside the bar; captioning those would add a second copy of what
-    the reader can already see to every such slide in every deck. (The
-    `_partial_scale` case is not the same and is untouched: there the middle
-    points carry no label at all, so even a plain bar's axis reads "1 2 3 …".)
-    """
-    if getattr(spec, "chart_type", "") not in _SCALE_IN_LEGEND:
-        return None
-    if var.name not in data.columns:
-        return None
-    labels = {int(vl.value): vl.label for vl in var.value_labels
-              if float(vl.value).is_integer() and vl.value not in eff}
-    if len(labels) < 3:
-        return None
-    # Every level opens with its own point number: the same test the legend
-    # applies before it shortens. If one does not, the legend keeps the words
-    # and there is nothing to preserve.
-    words = {}
-    for code, label in labels.items():
-        t = (label or "").strip()
-        m = _SCALE_POINT_PREFIX.match(t)
-        if not m or int(m.group(1)) != code:
-            return None
-        words[code] = _scale_words(code, label)
-    # An AUTHORED category label stands the whole legend down from shortening
-    # ("not just the renamed level" — image/bars._legend_below), so the words
-    # are on the legend after all and a caption repeats them. Mirroring that
-    # rule is the entire point of this function: the two must agree about when
-    # the words are lost. (Found on the regression report's own slide 11b,
-    # whose subject is that an authored name shows.)
-    authored = {full for full, _short in
-                (getattr(spec, "category_label_overrides", None) or ())}
-    if authored & set(labels.values()):
-        return None
-
-    worded = {c: w for c, w in words.items() if w}
-    # Some points carry words and some do not — an endpoint-labelled scale.
-    # When EVERY level is worded the legend drops all of them, which wants a
-    # different answer (not shortening at all) than a caption can give; when
-    # none is, there is nothing to say.
-    if not worded or len(worded) == len(words):
-        return None
-    return " · ".join(f"{c} = {worded[c]}" for c in sorted(worded))
 
 
 def _partial_scale(var: Variable, data: pd.DataFrame, eff: set[float]):
@@ -2574,18 +2434,6 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
             _scale_var = _v
             break
     codes = [_code_for_point.get(p, p) for p in points]
-    # Which end is which. A stacked battery shortens its legend to bare numbers
-    # exactly as a single stacked bar does, so the endpoint wording has to move
-    # to the caption above the footer the same way — but this path built its own
-    # SeriesResult and never asked for one. Attendo's brand-image batteries drew
-    # "1 2 3 4 5" over fourteen statements with nothing on the slide saying
-    # whether 5 was good or bad, while the identical scale on a single question
-    # was captioned correctly. A battery is where a numbered scale is most
-    # common, and it was the one path that lost the words.
-    #
-    # The SAME function the single path uses, on the member that defines the
-    # shared scale, so the two can never disagree about when the words are lost.
-    scale_caption = _scale_points_caption(scale_pts, spec)
     # Bar labels (member order), honouring the author's category-label overrides —
     # the editor lists the member labels, so a shortened label must reach the bars.
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
@@ -2742,7 +2590,7 @@ def _battery_stacked(question: Question, spec: ChartSpec, data: pd.DataFrame,
     base_n = {"Total": int(answered_any.sum()), **base_by_bar}
     return SeriesResult(
         categories=tuple(levels), segments=tuple(bars),
-        cells=cells, base_n=base_n, statistic="pct", caption=scale_caption,
+        cells=cells, base_n=base_n, statistic="pct",
         # Grouped BY STATEMENT when split by a group: each statement is said once,
         # beside its rows, and each row is named by its group and base. It used to
         # be left out because the grouped layout drew the primary as a ROTATED
