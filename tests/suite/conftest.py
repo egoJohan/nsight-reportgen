@@ -6,7 +6,13 @@ docs/superpowers/plans/2026-07-01-backend-test-suite-plan.md.
 """
 from __future__ import annotations
 
+import os
 import shutil
+
+# The layout editor's routes pre-draw every layout's ground in the background.
+# In a test that is a LibreOffice per API call for nothing the test measures;
+# `test_template_grounds_are_ready.py` exercises the drawing directly.
+os.environ.setdefault("NSIGHT_WARM_GROUNDS", "0")
 from unittest.mock import Mock
 
 import pytest

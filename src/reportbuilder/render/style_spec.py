@@ -81,6 +81,17 @@ class TemplateStyleSpec(StyleSpec):
     #: is the right guess when nobody has said where the chart goes — and simply
     #: overrides them when somebody has.
     content_is_authored: bool = False
+    #: Where the content area sat BEFORE an author moved it — the band the
+    #: template itself harvested. The question's own box is derived from it, so
+    #: dragging the chart does not drag the question along: the layout editor
+    #: leaves SUB where it was and the slide must agree with what it shows.
+    #: (Johan, 2026-09-21)
+    harvested_content_rect: tuple[int, int, int, int] | None = None
+    #: The lowest the N line may START without touching the template's own foot
+    #: furniture (a logo, a band), in EMU; 0 when unknown. A DEFAULT content area
+    #: ends that far up, less the gap, so the line fits right under it. An area
+    #: an author placed is theirs and is not moved. (Johan, 2026-09-24)
+    footer_limit: int = 0
     title_size_pt: float = 0.0
     title_colour: str = ""
     subtitle_font: str = ""
@@ -250,7 +261,43 @@ def load_style_spec(template_path: str,
                     left=int(content.left or 0), top=int(content.top or 0),
                     width=int(content.width or 0), height=int(content.height or 0),
                     name="chart")
+    spec.footer_limit = _footer_limit(prs, spec)
     return spec
+
+
+def _footer_limit(prs, spec) -> int:
+    """Where the N line may start at the lowest on this style's chart slide —
+    measured on an EMPTY slide of the chosen layout, exactly as the layout
+    editor measures it, so the default content area and the box the editor
+    draws for it agree. 0 when it cannot be read."""
+    try:
+        from pptx.util import Inches
+
+        from reportbuilder.render.image.slide_chrome import content_floor
+        from reportbuilder.render.template_profile import clone_furniture
+
+        profile = getattr(spec, "profile", None)
+        idx = getattr(profile, "layout_index", None)
+        layouts = prs.slide_layouts
+        layout = (layouts[idx] if isinstance(idx, int) and 0 <= idx < len(layouts)
+                  else layouts[len(layouts) - 1])
+        slide = prs.slides.add_slide(layout)
+        furniture = getattr(profile, "furniture", None)
+        if furniture:
+            clone_furniture(slide, furniture)
+        sw, sh = int(prs.slide_width or 0), int(prs.slide_height or 0)
+        # The LEFT half only — the N line's corner, and `content_floor`'s own
+        # default. Asking about the right half too read Suomalainen Työ's
+        # full-height colour band down the right edge as foot furniture and cut
+        # every chart to a strip at the top of the slide.
+        floor = content_floor(slide, sw, sh)
+        # A "foot" starting in the upper part of the slide is a band or a side
+        # graphic, not a foot; better no limit than a chart squeezed by one.
+        if floor < 0.6 * sh:
+            return 0
+        return int(floor - int(Inches(0.45)))
+    except Exception:  # noqa: BLE001 — without it the area is the template's, as before
+        return 0
 
 
 #: The theme slot a `<a:schemeClr>` in a background refers to. bg1/tx1 are the
@@ -579,6 +626,15 @@ def effective_content_rect(spec) -> tuple[int, int, int, int]:
     height = max(inch, min(height, sh or height))
     left = max(0, min(left, (sw or left + width) - width))
     top = max(0, min(top, (sh or top + height) - height))
+    # The N line goes right under the content, so a DEFAULT area ends where the
+    # line still fits above the template's own foot. Synsam's layout offers an
+    # area reaching 6.80in while its logo starts at 6.73in. An author's own area
+    # is left exactly where they put it. (Johan, 2026-09-24)
+    limit = int(getattr(spec, "footer_limit", 0) or 0)
+    if limit and not getattr(spec, "content_is_authored", False):
+        gap = int(0.18 * inch)                 # slide_chrome._CONTENT_MARGIN
+        if top + height > limit - gap:
+            height = max(inch, limit - gap - top)
     return left, top, width, height
 
 
@@ -612,6 +668,10 @@ def _apply_slot(spec, given: dict) -> None:
     edges = {k: _num(given.get(k)) for k in ("x", "y", "w", "h")}
     if all(v is None for v in edges.values()):
         return
+    if getattr(spec, "harvested_content_rect", None) is None:
+        # Before the override lands: after it, the template's own band cannot
+        # be read off the style any more.
+        spec.harvested_content_rect = effective_content_rect(spec)
     spec.content_is_authored = True
     current = getattr(spec, "chart_slot", None)
     if current is None:

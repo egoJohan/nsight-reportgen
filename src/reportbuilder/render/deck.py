@@ -8,6 +8,8 @@ render_to_file: convenience wrapper that saves to disk and returns the path
 """
 from __future__ import annotations
 
+import dataclasses
+
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.exc import PackageNotFoundError
@@ -301,7 +303,16 @@ def render_report(
         else:
             # Add house-style slide chrome first so chart image lands on top
             # (REQ-C-24a/h, REQ-C-25, REQ-C-27a, REQ-D-04)
-            add_image_slide_chrome(ctx)
+            # The question is drawn in the content's top-left corner, and the
+            # chart starts where it ends: the chrome says where that is, and
+            # the content's top follows it. (Johan, 2026-09-21)
+            question_floor = add_image_slide_chrome(ctx)
+            if question_floor and question_floor > int(slot.top):
+                used = question_floor - int(slot.top)
+                ctx = dataclasses.replace(ctx, slot=Slot(
+                    slide_index=slot.slide_index, left=slot.left, top=question_floor,
+                    width=slot.width, height=max(int(Inches(1.0)), slot.height - used),
+                    name=slot.name))
             # A chart with nothing to plot (e.g. a scale variable with no value
             # labels) degrades to a placeholder instead of crashing the builder.
             if series_is_empty(series):
@@ -385,15 +396,20 @@ def _resolve_slot(prs: Presentation, style, slot_name: str,
         # the subtitle has to go somewhere, so the chart starts below whichever
         # is lower — the placeholder or the title as it actually falls. Its
         # bottom edge does not move, so the customer's margin is kept.
-        top, height = int(chart_slot.top), int(chart_slot.height)
+        # The area the template settings show — `effective_content_rect` is the
+        # one definition, and it keeps a DEFAULT area clear of the template's
+        # foot so the N line fits right under it. (Johan, 2026-09-24)
+        from reportbuilder.render.style_spec import effective_content_rect
+
+        left, top, width, height = effective_content_rect(style)
         profile = getattr(style, "profile", None)
         # Not when somebody has placed the area themselves. Pushing the chart
         # below the title is how a LAYOUT's content box is kept clear of a
         # headline that runs longer than the customer's own — it has no business
         # moving a rectangle an author dragged while watching the result.
 
-        return Slot(slide_index=len(prs.slides) - 1, left=chart_slot.left,
-                    top=top, width=chart_slot.width,
+        return Slot(slide_index=len(prs.slides) - 1, left=left,
+                    top=top, width=width,
                     height=max(int(Inches(1.0)), height), name=slot_name)
 
     # Fallback: add a new blank slide and synthesise a slot covering most of it

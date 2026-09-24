@@ -61,11 +61,17 @@ def _key(style, dpi: int) -> str:
     # different band and logo, and a corrected background is a different colour.
     # Without them a ground cached for one layout was served for every other,
     # and choosing a layout appeared to do nothing.
+    #
+    # Whether there IS a chart slot changes how the empty slide is built, but not
+    # WHERE it is: the ground has no chart and none of our text, so the chart
+    # area's position never shows in it. It was in the key, and every drag or
+    # resize in the layout editor started LibreOffice (2.5-3.5 s on staging) for
+    # a picture identical to the one already on disk. (Johan, 2026-09-24)
     slot = getattr(style, "chart_slot", None)
     shape = (f"{getattr(style, 'chart_layout_index', None)}"
              f"|{getattr(style, 'background', '')}|{getattr(style, 'ink', '')}"
              f"|{getattr(style, 'accent', '')}"
-             f"|{'' if slot is None else f'{slot.left},{slot.top},{slot.width},{slot.height}'}")
+             f"|{'noslot' if slot is None else 'slot'}")
     raw = (f"{source}|{stamp}|{dpi}|{getattr(style, 'slide_width', 0)}"
            f"|{shape}|{rendering_fingerprint()}")
     return hashlib.md5(raw.encode()).hexdigest()[:16]
@@ -117,9 +123,10 @@ def ground_image(style, dpi: int = 110):
             if shape.is_placeholder and shape.has_text_frame and not shape.text_frame.text:
                 shape._element.getparent().remove(shape._element)
 
+        keep_only_used_layout(prs, slide)
         path = str(work / "ground.pptx")
         prs.save(path)
-        pdf = pptx_to_pdf(path, str(work))
+        pdf = pptx_to_pdf(path, str(work), background=_drawing_ahead())
         pngs = rasterize_pages(pdf, str(work / "png"), dpi=dpi, workers=1)
         if not pngs:
             return None
@@ -134,6 +141,183 @@ def ground_image(style, dpi: int = 110):
         import shutil
 
         shutil.rmtree(work, ignore_errors=True)
+
+
+_ahead = __import__("threading").local()
+
+
+def _drawing_ahead() -> bool:
+    """Is this thread drawing grounds nobody is waiting for? Then its
+    conversions take the background profile, not a slot from the pool."""
+    return getattr(_ahead, "on", False)
+
+
+def warm_grounds(template_path: str, overrides: dict | None, *,
+                 layouts: list[int] | None = None, dpi: int = 110,
+                 pause_s: float = 0.5) -> int:
+    """Draw the ground of every layout the editor offers, so picking one is a
+    cache hit instead of a LibreOffice start. Returns how many it drew.
+
+    One at a time and never in a hurry: the host is one core that authors are
+    working on. A ground already on disk costs nothing and is skipped, and the
+    pause between two lets a waiting export or preview take the conversion slot
+    first. Anything that fails is left for the editor to draw on demand, as
+    before. (Johan, 2026-09-24)
+    """
+    import time
+
+    from reportbuilder.render.style_spec import apply_template_overrides
+    from reportbuilder.render.template_cache import resolve_layout
+
+    if layouts is None:
+        from pptx import Presentation
+
+        from reportbuilder.render.template_check import rank_layouts
+        layouts = [c.index for c in rank_layouts(Presentation(template_path))]
+    drawn = 0
+    _ahead.on = True
+    try:
+        for index in layouts:
+            try:
+                style = resolve_layout(template_path, index)
+                apply_template_overrides(style, overrides or {})
+                variants = [style]
+                if getattr(style, "chart_slot", None) is None:
+                    # A layout we found no chart area on is built another way
+                    # until the author gives it one — and the first drag in the
+                    # editor does. Draw that slide too; any rectangle will do,
+                    # the ground does not depend on where it is.
+                    placed = resolve_layout(template_path, index)
+                    apply_template_overrides(placed, {**(overrides or {}), "content": {
+                        "x": 1.0, "y": 1.5, "w": 8.0, "h": 4.0}})
+                    variants.append(placed)
+                for variant in variants:
+                    if (_CACHE / f"{_key(variant, dpi)}.png").exists():
+                        continue
+                    if ground_image(variant, dpi) is not None:
+                        drawn += 1
+                    if pause_s:
+                        time.sleep(pause_s)
+            except Exception:  # noqa: BLE001 — a layout we cannot draw is drawn on demand
+                log.info("could not pre-draw layout %s of %s", index, template_path,
+                         exc_info=True)
+    finally:
+        _ahead.on = False
+    return drawn
+
+
+_warming: dict[str, object] = {}
+#: Asked for while another template was being drawn: {path: overrides}, in order.
+_pending: dict[str, dict] = {}
+#: Drawn to the end, with these overrides. The file name carries the template's
+#: content hash, so an edited template is a new path and is drawn again.
+_warmed: set[tuple[str, str]] = set()
+_warming_lock = __import__("threading").Lock()
+
+
+def start_warming(template_path: str, overrides: dict | None) -> bool:
+    """`warm_grounds` in a SEPARATE process at the lowest CPU priority, one at
+    a time for the whole server. True when it started now; a template asked
+    for while another is being drawn is queued and started after it, and one
+    already drawn with the same overrides is not started again.
+
+    A process, not a thread. A thread shares the server's interpreter, and
+    drawing a ground is mostly Python — parsing the template, building the
+    slide — so on one core an export alongside it waited for the interpreter
+    however low the thread's priority: 13.1 s against 6.4 s alone, measured
+    on the 2.3 MB Biocodex template. A process shares only the core, and the
+    kernel gives that to the author first. (Johan, 2026-09-24)
+    """
+    import json
+
+    # Off in the test suite, whose API tests open the editor routes: a
+    # background LibreOffice per test is time no test measures.
+    if os.environ.get("NSIGHT_WARM_GROUNDS", "1") == "0":
+        return False
+    overrides = overrides or {}
+    with _warming_lock:
+        if (template_path, json.dumps(overrides, sort_keys=True)) in _warmed:
+            return False
+        if template_path in _warming:
+            return False
+        if _warming:
+            _pending[template_path] = overrides
+            return False
+        return _spawn(template_path, overrides)
+
+
+def _spawn(template_path: str, overrides: dict) -> bool:
+    """Start the drawing process. Called with `_warming_lock` held."""
+    import json
+    import subprocess
+    import sys
+    import threading
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "reportbuilder.render.image.fast_preview",
+             "warm", template_path, json.dumps(overrides)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, preexec_fn=lambda: os.nice(19))
+    except OSError:
+        log.info("could not start pre-drawing %s", template_path, exc_info=True)
+        return False
+    _warming[template_path] = proc
+
+    def reap():
+        code = proc.wait()
+        with _warming_lock:
+            _warming.pop(template_path, None)
+            if code == 0:
+                _warmed.add((template_path, json.dumps(overrides, sort_keys=True)))
+            while _pending:
+                path, ov = next(iter(_pending.items()))
+                del _pending[path]
+                if _spawn(path, ov):
+                    break
+
+    threading.Thread(target=reap, name="warm-grounds", daemon=True).start()
+    return True
+
+
+def keep_only_used_layout(prs, slide) -> None:
+    """Drop every master and layout the *slide* does not use, before the deck
+    goes to LibreOffice.
+
+    What a ground costs is LibreOffice LOADING the file, and a deck saved from
+    a customer template carries every master, every layout and all their
+    images: Holiday Club's is 7.2 MB for one empty slide. Dropping what the
+    slide cannot reach leaves ~40 KB and the same picture — verified
+    pixel-identical on nine layouts across Holiday Club, Attendo and Synsam —
+    and the conversion falls from 3.5 s to 1.3 s. (2026-09-21)
+
+    Anything unexpected leaves the deck alone: a ground drawn slowly is right,
+    and one drawn from a deck we broke is not.
+    """
+    try:
+        used_layout = slide.slide_layout
+        used_master = used_layout.slide_master
+        master_part = used_master.part
+        for rId, rel in list(master_part.rels.items()):
+            if (rel.reltype.endswith("/slideLayout")
+                    and rel.target_part is not used_layout.part):
+                master_part.drop_rel(rId)
+        layout_ids = used_master._element.get_or_add_sldLayoutIdLst()
+        for el in list(layout_ids):
+            if el.rId not in master_part.rels:
+                layout_ids.remove(el)
+        prs_part = prs.part
+        for rId, rel in list(prs_part.rels.items()):
+            if (rel.reltype.endswith("/slideMaster")
+                    and rel.target_part is not master_part):
+                prs_part.drop_rel(rId)
+        master_ids = prs._element.get_or_add_sldMasterIdLst()
+        for el in list(master_ids):
+            if el.rId not in prs_part.rels:
+                master_ids.remove(el)
+    except Exception:  # noqa: BLE001 — the full deck still draws the same ground
+        log.debug("could not reduce the ground deck; drawing the whole one",
+                  exc_info=True)
 
 
 def _house_ground(slide, sw: int, sh: int, style) -> None:
@@ -656,3 +840,15 @@ def _tokens(text: str) -> list[str]:
     if buf:
         out.append(buf)
     return out
+
+
+if __name__ == "__main__":
+    # `python -m reportbuilder.render.image.fast_preview warm <template> <overrides>`
+    # — the process `start_warming` runs.
+    import json
+    import sys
+
+    if len(sys.argv) == 4 and sys.argv[1] == "warm":
+        logging.basicConfig(level=logging.INFO)
+        n = warm_grounds(sys.argv[2], json.loads(sys.argv[3]))
+        log.info("pre-drew %d layout ground(s) for %s", n, sys.argv[2])

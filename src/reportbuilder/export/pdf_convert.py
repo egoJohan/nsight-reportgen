@@ -70,8 +70,21 @@ _pp.mkdir(parents=True, exist_ok=True)
 _priority_slots.put(_pp)
 del _pp
 
+# ONE profile for work nobody is waiting for — the layout grounds drawn ahead of
+# time (fast_preview.warm_grounds). It never takes a slot from the pool above, so
+# an export or a preview does not queue behind it; being one, it also keeps such
+# work to a single LibreOffice at a time. Measured on a one-core container: with
+# the pool's only slot, an export alongside the pre-drawing took 15.0 s against
+# 6.4 s alone. (Johan, 2026-09-24)
+_background_slots: "queue.Queue[Path]" = queue.Queue()
+_bp = _PROFILE_ROOT / "slot-background"
+_bp.mkdir(parents=True, exist_ok=True)
+_background_slots.put(_bp)
+del _bp
 
-def pptx_to_pdf(pptx_path: str, out_dir: str, priority: bool = False) -> str:
+
+def pptx_to_pdf(pptx_path: str, out_dir: str, priority: bool = False,
+                background: bool = False) -> str:
     soffice = shutil.which("soffice") or shutil.which("libreoffice")
     if soffice is None:
         raise RuntimeError("LibreOffice (soffice) not found on PATH")
@@ -81,7 +94,10 @@ def pptx_to_pdf(pptx_path: str, out_dir: str, priority: bool = False) -> str:
     # A priority render takes the reserved slot first (so it never queues behind
     # background previews); if that reserved slot is momentarily busy (another
     # priority render in flight) it falls back to the shared pool.
-    if priority:
+    if background:
+        profile = _background_slots.get()
+        pool = _background_slots
+    elif priority:
         try:
             profile = _priority_slots.get_nowait()
             pool = _priority_slots

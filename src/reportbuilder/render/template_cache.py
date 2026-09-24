@@ -89,6 +89,33 @@ def _resolve(path: str, size: int, mtime_ns: int) -> ResolvedTemplate:
     return ResolvedTemplate(style=style, spec=spec)
 
 
+@lru_cache(maxsize=32)
+def _resolve_forced(path: str, size: int, mtime_ns: int,
+                    layout_index: int) -> TemplateStyleSpec:
+    # Same identity trick as `_resolve`; the layout joins the key because a
+    # chosen layout changes everything harvested from the file.
+    style = load_style_spec(path, force_layout=layout_index)
+    style.resolved_spec = build_spec(
+        style, title_font=_layout_title_font(path, layout_index))
+    return style
+
+
+def resolve_layout(template_path: str, layout_index: int) -> TemplateStyleSpec:
+    """The style this template harvests when *layout_index* is the one chosen.
+
+    Cached like `resolve`, and for the same reason: parsing a customer's .pptx
+    costs 1-2 s, and a forced layout used to miss the cache entirely. Every
+    preview of a report whose template names a layout paid that, and the layout
+    editor paid it on every dropdown change while the author waited.
+    (2026-09-21)
+
+    A COPY, because callers apply an author's corrections on top.
+    """
+    st = os.stat(template_path)
+    return copy.deepcopy(_resolve_forced(template_path, st.st_size,
+                                         st.st_mtime_ns, int(layout_index)))
+
+
 def resolve(template_path: str) -> ResolvedTemplate:
     """The resolved template at *template_path*, computed once per file.
 
@@ -116,12 +143,9 @@ def style_with_overrides(template_path: str, overrides: dict | None):
     if isinstance(chosen, int):
         # A chosen layout changes what there is to harvest, so it cannot be
         # patched onto an already-resolved style — the title box, the title
-        # colour and the content area all come from the layout. Not cached: it
-        # is one author's choice for one template, and the cache is keyed on the
-        # file alone.
-        from reportbuilder.render.style_spec import load_style_spec
-
-        style = load_style_spec(template_path, force_layout=chosen)
+        # colour and the content area all come from the layout. Cached on the
+        # file AND the layout (`resolve_layout`), which hands back a copy.
+        style = resolve_layout(template_path, chosen)
     else:
         style = copy.deepcopy(resolve(template_path).style)
     apply_template_overrides(style, overrides)

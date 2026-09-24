@@ -73,3 +73,40 @@ def test_blank_fields_are_not_stored_as_opinions(customer_with_template):
     client.put(f"/customers/{cid}/templates/{tid}/layout",
                json={"title": {"colour": "", "size": 0}, "content": {}, "accent": ""})
     assert client.get(f"/customers/{cid}/templates/{tid}/layout").json()["overrides"] == {}
+
+
+def test_sub_stands_in_the_contents_corner_by_default(customer_with_template):
+    """SUB's default box is the content's own top-left corner, and the chart
+    starts where SUB ends. One line tall, from the size the template states:
+    the box is geometry an author drags, so it cannot depend on what any one
+    slide's question says. (Johan, 2026-09-21)"""
+    client, cid, tid = customer_with_template
+    h = client.get(f"/customers/{cid}/templates/{tid}/layout").json()["harvested"]
+    sub, content = h["subtitle"], h["content"]
+    assert sub["x"] == pytest.approx(content["x"], abs=0.01), "the same left edge"
+    assert sub["w"] == pytest.approx(content["w"], abs=0.01), "the same width"
+    assert 0.2 <= sub["h"] <= 0.6, f"one line, not {sub['h']}in"
+    # Stacked, not on top of each other: the content starts where SUB ends.
+    assert content["y"] == pytest.approx(sub["y"] + sub["h"], abs=0.01), (
+        f"content starts at {content['y']}in, SUB ends at {sub['y'] + sub['h']}in")
+    assert content["h"] > 1.0, "the chart still has room under it"
+
+
+def test_the_boxes_are_reported_without_drawing_a_chart(customer_with_template,
+                                                        monkeypatch):
+    """The areas are what an author waits for on every change of the layout
+    dropdown, and a chart was rendered on the way to answering — to ask where
+    the footer goes, which `footer_top` reads off the layout and never off what
+    was drawn. Reported as "the refresh takes a long time". (2026-09-21)"""
+    from reportbuilder.export import pptx_build
+
+    def never(*a, **k):
+        raise AssertionError("the layout endpoint rendered a slide")
+
+    monkeypatch.setattr(pptx_build, "build_presentation", never)
+    client, cid, tid = customer_with_template
+    r = client.get(f"/customers/{cid}/templates/{tid}/layout")
+    assert r.status_code == 200, r.text
+    footer = r.json()["harvested"]["footer"]
+    slide_h = r.json()["slide"]["h"]
+    assert 0 < footer["y"] < slide_h, "the footer still lands on the slide"

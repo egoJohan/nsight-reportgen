@@ -74,7 +74,7 @@ export function useTemplateLayout(customerId: string, templateId: string) {
   const [draft, setDraft] = useState<TemplateLayout["overrides"]>({});
   // What the author is TRYING, which is what the harvested numbers must describe.
   const trying = draft.layout_index ?? null;
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["template-layout", customerId, templateId, trying],
     queryFn: () => api.templates.layout(customerId, templateId, trying),
     placeholderData: (previous) => previous,
@@ -117,12 +117,25 @@ export function useTemplateLayout(customerId: string, templateId: string) {
   // What the author is trying, a beat behind the keystroke. Every change here
   // costs a render on the server, so it waits for them to stop rather than
   // drawing a slide per character.
+  //
+  // A LAYOUT is not typed. Picking one from the menu is a whole new slide, and
+  // waiting out a typing pause before even asking for it made the editor sit
+  // on the old picture first. It goes straight through; drags and typed sizes
+  // still settle. (Johan, 2026-09-21: "The new areas should be immediately
+  // shown when e.g. changing layout from the menu, the old rendering should be
+  // cleared on the same time and preview rendering should start.")
   const [settled, setSettled] = useState("{}");
   const wanted = JSON.stringify(draft);
+  const lastLayout = useRef<number | null | undefined>(undefined);
   useEffect(() => {
+    if (lastLayout.current !== draft.layout_index) {
+      lastLayout.current = draft.layout_index;
+      setSettled(wanted);
+      return;
+    }
     const t = setTimeout(() => setSettled(wanted), 400);
     return () => clearTimeout(t);
-  }, [wanted]);
+  }, [wanted, draft.layout_index]);
 
   const groundUrl = useMemo(
     () => (data
@@ -141,6 +154,9 @@ export function useTemplateLayout(customerId: string, templateId: string) {
 
   return {
     data, isLoading, draft, setDraft, save, layoutIndex, groundUrl, areas,
+    // The boxes on screen belong to the layout we last heard about, so while a
+    // new one is being read they describe a slide nobody is looking at.
+    stale: isFetching,
     patch: (key: AreaKey, change: Partial<TemplateArea>) =>
       setDraft((d) => ({ ...d, [key]: { ...(d[key] ?? {}), ...change } })),
   };
@@ -176,7 +192,13 @@ export function TemplateSlidePreview({ state }: { state: State }) {
   // longer being asked for — showing it makes the chart look stuck under the
   // box being moved, which is the opposite of what the box is for.
   const [drawn, setDrawn] = useState("");
-  const { data, areas, groundUrl, patch } = state;
+  const { data, areas, groundUrl, patch, stale } = state;
+  // The moment the picture being asked for changes, the one on screen is of
+  // another slide: it goes, and "Drawing…" takes its place until the new one
+  // has loaded. Without this the old layout stayed up for the whole render.
+  useEffect(() => {
+    setDrawn((current) => (current === groundUrl ? current : ""));
+  }, [groundUrl]);
   if (!data || !areas) return null;
   const slide = data.slide;
 
@@ -264,6 +286,7 @@ export function TemplateSlidePreview({ state }: { state: State }) {
         style={{ aspectRatio: `${slide.w} / ${slide.h}` }}
       >
         <img
+          key={groundUrl}
           src={groundUrl}
           alt=""
           onLoad={() => setDrawn(groundUrl)}
@@ -273,7 +296,7 @@ export function TemplateSlidePreview({ state }: { state: State }) {
         {(busy || drawn !== groundUrl) && (
           <div className="absolute inset-0 flex items-center justify-center bg-muted/40">
             <span className="rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
-              {busy ? "Release to redraw" : "Drawing…"}
+              {busy ? "Release to redraw" : stale ? "Reading the layout…" : "Drawing…"}
             </span>
           </div>
         )}

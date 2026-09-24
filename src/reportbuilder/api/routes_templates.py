@@ -9,7 +9,9 @@ single report, and the lower level always wins. An already-delivered report
 keeps the template it rendered with until someone asks for the update — see
 Repository.resolve_template.
 """
+import copy
 import json
+import os
 import logging
 from dataclasses import replace
 
@@ -169,6 +171,7 @@ async def upload_template(customer_id: str, file: UploadFile = File(...),
     # what degrades is the PDF and the previews, which are rasterised here.
     # Said plainly, because a warning that overstates its case gets ignored.
     font_problems = [f["reason"] for f in summary["fonts"] if not f["ok"]]
+    _warm_grounds(repo, auth, customer_id, t.id, {})
     return {**_as_dict(t), "warnings": report.problems + font_problems}
 
 
@@ -233,6 +236,22 @@ def template_detail(customer_id: str, template_id: str,
     raise HTTPException(404, f"Template '{template_id}' not found")
 
 
+def _warm_grounds(repo, auth, customer_id: str, template_id: str,
+                  overrides: dict | None = None) -> None:
+    """Start drawing this template's layout grounds in the background, so the
+    layout editor answers from cache. Never fails the request that asked:
+    an undrawn ground is still drawn on demand, as before. (Johan, 2026-09-24)"""
+    try:
+        from reportbuilder.render.image.fast_preview import start_warming
+
+        path = _template_on_disk(repo, auth, customer_id, template_id)
+        if overrides is None:
+            overrides = repo.template_layout(auth, customer_id, template_id)
+        start_warming(path, overrides)
+    except Exception:  # noqa: BLE001
+        log.info("could not start pre-drawing %s", template_id, exc_info=True)
+
+
 def _template_on_disk(repo, auth, customer_id: str, template_id: str) -> str:
     """The template's bytes as a file, content-addressed like the preview path."""
     import hashlib
@@ -282,17 +301,24 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
     """
     from pptx import Presentation
 
-    from reportbuilder.render.style_spec import load_style_spec
+    from reportbuilder.render.template_cache import resolve, resolve_layout
     from reportbuilder.render.template_check import rank_layouts
 
     path = _template_on_disk(repo, auth, customer_id, template_id)
     stored = repo.template_layout(auth, customer_id, template_id)
+    # The editor is open: have every layout's ground ready before it is picked.
+    # Returns at once; a run already under way is not started twice.
+    _warm_grounds(repo, auth, customer_id, template_id, stored)
     # Harvested FOR the layout in question: the caller's `layout` while they are
     # trying one in the dropdown, else the one they saved, else ours. Reporting
     # the automatic choice's numbers whatever was selected is what made the
     # dropdown look like it did nothing.
     chosen = layout if layout is not None else stored.get("layout_index")
-    style = load_style_spec(path, force_layout=chosen if isinstance(chosen, int) else None)
+    # From the CACHE. Parsing the .pptx costs 1-2 s and this endpoint is what an
+    # author waits for on every change of the dropdown — the boxes cannot move
+    # until it answers. (2026-09-21)
+    style = (resolve_layout(path, chosen) if isinstance(chosen, int)
+             else resolve(path).style)
     prs = Presentation(path)
     profile = getattr(style, "profile", None)
     title = getattr(profile, "title", None)
@@ -330,21 +356,29 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
     # allows, and reaches up into the title's own box where it does not —
     # which is where a long question renders anyway, the box being mostly the
     # empty space under a one-line headline.
-    _sub_bottom = max(0, slot_top - _margin)
-    _sub_top = max(0, min(_title_bottom, _sub_bottom - int(0.20 * 914400)))
-    # Where the "n = 100" line really goes, from the function that puts it
-    # there — a guess of "near the bottom" drew the box somewhere the text was
-    # not. content_floor reads the template's own foot furniture, which is why
-    # it needs a slide rather than just a page size.
-    try:
-        from reportbuilder.export.pptx_build import build_presentation
-        from reportbuilder.render.image.slide_chrome import footer_top
+    # SUB sits in the content's own top-left corner, and the CONTENT then
+    # starts where SUB ends: the chart gives up the strip the question stands
+    # in and keeps its foot where the template put it. One line tall by
+    # default, from the size the template states — this box is geometry an
+    # author drags, and it cannot depend on what any one slide's question
+    # says. (Johan, 2026-09-21: "it positions to the top left corner of the
+    # content in the template's layout. The content's top is then adjusted to
+    # the bottom of the subtitle" … "the bottom y shall not change")
+    from reportbuilder.render.image.slide_chrome import (
+        _default_question_h, _spec_subtitle_pt,
+    )
 
-        _report, _model, _df = _sample_report()
-        _slide = build_presentation(_report, _model, _df, style=style).slides[0]
-        footer_y = footer_top(_slide, int(prs.slide_height or 0), int(prs.slide_width or 0))
-    except Exception:  # noqa: BLE001 — a template we cannot draw still opens
-        footer_y = max(0, int(prs.slide_height or 0) - int(0.80 * 914400))
+    _sub_top = max(0, slot_top)
+    # The size the RENDERER will use, so the box drawn here is the box drawn
+    # there: the author's own, else what the template's spec states, else 13.
+    _sub_pt = (getattr(style, "subtitle_size_pt", 0.0)
+               or _spec_subtitle_pt(style, getattr(style, "body_font", "") or "")
+               or 13.0)
+    _sub_h = _default_question_h(_sub_pt)
+    # The "n = 100" line is not measured here any more: it sits right under the
+    # content (see "footer" below), and the content already ends where the line
+    # fits above the template's foot — `style.footer_limit`, measured once when
+    # the template was read. (Johan, 2026-09-24)
     ranked = {c.index: c for c in rank_layouts(prs)}
     # OUR pick, independent of what the caller is trying — the star in the
     # picker means "this is what we chose", and reporting the selected one as
@@ -387,9 +421,16 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
                 "size": getattr(title, "size_pt", 0) or 0,
                 "colour": getattr(title, "colour", "") or "",
             },
+            # The chart's area starts where SUB ends and keeps the foot the
+            # template gave it. Reported that way because that is what renders:
+            # showing the content starting at SUB's own top drew two boxes with
+            # the same y and a chart in neither. (Johan, 2026-09-21: "Content Y
+            # is now same as subtitle Y. It needs to be positioned to the
+            # bottom.")
             "content": {
-                "x": _in(slot_left), "y": _in(slot_top),
-                "w": _in(slot_w), "h": _in(slot_h),
+                "x": _in(slot_left), "y": _in(_sub_top + _sub_h),
+                "w": _in(slot_w), "h": _in(max(int(0.5 * 914400),
+                                               slot_top + slot_h - _sub_top - _sub_h)),
                 "font": getattr(style, "body_font", "") or "",
                 "size": (getattr(style, "fonts", {}) or {}).get("category_names", ("", 0))[1],
                 "colour": _ink,
@@ -402,15 +443,20 @@ def template_layout(customer_id: str, template_id: str, layout: int | None = Non
             # edge — and is reported so an author can see where it lands and
             # restyle it, without being offered a drag that would do nothing.
             "subtitle": {
-                "x": _in(title_left), "y": _in(_sub_top),
-                "w": _in(title_width), "h": _in(_sub_bottom - _sub_top),
+                "x": _in(slot_left), "y": _in(_sub_top),
+                "w": _in(slot_w), "h": _in(_sub_h),
                 "font": getattr(style, "body_font", "") or "",
                 "size": getattr(style, "subtitle_size_pt", 0) or 13,
                 "colour": (getattr(style, "subtitle_colour", "") or "").lstrip("#").upper()
                           or _muted,
             },
+            # Right UNDER the content, in its bottom-LEFT corner — where the
+            # renderer draws the N line (slide_chrome, 2026-09-24). The content
+            # box above already ends where the line fits over the template's
+            # own foot (`effective_content_rect`).
             "footer": {
-                "x": _in(title_left), "y": _in(footer_y), "w": _in(title_width), "h": 0.35,
+                "x": _in(slot_left), "y": _in(slot_top + slot_h + int(0.18 * 914400)),
+                "w": _in(min(int(4.0 * 914400), slot_w)), "h": 0.35,
                 "font": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[0],
                 "size": (getattr(style, "fonts", {}) or {}).get("n_annotation", ("", 0))[1],
                 "colour": (getattr(style, "footer_colour", "") or "").lstrip("#").upper()
@@ -531,9 +577,11 @@ def template_sample(customer_id: str, template_id: str, layout: int | None = Non
                 chosen = candidate.get("layout_index", chosen)
         except ValueError:
             pass
-    style = load_style_spec(path, force_layout=chosen if isinstance(chosen, int) else None)
     from reportbuilder.render.style_spec import apply_template_overrides
+    from reportbuilder.render.template_cache import resolve, resolve_layout
 
+    style = (resolve_layout(path, chosen) if isinstance(chosen, int)
+             else copy.deepcopy(resolve(path).style))
     apply_template_overrides(style, trying)
 
     report, model, df = _sample_report()
@@ -599,6 +647,8 @@ def set_template_layout(customer_id: str, template_id: str,
         "background": str(body.background or "").strip(),
     }.items() if v not in (None, "", {})}
     repo.record_template_layout(auth, customer_id, template_id, layout)
+    # A saved background or accent is a different empty slide for every layout.
+    _warm_grounds(repo, auth, customer_id, template_id, layout)
     return {"saved": layout}
 
 
