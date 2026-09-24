@@ -37,5 +37,5 @@ register(ChartPlugin(
     native_build=build_horizontal_bar,
     suitability=suitability,
     suggest=suggest,
-    config_schema=clustered_bar_schema(),
+    config_schema=clustered_bar_schema("horizontal"),
 ))

@@ -169,14 +169,14 @@ def test_standard_schema_classifying_var_is_optional():
 
 def test_stacked_schema_classifying_var_is_optional():
     # Total-only stacked bars are valid, so the classifying variable is optional.
-    cv = next(f for f in stacked_schema() if f.key == "classifying_var")
+    cv = next(f for f in stacked_schema("horizontal") if f.key == "classifying_var")
     assert cv.required is False
 
 
 def test_stacked_schema_fields():
     # Stacked bars support a second classifying variable (cross-tab combos, grouped by
     # the primary classifier) AND an overall "Total" reference bar (a 100% ref stack).
-    assert _keys(stacked_schema()) == [
+    assert _keys(stacked_schema("horizontal")) == [
         "statistic", "percent_base", "classifying_var", "classifying_values",
         "classifying_var_2",
         "xtab_layout", "show_total", "total_position", "sort", "category_label_overrides",
@@ -218,18 +218,18 @@ def test_combo_schema_classifying_var_is_optional():
 
 def test_stacked_horizontal_row_summary_fields():
     from reportbuilder.render.config_schema import stacked_schema
-    hks = [f.key for f in stacked_schema(with_row_summary=True)]
+    hks = [f.key for f in stacked_schema("horizontal", with_row_summary=True)]
     for k in ("row_summary_fn", "row_summary_label", "row_summary_codes",
               "row_summary_pos_codes", "row_summary_neg_codes"):
         assert k in hks
-    fn = next(f for f in stacked_schema(with_row_summary=True)
+    fn = next(f for f in stacked_schema("horizontal", with_row_summary=True)
               if f.key == "row_summary_fn")
     assert fn.widget == "select"
     assert {v for v, _ in fn.options} == {
         "none", "top2_sum", "top3_sum", "bottom2_sum", "bottom3_sum",
         "sum", "mean", "net"}
     # the default stacked schema (used by vertical) does NOT include it
-    assert "row_summary_fn" not in [f.key for f in stacked_schema()]
+    assert "row_summary_fn" not in [f.key for f in stacked_schema("horizontal")]
 
 
 def test_xtab_layout_offers_separate_panels():
@@ -240,7 +240,7 @@ def test_xtab_layout_offers_separate_panels():
 
 def test_clustered_schema_keeps_all_four_layouts():
     from reportbuilder.render.config_schema import clustered_bar_schema
-    fld = next(f for f in clustered_bar_schema() if f.key == "xtab_layout")
+    fld = next(f for f in clustered_bar_schema("vertical") if f.key == "xtab_layout")
     assert [v for v, _ in fld.options] == [
         "auto", "grouped", "small_multiples", "separate"]
 
@@ -253,7 +253,7 @@ def test_stacked_schema_only_offers_layouts_that_do_something(with_row_summary):
     there was a control that lies: two silently inert options.
     (2026-08-04 final review, I6)"""
     from reportbuilder.render.config_schema import stacked_schema
-    fld = next(f for f in stacked_schema(with_row_summary=with_row_summary)
+    fld = next(f for f in stacked_schema("horizontal", with_row_summary=with_row_summary)
                if f.key == "xtab_layout")
     assert [v for v, _ in fld.options] == ["auto", "separate"]
     assert "Small multiples" not in (fld.help or "")
@@ -261,8 +261,8 @@ def test_stacked_schema_only_offers_layouts_that_do_something(with_row_summary):
 
 def test_all_two_classifier_schemas_carry_the_layout_control():
     from reportbuilder.render.config_schema import clustered_bar_schema, stacked_schema
-    for schema in (clustered_bar_schema(), stacked_schema(),
-                   stacked_schema(with_row_summary=True)):
+    for schema in (clustered_bar_schema("vertical"), stacked_schema("horizontal"),
+                   stacked_schema("horizontal", with_row_summary=True)):
         keys = [f.key for f in schema]
         assert "classifying_var_2" in keys
         assert "xtab_layout" in keys, "a chart with two classifiers can choose the layout"

@@ -29,5 +29,5 @@ register(ChartPlugin(
     native_build=build_vertical_bar,
     suitability=suitability,
     suggest=suggest,
-    config_schema=clustered_bar_schema(),
+    config_schema=clustered_bar_schema("vertical"),
 ))

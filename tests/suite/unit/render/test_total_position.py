@@ -235,8 +235,8 @@ def test_moving_the_total_does_not_recolour_the_groups(colours, chart_type):
 
 # ── the control ──────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("schema", [standard_schema(), clustered_bar_schema(),
-                                    stacked_schema(), stacked_schema(with_row_summary=True)])
+@pytest.mark.parametrize("schema", [standard_schema(), clustered_bar_schema("vertical"),
+                                    stacked_schema("horizontal"), stacked_schema("horizontal", with_row_summary=True)])
 def test_the_control_sits_right_after_the_total_column_control(schema):
     keys = [f.key for f in schema]
     assert keys[keys.index("show_total") + 1] == "total_position"

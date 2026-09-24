@@ -21,5 +21,5 @@ register(ChartPlugin(
     native_build=build_stacked_vertical_bar,
     suitability=suitability,
     suggest=None,  # available but never the auto-default
-    config_schema=stacked_schema(),
+    config_schema=stacked_schema("vertical"),
 ))
