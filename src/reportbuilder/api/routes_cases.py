@@ -3,9 +3,12 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from reportbuilder.api.deps import get_client
-from reportbuilder.api.deps_auth import (current_user, require_case_write,
-                                         require_case_write_even_read_only)
+from reportbuilder.api.deps_auth import (current_user, require_case, require_case_write,
+                                         require_case_write_even_read_only,
+                                         require_case_write_or_finish_delete)
+from reportbuilder.api.deps_store import get_auth
 from reportbuilder.auth.permissions import User
+from reportbuilder.store.seam import AuthContext
 from reportbuilder.store.datahive_client import DataHiveClient
 
 
@@ -128,3 +131,77 @@ def delete_case(
     if isinstance(removed, int):
         payload["objects_removed"] = removed
     return payload
+
+
+@cases_router.get("/cases/{case_id}/archive-usage")
+def archive_usage(
+    case_id: str,
+    client: DataHiveClient = Depends(get_client),
+    user: User = Depends(require_case),
+) -> dict:
+    """What "Delete study" would do: the reports whose deck stays and those that
+    go entirely — named, for the warning."""
+    try:
+        return client.study_usage(case_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found") from exc
+
+
+@cases_router.post("/cases/{case_id}/archive")
+def archive_case(
+    case_id: str,
+    keep_decks: bool = True,
+    client: DataHiveClient = Depends(get_client),
+    auth: AuthContext = Depends(get_auth),
+    user: User = Depends(require_case_write_or_finish_delete),
+) -> dict:
+    """"Delete study": the study becomes read-only for good.
+
+    Every dataset and report definition goes; the generated decks stay
+    downloadable unless `keep_decks=false` (the warning's tick box). ("Deleting
+    a study would make it exactly like Read only" — Johan, 2026-09-24; spec
+    docs/superpowers/specs/2026-09-24-dataset-deletion-design.md.) Removing the
+    study completely is `DELETE /cases/{case_id}`, offered on a read-only study
+    as "Delete permanently".
+
+    Called again to finish an interrupted archive; the guard admits that call,
+    and only that one, while the study is marked but not completed.
+    """
+    from reportbuilder.api.routes_materials import _forget_derived, _unregister_terms
+    from reportbuilder.store.seam import ConsentRequired
+
+    state = client.dataset_deleted(case_id)
+    if not state:
+        held = {rid: lock for rid, lock in (_locks(client, case_id) or {}).items()
+                if lock.get("user_id") != getattr(user, "id", "")}
+        if held:
+            names = sorted({(lock.get("user_name") or "Someone else")
+                            for lock in held.values()})
+            raise HTTPException(
+                status_code=409,
+                detail=(f"{' and '.join(names)} {'is' if len(names) == 1 else 'are'} "
+                        f"editing {len(held)} of this study's reports, so it "
+                        "cannot be deleted yet."))
+    materials = [m["material_id"] for m in client.list_materials(case_id)]
+    try:
+        result = client.archive_study(case_id, keep_decks=keep_decks)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found") from exc
+    except ConsentRequired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "consent_required",
+                "message": "Deleting needs approval in datahive.",
+                "request_id": exc.request_id,
+                "target": exc.target,
+                "approve": exc.envelope.get("approval_urls", {}),
+            },
+        ) from exc
+    for mid in materials:
+        _forget_derived(case_id, mid)
+    # Every dataset's curation is gone by now, so the union of accepted terms
+    # already leaves all of them out: one re-registration covers the lot.
+    if materials:
+        _unregister_terms(client, auth, materials[0])
+    return {"archived": case_id, "read_only": bool(result.get("read_only"))}

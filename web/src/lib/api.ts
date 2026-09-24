@@ -924,6 +924,25 @@ export const api = {
         json<Customer>(r)
       ),
 
+    /** Delete the customer and EVERY study in it, permanently — decks of
+     *  read-only studies included. The owner's call (an admin for an ownerless
+     *  customer). A datahive consent 409 surfaces as its message. */
+    remove: async (customerId: string): Promise<{ deleted: string }> => {
+      const res = await fetch(`${API_BASE}/customers/${customerId}`, { method: "DELETE" });
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (body?.detail?.error === "consent_required") detail = body.detail.message;
+          else if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep the status text
+        }
+        throw new Error(detail);
+      }
+      return res.json();
+    },
+
     /** Who reaches this customer, and who could be added. Served to whoever
      *  administers THIS customer — the owner, or an admin for a customer
      *  recorded before ownership existed. Exists so the permissions dialog
@@ -1099,6 +1118,36 @@ export const api = {
   cases: {
     list: (): Promise<Case[]> =>
       fetch(`${API_BASE}/cases`).then((r) => json<Case[]>(r)),
+
+    /** What "Delete study" would do — the reports whose deck stays and those
+     *  that go — for the warning. */
+    archiveUsage: (caseId: string): Promise<DatasetUsage> =>
+      fetch(`${API_BASE}/cases/${caseId}/archive-usage`).then((r) => json<DatasetUsage>(r)),
+
+    /** "Delete study": the study becomes read-only for good; with `keepDecks`
+     *  false its generated decks go too. Also finishes an interrupted one. */
+    archive: async (
+      caseId: string,
+      keepDecks = true
+    ): Promise<{ archived: string; read_only: boolean }> => {
+      const res = await fetch(
+        `${API_BASE}/cases/${caseId}/archive` + (keepDecks ? "" : "?keep_decks=false"),
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        let detail = `${res.status} ${res.statusText}`;
+        try {
+          const body = await res.json();
+          if (body?.detail?.error === "consent_required") detail = body.detail.message;
+          else if (typeof body?.detail?.detail === "string") detail = body.detail.detail;
+          else if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // not JSON — keep the status text
+        }
+        throw new Error(detail);
+      }
+      return res.json();
+    },
 
     create: (name: string): Promise<{ case_id: string }> =>
       fetch(`${API_BASE}/cases`, {

@@ -470,6 +470,21 @@ class RepositoryClient:
             by_name=getattr(self.user, "name", "") or getattr(self.user, "email", ""),
             keep_decks=keep_decks)
 
+    def archive_study(self, case_id: str, keep_decks: bool = True) -> dict:
+        """Make the study read-only for good ("Delete study"). ConsentRequired
+        propagates, as for any delete."""
+        k = self._case(case_id)
+        return self.repo.archive_study(
+            self.auth, k.customer_id, k.id,
+            by=getattr(self.user, "id", ""),
+            by_name=getattr(self.user, "name", "") or getattr(self.user, "email", ""),
+            keep_decks=keep_decks)
+
+    def study_usage(self, case_id: str) -> dict:
+        """What archiving the whole study would do — for the warning."""
+        k = self._case(case_id)
+        return self.repo.study_usage(self.auth, k.customer_id, k.id)
+
     def dataset_usage(self, case_id: str, material_id: str) -> dict:
         """What deleting this dataset would do — for the warning."""
         k = self._case(case_id)

@@ -268,6 +268,69 @@ def rename_customer(customer_id: str, body: NameBody,
     return {"id": c.id, "name": c.name}
 
 
+@customers_router.delete("/customers/{customer_id}")
+def delete_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
+                    repo: Repository = Depends(get_repository),
+                    user: User = Depends(current_user)) -> dict:
+    """Delete the customer and EVERY study in it, permanently: data, reports,
+    generated decks (read-only studies' too) and its templates. Nothing is
+    kept read-only — "That will just remove all studies permanently"
+    (Johan, 2026-09-24).
+
+    THE OWNER decides, as for its permissions (`_managing`): an editor may
+    delete a study, but taking every study of a customer at once is the
+    owner's call. An ownerless legacy customer falls back to an admin.
+
+    Refused while somebody else has one of its reports open — the study
+    delete's rule, for every study at once. datahive's consent gate comes
+    back as the same 409 envelope as the study delete; each approved retry
+    makes progress. Only once the objects are gone are the grants and the
+    permission mode naming it removed, so an interrupted delete leaves the
+    customer reachable to finish.
+    """
+    from reportbuilder.store.seam import ConsentRequired
+
+    customer = _managing(repo, auth, customer_id, user)
+    held: dict[str, dict] = {}
+    for k in repo.list_cases(auth, customer.id):
+        try:
+            locks = repo.report_locks(auth, customer.id, k.id) or {}
+        except Exception:  # noqa: BLE001 — a store that cannot answer blocks nothing
+            locks = {}
+        held.update({f"{k.id}/{rid}": lock for rid, lock in locks.items()
+                     if lock.get("user_id") != user.id})
+    if held:
+        names = sorted({(lock.get("user_name") or "Someone else") for lock in held.values()})
+        raise HTTPException(
+            409,
+            f"{' and '.join(names)} {'is' if len(names) == 1 else 'are'} editing "
+            f"{len(held)} of this customer's reports, so it cannot be deleted yet.")
+
+    try:
+        removed = repo.delete_customer(auth, customer.id)
+    except ConsentRequired as exc:
+        raise HTTPException(409, detail={
+            "error": "consent_required",
+            "message": "Deleting needs approval in datahive.",
+            "request_id": exc.request_id,
+            "target": exc.target,
+            "approve": exc.envelope.get("approval_urls", {}),
+        }) from exc
+
+    scope = customer.id
+    for u in repo.list_users(auth):
+        kept = tuple(g for g in u.grants
+                     if g.scope != scope and not g.scope.startswith(scope + "/"))
+        if len(kept) != len(u.grants):
+            repo.set_grants(auth, u.id, kept)
+    modes = repo.customer_modes(auth)
+    if scope in modes:
+        del modes[scope]
+        repo.set_setting(auth, "customer-access.json", {"modes": modes})
+    session.forget_all()
+    return {"deleted": customer.id, "objects_removed": removed}
+
+
 @customers_router.get("/customers/{customer_id}/access")
 def get_customer_access(customer_id: str, auth: AuthContext = Depends(get_auth),
                         repo: Repository = Depends(get_repository),

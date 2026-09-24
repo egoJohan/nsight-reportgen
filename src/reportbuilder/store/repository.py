@@ -1173,6 +1173,16 @@ class Repository:
             return []
         return self.list_reports(auth, customer_id, case_id)
 
+    def study_usage(self, auth: AuthContext, customer_id: str, case_id: str) -> dict:
+        """What archiving the whole study would do — the dataset warning's facts
+        with every dataset going at once."""
+        decks = self._stored_decks(auth, customer_id, case_id)
+        with_deck, without_deck = [], []
+        for r in self.list_reports(auth, customer_id, case_id):
+            (with_deck if r.id in decks else without_deck).append(r.name)
+        return {"last_dataset": True, "remaining": [],
+                "with_deck": sorted(with_deck), "without_deck": sorted(without_deck)}
+
     def dataset_usage(self, auth: AuthContext, customer_id: str, case_id: str,
                       material_id: str) -> dict:
         """What deleting this dataset would do, for the warning.
@@ -1233,6 +1243,20 @@ class Repository:
             if others:
                 self._delete_material_objects(auth, customer_id, case_id, [material_id])
                 return {"read_only": False}
+        return self.archive_study(auth, customer_id, case_id, by=by, by_name=by_name,
+                                  keep_decks=keep_decks)
+
+    def archive_study(self, auth: AuthContext, customer_id: str, case_id: str, *,
+                      by: str = "", by_name: str = "", keep_decks: bool = True) -> dict:
+        """Make the study read-only for good: every dataset and report definition
+        goes, the generated decks stay (unless `keep_decks` is False).
+
+        What "Delete study" does (Johan, 2026-09-24: "deleting a study would make
+        it exactly like Read only"); the study's last dataset being deleted leads
+        here too. Safe to repeat; a resumed call keeps to the recorded choice."""
+        state = self.get_case(auth, customer_id, case_id).dataset_deleted
+        if state is None:
+            materials = self.list_materials(auth, customer_id, case_id)
             state = {"at": _now(), "by": by, "by_name": by_name,
                      "files": [m.name for m in materials], "keep_decks": keep_decks,
                      "completed": False}
@@ -1255,7 +1279,7 @@ class Repository:
             self._delete_quietly(auth, info.path)
         self._delete_material_objects(
             auth, customer_id, case_id,
-            [m.id for m in self.list_materials(auth, customer_id, case_id)] or [material_id])
+            [m.id for m in self.list_materials(auth, customer_id, case_id)])
         self._set_dataset_deleted(auth, customer_id, case_id, {**state, "completed": True})
         return {"read_only": True}
 

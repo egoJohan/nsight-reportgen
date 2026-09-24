@@ -38,6 +38,25 @@ Deleting one of several datasets in a study (left behind by "Replace file")
 while others remain removes only that file; the study stays editable on the
 remaining one.
 
+**Delete study is the same action.** The study page's **Delete study** button
+archives the study this way: every dataset in it goes, and it becomes
+read-only with its decks kept — the same warning and the same keep-the-decks
+tick box ("deleting a study would make it exactly like Read only", Johan,
+2026-09-24). `POST /cases/{case_id}/archive[?keep_decks=false]` does it, and
+`GET /cases/{case_id}/archive-usage` gives the warning its facts. When **no
+deck would be left to download** — no reports, none ever generated, or "keep
+the decks" unticked — there is nothing to keep read-only: the dialog says
+the study is deleted completely, names its reports, and Delete study deletes
+it outright (`DELETE /cases/{case_id}`) — "Delete permanently should be done
+when there was no reports left to download" (Johan, 2026-09-24). If the
+usage cannot be fetched, the archive is offered, never the outright delete.
+`studyDeleteWarning` in `web/src/lib/datasetDeletion.ts` decides. On a
+read-only study the button reads **Delete permanently**: `DELETE
+/cases/{case_id}`, which removes the study and its decks entirely. While an
+archive is unfinished neither button shows; the banner's **Finish deleting**
+(which calls the archive route, recorded `keep_decks` deciding) is the one
+action.
+
 ## 1. State
 
 `case.json` gains:
@@ -85,9 +104,9 @@ settings, which writes nothing to the study.
 
 - `DELETE /cases/{case_id}` — deleting the whole study — stays allowed, so an
   archive can be removed completely.
-- While `completed` is `false`, `DELETE /cases/{case_id}/materials/{mid}` stays
-  allowed, so an interrupted delete can always be finished (§3). Nothing else
-  does.
+- While `completed` is `false`, `DELETE /cases/{case_id}/materials/{mid}` and
+  `POST /cases/{case_id}/archive` stay allowed, so an interrupted delete can
+  always be finished (§3). Nothing else does.
 
 Someone who took a lock between the delete's lock check and the marking loses
 nothing already saved; their next save is refused with the read-only message.
@@ -222,6 +241,28 @@ picks the remaining one:
   no-deck list; the read-only banner and report label.
 - **Against a real hive**: the whole flow on a disposable copy of the local hive
   (restored from the Phase 1 archive), as in `docs/local-hive-upgrade.md`.
+
+## Deleting a customer
+
+"That will just remove all studies permanently" (Johan, 2026-09-24). **Delete
+customer**, top right on the customer page, deletes the customer and every
+study in it — read-only studies' decks included — with its templates. Nothing
+is archived. `DELETE /customers/{customer_id}`:
+
+- **Who:** the owner, the same person who manages its permissions; an admin
+  for an ownerless legacy customer. An editor may delete a study, not a
+  customer.
+- **Refused** (409) while somebody else has one of its reports open, as the
+  study delete is.
+- **Consent:** datahive's 409 envelope, as for the study delete; each approved
+  retry makes progress.
+- **Afterwards**, and only once the objects are gone: the grants naming it and
+  its permission mode are removed, and cached identities forgotten.
+
+The dialog says in its title that the delete is permanent, states that ALL N
+studies go and that nothing is kept read-only, names every study (marking
+read-only ones, whose decks go too), and enables its button only once the
+customer's name is typed back.
 
 ## Existing data
 

@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api, type DatasetDeleted } from "@/lib/api";
+import { api, type DatasetDeleted, type DatasetUsage } from "@/lib/api";
+import { studyDeleteWarning } from "@/lib/datasetDeletion";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -180,6 +181,48 @@ export default function CaseDetailPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteCase = useDeleteCase();
+  // "Delete study" ARCHIVES: the study becomes read-only and keeps its decks
+  // ("deleting a study would make it exactly like Read only" — Johan,
+  // 2026-09-24). Removing it completely is "Delete permanently", offered on
+  // the read-only study.
+  const qc = useQueryClient();
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveUsage, setArchiveUsage] = useState<DatasetUsage | null>(null);
+  const [keepDecks, setKeepDecks] = useState(true);
+  const [archiving, setArchiving] = useState(false);
+  // No deck left to download → nothing to keep read-only: deleted outright.
+  const archiveWarning = studyDeleteWarning(archiveUsage, caseName || id || "", keepDecks);
+
+  async function openArchive() {
+    if (!id) return;
+    setKeepDecks(true);
+    try {
+      setArchiveUsage(await api.cases.archiveUsage(id));
+    } catch {
+      setArchiveUsage(null); // the stronger warning, rather than no delete
+    }
+    setArchiveOpen(true);
+  }
+
+  async function handleArchive() {
+    if (!id) return;
+    setArchiving(true);
+    try {
+      await api.cases.archive(id, keepDecks);
+      setArchiveOpen(false);
+      qc.invalidateQueries({ queryKey: ["case", id, "resolve"] });
+      qc.invalidateQueries({ queryKey: qk.caseReports(id) });
+      qc.invalidateQueries({ queryKey: qk.caseMaterials(id) });
+      qc.invalidateQueries({ queryKey: qk.cases() });
+      qc.invalidateQueries({ queryKey: ["customer"] });
+      qc.removeQueries({ queryKey: ["chart-preview"] });
+      toast.success("Study deleted — it is now read-only");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the study");
+    } finally {
+      setArchiving(false);
+    }
+  }
 
   function handleDelete() {
     if (!id) return;
@@ -246,13 +289,26 @@ export default function CaseDetailPage() {
                 }
               />
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2Icon className="size-4" />Delete study</Button>
+            {/* A live study is archived; a read-only one can be removed for
+                good. Nothing while an archive is unfinished — the banner's
+                Finish deleting is the one action then. */}
+            {!readOnly ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                onClick={openArchive}
+              >
+                <Trash2Icon className="size-4" />Delete study</Button>
+            ) : readOnly.completed ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2Icon className="size-4" />Delete permanently</Button>
+            ) : null}
           </div>
         )}
       </div>
@@ -262,7 +318,6 @@ export default function CaseDetailPage() {
           caseId={id}
           state={readOnly}
           mayWrite={mayWrite}
-          materialId={serverMaterialId}
         />
       )}
 
@@ -299,10 +354,11 @@ export default function CaseDetailPage() {
       <Dialog open={confirmDelete} onOpenChange={(v) => !v && setConfirmDelete(false)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete this study?</DialogTitle>
+            <DialogTitle>Delete this study permanently?</DialogTitle>
             <DialogDescription>
-              This permanently deletes the study “{caseName || id}”, the data
-              imported into it, and its reports. This cannot be undone.
+              This removes the study “{caseName || id}” completely, including
+              the generated decks that are still downloadable. This cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -313,7 +369,55 @@ export default function CaseDetailPage() {
               disabled={deleteCase.isPending}
             >
               {deleteCase.isPending && <Loader2Icon className="size-4 animate-spin" />}
-              Delete study
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={archiveOpen} onOpenChange={(v) => !v && setArchiveOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this study?</DialogTitle>
+            <DialogDescription>{archiveWarning.paragraphs[0]}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {archiveWarning.paragraphs.slice(1).map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+            {archiveWarning.lost.length > 0 && (
+              <ul className="list-disc pl-5 font-medium text-foreground">
+                {archiveWarning.lost.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            )}
+            <p>This cannot be undone.</p>
+          </div>
+          {archiveWarning.offerKeepDecks && (
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 shrink-0"
+                checked={keepDecks}
+                onChange={(e) => setKeepDecks(e.target.checked)}
+              />
+              <span>
+                Keep the {archiveWarning.deckCount} generated{" "}
+                {archiveWarning.deckCount === 1 ? "deck" : "decks"} for download
+                (PDF and PPTX)
+              </span>
+            </label>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={archiveWarning.outright ? handleDelete : handleArchive}
+              disabled={archiving || deleteCase.isPending}
+            >
+              {(archiving || deleteCase.isPending) && <Loader2Icon className="size-4 animate-spin" />}
+              {archiveWarning.confirm}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -329,12 +433,10 @@ function ReadOnlyBanner({
   caseId,
   state,
   mayWrite,
-  materialId,
 }: {
   caseId: string;
   state: DatasetDeleted;
   mayWrite: boolean;
-  materialId: string | null;
 }) {
   const qc = useQueryClient();
   const [finishing, setFinishing] = useState(false);
@@ -345,7 +447,7 @@ function ReadOnlyBanner({
     setFinishing(true);
     try {
       // The server finishes whatever is left; the id only addresses the route.
-      await api.materials.remove(caseId, materialId ?? "-", state.keep_decks ?? true);
+      await api.cases.archive(caseId, state.keep_decks ?? true);
       qc.invalidateQueries({ queryKey: ["case", caseId, "resolve"] });
       qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
       qc.invalidateQueries({ queryKey: qk.caseMaterials(caseId) });

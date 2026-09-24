@@ -76,3 +76,56 @@ export function datasetDeleteWarning(
     deckCount: withDeck.length,
   };
 }
+
+/** The study page's "Delete study" confirmation.
+ *
+ *  A study with decks to keep becomes read-only and keeps them — the same
+ *  warning as its last dataset's delete. When NO deck would be left to download
+ *  (no reports, none ever generated, or "keep the decks" unticked) there is
+ *  nothing to keep read-only, and the study is deleted outright ("Delete
+ *  permanently should be done when there was no reports left to download" —
+ *  Johan, 2026-09-24). Unknown usage (the fetch failed) is never outright: the
+ *  archive, which keeps what there is, is the safe side of that doubt. */
+export interface StudyDeleteWarning extends DatasetDeleteWarning {
+  /** Delete the study entirely (DELETE /cases/{id}) instead of archiving it. */
+  outright: boolean;
+}
+
+export function studyDeleteWarning(
+  usage: DatasetUsage | null,
+  studyName: string,
+  keepDecks = true
+): StudyDeleteWarning {
+  const archive = datasetDeleteWarning(usage, "", keepDecks);
+  const withDeck = usage?.with_deck ?? [];
+  const outright = !!usage && (withDeck.length === 0 || !keepDecks);
+  if (!outright) {
+    return {
+      ...archive,
+      paragraphs: [
+        archive.paragraphs[0],
+        `The data imported into “${studyName}” is deleted.`,
+        ...archive.paragraphs.slice(1),
+      ],
+      confirm: "Delete study",
+      outright,
+    };
+  }
+  const lost = [...withDeck, ...(usage?.without_deck ?? [])].sort();
+  const reports = lost.length === 1 ? "its report" : `its ${lost.length} reports`;
+  return {
+    paragraphs: [
+      lost.length === 0
+        ? `The study “${studyName}” has no reports. It is deleted together ` +
+          "with the data imported into it."
+        : `The study “${studyName}” is deleted completely, together with the ` +
+          `data imported into it and ${reports}` +
+          (withDeck.length ? ", generated decks included:" : ":"),
+    ],
+    lost,
+    confirm: withDeck.length ? "Delete study and every deck" : "Delete study",
+    offerKeepDecks: archive.offerKeepDecks,
+    deckCount: archive.deckCount,
+    outright,
+  };
+}

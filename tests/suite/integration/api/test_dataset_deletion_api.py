@@ -175,3 +175,54 @@ def test_the_decks_can_be_deleted_too(client_memory, study):
     assert c.get(f"/cases/{s['cid']}/reports/{s['done']}/preview.pptx").status_code == 404
     state = c.get(f"/customers/{s['cust']}/cases/{s['cid']}").json()["dataset_deleted"]
     assert state["keep_decks"] is False and state["completed"] is True
+
+
+# ---- "Delete study" archives the study -----------------------------------------
+# "Deleting a study would make it exactly like Read only" (Johan, 2026-09-24):
+# the study page's Delete study button does this; removing it completely is
+# "Delete permanently" (DELETE /cases/{id}) on the read-only study.
+
+def _archive(client, s, keep_decks=True):
+    q = "" if keep_decks else "?keep_decks=false"
+    return _with_consent(client, "POST", f"/cases/{s['cid']}/archive{q}")
+
+
+def test_delete_study_archives_every_dataset_and_keeps_the_decks(client_memory, study, synthetic_bytes):
+    c, s = client_memory, study
+    c.post(f"/cases/{s['cid']}/materials", files={
+        "file": ("brandi-v2.sav", synthetic_bytes, "application/octet-stream")})
+    u = c.get(f"/cases/{s['cid']}/archive-usage").json()
+    assert u["with_deck"] == ["Delivered"] and u["without_deck"] == ["Draft"]
+    resp = _archive(c, s)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"archived": s["cid"], "read_only": True}
+    assert c.get(f"/cases/{s['cid']}/materials").json()["materials"] == []
+    state = c.get(f"/customers/{s['cust']}/cases/{s['cid']}").json()["dataset_deleted"]
+    assert state["completed"] is True and sorted(state["files"]) == ["brandi-v2.sav", "brandi.sav"]
+    listed = c.get(f"/cases/{s['cid']}/reports").json()["reports"]
+    assert [(r["report_id"], r["deck_only"]) for r in listed] == [(s["done"], True)]
+    assert c.get(f"/cases/{s['cid']}/reports/{s['done']}/preview.pptx").content == DECK
+
+
+def test_delete_study_without_keeping_the_decks(client_memory, study):
+    c, s = client_memory, study
+    assert _archive(c, s, keep_decks=False).status_code == 200
+    assert c.get(f"/cases/{s['cid']}/reports").json()["reports"] == []
+
+
+def test_delete_study_waits_for_someone_elses_open_report(client_memory, study):
+    c, s = client_memory, study
+    repo, auth = _repo(c)
+    repo.lock_report(auth, s["cust"], s["cid"], s["draft"], "usr-other", "Maija Meikäläinen")
+    resp = c.post(f"/cases/{s['cid']}/archive")
+    assert resp.status_code == 409 and "Maija Meikäläinen" in resp.json()["detail"]
+    assert repo.get_case(auth, s["cust"], s["cid"]).dataset_deleted is None
+
+
+def test_an_archived_study_is_not_archived_again_but_can_be_removed(client_memory, study):
+    c, s = client_memory, study
+    _archive(c, s)
+    again = c.post(f"/cases/{s['cid']}/archive")
+    assert again.status_code == 409 and again.json()["detail"]["error"] == "study_read_only"
+    gone = _with_consent(c, "DELETE", f"/cases/{s['cid']}")
+    assert gone.status_code == 200, gone.text

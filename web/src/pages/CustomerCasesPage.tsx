@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon,
-  PencilIcon, CheckIcon, XIcon,
+  PencilIcon, CheckIcon, XIcon, Trash2Icon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +21,7 @@ import NewCaseDialog from "@/components/NewCaseDialog";
 import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
 import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
+import DeleteCustomerDialog from "@/components/DeleteCustomerDialog";
 import NoAccessCustomer from "@/components/NoAccessCustomer";
 import { RequestAccessDialog } from "@/components/RequestAccessDialog";
 import type { AccessMode } from "@/lib/api";
@@ -117,6 +118,7 @@ export default function CustomerCasesPage() {
   const { data: me } = useSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const [managingAccess, setManagingAccess] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
   const [requestingPermissions, setRequestingPermissions] = useState(false);
 
   // A customer the caller holds no grant on 404s (spec §5, deps_auth._check)
@@ -224,6 +226,17 @@ export default function CustomerCasesPage() {
           {canManagePermissions && (
             <Button variant="outline" onClick={() => setManagingAccess(true)}>
               <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
+          )}
+          {/* Deleting the customer takes every study in it — the owner's
+              call, the same person as Manage permissions (server:
+              routes_customers.delete_customer). */}
+          {canManagePermissions && (
+            <Button
+              variant="outline"
+              className="text-muted-foreground hover:border-destructive/40 hover:text-destructive"
+              onClick={() => setDeletingCustomer(true)}
+            >
+              <Trash2Icon className="mr-2 size-4" />Delete customer</Button>
           )}
         </div>
       </div>
@@ -348,6 +361,15 @@ export default function CustomerCasesPage() {
           onOpenChange={setManagingAccess}
           customerId={customerId}
           customerName={customer?.name ?? ""}
+        />
+      )}
+      {customerId && canManagePermissions && (
+        <DeleteCustomerDialog
+          open={deletingCustomer}
+          onOpenChange={setDeletingCustomer}
+          customerId={customerId}
+          customerName={customer?.name ?? ""}
+          studies={cases}
         />
       )}
 
