@@ -57,8 +57,11 @@ dict | None`; `GET /cases/{id}` and the case list return it.
 
 ## 2. Read-only is enforced on the server
 
-A dependency `require_case_live` (in `api/deps_auth.py`, next to
-`require_case_write`) resolves the case and refuses with **409**
+The check lives **inside the write guards themselves** (`require_case_write`,
+`require_case_in_customer_write`, `require_material_write` in
+`api/deps_auth.py`, via `refuse_if_read_only`): every route that writes to a
+study already passes through one of them, so none can be forgotten. It refuses
+with **409**
 `{"error": "study_read_only", "detail": "This study is read-only: its dataset
 was deleted on <date>."}` when `dataset_deleted` is set. Every route that writes
 to a study, or starts work that would, takes it instead of or in addition to
@@ -72,10 +75,11 @@ to a study, or starts work that would, takes it instead of or in addition to
 - grouping/regroup, AI routes that write, report template pin;
 - the study itself: renaming it, or changing its template.
 
-The rule for completeness: **every route that takes `require_case_write`
-also takes `require_case_live`**, except `DELETE /cases/{case_id}`. The
-implementation lists them, and a test walks the app's routes to prove no
-`require_case_write` route was missed.
+A test walks the app's own routes and requires every write (POST, PUT, PATCH,
+DELETE) addressed by a study id to be refused, so a route added later is
+covered too. It found one legitimate exception, kept: `PUT
+/settings/workspace/{case_id}` — a user's OWN screen state, stored in their
+settings, which writes nothing to the study.
 
 **Exceptions:**
 
@@ -122,9 +126,12 @@ converge:
    (`preview_root`, the per-material marker), the local deck cache
    `render_root/{case}/*` (decks are served from the store from now on), the
    parsed-file cache entry, the location cache.
-7. **Re-register the tenant's masking terms** without the deleted dataset's
-   accepted terms.
-8. **Mark the delete finished:** `completed: true`.
+7. **Mark the delete finished:** `completed: true`.
+8. After it, best-effort: **clear derived data** (step 6 of the list above,
+   done by the route) and **re-register the tenant's masking terms** without
+   the deleted dataset's accepted terms. A failure here only leaves those terms
+   masked — more masking, never less — until the next acceptance anywhere
+   re-registers the union.
 
 **Interrupted?** Datahive may stop any delete to ask a human for consent
 (`consent_required`, returned as 409 with an approve link), and a process can
@@ -168,6 +175,16 @@ with its label, and a test proves a read-only study round-trips through backup
 and restore with its decks.
 
 ## 5. The warning
+
+**Keep the decks?** When the study has generated decks, the warning offers a
+tick box — *"Keep the N generated decks for download (PDF and PPTX)"* —
+**ticked by default**. Left empty, the decks and every report go too; the
+study is still read-only, now empty, and can then be deleted with **Delete
+study**. ("If there is deck/PDF downloadable, let's have a tick box whether to
+leave those or delete." — Johan, 2026-09-24.) The choice travels as
+`?keep_decks=false` and is recorded as `keep_decks` in `dataset_deleted`, so a
+resumed delete keeps to it.
+
 
 Shown by the Data tab's delete button, from the usage endpoint.
 

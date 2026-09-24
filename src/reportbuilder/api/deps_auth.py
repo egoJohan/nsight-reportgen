@@ -131,7 +131,30 @@ def current_session_id(request: Request,
         return ""
 
 
-def _case_guard(write: bool):
+def refuse_if_read_only(case, allow: str = "") -> None:
+    """A study whose dataset was deleted takes no writes — for anyone.
+
+    Read-only is enforced HERE, inside the write guards, rather than route by
+    route: every route that writes to a study already passes through one of
+    them, so none can be forgotten. `allow` names the two exceptions (spec
+    2026-09-24-dataset-deletion-design.md §2): "study-delete" — an archive can
+    still be removed entirely — and "finish-delete" — a dataset delete that did
+    not finish can be run again, and nothing else.
+    """
+    state = getattr(case, "dataset_deleted", None)
+    if not state or allow == "study-delete":
+        return
+    if allow == "finish-delete" and not state.get("completed"):
+        return
+    when = str(state.get("at") or "")[:10]
+    raise HTTPException(409, detail={
+        "error": "study_read_only",
+        "detail": f"This study is read-only: its dataset was deleted on {when}. "
+                  "Only the generated decks remain.",
+    })
+
+
+def _case_guard(write: bool, allow: str = ""):
     def guard(request: Request,
               case_id: str,
               user: User = Depends(current_user),
@@ -149,8 +172,12 @@ def _case_guard(write: bool):
         if case is None:
             raise HTTPException(404, f"Case '{case_id}' not found")
         _check(user, f"{case.customer_id}/{case.id}", write)
+        if write:
+            refuse_if_read_only(case, allow)
         return user
-    guard.__name__ = "require_case_write" if write else "require_case"
+    guard.__name__ = {"study-delete": "require_case_write_even_read_only",
+                      "finish-delete": "require_case_write_or_finish_delete"
+                      }.get(allow, "require_case_write" if write else "require_case")
     return guard
 
 
@@ -175,6 +202,8 @@ def _case_in_customer_guard(write: bool):
         if case is None or case.customer_id != customer_id:
             raise HTTPException(404, f"Case '{case_id}' not found")
         _check(user, f"{case.customer_id}/{case.id}", write)
+        if write:
+            refuse_if_read_only(case)
         return user
     guard.__name__ = ("require_case_in_customer_write" if write
                       else "require_case_in_customer")
@@ -197,6 +226,11 @@ def _material_guard(write: bool):
         if material is None:
             raise HTTPException(404, f"Material '{material_id}' not found")
         _check(user, f"{material.customer_id}/{material.case_id}", write)
+        if write:
+            # A dataset outlives its study's read-only marking only while a
+            # delete is unfinished; its curation takes no writes meanwhile.
+            refuse_if_read_only(repo.get_case(auth, material.customer_id,
+                                              material.case_id))
         return user
     guard.__name__ = "require_material_write" if write else "require_material"
     return guard
@@ -206,6 +240,10 @@ require_customer = _customer_guard(False)
 require_customer_write = _customer_guard(True)
 require_case = _case_guard(False)
 require_case_write = _case_guard(True)
+#: Deleting the whole study: allowed on a read-only study too.
+require_case_write_even_read_only = _case_guard(True, allow="study-delete")
+#: Deleting a dataset: on a read-only study, only to finish an interrupted delete.
+require_case_write_or_finish_delete = _case_guard(True, allow="finish-delete")
 require_case_in_customer = _case_in_customer_guard(False)
 require_case_in_customer_write = _case_in_customer_guard(True)
 require_material = _material_guard(False)
@@ -216,6 +254,7 @@ GUARD_NAMES = frozenset({
     "current_user", "require_admin",
     "require_customer", "require_customer_write",
     "require_case", "require_case_write",
+    "require_case_write_even_read_only", "require_case_write_or_finish_delete",
     "require_case_in_customer", "require_case_in_customer_write",
     "require_material", "require_material_write",
 })

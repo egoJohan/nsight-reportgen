@@ -3,7 +3,8 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from reportbuilder.api.deps import get_client
-from reportbuilder.api.deps_auth import current_user, require_case_write
+from reportbuilder.api.deps_auth import (current_user, require_case_write,
+                                         require_case_write_even_read_only)
 from reportbuilder.auth.permissions import User
 from reportbuilder.store.datahive_client import DataHiveClient
 
@@ -77,7 +78,8 @@ def _locks(client, case_id: str) -> dict[str, dict]:
 def delete_case(
     case_id: str,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_case_write),
+    # A read-only study (its dataset deleted) can still be removed entirely.
+    user: User = Depends(require_case_write_even_read_only),
 ) -> dict:
     """Delete a tutkimus and everything in it: materials, curation, reports, renders.
 

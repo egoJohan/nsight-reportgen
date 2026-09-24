@@ -578,6 +578,31 @@ export interface ParallelSuggestion {
   labels: string[];
 }
 
+/** A study whose dataset was deleted: read-only for good, only its generated
+ *  decks remain (spec 2026-09-24-dataset-deletion-design.md). `completed` is
+ *  false while the delete is still under way and can be finished. */
+export interface DatasetDeleted {
+  at: string;
+  by: string;
+  by_name: string;
+  files: string[];
+  /** Whether the generated decks were kept (the warning's tick box). */
+  keep_decks?: boolean;
+  completed: boolean;
+}
+
+/** What deleting a dataset would do — for the warning. */
+export interface DatasetUsage {
+  /** Deleting it makes the study read-only. */
+  last_dataset: boolean;
+  /** The files the reports use otherwise, when it is not the last. */
+  remaining: string[];
+  /** Reports whose generated deck stays downloadable. */
+  with_deck: string[];
+  /** Reports with no generated deck — deleted entirely. */
+  without_deck: string[];
+}
+
 export interface CaseMaterial {
   material_id: string;
   name: string;
@@ -590,6 +615,9 @@ export interface CaseReportInfo {
    *  the deliverable a viewer may download. A report with no render behind it
    *  is the analyst's working state, not a finished report. */
   rendered: boolean;
+  /** Only the generated deck is left: the study's dataset was deleted, and
+   *  with it this report's definition. Download-only. */
+  deck_only?: boolean;
   /** When that render happened, ISO 8601. Empty on decks rendered before the
    *  backend recorded it — absence means "unknown", not "never". */
   rendered_at?: string;
@@ -706,6 +734,9 @@ export interface ResolvedCase {
    *  editor-only controls — every write route re-checks the same grant on
    *  its own, so this flag hiding a button is not what protects the data. */
   can_edit: boolean;
+  /** Set when the study's dataset was deleted: read-only for everyone,
+   *  whatever `can_edit` says — only deleting the study stays allowed. */
+  dataset_deleted?: DatasetDeleted | null;
 }
 
 /** The user who created a customer — its one owner (see
@@ -785,6 +816,8 @@ export interface CustomerCase {
    *  "Empty" (no charts, no deck) folded together, since neither is a
    *  deliverable — see routes_customers.py's `_report_stats`. */
   draft_reports: number;
+  /** Set when the study's dataset was deleted: read-only for good. */
+  dataset_deleted?: DatasetDeleted | null;
 }
 
 const jsonPost = (body: unknown) => ({
@@ -1150,19 +1183,24 @@ export const api = {
         json<{ materials: CaseMaterial[] }>(r)
       ),
 
-    // What deleting this dataset would empty. Asked before the confirmation so
+    // What deleting this dataset would do. Asked before the confirmation so
     // it can name the reports rather than count them.
-    usage: (
-      caseId: string,
-      materialId: string
-    ): Promise<{ reports: CaseReportInfo[] }> =>
+    usage: (caseId: string, materialId: string): Promise<DatasetUsage> =>
       fetch(`${API_BASE}/cases/${caseId}/materials/${materialId}/usage`).then((r) =>
-        json<{ reports: CaseReportInfo[] }>(r)
+        json<DatasetUsage>(r)
       ),
 
-    remove: async (caseId: string, materialId: string): Promise<void> => {
+    /** Delete a dataset. The study's last one makes it read-only; with
+     *  `keepDecks` false its reports' generated decks go too. Also finishes a
+     *  delete that was interrupted. */
+    remove: async (
+      caseId: string,
+      materialId: string,
+      keepDecks = true
+    ): Promise<{ deleted: string; read_only: boolean }> => {
       const res = await fetch(
-        `${API_BASE}/cases/${caseId}/materials/${materialId}`,
+        `${API_BASE}/cases/${caseId}/materials/${materialId}` +
+          (keepDecks ? "" : "?keep_decks=false"),
         { method: "DELETE" }
       );
       if (!res.ok) {
@@ -1181,6 +1219,7 @@ export const api = {
         }
         throw new Error(detail);
       }
+      return res.json();
     },
 
     upload: (caseId: string, file: File): Promise<UploadResult> => {

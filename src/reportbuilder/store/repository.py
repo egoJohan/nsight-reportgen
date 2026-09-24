@@ -88,6 +88,15 @@ class Case:
     customer_id: str
     name: str
     template_id: str = ""
+    #: Set when the study's last dataset was deleted: the study is read-only for
+    #: good and only its generated decks remain. {at, by, by_name, files,
+    #: completed}; `completed` is False while the delete is still under way.
+    #: None for a live study. (spec 2026-09-24-dataset-deletion-design.md)
+    dataset_deleted: dict | None = None
+
+
+class StudyReadOnly(Exception):
+    """A write aimed at a study whose dataset was deleted."""
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,9 @@ class ReportRef:
     #: A report doc with no render behind it is the analyst's working state,
     #: not something finished.
     rendered: bool = False
+    #: Only the generated deck is left: the study's dataset was deleted, and
+    #: with it this report's definition. Download-only.
+    deck_only: bool = False
     #: When that render happened, ISO 8601. Empty for decks rendered before
     #: this was recorded — treat absence as "unknown", not as "never".
     rendered_at: str = ""
@@ -416,6 +428,7 @@ class Repository:
                 continue
             d = self._read_json(auth, info.path)
             out.append(Case(id=d["id"], customer_id=customer_id,
+                            dataset_deleted=d.get("dataset_deleted") or None,
                             name=d.get("name", d["id"]),
                             template_id=d.get("template_id", "")))
         # Newest first. Studies are named by wave — "Brändiseuranta 2025",
@@ -464,7 +477,8 @@ class Repository:
         d = self._read_json(auth, P.case_meta_path(customer_id, case_id))
         return Case(id=d["id"], customer_id=customer_id,
                     name=d.get("name", d["id"]),
-                    template_id=d.get("template_id", ""))
+                    template_id=d.get("template_id", ""),
+                    dataset_deleted=d.get("dataset_deleted") or None)
 
     def find_case(self, auth: AuthContext, case_id: str, user=None) -> Case | None:
         """Locate a case by id alone, without knowing its customer.
@@ -486,7 +500,8 @@ class Repository:
                 d = self._read_json(auth, info.path)
                 return Case(id=d["id"], customer_id=segments[0],
                             name=d.get("name", d["id"]),
-                            template_id=d.get("template_id", ""))
+                            template_id=d.get("template_id", ""),
+                            dataset_deleted=d.get("dataset_deleted") or None)
         return None
 
     def rename_case(self, auth: AuthContext, customer_id: str, case_id: str,
@@ -993,7 +1008,13 @@ class Repository:
                                         labels=[P.LABEL_REPORT_META])
             if _admits(user, info.path)
         ]
-        return sorted([r for r in refs if r], key=lambda r: r.modified_at, reverse=True)
+        refs = [r for r in refs if r]
+        # A report only becomes deck-only after its study is marked read-only,
+        # so one deck-only report means the study's dataset was deleted — and
+        # a report still waiting its turn in an unfinished delete is not shown.
+        if any(r.deck_only for r in refs):
+            refs = [r for r in refs if r.deck_only]
+        return sorted(refs, key=lambda r: r.modified_at, reverse=True)
 
     def list_reports_for_customer(self, auth: AuthContext, customer_id: str,
                                   user=None) -> list[ReportRef]:
@@ -1077,7 +1098,11 @@ class Repository:
                          # exists for the report's CURRENT content, since
                          # save_report rewrites this sidecar from scratch and
                          # drops any stale key when the report changes.
-                         rendered=bool(d.get("render_key")))
+                         # A deck-only report keeps no key — nothing is left
+                         # to check its deck against — and is rendered by
+                         # definition.
+                         rendered=bool(d.get("render_key") or d.get("deck_only")),
+                         deck_only=bool(d.get("deck_only")))
 
     def duplicate_report(self, auth: AuthContext, customer_id: str, case_id: str,
                          report_id: str, new_name: str) -> ReportRef:
@@ -1148,42 +1173,160 @@ class Repository:
             return []
         return self.list_reports(auth, customer_id, case_id)
 
+    def dataset_usage(self, auth: AuthContext, customer_id: str, case_id: str,
+                      material_id: str) -> dict:
+        """What deleting this dataset would do, for the warning.
+
+        `with_deck`/`without_deck` by the same rule the delete applies — a deck
+        stored in the hive, whatever its age — so what the warning says will be
+        kept is exactly what is kept."""
+        materials = self.list_materials(auth, customer_id, case_id)
+        remaining = [m.name for m in materials if m.id != material_id]
+        decks = self._stored_decks(auth, customer_id, case_id)
+        with_deck, without_deck = [], []
+        for r in self.list_reports(auth, customer_id, case_id):
+            (with_deck if r.id in decks else without_deck).append(r.name)
+        return {"last_dataset": not remaining, "remaining": remaining,
+                "with_deck": sorted(with_deck), "without_deck": sorted(without_deck)}
+
+    def _stored_decks(self, auth: AuthContext, customer_id: str, case_id: str) -> set[str]:
+        """Ids of the reports whose deck is stored in the hive."""
+        out = set()
+        for info in self.store.list(auth, P.reports_prefix(customer_id, case_id),
+                                    labels=[P.LABEL_RENDER]):
+            name = info.path.rsplit("/", 1)[-1]
+            if name.endswith(".pptx"):
+                out.add(name[:-len(".pptx")])
+        return out
+
     def delete_material(self, auth: AuthContext, customer_id: str, case_id: str,
-                        material_id: str) -> int:
-        """A dataset, its curation, and the renders drawn from it.
+                        material_id: str, *, by: str = "", by_name: str = "",
+                        keep_decks: bool = True) -> dict:
+        """Delete a dataset. The study's LAST dataset makes it read-only for good.
 
-        The reports are KEPT. A report is a list of questions and how to chart
-        them, written by an analyst; the dataset is what those questions were
-        asked of. Deleting the data to import a corrected export is the reason
-        this exists, and throwing away the report layout with it would make the
-        feature useless for its own purpose. The reports go empty until a
-        dataset is imported again — which is why the caller warns first.
+        Agreed with Johan, 2026-09-24 (docs/superpowers/specs/
+        2026-09-24-dataset-deletion-design.md): the report definitions go with
+        the data, the decks already generated stay — the study becomes what a
+        Read-only user sees, for everyone. This replaces the delete of
+        2026-08-20, which kept the definitions and dropped the decks.
 
-        Cached renders DO go: a deck on disk drawn from data that no longer
-        exists is the one artefact nobody can tell is stale by looking.
+        One of several datasets (left by "Replace file") goes on its own and
+        the study stays live on the rest.
+
+        `keep_decks=False` — the tick box left empty — takes the decks and every
+        report too; the study is still read-only, now empty. The choice is
+        recorded with the marking, so a resumed delete keeps to it whatever the
+        resuming call says.
+
+        Every step is safe to repeat. datahive asks a human before each
+        destructive step (ConsentRequired propagates to the caller, who
+        retries), and a process can die mid-way; the study is marked FIRST, with
+        `completed: False`, so nothing new is written while the rest is done,
+        and marked completed LAST.
         """
-        # Deliberately tolerant of what is already gone: datahive gates each
-        # delete behind approval, so this method is CALLED AGAIN after consent,
-        # and by then the objects it removed on the first pass do not exist.
-        # "Does this dataset exist at all" is the caller's question, asked once
-        # before it starts — see routes_materials.delete_material.
         self._material_location.pop(material_id, None)
-        removed = 0
-        for path in (P.material_path(customer_id, case_id, material_id),
-                     P.material_config_path(customer_id, case_id, material_id)):
-            try:
-                self.store.delete(auth, path)
-                removed += 1
-            except NotFound:
-                pass  # a material may carry no curation
-        for report in self.list_reports(auth, customer_id, case_id):
-            try:
-                self.store.delete(
-                    auth, P.report_render_path(customer_id, case_id, report.id))
-                removed += 1
-            except NotFound:
-                pass
-        return removed
+        case = self.get_case(auth, customer_id, case_id)
+        state = case.dataset_deleted
+        if state is None:
+            materials = self.list_materials(auth, customer_id, case_id)
+            others = [m for m in materials if m.id != material_id]
+            if others:
+                self._delete_material_objects(auth, customer_id, case_id, [material_id])
+                return {"read_only": False}
+            state = {"at": _now(), "by": by, "by_name": by_name,
+                     "files": [m.name for m in materials], "keep_decks": keep_decks,
+                     "completed": False}
+            self._set_dataset_deleted(auth, customer_id, case_id, state)
+        if state.get("completed"):
+            return {"read_only": True}
+
+        decks = (self._stored_decks(auth, customer_id, case_id)
+                 if state.get("keep_decks", True) else set())
+        for info in self.store.list(auth, P.reports_prefix(customer_id, case_id),
+                                    labels=[P.LABEL_REPORT_META]):
+            report_id = info.path.rsplit("/", 1)[-1][:-len(".meta")]
+            if report_id in decks:
+                self._keep_only_the_deck(auth, customer_id, case_id, report_id)
+            else:
+                self._delete_report_entirely(auth, customer_id, case_id, report_id)
+        # Definitions whose sidecar went first on an earlier, interrupted pass.
+        for info in self.store.list(auth, P.reports_prefix(customer_id, case_id),
+                                    labels=[P.LABEL_REPORT]):
+            self._delete_quietly(auth, info.path)
+        self._delete_material_objects(
+            auth, customer_id, case_id,
+            [m.id for m in self.list_materials(auth, customer_id, case_id)] or [material_id])
+        self._set_dataset_deleted(auth, customer_id, case_id, {**state, "completed": True})
+        return {"read_only": True}
+
+    def _delete_material_objects(self, auth: AuthContext, customer_id: str, case_id: str,
+                                 material_ids: list[str]) -> None:
+        for mid in material_ids:
+            self._material_location.pop(mid, None)
+            for path in (P.material_path(customer_id, case_id, mid),
+                         P.material_config_path(customer_id, case_id, mid)):
+                self._delete_quietly(auth, path)
+
+    def _keep_only_the_deck(self, auth: AuthContext, customer_id: str, case_id: str,
+                            report_id: str) -> None:
+        """The sidecar becomes the deck-only form FIRST, then the definition
+        goes — interrupted in between, the report is already download-only."""
+        meta_path = P.report_meta_path(customer_id, case_id, report_id)
+        try:
+            d = self._read_json(auth, meta_path)
+        except NotFound:
+            d = {}
+        if not d.get("deck_only"):
+            self._write_json(auth, meta_path, {
+                "id": report_id, "case_id": case_id, "customer_id": customer_id,
+                "name": d.get("name") or report_id, "has_render": True,
+                "rendered_at": d.get("rendered_at", ""), "deck_only": True,
+            }, [P.LABEL_REPORT_META])
+        for path in (P.report_path(customer_id, case_id, report_id),
+                     P.report_lock_path(customer_id, case_id, report_id)):
+            self._delete_quietly(auth, path)
+
+    def _delete_report_entirely(self, auth: AuthContext, customer_id: str, case_id: str,
+                                report_id: str) -> None:
+        # The sidecar last: it is what lists the report, so while it exists a
+        # retry still finds this report and finishes it.
+        for path in (P.report_path(customer_id, case_id, report_id),
+                     P.report_render_path(customer_id, case_id, report_id),
+                     P.report_lock_path(customer_id, case_id, report_id),
+                     P.report_meta_path(customer_id, case_id, report_id)):
+            self._delete_quietly(auth, path)
+
+    def _delete_quietly(self, auth: AuthContext, path: str) -> None:
+        """Delete, treating "already gone" as done. ConsentRequired propagates."""
+        try:
+            self.store.delete(auth, path)
+        except NotFound:
+            pass
+
+    def _set_dataset_deleted(self, auth: AuthContext, customer_id: str, case_id: str,
+                             state: dict) -> None:
+        path = P.case_meta_path(customer_id, case_id)
+        d = self._read_json(auth, path)
+        d["dataset_deleted"] = state
+        self._write_json(auth, path, d, [P.LABEL_CASE])
+
+    def load_deck_only(self, auth: AuthContext, customer_id: str, case_id: str,
+                       report_id: str) -> bytes | None:
+        """The stored deck of a report whose dataset was deleted, or None.
+
+        No render key is checked: nothing is left to check it against. Only a
+        report marked deck-only is served this way — a live report's deck is
+        checked against its definition as before (`load_render`)."""
+        try:
+            d = self._read_json(auth, P.report_meta_path(customer_id, case_id, report_id))
+        except NotFound:
+            return None
+        if not d.get("deck_only"):
+            return None
+        try:
+            return self.store.get(auth, P.report_render_path(customer_id, case_id, report_id))
+        except NotFound:
+            return None
 
     def delete_case(self, auth: AuthContext, customer_id: str, case_id: str) -> int:
         """The tutkimus and everything in it: materials, curation, reports,
@@ -2341,7 +2484,12 @@ class Repository:
 
     def save_render(self, auth: AuthContext, customer_id: str, case_id: str,
                     report_id: str, pptx: bytes, key: str) -> None:
-        """Store a rendered deck and stamp the key it was rendered from."""
+        """Store a rendered deck and stamp the key it was rendered from.
+
+        Refused in a study whose dataset was deleted: a render that was already
+        running when the delete started must not write a deck back into it."""
+        if self.get_case(auth, customer_id, case_id).dataset_deleted:
+            raise StudyReadOnly(case_id)
         self.store.put(auth, P.report_render_path(customer_id, case_id, report_id),
                        pptx, _PPTX, labels=[P.LABEL_RENDER])
         # Merged, not written over: this used to rewind `version`, telling the

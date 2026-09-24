@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api, type DatasetDeleted } from "@/lib/api";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { PencilIcon, CheckIcon, XIcon, Trash2Icon, Loader2Icon } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +27,7 @@ import {
   useDeleteCase,
   useCaseMaterials,
   useCaseTemplate,
+  qk,
 } from "@/lib/queries";
 import { useWorkspace, useClearWorkspace } from "@/lib/workspace";
 import TemplateSelect from "@/components/TemplateSelect";
@@ -144,7 +147,12 @@ export default function CaseDetailPage() {
   // flashes delete buttons and the workbench at a viewer for one fetch, and
   // every one of those controls would 403 if clicked. Erring closed costs an
   // editor a moment of quiet; erring open shows people doors that are locked.
-  const canEdit = resolved?.can_edit ?? false;
+  const mayWrite = resolved?.can_edit ?? false;
+  // A study whose dataset was deleted is read-only for everyone — exactly what
+  // a Read-only user sees: the generated decks, for download, and nothing
+  // else. Deleting the whole study stays allowed (`mayWrite`).
+  const readOnly = resolved?.dataset_deleted ?? null;
+  const canEdit = mayWrite && !readOnly;
   const { workspace, removeReport } = useWorkspace(id ?? "");
   const clearWorkspace = useClearWorkspace();
   // The case→material link is server-side; fall back to it when this browser has
@@ -222,19 +230,22 @@ export default function CaseDetailPage() {
           <p className="mt-1 font-mono text-xs text-muted-foreground">{id}</p>
         </div>
         {/* Choosing a template and deleting the study are both writes — a
-            viewer gets neither control. */}
-        {canEdit && (
+            viewer gets neither control. A read-only study keeps only the
+            delete. */}
+        {mayWrite && (
           <div className="flex shrink-0 items-center gap-2">
             {/* The pohja this tutkimus renders with. Managing the LIST is the
                 asiakas's page; here you choose from it. */}
-            <TemplateSelect
-              customerId={resolved?.customer_id}
-              value={resolved?.template_id ?? ""}
-              inheritedId={caseTemplate?.template_id}
-              onChange={(templateId) =>
-                templates.bindCase.mutate({ caseId: id, templateId })
-              }
-            />
+            {canEdit && (
+              <TemplateSelect
+                customerId={resolved?.customer_id}
+                value={resolved?.template_id ?? ""}
+                inheritedId={caseTemplate?.template_id}
+                onChange={(templateId) =>
+                  templates.bindCase.mutate({ caseId: id, templateId })
+                }
+              />
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -245,6 +256,15 @@ export default function CaseDetailPage() {
           </div>
         )}
       </div>
+
+      {readOnly && (
+        <ReadOnlyBanner
+          caseId={id}
+          state={readOnly}
+          mayWrite={mayWrite}
+          materialId={serverMaterialId}
+        />
+      )}
 
       {!canEdit ? (
         // A viewer never sees the workbench (DataTab: upload, questions,
@@ -298,6 +318,67 @@ export default function CaseDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+
+/** Why this study is read-only, and — while its dataset delete is unfinished —
+ *  the way to finish it. (spec 2026-09-24-dataset-deletion-design.md) */
+function ReadOnlyBanner({
+  caseId,
+  state,
+  mayWrite,
+  materialId,
+}: {
+  caseId: string;
+  state: DatasetDeleted;
+  mayWrite: boolean;
+  materialId: string | null;
+}) {
+  const qc = useQueryClient();
+  const [finishing, setFinishing] = useState(false);
+  const when = state.at ? new Date(state.at).toLocaleDateString() : "";
+  const files = state.files.length ? ` ${state.files.map((f) => `"${f}"`).join(", ")}` : "";
+
+  async function finish() {
+    setFinishing(true);
+    try {
+      // The server finishes whatever is left; the id only addresses the route.
+      await api.materials.remove(caseId, materialId ?? "-", state.keep_decks ?? true);
+      qc.invalidateQueries({ queryKey: ["case", caseId, "resolve"] });
+      qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+      qc.invalidateQueries({ queryKey: qk.caseMaterials(caseId) });
+      toast.success("Deleting the dataset is finished");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not finish deleting");
+    } finally {
+      setFinishing(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+      {state.completed ? (
+        <p>
+          <strong>Read only:</strong> the dataset{files} was deleted
+          {when && ` on ${when}`}
+          {state.by_name && ` by ${state.by_name}`}. Only the generated decks remain.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p>
+            <strong>Deleting the dataset did not finish.</strong> The study is
+            read-only until it does.
+          </p>
+          {mayWrite && (
+            <Button size="sm" variant="outline" onClick={finish} disabled={finishing}>
+              {finishing && <Loader2Icon className="size-4 animate-spin" />}
+              Finish deleting
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

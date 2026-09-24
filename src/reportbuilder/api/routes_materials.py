@@ -5,7 +5,11 @@ import tempfile
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from reportbuilder.api.deps import get_client
-from reportbuilder.api.deps_auth import require_case, require_case_write
+from reportbuilder.api.deps_auth import (require_case, require_case_write,
+                                         require_case_write_or_finish_delete)
+from reportbuilder.api.deps_store import get_auth
+from reportbuilder.api.routes_cases import _locks
+from reportbuilder.store.seam import AuthContext
 from reportbuilder.auth.permissions import User
 from reportbuilder.ingest.sav_reader import read_sav, sav_file_label
 from reportbuilder.store.datahive_client import DataHiveClient
@@ -116,48 +120,70 @@ def material_usage(
     client: DataHiveClient = Depends(get_client),
     user: User = Depends(require_case),
 ) -> dict:
-    """What deleting this dataset would affect.
+    """What deleting this dataset would do, for the warning.
 
-    Asked BEFORE the delete so the confirmation can name the reports rather than
-    count them: "this empties Report 1, Report 2 and Report 3" is something an
-    analyst can weigh, "3 reports affected" is not.
+    `last_dataset` — the study becomes read-only; `remaining` — the files the
+    reports use otherwise; `with_deck`/`without_deck` — the reports whose deck
+    stays, and those that go entirely. Named, not counted: a list of reports is
+    something an analyst can weigh before agreeing to it.
     """
     try:
-        return {"reports": client.reports_using_material(case_id, material_id)}
+        return client.dataset_usage(case_id, material_id)
     except (KeyError, NotFound):
-        return {"reports": []}
+        return {"last_dataset": False, "remaining": [], "with_deck": [], "without_deck": []}
 
 
 @materials_router.delete("/cases/{case_id}/materials/{material_id}")
 def delete_material(
     case_id: str,
     material_id: str,
+    keep_decks: bool = True,
     client: DataHiveClient = Depends(get_client),
-    user: User = Depends(require_case_write),
+    auth: AuthContext = Depends(get_auth),
+    user: User = Depends(require_case_write_or_finish_delete),
 ) -> dict:
-    """Delete a dataset and the curation and renders drawn from it.
+    """Delete a dataset. The study's LAST dataset makes it read-only for good.
 
-    The tutkimus and its REPORTS survive: a report is an analyst's list of
-    questions and how to chart them, and the usual reason to delete a dataset is
-    to import a corrected export in its place. Throwing the layout away with the
-    data would defeat that. The reports chart nothing until a dataset is
-    imported again, which is what the confirmation warns about.
+    Report definitions go with the data and the generated decks stay (spec
+    docs/superpowers/specs/2026-09-24-dataset-deletion-design.md). One of
+    several datasets goes on its own and the study stays live.
 
-    Consent comes back as a 409 carrying the approval envelope, as for a case.
+    Called again to FINISH a delete that was interrupted — by datahive asking
+    for consent (a 409 carrying the approval envelope, as for a case), or by a
+    process dying. The guard admits that call, and only that one, while the
+    study is marked read-only but not yet completed.
+
+    `keep_decks=false` — the warning's tick box left empty — deletes the decks
+    and every report too. Recorded with the first call; a resumed delete keeps
+    to it.
     """
     from reportbuilder.store.seam import ConsentRequired, NotFound
 
-    # Asked here rather than inside the delete: a delete is re-run after
-    # datahive grants consent, and by the second pass the objects removed on the
-    # first are legitimately gone. Checking in there would turn the retry into a
-    # 404.
-    known = {m["material_id"] for m in client.list_materials(case_id)}
-    if material_id not in known:
-        raise HTTPException(
-            status_code=404, detail=f"Material '{material_id}' not found")
+    state = client.dataset_deleted(case_id)
+    finishing = bool(state) and not state.get("completed")
+    if not finishing:
+        # Asked here rather than inside the delete: a delete is re-run after
+        # datahive grants consent, and by then objects removed on the first
+        # pass are legitimately gone.
+        known = {m["material_id"] for m in client.list_materials(case_id)}
+        if material_id not in known:
+            raise HTTPException(
+                status_code=404, detail=f"Material '{material_id}' not found")
+        # The same rule as deleting the study: somebody else's open report is
+        # not taken from under them.
+        held = {rid: lock for rid, lock in (_locks(client, case_id) or {}).items()
+                if lock.get("user_id") != getattr(user, "id", "")}
+        if held:
+            names = sorted({(lock.get("user_name") or "Someone else")
+                            for lock in held.values()})
+            raise HTTPException(
+                status_code=409,
+                detail=(f"{' and '.join(names)} {'is' if len(names) == 1 else 'are'} "
+                        f"editing {len(held)} of this study's reports, so its "
+                        "dataset cannot be deleted yet."))
 
     try:
-        removed = client.delete_material(case_id, material_id)
+        result = client.delete_material(case_id, material_id, keep_decks=keep_decks)
     except (KeyError, NotFound) as exc:
         raise HTTPException(
             status_code=404, detail=f"Material '{material_id}' not found") from exc
@@ -172,7 +198,45 @@ def delete_material(
                 "approve": exc.envelope.get("approval_urls", {}),
             },
         ) from exc
-    payload = {"deleted": material_id}
-    if isinstance(removed, int):
-        payload["objects_removed"] = removed
-    return payload
+    _forget_derived(case_id, material_id)
+    if result.get("read_only"):
+        _unregister_terms(client, auth, material_id)
+    return {"deleted": material_id, "read_only": bool(result.get("read_only"))}
+
+
+def _forget_derived(case_id: str, material_id: str) -> None:
+    """What the server derived from the deleted data, outside the hive.
+
+    Best-effort and idempotent: a cache left behind is served to nobody — a
+    read-only study's decks come from the hive, not from `render_root` — so a
+    failure here is logged, never raised."""
+    import shutil
+
+    from reportbuilder import cache_dirs
+    try:
+        from reportbuilder.api.routes_questions import clear_material_previews
+        clear_material_previews(material_id)
+    except Exception:  # noqa: BLE001
+        log.info("could not clear the previews of %s", material_id, exc_info=True)
+    try:
+        shutil.rmtree(cache_dirs.render_root() / case_id, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        log.info("could not clear the deck cache of %s", case_id, exc_info=True)
+    try:
+        from reportbuilder.api.model_loader import forget_parsed
+        forget_parsed(material_id)
+    except Exception:  # noqa: BLE001
+        log.info("could not forget the parsed data of %s", material_id, exc_info=True)
+
+
+def _unregister_terms(client, auth: AuthContext, material_id: str) -> None:
+    """Drop the deleted dataset's accepted terms from the tenant's masking list.
+
+    Best-effort: if it fails, those terms stay masked — more masking, never
+    less — until the next acceptance anywhere re-registers the union."""
+    try:
+        from reportbuilder.api.routes_questions import _register_with_datahive
+        _register_with_datahive(auth, client.all_accepted_terms(exclude=material_id))
+    except Exception:  # noqa: BLE001
+        log.info("could not re-register masking terms after deleting %s",
+                 material_id, exc_info=True)

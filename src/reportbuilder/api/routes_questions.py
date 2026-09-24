@@ -2440,9 +2440,15 @@ def clear_preview_cache(
     is how a clear-cache button becomes the thing that made the morning slow.
     """
     del user
+    return {"cleared": clear_material_previews(material_id)}
+
+
+def clear_material_previews(material_id: str) -> int:
+    """Remove the rendered previews marked as this material's; return how many.
+    Shared by the Clear-cache button and deleting a dataset."""
     root = cache_dirs.preview_root()
     if not root.is_dir():
-        return {"cleared": 0}
+        return 0
     cleared = 0
     for entry in root.iterdir():
         if not entry.is_dir():
@@ -2457,7 +2463,7 @@ def clear_preview_cache(
         shutil.rmtree(entry, ignore_errors=True)
         cleared += 1
     log.info("preview cache: cleared %d entries for %s", cleared, material_id)
-    return {"cleared": cleared}
+    return cleared
 
 
 class AcceptTermsBody(BaseModel):

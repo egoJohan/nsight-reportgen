@@ -306,7 +306,15 @@ export default function CustomerCasesPage() {
               <span className="flex min-w-0 items-center gap-3">
                 <FolderIcon className="size-5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 text-left">
-                  <span className="block truncate font-medium">{k.name}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="truncate font-medium">{k.name}</span>
+                    {/* Its dataset was deleted: only the decks remain. */}
+                    {k.dataset_deleted && (
+                      <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 text-[11px] font-normal text-amber-800">
+                        Read only
+                      </span>
+                    )}
+                  </span>
                   {total > 0 && (
                     <span className="mt-0.5 block text-xs text-muted-foreground">
                       {k.completed_reports} completed, {k.draft_reports} draft

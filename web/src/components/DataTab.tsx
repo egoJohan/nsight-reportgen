@@ -33,7 +33,8 @@ import {
   qk,
 } from "@/lib/queries";
 import { useWorkspace } from "@/lib/workspace";
-import type { Question } from "@/lib/api";
+import type { DatasetUsage, Question } from "@/lib/api";
+import { datasetDeleteWarning } from "@/lib/datasetDeletion";
 import QuestionDetailsDialog from "@/components/QuestionDetailsDialog";
 import { QuestionTags } from "@/components/QuestionTags";
 import { ERROR, ITEM_ROW, ITEM_TITLE, PANEL_TITLE } from "@/lib/surfaces";
@@ -283,26 +284,39 @@ export default function DataTab({ caseId }: { caseId: string }) {
   const [replacing, setReplacing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Reports the delete would leave with nothing to chart, named in the warning.
-  const [affected, setAffected] = useState<string[]>([]);
+  // What the delete would do — read before the confirmation, so the warning
+  // can name what is kept and what is lost (spec 2026-09-24).
+  const [usage, setUsage] = useState<DatasetUsage | null>(null);
+  // "Keep the generated decks" — the safe choice is the default.
+  const [keepDecks, setKeepDecks] = useState(true);
   // Prefer this browser's local pointer; else fall back to the case's material
   // on the server (so a case opened by another user/device isn't shown empty).
   const { data: caseMaterials } = useCaseMaterials(caseId);
   const serverMaterialId = caseMaterials?.materials?.[0]?.material_id ?? null;
   const materialId = workspace.materialId ?? serverMaterialId;
+  const fileName =
+    caseMaterials?.materials?.find((m) => m.material_id === materialId)?.name ?? "";
+  const warning = datasetDeleteWarning(usage, fileName, keepDecks);
 
   async function deleteMaterial() {
     if (!materialId) return;
     setDeleting(true);
     try {
-      await api.materials.remove(caseId, materialId);
+      const { read_only } = await api.materials.remove(caseId, materialId, keepDecks);
       setMaterial(null);
       setConfirmDelete(false);
-      // The reports survive but chart nothing until a dataset is imported, and
-      // every preview was drawn from data that is gone.
       qc.invalidateQueries({ queryKey: qk.caseMaterials(caseId) });
+      // Every preview was drawn from data that is gone.
       qc.removeQueries({ queryKey: ["chart-preview"] });
-      toast.success("Dataset deleted");
+      if (read_only) {
+        // The page turns into the read-only view: the study says so, the list
+        // keeps only the decks, and the study lists show the label.
+        qc.invalidateQueries({ queryKey: ["case", caseId, "resolve"] });
+        qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+        qc.invalidateQueries({ queryKey: qk.cases() });
+        qc.invalidateQueries({ queryKey: ["customer"] });
+      }
+      toast.success(read_only ? "Dataset deleted — the study is now read-only" : "Dataset deleted");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete the dataset");
     } finally {
@@ -356,13 +370,13 @@ export default function DataTab({ caseId }: { caseId: string }) {
                 title="Delete this dataset"
                 className="text-muted-foreground hover:text-destructive"
                 onClick={async () => {
+                  setKeepDecks(true);
                   try {
-                    const { reports } = await api.materials.usage(caseId, materialId);
-                    setAffected(reports.map((r) => r.name));
+                    setUsage(await api.materials.usage(caseId, materialId));
                   } catch {
-                    // The warning is a courtesy; not being able to build it is
-                    // no reason to block the delete.
-                    setAffected([]);
+                    // Without the facts, the warning takes the stronger form
+                    // (read-only) rather than block the delete.
+                    setUsage(null);
                   }
                   setConfirmDelete(true);
                 }}
@@ -391,26 +405,43 @@ export default function DataTab({ caseId }: { caseId: string }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete this dataset?</DialogTitle>
-            <DialogDescription>
-              The SPSS file and its curation — groupings, word merges, label
-              edits — are removed, along with every deck rendered from it.
-              {affected.length > 0 && (
-                <>
-                  {" "}
-                  The study keeps its reports, but {affected.join(", ")} will
-                  chart nothing until a dataset is imported again.
-                </>
-              )}{" "}
-              This cannot be undone.
-            </DialogDescription>
+            <DialogDescription>{warning.paragraphs[0]}</DialogDescription>
           </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {warning.paragraphs.slice(1).map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+            {warning.lost.length > 0 && (
+              <ul className="list-disc pl-5 font-medium text-foreground">
+                {warning.lost.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            )}
+            <p>This cannot be undone.</p>
+          </div>
+          {warning.offerKeepDecks && (
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 shrink-0"
+                checked={keepDecks}
+                onChange={(e) => setKeepDecks(e.target.checked)}
+              />
+              <span>
+                Keep the {warning.deckCount} generated{" "}
+                {warning.deckCount === 1 ? "deck" : "decks"} for download (PDF
+                and PPTX)
+              </span>
+            </label>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDelete(false)}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={deleteMaterial} disabled={deleting}>
               {deleting && <Loader2Icon className="size-4 animate-spin" />}
-              Delete dataset
+              {warning.confirm}
             </Button>
           </DialogFooter>
         </DialogContent>

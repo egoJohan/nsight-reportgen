@@ -120,12 +120,31 @@ def _strip_render_stamp(data: bytes) -> bytes:
         return data  # not JSON we understand; store it untouched
     if not isinstance(d, dict):
         return data
+    if d.get("deck_only"):
+        # Only the deck is left of this report, and its deck IS in the archive
+        # (see `write`): the stamp is true of what the backup holds.
+        return data
     stamps = ("render_key", "rendered_at", "has_render")
     if not any(k in d for k in stamps):
         return data
     for k in stamps:
         d.pop(k, None)
     return json.dumps(d).encode("utf-8")
+
+
+def _read_only_study_prefixes(repo: Repository, auth: AuthContext, listing) -> list[str]:
+    """Case prefixes of the studies whose dataset was deleted."""
+    out = []
+    for info in listing:
+        if P.LABEL_CASE not in info.labels:
+            continue
+        try:
+            d = json.loads(repo.store.get(auth, info.path).decode("utf-8"))
+        except Exception:  # noqa: BLE001 — an unreadable case keeps no decks
+            continue
+        if isinstance(d, dict) and d.get("dataset_deleted"):
+            out.append(info.path.rsplit("/", 1)[0] + "/")
+    return out
 
 
 def write(repo: Repository, auth: AuthContext, out) -> BackupSummary:
@@ -138,9 +157,16 @@ def write(repo: Repository, auth: AuthContext, out) -> BackupSummary:
     summary = BackupSummary()
     entries: list[dict] = []
 
+    listing = sorted(repo.store.list(auth, ""), key=lambda i: i.path)
+    archived = _read_only_study_prefixes(repo, auth, listing)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for info in sorted(repo.store.list(auth, ""), key=lambda i: i.path):
-            if EXCLUDED_LABELS.intersection(info.labels):
+        for info in listing:
+            # A live report's deck can be drawn again from its definition, so
+            # decks are left out. A read-only study's cannot — its dataset and
+            # definitions are gone, and the decks are all that is left of it.
+            keep_deck = (P.LABEL_RENDER in info.labels
+                         and any(info.path.startswith(a) for a in archived))
+            if EXCLUDED_LABELS.intersection(info.labels) and not keep_deck:
                 summary.skipped += 1
                 continue
             try:

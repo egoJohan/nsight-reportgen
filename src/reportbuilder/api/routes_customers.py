@@ -394,7 +394,7 @@ def create_case(customer_id: str, body: NameBody,
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
     return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
-            "template_id": k.template_id}
+            "template_id": k.template_id, "dataset_deleted": k.dataset_deleted}
 
 
 @customers_router.get("/customers/{customer_id}/cases")
@@ -421,6 +421,8 @@ def list_cases(customer_id: str, auth: AuthContext = Depends(get_auth),
         completed, draft = _report_stats(reports_by_case.get(k.id, []))
         out.append({"id": k.id, "customer_id": k.customer_id, "name": k.name,
                     "template_id": k.template_id,
+                    # Set when the dataset was deleted: read-only for good.
+                    "dataset_deleted": k.dataset_deleted,
                     "completed_reports": completed, "draft_reports": draft})
     return out
 
@@ -434,7 +436,7 @@ def get_case(customer_id: str, case_id: str, auth: AuthContext = Depends(get_aut
     except NotFound:
         raise HTTPException(404, f"Case '{case_id}' not found") from None
     return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
-            "template_id": k.template_id}
+            "template_id": k.template_id, "dataset_deleted": k.dataset_deleted}
 
 
 @customers_router.patch("/customers/{customer_id}/cases/{case_id}")
@@ -447,7 +449,7 @@ def rename_case(customer_id: str, case_id: str, body: NameBody,
     except NotFound:
         raise HTTPException(404, f"Case '{case_id}' not found") from None
     return {"id": k.id, "customer_id": k.customer_id, "name": k.name,
-            "template_id": k.template_id}
+            "template_id": k.template_id, "dataset_deleted": k.dataset_deleted}
 
 
 @customers_router.get("/reports/recent")
@@ -498,7 +500,10 @@ def resolve_case(case_id: str, auth: AuthContext = Depends(get_auth),
         pass
     return {"id": k.id, "name": k.name, "customer_id": k.customer_id,
             "customer_name": customer_name, "template_id": k.template_id,
-            "can_edit": may_write(user, f"{k.customer_id}/{k.id}")}
+            "can_edit": may_write(user, f"{k.customer_id}/{k.id}"),
+            # Set when the study's dataset was deleted: read-only for everyone,
+            # whatever `can_edit` says (deleting the study stays allowed).
+            "dataset_deleted": k.dataset_deleted}
 
 
 def _case_name_from_filename(filename: str) -> str:

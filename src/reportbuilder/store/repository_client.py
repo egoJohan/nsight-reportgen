@@ -398,6 +398,8 @@ class RepositoryClient:
             out.append({
                 "report_id": r.id, "name": r.name,
                 "rendered": r.rendered, "rendered_at": r.rendered_at,
+                # Only the deck is left: the study's dataset was deleted.
+                "deck_only": r.deck_only,
                 "modified_at": r.modified_at, "modified_by": r.modified_by,
                 # Who has it open, and whether that is you — a report you left
                 # open in another tab must not look barred to you.
@@ -445,7 +447,7 @@ class RepositoryClient:
         the old routes expect."""
         out = []
         for c in self.repo.list_customers(self.auth, user=self.user):
-            out += [{"id": k.id, "name": k.name}
+            out += [{"id": k.id, "name": k.name, "dataset_deleted": k.dataset_deleted}
                     for k in self.repo.list_cases(self.auth, c.id, user=self.user)]
         return out
 
@@ -455,10 +457,37 @@ class RepositoryClient:
                 for r in deliverables_only(self.user, self.repo.reports_using_material(
                     self.auth, k.customer_id, k.id, material_id))]
 
-    def delete_material(self, case_id: str, material_id: str) -> int:
-        """Delete a dataset. ConsentRequired propagates, as for a case."""
+    def delete_material(self, case_id: str, material_id: str,
+                        keep_decks: bool = True) -> dict:
+        """Delete a dataset. ConsentRequired propagates, as for a case.
+
+        The study's last dataset makes it read-only; see
+        Repository.delete_material."""
         k = self._case(case_id)
-        return self.repo.delete_material(self.auth, k.customer_id, k.id, material_id)
+        return self.repo.delete_material(
+            self.auth, k.customer_id, k.id, material_id,
+            by=getattr(self.user, "id", ""),
+            by_name=getattr(self.user, "name", "") or getattr(self.user, "email", ""),
+            keep_decks=keep_decks)
+
+    def dataset_usage(self, case_id: str, material_id: str) -> dict:
+        """What deleting this dataset would do — for the warning."""
+        k = self._case(case_id)
+        return self.repo.dataset_usage(self.auth, k.customer_id, k.id, material_id)
+
+    def dataset_deleted(self, case_id: str) -> dict | None:
+        """The study's read-only state, or None while it is live."""
+        k = self.repo.get_case(self.auth, *self._customer_and_case(case_id))
+        return k.dataset_deleted
+
+    def _customer_and_case(self, case_id: str) -> tuple[str, str]:
+        k = self._case(case_id)
+        return k.customer_id, k.id
+
+    def load_deck_only(self, case_id: str, report_id: str) -> bytes | None:
+        """The stored deck of a report whose dataset was deleted, or None."""
+        k = self._case(case_id)
+        return self.repo.load_deck_only(self.auth, k.customer_id, k.id, report_id)
 
     def delete_case(self, case_id: str) -> int:
         """Delete a tutkimus and everything under it.

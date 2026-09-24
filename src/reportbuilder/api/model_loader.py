@@ -47,6 +47,18 @@ _PARSED_MAX = 4
 _PARSED_LOCK = threading.Lock()
 
 
+def forget_parsed(material_id: str = "") -> None:
+    """Drop every parsed file held in memory.
+
+    Keyed by the file's CONTENT, not by material, so a deleted dataset cannot be
+    singled out; the cache holds at most `_PARSED_MAX` entries and a re-parse is
+    the whole cost of emptying it. Called when a dataset is deleted, so its
+    parsed answers do not outlive it in this process."""
+    del material_id
+    with _PARSED_LOCK:
+        _PARSED.clear()
+
+
 def _parse(raw: bytes):
     """Parse a SAV blob, or hand back the parse we already have of it."""
     key = hashlib.sha256(raw).hexdigest()

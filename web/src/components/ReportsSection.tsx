@@ -123,6 +123,8 @@ function ReportRow({
     name: string;
     createdAt?: string;
     renderedAt?: string;
+    /** Only the deck is left: the study's dataset was deleted. */
+    deckOnly?: boolean;
     modifiedAt?: string;
     modifiedBy?: string;
     lockedByName?: string;
@@ -291,7 +293,19 @@ function ReportRow({
           </Button>
         </>
       ) : (
-        <DownloadButtons caseId={caseId} reportId={report.id} name={report.name} />
+        <>
+          {/* Its study's dataset was deleted: the deck is all that is left,
+              and nothing here can be regenerated. (spec 2026-09-24) */}
+          {report.deckOnly && (
+            <Badge
+              variant="outline"
+              className="shrink-0 border-amber-300 bg-amber-50 font-normal text-amber-800"
+            >
+              Dataset deleted
+            </Badge>
+          )}
+          <DownloadButtons caseId={caseId} reportId={report.id} name={report.name} />
+        </>
       )}
     </div>
   );
@@ -355,6 +369,7 @@ export default function ReportsSection({
     createdAt: wsById.get(r.report_id)?.createdAt,
     rendered: r.rendered,
     renderedAt: r.rendered_at,
+    deckOnly: r.deck_only,
     // The freshly-polled set wins once it has an answer: the list's own flag
     // is as old as the last time this expensive query ran.
     rendering: renderingNow.size > 0 ? renderingNow.has(r.report_id) : r.rendering,

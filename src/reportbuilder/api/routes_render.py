@@ -499,6 +499,38 @@ def render_status(
 _NO_STORE = {"Cache-Control": "no-store, must-revalidate"}
 
 
+def _deck_only(repo: Repository, auth: AuthContext, case_id: str, report_id: str,
+               pdf: bool) -> pathlib.Path | None:
+    """The file to serve for a report whose study's dataset was deleted, or
+    None for a live study.
+
+    Checked BEFORE the local deck cache: a read-only study's decks are served
+    from the hive and nowhere else — the cache is what a deck of deleted data
+    used to leak through. Written to a folder of its own, so no deck a live
+    render or an earlier session left in `render_output_dir` can be served in
+    its place. No render key is checked: nothing is left to check it against.
+    """
+    k = repo.find_case(auth, case_id)
+    if k is None or not k.dataset_deleted:
+        return None
+    blob = repo.load_deck_only(auth, k.customer_id, k.id, report_id)
+    if blob is None:
+        raise HTTPException(status_code=404, detail="no generated deck")
+    out = render_output_dir(case_id, report_id) / "deck-only"
+    out.mkdir(parents=True, exist_ok=True)
+    pptx = out / "deck.pptx"
+    if not pptx.exists() or pptx.stat().st_size != len(blob):
+        pptx.write_bytes(blob)
+        (out / "deck.pdf").unlink(missing_ok=True)
+    if not pdf:
+        return pptx
+    if not (out / "deck.pdf").exists():
+        pptx_to_pdf(str(pptx), str(out))
+    if not (out / "deck.pdf").exists():
+        raise HTTPException(status_code=404, detail="the deck could not be converted")
+    return out / "deck.pdf"
+
+
 @render_router.get("/cases/{case_id}/reports/{report_id}/preview.pdf")
 def get_preview_pdf(case_id: str, report_id: str,
                     auth: AuthContext = Depends(get_auth),
@@ -511,6 +543,10 @@ def get_preview_pdf(case_id: str, report_id: str,
     heuristic — which is how a re-rendered deck kept showing the PREVIOUS
     render's slides and looked like the render had not taken effect.
     """
+    archived = _deck_only(repo, auth, case_id, report_id, pdf=True)
+    if archived is not None:
+        return FileResponse(str(archived), media_type="application/pdf",
+                            filename="preview.pdf", headers=_NO_STORE)
     # pptx_to_pdf produces <stem>.pdf; since we write deck.pptx the output is deck.pdf
     out = render_output_dir(case_id, report_id)
     pdf = out / "deck.pdf"
@@ -543,6 +579,10 @@ def get_preview_pptx(case_id: str, report_id: str,
 
     Never cached, for the same reason as the PDF: same URL, new content on
     every render."""
+    archived = _deck_only(repo, auth, case_id, report_id, pdf=False)
+    if archived is not None:
+        return FileResponse(str(archived), media_type=_PPTX_MEDIA_TYPE,
+                            filename="preview.pptx", headers=_NO_STORE)
     out = render_output_dir(case_id, report_id)
     pptx = out / "deck.pptx"
     if not pptx.exists() and not _restore_deck(repo, auth, case_id, report_id, out):
