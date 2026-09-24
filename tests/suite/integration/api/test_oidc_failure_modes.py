@@ -252,7 +252,7 @@ def test_a_refused_sign_in_mints_no_session_and_sets_no_session_cookie(
     callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
                           follow_redirects=False)
     assert callback.status_code == 302
-    assert "/request-access" in callback.headers["location"]
+    assert callback.headers["location"] == "/login?error=sign_in_failed"
 
     set_cookie_headers = callback.headers.get_list("set-cookie")
     assert not any(h.startswith(f"{session.COOKIE_NAME}=") for h in set_cookie_headers)
@@ -261,7 +261,7 @@ def test_a_refused_sign_in_mints_no_session_and_sets_no_session_cookie(
 def test_a_refused_sign_in_drops_the_next_destination(client, repo, auth, monkeypatch, rsa_key):
     """DOCUMENTS a known gap (flagged in Task 13's report, not fixed here --
     the controller decides, per this task's instructions): a refusal always
-    redirects to the bare `/login?error=not_allowed`, even when the login
+    redirects to the bare `/login?error=sign_in_failed`, even when the login
     attempt started with `?next=/somewhere`. `next` correctly survives the
     round trip on the SUCCESS path; this pins that only the REFUSAL path
     loses it. If this starts failing, `next` is being carried through and
@@ -280,7 +280,7 @@ def test_a_refused_sign_in_drops_the_next_destination(client, repo, auth, monkey
     callback = client.get(f"/auth/callback/google?code=fake-code&state={state}",
                           follow_redirects=False)
     assert callback.status_code == 302
-    assert callback.headers["location"] == "/request-access"
+    assert callback.headers["location"] == "/login?error=sign_in_failed"
     assert "reports" not in callback.headers["location"]
 
 

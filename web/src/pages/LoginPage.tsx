@@ -54,15 +54,17 @@ function useProviderAvailability() {
 
 /** The callback (routes_auth.py `oidc_callback`) never mints a session on
  *  refusal — it redirects here with `?error=…` instead, so this is the only
- *  place that refusal is ever shown. `not_allowed` is spec §4 step 3: a real
- *  identity, an email nSight does not admit. `sign_in_failed` covers
- *  everything upstream of that check (a rejected/expired code, a bad token)
- *  — deliberately vaguer, since the server's own log line is where the real
- *  reason lives (never sent to the browser).
+ *  place that refusal is ever shown. One standard message for every sign-in
+ *  that did not go through — an address nSight has no account for included —
+ *  so the page never says whether an account exists. People get in by an
+ *  admin's invitation; asking from here was removed (2026-09-25). The real
+ *  reason is in the server's log, never sent to the browser.
  */
+const SIGN_IN_FAILED =
+  "Sign-in failed. Check that you used the right account, or ask your administrator for access.";
 const SSO_ERROR_MESSAGES: Record<string, string> = {
-  not_allowed: "That email isn't set up for nSight Studio. Ask an admin to add it, then try again.",
-  sign_in_failed: "That sign-in didn't go through. Try again.",
+  not_allowed: SIGN_IN_FAILED,
+  sign_in_failed: SIGN_IN_FAILED,
   sign_in_cancelled: "Sign-in was cancelled. Try again when you're ready.",
 };
 
@@ -153,8 +155,7 @@ export default function LoginPage() {
         {/* Centred throughout: the logo, the heading and the two provider
             buttons are one vertical stack, and a left-aligned heading over
             centred buttons read as two different layouts sharing a card.
-            Matches RequestAccessPage, which is the same card at the next
-            step. */}
+            */}
         <div className="space-y-4 rounded-xl border bg-surface p-6 text-center shadow-xl shadow-black/10 dark:shadow-black/40">
           <h1 className="text-lg font-semibold tracking-tight">
             Sign in to nSight Studio
@@ -203,9 +204,6 @@ export default function LoginPage() {
             </p>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            No account yet? Sign in anyway to request it.
-          </p>
         </div>
       </div>
     </div>

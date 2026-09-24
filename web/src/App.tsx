@@ -2,7 +2,6 @@ import { Routes, Route } from "react-router-dom";
 import NotFoundPage from "@/pages/NotFoundPage";
 import AppShell from "@/components/layout/AppShell";
 import LoginPage from "@/pages/LoginPage";
-import RequestAccessPage from "@/pages/RequestAccessPage";
 import RecentReportsPage from "@/pages/RecentReportsPage";
 import CustomersPage from "@/pages/CustomersPage";
 import CustomerCasesPage from "@/pages/CustomerCasesPage";
@@ -15,9 +14,6 @@ export default function App() {
       {/* Outside AppShell: signing in has no sidebar, no breadcrumb, nothing
           that assumes a session already exists. */}
       <Route path="/login" element={<LoginPage />} />
-      {/* Outside AppShell, like /login: whoever lands here has no account, so
-          the shell's own guard would bounce them straight back to sign-in. */}
-      <Route path="/request-access" element={<RequestAccessPage />} />
       <Route element={<AppShell />}>
         {/* The landing page answers "where was I?" — the customer tree is
             navigation and lives in the sidebar. */}
