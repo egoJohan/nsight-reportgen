@@ -1627,6 +1627,20 @@ class Repository:
                     if i.email == wanted and i.accepted_user_id is None and i.expires > now),
                    None)
 
+    def renew_invite(self, auth: AuthContext, invite_id: str,
+                     lifetime_seconds: int) -> "Invite | None":
+        """Restart *invite_id*'s lifetime from now -- a resent invitation is
+        good for as long as a new one. Only `expires` changes; who invited,
+        when first, and the grants stay as they were. None if it is gone."""
+        try:
+            d = self._read_json(auth, P.invite_path(invite_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        d["expires"] = (datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds)) \
+            .isoformat(timespec="seconds")
+        self._write_json(auth, P.invite_path(invite_id), d, [P.LABEL_INVITE])
+        return self._invite_from(d)
+
     def mark_invite_accepted(self, auth: AuthContext, invite_id: str, user_id: str) -> None:
         """Single-use: once `accepted_user_id` is set, the invite can never
         again satisfy `find_pending_invite_by_email`, so it cannot be

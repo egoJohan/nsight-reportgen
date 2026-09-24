@@ -32,7 +32,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { EMPTY, PAGE, PAGE_TITLE, PANEL_PADDED, PANEL_TITLE, ROW, SECTION_HEADER } from "@/lib/surfaces";
 import {
   useFontSettings, useFontActions,
-  useUsers, useUserActions,
+  useUsers, useUserActions, useInvites,
   useAccessRequests, useAccessRequestActions,
 } from "@/lib/queries";
 import { useSession } from "@/lib/session";
@@ -44,7 +44,7 @@ import ProfileTab from "@/components/settings/ProfileTab";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { formatReportDate } from "@/lib/utils";
-import type { InstalledFont, MissingFont, StudioUser, AccessRequest } from "@/lib/api";
+import type { InstalledFont, MissingFont, StudioUser, AccessRequest, Invite } from "@/lib/api";
 
 function bytes(n: number): string {
   return n > 1_000_000 ? `${(n / 1_000_000).toFixed(1)} MB` : `${Math.round(n / 1000)} kB`;
@@ -350,8 +350,45 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
 /** One user, their admin flag, and their customer grants — the grants are
  *  removed individually here (an × on the badge); changing a grant's mode
  *  reuses the same picker, added at the bottom of the row. */
-function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
+function UserRow({
+  user,
+  isSelf,
+  invite,
+}: {
+  user: StudioUser;
+  isSelf: boolean;
+  /** Their invitation, while it can still be resent: not accepted, and they
+   *  have never signed in. */
+  invite?: Invite;
+}) {
   const actions = useUserActions();
+
+  function resend() {
+    if (!invite) return;
+    actions.resendInvite.mutate(invite.id, {
+      onSuccess: async (r) => {
+        if (r.emailed) {
+          toast.success(`Invitation emailed to ${r.email} again`);
+          return;
+        }
+        // Not sent (no mail route working): the link still gets them in.
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(r.link);
+          copied = true;
+        } catch {
+          // clipboard refused (not a secure context) — show the link instead
+        }
+        toast.warning(`The invitation could not be emailed to ${r.email}`, {
+          description: copied
+            ? `Its sign-in link is copied — send it to them yourself: ${r.link}`
+            : `Send them this sign-in link yourself: ${r.link}`,
+          duration: 15000,
+        });
+      },
+      onError: (e) => toast.error(e.message),
+    });
+  }
 
 
 
@@ -386,6 +423,26 @@ function UserRow({ user, isSelf }: { user: StudioUser; isSelf: boolean }) {
               }
             />
           </div>
+          {invite && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={actions.resendInvite.isPending}
+              onClick={resend}
+              title={
+                invite.status === "expired"
+                  ? "Their invitation expired — send it again, good for 14 days"
+                  : "Send the invitation email again, good for 14 days"
+              }
+            >
+              {actions.resendInvite.isPending ? (
+                <Loader2Icon className="size-4 animate-spin" />
+              ) : (
+                <MailIcon className="size-4" />
+              )}
+              Resend invitation
+            </Button>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -489,7 +546,15 @@ function PermissionRequestsTab() {
 function UsersTab() {
   const { data: me } = useSession();
   const { data: users, isLoading } = useUsers();
+  const { data: invites } = useInvites();
   const [inviting, setInviting] = useState(false);
+  // The newest invitation per address that can still be resent. Only for
+  // someone who has never signed in: once they have, there is nothing to invite
+  // them to.
+  const resendable = new Map<string, Invite>();
+  for (const i of invites ?? []) {
+    if (i.status !== "accepted" && !resendable.has(i.email)) resendable.set(i.email, i);
+  }
 
   return (
     <div className="space-y-6">
@@ -504,7 +569,14 @@ function UsersTab() {
         {users?.length === 0 && !isLoading && (
           <p className={`${EMPTY} text-sm text-muted-foreground`}>No users yet.</p>
         )}
-        {users?.map((u) => <UserRow key={u.id} user={u} isSelf={u.id === me?.id} />)}
+        {users?.map((u) => (
+          <UserRow
+            key={u.id}
+            user={u}
+            isSelf={u.id === me?.id}
+            invite={u.last_login_at ? undefined : resendable.get(u.email.toLowerCase())}
+          />
+        ))}
       </div>
 
       <InviteDialog open={inviting} onOpenChange={setInviting} />

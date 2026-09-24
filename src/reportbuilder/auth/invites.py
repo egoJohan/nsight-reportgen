@@ -12,9 +12,10 @@ already turned into a user.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from html import escape
 
 from reportbuilder.auth import mailer, users
-from reportbuilder.auth.mailer import Sender, send_via_smtp
+from reportbuilder.auth.mailer import HiveSender, Sender, send_via_hive, send_via_smtp
 from reportbuilder.auth.permissions import Grant, User
 from reportbuilder.store.repository import Invite, Repository
 from reportbuilder.store.seam import AuthContext
@@ -34,6 +35,28 @@ def _body(invited_by_email: str, link: str) -> str:
     )
 
 
+def _html(invited_by_email: str, link: str) -> str:
+    """The same message for the hive's route, which sends HTML: the link is a
+    real link. Both values are escaped -- the inviter's address is a stored
+    string, and the link carries this server's own origin."""
+    who, href = escape(invited_by_email), escape(link, quote=True)
+    return (
+        f"<p>{who} has invited you to nSight Studio.</p>"
+        f'<p><a href="{href}">Sign in to nSight Studio</a></p>'
+        "<p>Sign in with your own Google or Microsoft account using this email "
+        "address. There is no password to set, and your access is already "
+        "waiting.</p>"
+    )
+
+
+def _send(repo: Repository, auth: AuthContext, to: str, invited_by_email: str,
+          login_url: str, sender: Sender, hive: HiveSender) -> bool:
+    return mailer.deliver(repo.get_setting(auth, mailer.EMAIL_KEY), to, _SUBJECT,
+                          _body(invited_by_email, login_url),
+                          _html(invited_by_email, login_url),
+                          hive=hive, sender=sender)
+
+
 @dataclass(frozen=True)
 class Invitation:
     """What `create_invitation` hands back to the route: the stored
@@ -48,7 +71,8 @@ class Invitation:
 
 def create_invitation(repo: Repository, auth: AuthContext, *, email: str,
                       grants: tuple[Grant, ...], invited_by: User,
-                      login_url: str, sender: Sender = send_via_smtp) -> Invitation:
+                      login_url: str, sender: Sender = send_via_smtp,
+                      hive: HiveSender = send_via_hive) -> Invitation:
     """Record the invitation, then try to send it. Spec §6: "delivery may
     fail without failing the invitation" -- the record exists either way;
     only `emailed` says whether the admin also needs to copy the link by
@@ -81,10 +105,32 @@ def create_invitation(repo: Repository, auth: AuthContext, *, email: str,
     invite = repo.create_invite(auth, email, grants, invited_by.id,
                                 lifetime_seconds=DEFAULT_LIFETIME_SECONDS,
                                 user_id=user.id)
-    config = mailer.config_from_settings(repo.get_setting(auth, mailer.EMAIL_KEY))
-    emailed = (config is not None
-              and sender(config, invite.email, _SUBJECT, _body(invited_by.email, login_url)))
-    return Invitation(invite=invite, link=login_url, emailed=bool(emailed))
+    emailed = _send(repo, auth, invite.email, invited_by.email, login_url, sender, hive)
+    return Invitation(invite=invite, link=login_url, emailed=emailed)
+
+
+class ResendRefused(Exception):
+    """An accepted invitation has nothing to resend: its person has signed in."""
+
+
+def resend_invitation(repo: Repository, auth: AuthContext, invite_id: str, *,
+                      invited_by: User, login_url: str,
+                      sender: Sender = send_via_smtp,
+                      hive: HiveSender = send_via_hive) -> "Invitation | None":
+    """Email a pending or expired invitation again, good for another
+    `DEFAULT_LIFETIME_SECONDS` from now. None when it does not exist;
+    `ResendRefused` when it was already accepted. The admin resending it
+    signs the message -- they are the one asking now. Delivery is
+    best-effort exactly as for a new one: `emailed` says whether the link
+    still needs copying by hand."""
+    invite = repo.get_invite(auth, invite_id)
+    if invite is None:
+        return None
+    if invite.accepted_user_id:
+        raise ResendRefused(f"{invite.email} has already accepted this invitation")
+    invite = repo.renew_invite(auth, invite_id, DEFAULT_LIFETIME_SECONDS) or invite
+    emailed = _send(repo, auth, invite.email, invited_by.email, login_url, sender, hive)
+    return Invitation(invite=invite, link=login_url, emailed=emailed)
 
 
 def revoke_invitation(repo: Repository, auth: AuthContext,

@@ -14,8 +14,10 @@ got the memo.
 """
 from __future__ import annotations
 
+from html import escape
+
 from reportbuilder.auth import mailer
-from reportbuilder.auth.mailer import Sender, send_via_smtp
+from reportbuilder.auth.mailer import HiveSender, Sender, send_via_hive, send_via_smtp
 from reportbuilder.auth.permissions import EDIT, User
 from reportbuilder.store.repository import AccessRequest, Repository
 from reportbuilder.store.seam import AuthContext
@@ -30,6 +32,18 @@ def _body(request: AccessRequest, customer_name: str, settings_url: str) -> str:
         f"Decide it here: {settings_url}\n\n"
         "Sign in and open Settings → Permission requests to approve or "
         "refuse it.\n"
+    )
+
+
+def _html(request: AccessRequest, customer_name: str, settings_url: str) -> str:
+    """The same message as HTML, for the hive's route. Every value escaped:
+    the requester's address and the customer's name are stored strings."""
+    return (
+        f"<p>{escape(request.user_email)} is asking for {escape(request.mode)} "
+        f"access to {escape(customer_name)}.</p>"
+        f'<p><a href="{escape(settings_url, quote=True)}">Decide it here</a></p>'
+        "<p>Sign in and open Settings → Permission requests to approve or "
+        "refuse it.</p>"
     )
 
 
@@ -57,7 +71,8 @@ def decision_makers(repo: Repository, auth: AuthContext, *, customer_id: str,
 
 def notify_decision_makers(repo: Repository, auth: AuthContext, *,
                            request: AccessRequest, customer_name: str,
-                           settings_url: str, sender: Sender = send_via_smtp) -> int:
+                           settings_url: str, sender: Sender = send_via_smtp,
+                           hive: HiveSender = send_via_hive) -> int:
     """Best-effort, same shape as `invites.create_invitation`: unconfigured
     or failed delivery is not an error, just nothing sent. The return value
     (how many sends the transport reported as successful) is for a log
@@ -75,13 +90,14 @@ def notify_decision_makers(repo: Repository, auth: AuthContext, *,
     volume (a digest, a rate limit), but not worth building against a
     volume nobody has seen yet.
     """
-    config = mailer.config_from_settings(repo.get_setting(auth, mailer.EMAIL_KEY))
-    if config is None:
-        return 0
+    stored = repo.get_setting(auth, mailer.EMAIL_KEY)
     recipients = decision_makers(repo, auth, customer_id=request.customer_id,
                                  exclude_user_id=request.user_id)
-    body = _body(request, customer_name, settings_url)
-    return sum(1 for u in recipients if sender(config, u.email, _SUBJECT, body))
+    text = _body(request, customer_name, settings_url)
+    html = _html(request, customer_name, settings_url)
+    return sum(1 for u in recipients
+               if mailer.deliver(stored, u.email, _SUBJECT, text, html,
+                                 hive=hive, sender=sender))
 
 
 __all__ = ["decision_makers", "notify_decision_makers"]

@@ -94,3 +94,85 @@ def test_send_via_smtp_never_raises_on_failure(monkeypatch):
     cfg = mailer.EmailConfig(host="h", port=25, username="", password="",
                              from_addr="a@b.c", use_tls=False)
     assert mailer.send_via_smtp(cfg, "to@example.com", "S", "B") is False
+
+
+# ---- the hive sends first (2026-09-25) ----------------------------------------
+
+class _Resp:
+    def __init__(self, status, text=""):
+        self.status_code, self.text = status, text
+
+
+def _hive_env(monkeypatch):
+    monkeypatch.setenv("NSIGHT_DATAHIVE_URL", "https://hive.example/")
+    monkeypatch.setenv("NSIGHT_DATAHIVE_TOKEN", "tok")
+
+
+def test_send_via_hive_posts_to_the_hives_send_route(monkeypatch):
+    _hive_env(monkeypatch)
+    seen = {}
+
+    def post(url, json, headers, timeout):
+        seen.update(url=url, json=json, headers=headers)
+        return _Resp(200)
+
+    monkeypatch.setattr(mailer.httpx, "post", post)
+    assert mailer.send_via_hive("a@b.c", "Hello", "<p>hi</p>") is True
+    assert seen["url"] == "https://hive.example/api/v1/email/hive/send"
+    assert seen["json"] == {"to": "a@b.c", "subject": "Hello", "body": "<p>hi</p>"}
+    assert seen["headers"] == {"Authorization": "Bearer tok"}
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 405, 502, 503])
+def test_send_via_hive_is_false_on_every_refusal(monkeypatch, status):
+    """400 no sender address, 503 no relay, 502 relay failed, 404/405 a hive
+    without the route (the local one today)."""
+    _hive_env(monkeypatch)
+    monkeypatch.setattr(mailer.httpx, "post", lambda *a, **k: _Resp(status, "why"))
+    assert mailer.send_via_hive("a@b.c", "s", "b") is False
+
+
+def test_send_via_hive_never_raises_when_unreachable(monkeypatch):
+    _hive_env(monkeypatch)
+
+    def post(*a, **k):
+        raise mailer.httpx.ConnectError("refused")
+
+    monkeypatch.setattr(mailer.httpx, "post", post)
+    assert mailer.send_via_hive("a@b.c", "s", "b") is False
+
+
+def test_send_via_hive_without_a_hive_sends_nothing(monkeypatch):
+    monkeypatch.delenv("NSIGHT_DATAHIVE_URL", raising=False)
+
+    def post(*a, **k):
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(mailer.httpx, "post", post)
+    assert mailer.send_via_hive("a@b.c", "s", "b") is False
+
+
+_SMTP = {"host": "smtp.example.com", "from_addr": "nsight@example.com"}
+
+
+def test_deliver_uses_the_hive_and_not_smtp_when_the_hive_sends():
+    smtp_calls = []
+    ok = mailer.deliver(_SMTP, "a@b.c", "s", "text", "<p>html</p>",
+                        hive=lambda to, subject, html: html == "<p>html</p>",
+                        sender=lambda *a: smtp_calls.append(a) or True)
+    assert ok is True and smtp_calls == []
+
+
+def test_deliver_falls_back_to_smtp_with_the_text_body():
+    smtp_calls = []
+    ok = mailer.deliver(_SMTP, "a@b.c", "s", "text", "<p>html</p>",
+                        hive=lambda *a: False,
+                        sender=lambda cfg, to, subject, body: smtp_calls.append(body) or True)
+    assert ok is True and smtp_calls == ["text"]
+
+
+def test_deliver_with_neither_is_false():
+    ok = mailer.deliver(None, "a@b.c", "s", "text", "html",
+                        hive=lambda *a: False,
+                        sender=lambda *a: pytest.fail("no SMTP is configured"))
+    assert ok is False

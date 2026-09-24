@@ -1827,6 +1827,13 @@ export const api = {
 
     revokeInvite: (inviteId: string): Promise<void> =>
       fetch(`${API_BASE}/invites/${inviteId}`, { method: "DELETE" }).then(detailedVoid),
+
+    /** Email a pending or expired invitation again, good for another 14 days.
+     *  `emailed` false means neither the hive nor SMTP sent it: copy `link`. */
+    resendInvite: (inviteId: string): Promise<InvitationResult> =>
+      fetch(`${API_BASE}/invites/${inviteId}/resend`, { method: "POST" }).then((r) =>
+        detailedJson<InvitationResult>(r)
+      ),
   },
 
   /** The "Request access"/"Request permissions" buttons on the customer
