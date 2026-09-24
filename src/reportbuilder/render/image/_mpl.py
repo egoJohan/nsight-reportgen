@@ -145,6 +145,175 @@ def force_break_token(token: str, width: int) -> list[str]:
     return [token[i:i + width] for i in range(0, len(token), width)]
 
 
+#: A panel's heading, and the floor it may shrink to before it is cut instead.
+PANEL_TITLE_PT: float = 12.5
+PANEL_TITLE_MIN_PT: float = 8.5
+
+
+def _title_extent(fig, text: str, fontsize: float) -> tuple[float, float]:
+    """(width, height) in px of *text* as a panel title on this figure."""
+    kw = {"fontsize": fontsize, "fontweight": "bold"}
+    family = getattr(fig, "_nsight_chart_font", "")
+    if family:
+        kw["fontfamily"] = family
+    art = fig.text(0, 0, text, **kw)
+    try:
+        box = art.get_window_extent(fig.canvas.get_renderer())
+        return box.width, box.height
+    finally:
+        art.remove()
+
+
+#: The gap `label_fit` leaves between a legend and the names above it.
+_LEGEND_DROP_GAP_PT = 6.0
+
+
+def panel_band(fig, ax) -> tuple[float, float]:
+    """(bottom, top) in px of everything this panel draws: its plot, its title,
+    the names under it and its own legend.
+
+    The legend is counted where it will END UP, not where it sits now: the
+    label fitter lowers it below the rotated names once they are final, so a
+    band measured from its current place reserves too little and the lowered
+    legend lands on the panel below. (2026-09-22)
+    """
+    r = fig.canvas.get_renderer()
+    boxes = [ax.bbox]
+    title = ax.title
+    if title is not None and title.get_text().strip():
+        boxes.append(title.get_window_extent(r))
+    names = [label.get_window_extent(r)
+             for label in list(ax.get_xticklabels()) + list(ax.get_yticklabels())
+             if label.get_visible() and label.get_text().strip()]
+    boxes += names
+    bottom, top = min(b.y0 for b in boxes), max(b.y1 for b in boxes)
+    legend = ax.get_legend()
+    if legend is not None:
+        box = legend.get_window_extent(r)
+        under_names = (min((b.y0 for b in names), default=ax.bbox.y0)
+                       - r.points_to_pixels(_LEGEND_DROP_GAP_PT) - box.height)
+        bottom = min(bottom, box.y0, under_names)
+        top = max(top, box.y1)
+    return bottom, top
+
+
+def separate_panel_rows(fig, *, margin_pt: float = 8.0, passes: int = 8) -> None:
+    """Pull stacked panels apart until each has the page to itself.
+
+    A panel is not its plot: it is its title, its plot, the names under it and
+    its own legend, and on a chart split by two variables those bands met — the
+    lower panel's title was printed in the middle of the upper panel's legend.
+    Reported 2026-09-22: "the title of the lower overlaps with the legend of
+    the upper … ensure that those have clearly separate areas to render, with
+    small margin."
+
+    The panels are given the room by widening the gap between the rows, which
+    is the one number that means "space between panels"; everything anchored to
+    an axes — title, legend — travels with it.
+
+    Measured and re-measured until they clear: widening the gap shrinks the
+    panels, and a legend anchored under its own panel moves with it, so one
+    nudge does not settle it. Each pass removes what is left of the overlap,
+    and a little more than the measurement asks for, since an exact step lands
+    just short every time.
+    """
+    for _pass in range(passes):
+        fig.draw_without_rendering()
+        columns: dict[int, list] = {}
+        for ax in fig.axes:
+            if ax.get_visible():
+                columns.setdefault(round(ax.bbox.x0), []).append(ax)
+        need = 0.0
+        heights = []
+        for axes in columns.values():
+            axes.sort(key=lambda a: a.bbox.y0, reverse=True)     # top row first
+            for upper, lower in zip(axes, axes[1:]):
+                heights += [upper.bbox.height, lower.bbox.height]
+                gap = panel_band(fig, upper)[0] - panel_band(fig, lower)[1]
+                need = max(need, margin_pt * fig.dpi / 72.0 - gap)
+        if need <= 1.0 or not heights:
+            return
+        pars = fig.subplotpars
+        grown = pars.hspace + 1.25 * need / (sum(heights) / len(heights))
+        if grown >= 2.0:
+            return              # more gap than plot: leave it, something is odd
+        fig.subplots_adjust(hspace=grown)
+
+
+def fit_panel_titles(fig, titled, *, colour, pad: int = 3,
+                     max_lines: int = 2) -> None:
+    """Set each panel's title, wrapped and sized to the panel it names.
+
+    Set close to its own plot (`pad`), so a reader pairs it with the chart
+    under it rather than with whatever is above.
+
+    A title was set at one size whatever the panel's width, and a value label
+    like "Suuressa kaupungissa (yli 150 000 asukasta)" is three times as wide
+    as the panel it heads: five of them printed straight through each other
+    across the top of the chart. Reported from the field, 2026-09-22 —
+    "Second classifyingin kanssa tulee vielä tekstien sijoitteluongelmia".
+
+    The room a title has is its own panel plus half the gap to its neighbours,
+    which is exactly the room its neighbours are not using. Wrapped to that
+    first, then a step smaller at a time, and at the floor cut to `max_lines`
+    with an ellipsis — a title that cannot fit is shortened here, where it is
+    still legible, rather than drawn over the next panel's.
+
+    `titled` is [(axes, text)]. Call it once the panels are laid out
+    (`subplots_adjust`), since that is the width being fitted to.
+    """
+    if not titled:
+        return
+    # Lays the panels out without painting them, so the boxes being fitted to
+    # are the ones the saved picture will have.
+    fig.draw_without_rendering()
+    sizes = [PANEL_TITLE_PT]
+    while sizes[-1] * 0.9 >= PANEL_TITLE_MIN_PT:
+        sizes.append(sizes[-1] * 0.9)
+    fitted: list[tuple[object, str, float]] = []
+    for ax, text in titled:
+        flat = " ".join(str(text or "").split())
+        if not flat:
+            continue
+        others = [a.bbox for a in fig.axes if a is not ax and a.get_visible()]
+        right = min((b.x0 for b in others if b.x0 >= ax.bbox.x1), default=fig.bbox.x1)
+        left = max((b.x1 for b in others if b.x1 <= ax.bbox.x0), default=fig.bbox.x0)
+        room = min(ax.bbox.x0 - left, right - ax.bbox.x1) + ax.bbox.width
+        wrapped, chosen = flat, sizes[-1]
+        for size in sizes:
+            per_char = _title_extent(fig, flat, size)[0] / max(len(flat), 1)
+            chars = max(6, int(room / max(per_char, 0.1)))
+            candidate = wrap_label(flat, chars)
+            while (_title_extent(fig, candidate, size)[0] > room
+                   and chars > 6):
+                chars = int(chars * 0.92)
+                candidate = wrap_label(flat, chars)
+            if (candidate.count("\n") + 1 <= max_lines
+                    and _title_extent(fig, candidate, size)[0] <= room):
+                wrapped, chosen = candidate, size
+                break
+            if size == sizes[-1]:
+                wrapped, chosen = wrap_label_capped(flat, chars, max_lines), size
+        fitted.append((ax, wrapped, chosen))
+    # ONE size for the row: a title set a step larger than the one beside it
+    # reads as emphasis nobody meant. The smallest that any of them needed is
+    # the size they all take, and each is re-wrapped to it.
+    if not fitted:
+        return
+    smallest = min(size for _ax, _text, size in fitted)
+    for (ax, _wrapped, size), (_ax2, text) in zip(fitted, titled):
+        if size > smallest:
+            flat = " ".join(str(text or "").split())
+            per_char = _title_extent(fig, flat, smallest)[0] / max(len(flat), 1)
+            others = [a.bbox for a in fig.axes if a is not ax and a.get_visible()]
+            right = min((b.x0 for b in others if b.x0 >= ax.bbox.x1), default=fig.bbox.x1)
+            left = max((b.x1 for b in others if b.x1 <= ax.bbox.x0), default=fig.bbox.x0)
+            room = min(ax.bbox.x0 - left, right - ax.bbox.x1) + ax.bbox.width
+            chars = max(6, int(room / max(per_char, 0.1)))
+            _wrapped = wrap_label(flat, chars)
+        ax.set_title(_wrapped, fontsize=smallest, fontweight="bold", color=colour, pad=pad)
+
+
 def wrap_label(text: str, width: int) -> str:
     """Wrap *text* at word boundaries onto lines of at most *width* chars.
 
@@ -463,6 +632,65 @@ def author_label_floor(spec, statistic: str, all_vals) -> float:
     return label_floor(fmt, default_pct=0.0, axis_max=axis_max)
 
 
+def _grown(start: float, size: float, by: float) -> tuple[float, float]:
+    """(start, size) grown by *by* inside 0..1, spilling into the near margin
+    when the far edge is reached."""
+    size = min(1.0, size + by)
+    start = min(start, max(0.0, 1.0 - size))
+    return start, min(size, 1.0 - start)
+
+
+def _use_the_whole_figure(fig) -> None:
+    """Give the plot the height nothing else is using.
+
+    The figure is drawn at the size of the slot, and `bbox_inches="tight"` then
+    trims it to its ink. A chart WITH a legend fills that size — the legend
+    hangs below the axes and the trim keeps it — but a chart without one saves
+    a PNG a fifth of an inch shorter, and `place_picture` never magnifies, so
+    that fifth of an inch stayed empty under the chart on the slide. Reported
+    as "if there is no legend we do not want to preserve empty space for those.
+    Now there is empty space below the chart if there is no legend."
+    (Johan, 2026-09-21)
+
+    So the axes take the slack instead: the ink grows to the figure it was
+    given, at the same point sizes, and the picture fills its slot. Only for
+    the ordinary one-plot figure — a grid of small multiples, a chart with a
+    legend beside it and anything that placed its own axes are left alone.
+    """
+    try:
+        axes = [ax for ax in fig.axes if ax.get_visible()]
+        if len(axes) != 1 or axes[0].get_legend() is not None:
+            return
+        if any(getattr(child, "get_visible", lambda: False)()
+               and child.__class__.__name__ == "Legend" for child in fig.legends):
+            return
+        ax = axes[0]
+        fig_w, fig_h = fig.get_figwidth(), fig.get_figheight()
+        # Twice: growing the axes moves the labels that were being measured, so
+        # the first pass takes most of the slack and the second what is left.
+        # Both ways — a horizontal bar's row names are trimmed off the side
+        # just as a column chart's are trimmed off the foot.
+        for _pass in range(2):
+            fig.draw_without_rendering()
+            ink = fig.get_tightbbox()
+            if ink is None:
+                return
+            slack_w, slack_h = fig_w - ink.width, fig_h - ink.height
+            if slack_w >= fig_w * 0.5 or slack_h >= fig_h * 0.5:
+                return                  # something unusual; leave it alone
+            if slack_w <= 0.02 and slack_h <= 0.02:
+                return                  # the ink already fills the figure
+            box = ax.get_position()
+            # Grow, and where that runs into the figure's edge take the rest
+            # from the margin on the other side — the labels that live there
+            # are what `bbox_inches="tight"` keeps, so nothing is lost.
+            x0, w = _grown(box.x0, box.width, max(0.0, slack_w) / fig_w)
+            y0, h = _grown(box.y0, box.height, max(0.0, slack_h) / fig_h)
+            ax.set_position([x0, y0, w, h])
+    except Exception:  # noqa: BLE001 — a chart that will not measure is drawn as it is
+        pass
+
+
 def render_png(fig) -> str:
     """Save figure to a temp PNG file at high quality and free it. Returns the path.
 
@@ -495,6 +723,7 @@ def render_png(fig) -> str:
     # do not — after the face, since the face decides how wide they are.
     from reportbuilder.render.image import label_fit
     label_fit.fit_category_labels(fig)
+    _use_the_whole_figure(fig)
     fig.savefig(path, dpi=_RENDER_DPI, bbox_inches="tight", pad_inches=0.04,
                 transparent=True)
     fig.clear()

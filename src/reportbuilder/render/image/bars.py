@@ -40,7 +40,8 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     series_label, with_base, place_total, colours_by_series,
     place_picture_square, series_values, format_value, label_floor, default_label_floor,
     author_label_floor, style_legend,
-    force_break_token, wrap_label, wrap_label_capped,
+    fit_panel_titles, force_break_token, separate_panel_rows,
+    wrap_label, wrap_label_capped,
     VALUE_GID,
     _new_agg_figure, _EMU_PER_IN, wants_group_base, _value_axis,
 )
@@ -812,6 +813,46 @@ def _drawable_panels(groups, drawable) -> list[tuple[str, list[str]]]:
     return [(p, segs) for p, segs in kept if segs]
 
 
+def _panel_legends(fig, legends, *, max_ncol: int, fontsize: float = 9.0) -> None:
+    """Give every panel its legend, each no wider than its own panel.
+
+    `legends` is [(axes, handles, names)]. A panel's legend is its own — one
+    group is 240 people in one panel and 261 in the next — but it was set in as
+    many as four columns whatever the panel's width, and entries like
+    "Pääkaupunkiseudulla (n=118)" made each legend wider than its panel: side by
+    side, every legend was printed through its neighbours'. Fewer columns first,
+    then smaller type down to the names' own floor. Call once the panels are laid
+    out (`subplots_adjust`), since that is the width being fitted to.
+    (visual QA, 2026-09-19)
+    """
+    from reportbuilder.render.image.label_fit import _MIN_PT
+
+    r = fig.canvas.get_renderer()
+    sizes = [fontsize]
+    while sizes[-1] * 0.9 >= _MIN_PT:
+        sizes.append(sizes[-1] * 0.9)
+    for ax, handles, names in legends:
+        # The panel plus its half of the gutter on each side is the room there is.
+        others = [a.bbox for a in fig.axes if a is not ax and a.get_visible()]
+        right = min((b.x0 for b in others if b.x0 >= ax.bbox.x1), default=fig.bbox.x1)
+        left = max((b.x1 for b in others if b.x1 <= ax.bbox.x0), default=fig.bbox.x0)
+        limit = min(ax.bbox.x0 - left, right - ax.bbox.x1) + ax.bbox.width
+        leg = None
+        for fs in sizes:
+            for ncol in range(min(len(names), max_ncol), 0, -1):
+                if leg is not None:
+                    leg.remove()
+                leg = ax.legend(*_rowmajor_legend(handles, names, ncol),
+                                loc="upper center",
+                                bbox_to_anchor=(0.5, -0.12), ncol=ncol,
+                                frameon=False, fontsize=fs)
+                if leg.get_window_extent(r).width <= limit:
+                    break
+            else:
+                continue
+            break
+
+
 def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     """Cross-tab SMALL MULTIPLES: one subplot per PRIMARY value, each a clustered bar of
     (answer categories × the SECONDARY classifier). Shared value axis + one legend."""
@@ -830,6 +871,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     if vertical:
         fig, axes = new_figure_grid(ctx, len(groups))
         x = np.arange(n_cat)
+        titled: list[tuple[object, str]] = []
         for ax, (p, segs) in zip(axes, groups):
             n = len(segs)
             w = 0.82 / n if n > 1 else 0.6
@@ -838,7 +880,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
-            ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
+            titled.append((ax, p))
             ax.set_xticks(x)
             ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
@@ -849,6 +891,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     else:
         fig, axes = new_figure_grid(ctx, len(groups), tall_in=n_cat * 0.42 + 2.0)
         y = np.arange(n_cat)[::-1]
+        titled = []
         for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
             n = len(segs)
             h = 0.82 / n if n > 1 else 0.6
@@ -857,7 +900,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
-            ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
+            titled.append((ax, p))
             ax.set_yticks(y)
             _apply_bar_style(ax, ctx, max_val, series.statistic)
             # y-axis is SHARED (sharey) → set the category labels ONCE, then hide their
@@ -868,6 +911,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                                          wrap=_wrap_label, width=_LABEL_WRAP_WIDTH)
             ax.tick_params(axis="y", labelleft=(k == 0))
 
+    panel_legends = []
     if ctx.spec.elements.legend:
         # One legend PER PANEL. "Naiset" is 240 people in one panel and 261 in
         # the next, and a legend shared by the row can say only one of them.
@@ -875,10 +919,14 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         for ax, (_p, segs) in zip(axes, groups):
             names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
-            ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-                      ncol=min(len(names), 3), frameon=False, fontsize=9)
+            panel_legends.append((ax, handles, names))
     fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
                         left=0.12 if vertical else 0.2)
+    # Once the panels are laid out, so both are fitted to the width they have.
+    fit_panel_titles(fig, titled, colour=ink)
+    if panel_legends:
+        _panel_legends(fig, panel_legends, max_ncol=3)
+    separate_panel_rows(fig)
     place_picture(ctx, render_png(fig))
 
 
@@ -1141,6 +1189,8 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                                 rows=rows)
     ink, _muted, _grid = chart_furniture(ctx)
 
+    titled: list[tuple[object, str]] = []
+    panel_legends: list[tuple[object, list, list[str]]] = []
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
         clrs = colours_by_series(series_colors(n, palette=template_palette(ctx),
@@ -1191,15 +1241,21 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 register_category_labels(ax, "y", _category_ticks(cats, str, series.statistic),
                                          wrap=_wrap_label, width=_LABEL_WRAP_WIDTH)
         # Each panel is titled with its VARIABLE, not with a group of the first one.
-        ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
+        titled.append((ax, p))
         if ctx.spec.elements.legend:
             names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
-            ax.legend(handles, names, loc="upper center", bbox_to_anchor=(0.5, -0.12),
-                      ncol=min(len(names), 4), frameon=False, fontsize=9)
+            panel_legends.append((ax, handles, names))
 
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
+    # Fitted once the panels are laid out: both are as wide as their own panel
+    # and the half-gutter beside it, and no wider.
+    fit_panel_titles(fig, titled, colour=ink)
+    if panel_legends:
+        _panel_legends(fig, panel_legends, max_ncol=4)
+    # Each panel's band — title, plot, names, legend — clear of its neighbour's.
+    separate_panel_rows(fig)
     place_picture(ctx, render_png(fig))
 
 
@@ -1672,6 +1728,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
                                 sharey=False)   # panels draw DIFFERENT bars, not a shared axis
     ink, _muted, _grid = chart_furniture(ctx)
 
+    titled: list[tuple[object, str]] = []
     for ax, (p, bars) in zip(axes, groups):
         # `bars_all` (from `_stacked_layout`) is base-filtered and may drop a
         # near-empty group's bar, so `_drawable_panels` already narrowed each panel
@@ -1691,7 +1748,7 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
         ax.tick_params(axis="y", labelleft=True)
         ax.set_ylim(min(y) - 0.7, max(y) + 0.5)
         _apply_bar_style(ax, ctx, axis_max, "pct" if normalise else series.statistic)
-        ax.set_title(p, fontsize=12.5, fontweight="bold", color=ink, pad=6)
+        titled.append((ax, p))
         # per panel, keyed by bar — placed against the axis the bars were drawn on
         _draw_row_summary(ctx, ax, y, bars, ax.get_xlim()[1])
 
@@ -1699,6 +1756,8 @@ def _render_stacked_variable_panels(ctx, cats) -> None:
         _legend_below(axes[-1], len(stack), ctx)
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
+    fit_panel_titles(fig, titled, colour=ink)
+    separate_panel_rows(fig)
     for _panel_ax in axes:
         make_room_for_values(fig, _panel_ax)
         clear_callouts(fig, _panel_ax, along="x")

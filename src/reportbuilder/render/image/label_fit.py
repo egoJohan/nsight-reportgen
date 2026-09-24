@@ -300,7 +300,17 @@ def _clear_legends(fig, entries, r) -> None:
     legends = [ax.get_legend() for ax in fig.axes if ax.get_legend() is not None]
     for legend in legends + list(fig.legends):
         lb = legend.get_window_extent(r)
-        hit = [ax for box, poly, ax in names if _meet(box, poly, _box(lb), _corners(lb))]
+        # A PANEL's legend answers to its own panel's names. Measured against
+        # every name in the figure, the top panel's legend was lowered past the
+        # names of the panel BELOW it and landed on that panel's own legend —
+        # the two printed through each other at the foot of the slide, on a
+        # chart split by two variables. A legend attached to the figure still
+        # weighs them all: it belongs to no panel. (2026-09-22)
+        parent = legend.parent
+        mine = [n for n in names if n[2] is parent] if parent in fig.axes else names
+        if not mine:
+            continue
+        hit = [ax for box, poly, ax in mine if _meet(box, poly, _box(lb), _corners(lb))]
         # Under the plot of the names it runs into — not their centres: a rotated
         # name reaches far below the axis, and a legend 8% under it sits above
         # the middle of the names it covers.
@@ -308,16 +318,40 @@ def _clear_legends(fig, entries, r) -> None:
             continue
         # Clear of every name standing over the legend's width, not just those
         # it touches now — lowered past one, it must not land on a deeper one.
-        over = [b for b, _p, _ax in names if min(b[2], lb.x1) - max(b[0], lb.x0) > _TOL]
+        over = [b for b, _p, _ax in mine if min(b[2], lb.x1) - max(b[0], lb.x0) > _TOL]
+        if not over:
+            continue
         floor = min(b[1] for b in over) - r.points_to_pixels(_LEGEND_GAP_PT)
+        # Never into the panel below. Lowering a legend past its own names is
+        # right; lowering it past the top of the next panel puts it across that
+        # panel's title, which is what a reader saw on a chart split by two
+        # variables — "the title of the lower overlaps with the legend of the
+        # upper". The panels are already spaced to leave room for this.
+        # (2026-09-22)
+        if parent in fig.axes:
+            below = [a for a in fig.axes
+                     if a is not parent and a.get_visible() and a.bbox.y1 < parent.bbox.y0]
+            if below:
+                ceiling = max(_panel_top(a, r) for a in below) + r.points_to_pixels(_LEGEND_GAP_PT)
+                floor = max(floor, ceiling + (lb.y1 - lb.y0))
         drop = lb.y1 - floor
-        parent = legend.parent
+        if drop <= 0:
+            continue
         trans = parent.transAxes if hasattr(parent, "transAxes") else parent.transFigure
         anchor = legend.get_bbox_to_anchor().transformed(trans.inverted())
         step = drop / parent.bbox.height
         legend.set_bbox_to_anchor(
             Bbox.from_extents(anchor.x0, anchor.y0 - step, anchor.x1, anchor.y1 - step),
             transform=trans)
+
+
+def _panel_top(ax, r) -> float:
+    """The highest thing this panel draws: its title, or its plot."""
+    top = ax.bbox.y1
+    title = ax.title
+    if title is not None and title.get_text().strip():
+        top = max(top, title.get_window_extent(r).y1)
+    return top
 
 
 def _cap(e: _Entry, r, fig) -> float:
