@@ -158,7 +158,7 @@ def revoke_invitation(repo: Repository, auth: AuthContext,
     # email is somebody else, and revoking an invitation must not delete them.
     user_id = invite.accepted_user_id or invite.user_id
     if user_id:
-        refused = users.remove_user(repo, auth, user_id)
+        refused = users.remove_user(repo, auth, user_id, keep_invite_id=invite_id)
         if refused is not None:
             return refused
     repo.delete_invite(auth, invite_id)

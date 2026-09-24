@@ -33,7 +33,8 @@ def _admin_count(repo: Repository, auth: AuthContext) -> int:
 
 
 def remove_user(repo: Repository, auth: AuthContext,
-                user_id: str) -> "LastAdminRefused | None":
+                user_id: str, *, keep_invite_id: str | None = None
+                ) -> "LastAdminRefused | None":
     """Delete *user_id*, their grants, their password hash if they had one,
     and every live session of theirs (spec §7: "deleting a user...ends it"
     -- sessions are dropped here too, rather than left to the ordinary idle
@@ -58,6 +59,26 @@ def remove_user(repo: Repository, auth: AuthContext,
     if user.is_admin and _admin_count(repo, auth) <= 1:
         return LastAdminRefused("the last admin cannot be removed")
     repo.delete_sessions_for_user(auth, user_id)
+    # Their invitations go with them. One left pending was a way back in:
+    # sign-in creates the account from a pending invitation when none exists
+    # (identity.py), so the person just removed could sign in again with its
+    # grants until it expired -- and it blocked inviting the address again
+    # ("already pending"). Expired FIRST, a plain write no consent prompt can
+    # interrupt, so none is ever live after this line; then deleted, before
+    # the account, so an interrupted removal resumes with the account still
+    # there. `keep_invite_id` is revoking's own invitation: revoke deletes it
+    # last, because a retried revoke finds the account THROUGH it.
+    # Unaccepted ones for the same address count too: an invitation from
+    # before `user_id` was recorded names no account, only the address.
+    email = (user.email or "").strip().lower()
+    theirs = [i for i in repo.list_invites(auth)
+              if user_id in (i.user_id, i.accepted_user_id)
+              or (i.email == email and not i.accepted_user_id)]
+    for invite in theirs:
+        repo.expire_invite(auth, invite.id)
+    for invite in theirs:
+        if invite.id != keep_invite_id:
+            repo.delete_invite(auth, invite.id)
     repo.delete_user(auth, user_id)
     # And the cached identity, here rather than in the route: `remove_user` has
     # two callers — the Users list and revoking an ACCEPTED invitation — and

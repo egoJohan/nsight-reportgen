@@ -214,6 +214,27 @@ class TestInvite:
         assert r.status_code == 403
 
 
+class TestRemovedUserCanBeInvitedAgain:
+    """Removing a user left their invitation pending: inviting the address
+    again answered 409 "an invitation is already pending", and that leftover
+    invitation would have let the removed person sign straight back in, with
+    its access, until it expired (Johan, 2026-09-25)."""
+
+    def test_remove_then_invite_again(self, admin_client, repo, auth):
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        uid = repo.find_user_by_email(auth, "new@egoiq.com").id
+        assert _delete_approving_consent(admin_client, repo, f"/users/{uid}").status_code == 204
+        again = admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        assert again.status_code == 201, again.text
+
+    def test_no_pending_invitation_outlives_the_removed_user(self, admin_client, repo, auth):
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        uid = repo.find_user_by_email(auth, "new@egoiq.com").id
+        _delete_approving_consent(admin_client, repo, f"/users/{uid}")
+        assert repo.find_pending_invite_by_email(auth, "new@egoiq.com") is None
+        assert admin_client.get("/invites").json() == []
+
+
 class TestResendInvite:
     def test_resends_a_pending_invitation(self, admin_client):
         # No hive and no SMTP under test: renewed, not emailed, link to copy.

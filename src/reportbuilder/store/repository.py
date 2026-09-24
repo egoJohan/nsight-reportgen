@@ -1641,6 +1641,19 @@ class Repository:
         self._write_json(auth, P.invite_path(invite_id), d, [P.LABEL_INVITE])
         return self._invite_from(d)
 
+    def expire_invite(self, auth: AuthContext, invite_id: str) -> None:
+        """Make *invite_id* unusable now: its `expires` becomes this moment,
+        so `find_pending_invite_by_email` -- what sign-in and a new invitation
+        consult -- no longer finds it. A write, not a delete, so no consent
+        prompt can leave it live halfway; `delete_invite` removes the record
+        after. Unknown id: no-op."""
+        try:
+            d = self._read_json(auth, P.invite_path(invite_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return
+        d["expires"] = _now()
+        self._write_json(auth, P.invite_path(invite_id), d, [P.LABEL_INVITE])
+
     def mark_invite_accepted(self, auth: AuthContext, invite_id: str, user_id: str) -> None:
         """Single-use: once `accepted_user_id` is set, the invite can never
         again satisfy `find_pending_invite_by_email`, so it cannot be
