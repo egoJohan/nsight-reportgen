@@ -214,6 +214,52 @@ class TestInvite:
         assert r.status_code == 403
 
 
+class TestRemovedUserCanBeInvitedAgain:
+    """Removing a user left their invitation pending: inviting the address
+    again answered 409 "an invitation is already pending", and that leftover
+    invitation would have let the removed person sign straight back in, with
+    its access, until it expired (Johan, 2026-09-25)."""
+
+    def test_remove_then_invite_again(self, admin_client, repo, auth):
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        uid = repo.find_user_by_email(auth, "new@egoiq.com").id
+        assert _delete_approving_consent(admin_client, repo, f"/users/{uid}").status_code == 204
+        again = admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        assert again.status_code == 201, again.text
+
+    def test_no_pending_invitation_outlives_the_removed_user(self, admin_client, repo, auth):
+        admin_client.post("/users/invite", json={"email": "new@egoiq.com", "grants": []})
+        uid = repo.find_user_by_email(auth, "new@egoiq.com").id
+        _delete_approving_consent(admin_client, repo, f"/users/{uid}")
+        assert repo.find_pending_invite_by_email(auth, "new@egoiq.com") is None
+        assert admin_client.get("/invites").json() == []
+
+
+class TestResendInvite:
+    def test_resends_a_pending_invitation(self, admin_client):
+        # No hive and no SMTP under test: renewed, not emailed, link to copy.
+        inv = admin_client.post("/users/invite",
+                                json={"email": "new@egoiq.com", "grants": []}).json()
+        r = admin_client.post(f"/invites/{inv['id']}/resend")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["id"] == inv["id"] and body["status"] == "pending"
+        assert body["emailed"] is False and body["link"].endswith("/login")
+
+    def test_an_accepted_invitation_is_refused(self, admin_client, repo, auth):
+        inv = admin_client.post("/users/invite",
+                                json={"email": "new@egoiq.com", "grants": []}).json()
+        repo.mark_invite_accepted(auth, inv["id"], "usr-x")
+        r = admin_client.post(f"/invites/{inv['id']}/resend")
+        assert r.status_code == 409 and "already accepted" in r.json()["detail"]
+
+    def test_an_unknown_invitation_is_404(self, admin_client):
+        assert admin_client.post("/invites/inv-nope/resend").status_code == 404
+
+    def test_a_non_admin_cannot_resend(self, viewer_client):
+        assert viewer_client.post("/invites/inv-x/resend").status_code == 403
+
+
 class TestInviteConsumption:
     def test_there_is_no_route_that_claims_an_address(self, admin_client):
         """The attack this closes, now closed structurally.

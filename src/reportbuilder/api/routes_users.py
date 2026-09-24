@@ -219,6 +219,25 @@ def list_invites(auth: AuthContext = Depends(get_auth), repo: Repository = Depen
     return [_invite_out(i) for i in repo.list_invites(auth)]
 
 
+@users_router.post("/invites/{invite_id}/resend")
+def resend_invite_route(invite_id: str, request: Request,
+                        auth: AuthContext = Depends(get_auth),
+                        repo: Repository = Depends(get_repository),
+                        admin: User = Depends(require_admin)) -> dict:
+    """Email a pending or expired invitation again, good for another 14 days.
+    Same answer as a new invitation: `emailed` false means copy `link`."""
+    try:
+        invitation = invites.resend_invitation(
+            repo, auth, invite_id, invited_by=admin,
+            login_url=f"{public_origin(request)}/login")
+    except invites.ResendRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if invitation is None:
+        raise HTTPException(404, f"Invitation '{invite_id}' not found")
+    return {**_invite_out(invitation.invite), "link": invitation.link,
+            "emailed": invitation.emailed}
+
+
 @users_router.delete("/invites/{invite_id}", status_code=204)
 def revoke_invite_route(invite_id: str, auth: AuthContext = Depends(get_auth),
                         repo: Repository = Depends(get_repository),

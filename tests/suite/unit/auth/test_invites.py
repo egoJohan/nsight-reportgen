@@ -117,6 +117,87 @@ class TestCreateInvitation:
         assert repo.get_invite(auth, result.invite.id) is not None
 
 
+class TestTheHiveSends:
+    def test_the_hive_is_tried_first_with_an_html_link(self, repo, auth, admin):
+        sent = []
+        result = invites.create_invitation(
+            repo, auth, email="new@egoiq.com", grants=(), invited_by=admin,
+            login_url="https://studio.example.com/login?a=1&b=2",
+            sender=lambda *a: pytest.fail("SMTP must not be used when the hive sends"),
+            hive=lambda to, subject, html: sent.append((to, html)) or True)
+        assert result.emailed is True
+        [(to, html)] = sent
+        assert to == "new@egoiq.com"
+        assert '<a href="https://studio.example.com/login?a=1&amp;b=2">' in html
+
+    def test_the_inviters_address_is_escaped(self, repo, auth):
+        odd = repo.save_user(auth, User(id="", email="<b>x</b>@egoiq.com", is_admin=True))
+        sent = []
+        invites.create_invitation(
+            repo, auth, email="new@egoiq.com", grants=(), invited_by=odd,
+            login_url="https://s/login", sender=lambda *a: False,
+            hive=lambda to, subject, html: sent.append(html) or True)
+        assert "<b>" not in sent[0] and "&lt;b&gt;" in sent[0]
+
+    def test_smtp_takes_over_when_the_hive_refuses(self, repo, auth, admin):
+        repo.set_setting(auth, "email.json",
+                         {"host": "smtp.example.com", "from_addr": "nsight@example.com"})
+        calls = []
+        result = invites.create_invitation(
+            repo, auth, email="new@egoiq.com", grants=(), invited_by=admin,
+            login_url="https://studio.example.com/login", sender=_fake_sender(calls),
+            hive=lambda *a: False)
+        assert result.emailed is True and calls[0][1] == "new@egoiq.com"
+
+
+class TestResendInvitation:
+    def _invite(self, repo, auth, admin, lifetime=3600):
+        return repo.create_invite(auth, "new@egoiq.com", (Grant("attendo", "view"),),
+                                  admin.id, lifetime_seconds=lifetime)
+
+    def test_a_pending_one_is_emailed_again_and_good_for_14_days(self, repo, auth, admin):
+        inv = self._invite(repo, auth, admin)
+        sent = []
+        result = invites.resend_invitation(
+            repo, auth, inv.id, invited_by=admin, login_url="https://s/login",
+            sender=lambda *a: False, hive=lambda to, s, h: sent.append(to) or True)
+        assert result.emailed is True and sent == ["new@egoiq.com"]
+        assert result.invite.expires > inv.expires
+        stored = repo.get_invite(auth, inv.id)
+        assert stored.expires == result.invite.expires
+        assert stored.grants == inv.grants and stored.invited_at == inv.invited_at
+
+    def test_an_expired_one_comes_back_to_life(self, repo, auth, admin):
+        inv = self._invite(repo, auth, admin, lifetime=-60)
+        assert repo.find_pending_invite_by_email(auth, "new@egoiq.com") is None
+        invites.resend_invitation(repo, auth, inv.id, invited_by=admin,
+                                  login_url="https://s/login",
+                                  sender=lambda *a: False, hive=lambda *a: True)
+        assert repo.find_pending_invite_by_email(auth, "new@egoiq.com").id == inv.id
+
+    def test_an_accepted_one_is_refused(self, repo, auth, admin):
+        inv = self._invite(repo, auth, admin)
+        repo.mark_invite_accepted(auth, inv.id, "usr-x")
+        with pytest.raises(invites.ResendRefused):
+            invites.resend_invitation(repo, auth, inv.id, invited_by=admin,
+                                      login_url="https://s/login",
+                                      sender=lambda *a: False,
+                                      hive=lambda *a: pytest.fail("nothing to send"))
+
+    def test_an_unknown_one_is_none(self, repo, auth, admin):
+        assert invites.resend_invitation(repo, auth, "inv-nope", invited_by=admin,
+                                         login_url="https://s/login",
+                                         sender=lambda *a: False, hive=lambda *a: True) is None
+
+    def test_not_emailed_still_renews_and_says_so(self, repo, auth, admin):
+        inv = self._invite(repo, auth, admin)
+        result = invites.resend_invitation(repo, auth, inv.id, invited_by=admin,
+                                           login_url="https://s/login",
+                                           sender=lambda *a: False, hive=lambda *a: False)
+        assert result.emailed is False and result.link == "https://s/login"
+        assert result.invite.expires > inv.expires
+
+
 class TestRevokeInvitation:
     def test_revoking_a_pending_invite_deletes_it(self, repo, auth, admin):
         inv = repo.create_invite(auth, "new@egoiq.com", (), admin.id, lifetime_seconds=3600)

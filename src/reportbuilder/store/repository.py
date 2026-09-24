@@ -229,31 +229,6 @@ class AccessRequest:
     decided_at: str | None = None
 
 
-@dataclass(frozen=True)
-class SignupRequest:
-    """Somebody who proved who they are and has no account here.
-
-    They completed Google or Microsoft sign-in, so `email` is verified by the
-    provider — this is not a claim typed into a form, which is the whole reason
-    it can be trusted enough to show an admin. What they are asking for is an
-    ACCOUNT; the answer is an invitation, which creates one with the grants the
-    admin chooses.
-
-    Distinct from `AccessRequest`, which is a known user asking for one more
-    customer and is answered with a grant. Kept past its decision for the same
-    reason as `Invite`: an admin looking later should see what was refused
-    rather than find it vanished.
-    """
-    id: str
-    email: str
-    provider: str
-    name: str = ""
-    requested_at: str = ""
-    state: str = "pending"  # "pending" | "approved" | "refused"
-    decided_by: str | None = None
-    decided_at: str | None = None
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -1794,6 +1769,33 @@ class Repository:
                     if i.email == wanted and i.accepted_user_id is None and i.expires > now),
                    None)
 
+    def renew_invite(self, auth: AuthContext, invite_id: str,
+                     lifetime_seconds: int) -> "Invite | None":
+        """Restart *invite_id*'s lifetime from now -- a resent invitation is
+        good for as long as a new one. Only `expires` changes; who invited,
+        when first, and the grants stay as they were. None if it is gone."""
+        try:
+            d = self._read_json(auth, P.invite_path(invite_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return None
+        d["expires"] = (datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds)) \
+            .isoformat(timespec="seconds")
+        self._write_json(auth, P.invite_path(invite_id), d, [P.LABEL_INVITE])
+        return self._invite_from(d)
+
+    def expire_invite(self, auth: AuthContext, invite_id: str) -> None:
+        """Make *invite_id* unusable now: its `expires` becomes this moment,
+        so `find_pending_invite_by_email` -- what sign-in and a new invitation
+        consult -- no longer finds it. A write, not a delete, so no consent
+        prompt can leave it live halfway; `delete_invite` removes the record
+        after. Unknown id: no-op."""
+        try:
+            d = self._read_json(auth, P.invite_path(invite_id))
+        except (NotFound, ValueError, UnicodeDecodeError):
+            return
+        d["expires"] = _now()
+        self._write_json(auth, P.invite_path(invite_id), d, [P.LABEL_INVITE])
+
     def mark_invite_accepted(self, auth: AuthContext, invite_id: str, user_id: str) -> None:
         """Single-use: once `accepted_user_id` is set, the invite can never
         again satisfy `find_pending_invite_by_email`, so it cannot be
@@ -1845,97 +1847,6 @@ class Repository:
     # asked, for which customer, at what mode, and what an admin did about
     # it. Same shape and tolerances as invitations above -- one malformed
     # row costs only itself, never the whole listing.
-
-    # ---- signup requests: a verified stranger asking for an account -------
-
-    def create_signup_request(self, auth: AuthContext, email: str, provider: str,
-                              name: str = "") -> SignupRequest:
-        """File (or refresh) a pending ask for an account.
-
-        A second ask from the same address while the first is still pending
-        REPLACES it, the same rule `create_access_request` follows: the record
-        is what this person wants now, not a log of how many times they tried,
-        and a duplicate row is something for an admin to reconcile rather than
-        information. A DECIDED request is left alone and a fresh one opened —
-        that decision is history.
-        """
-        normalized = (email or "").strip().lower()
-        existing = self.find_pending_signup_request(auth, normalized)
-        rid = existing.id if existing is not None else _new_id("sup")
-        now = _now()
-        self._write_json(auth, P.signup_request_path(rid),
-                         {"id": rid, "email": normalized, "provider": provider,
-                          "name": name, "requested_at": now, "state": "pending",
-                          "decided_by": None, "decided_at": None},
-                         [P.LABEL_SIGNUP_REQUEST])
-        return SignupRequest(id=rid, email=normalized, provider=provider, name=name,
-                             requested_at=now)
-
-    def _signup_request_from(self, d: dict) -> SignupRequest:
-        return SignupRequest(id=d["id"], email=d.get("email", ""),
-                             provider=d.get("provider", ""), name=d.get("name", ""),
-                             requested_at=d.get("requested_at", ""),
-                             state=d.get("state", "pending"),
-                             decided_by=d.get("decided_by"),
-                             decided_at=d.get("decided_at"))
-
-    def list_signup_requests(self, auth: AuthContext) -> list[SignupRequest]:
-        out = []
-        for ref in self.store.list(auth, f"{P.SETTINGS_ROOT}/signup_request/",
-                                   labels=[P.LABEL_SIGNUP_REQUEST]):
-            try:
-                out.append(self._signup_request_from(self._read_json(auth, ref.path)))
-            except (NotFound, ValueError, UnicodeDecodeError, KeyError):
-                continue    # one unreadable row must not hide every other ask
-        return sorted(out, key=lambda r: r.requested_at, reverse=True)
-
-    def get_signup_request(self, auth: AuthContext, request_id: str) -> "SignupRequest | None":
-        try:
-            return self._signup_request_from(
-                self._read_json(auth, P.signup_request_path(request_id)))
-        except (NotFound, ValueError, UnicodeDecodeError, KeyError):
-            return None
-
-    def find_pending_signup_request(self, auth: AuthContext,
-                                    email: str) -> "SignupRequest | None":
-        wanted = (email or "").strip().lower()
-        if not wanted:
-            return None
-        return next((r for r in self.list_signup_requests(auth)
-                     if r.email == wanted and r.state == "pending"), None)
-
-    def decide_signup_request(self, auth: AuthContext, request_id: str, state: str,
-                              decided_by: str) -> "SignupRequest | None":
-        """Move a pending ask to *state* ("approved" or "refused"), once.
-
-        Records the decision only; creating the account is the caller's job and
-        goes through `invites.create_invitation`, so an approved signup takes
-        exactly the path an admin-initiated invitation takes.
-        """
-        r = self.get_signup_request(auth, request_id)
-        if r is None:
-            return None
-        now = _now()
-        self._write_json(auth, P.signup_request_path(request_id),
-                         {"id": r.id, "email": r.email, "provider": r.provider,
-                          "name": r.name, "requested_at": r.requested_at,
-                          "state": state, "decided_by": decided_by, "decided_at": now},
-                         [P.LABEL_SIGNUP_REQUEST])
-        return replace(r, state=state, decided_by=decided_by, decided_at=now)
-
-    def delete_signup_request(self, auth: AuthContext, request_id: str) -> None:
-        """Best-effort removal. Never raises for consent.
-
-        A refused request is already marked refused before this runs, and the
-        queue lists only pending ones — so a row this call cannot physically
-        remove is already invisible to everyone. That is what makes swallowing
-        the gate safe here, the same reasoning `delete_session` sets out: the
-        delete is tidying, not the thing the behaviour depends on.
-        """
-        try:
-            self.store.delete(auth, P.signup_request_path(request_id))
-        except (NotFound, ConsentRequired):
-            pass
 
     def create_access_request(self, auth: AuthContext, user_id: str, user_email: str,
                               customer_id: str, mode: str) -> AccessRequest:

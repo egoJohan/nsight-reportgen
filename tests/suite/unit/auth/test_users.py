@@ -158,3 +158,33 @@ class TestSetAdmin:
 
     def test_setting_admin_on_an_unknown_user_is_none(self, repo, auth):
         assert users.set_admin(repo, auth, "usr-nope", True) is None
+
+
+class TestRemovedUsersInvitation:
+    """A removed user's invitation must not stay a way back in (2026-09-25):
+    sign-in creates the account from a pending invitation when none exists."""
+
+    def _invited(self, repo, auth):
+        from reportbuilder.auth import invites
+        repo.save_user(auth, User(id="", email="admin@egoiq.com", is_admin=True))
+        admin = repo.find_user_by_email(auth, "admin@egoiq.com")
+        inv = invites.create_invitation(
+            repo, auth, email="gone@egoiq.com", grants=(Grant("attendo", "edit"),),
+            invited_by=admin, login_url="https://s/login",
+            sender=lambda *a: False, hive=lambda *a: False)
+        return inv.invite.user_id
+
+    def test_the_removed_person_cannot_sign_back_in_with_it(self, repo, auth):
+        from reportbuilder.auth import identity
+        uid = self._invited(repo, auth)
+        approve_all(repo.store, lambda: users.remove_user(repo, auth, uid))
+        got = identity.resolve_signed_in_user(repo, auth, "gone@egoiq.com", frozenset(),
+                                              email_domain_proven=False)
+        assert isinstance(got, identity.SignInRefused)
+        assert repo.find_user_by_email(auth, "gone@egoiq.com") is None
+
+    def test_an_interrupted_removal_leaves_no_usable_invitation(self, repo, auth):
+        uid = self._invited(repo, auth)
+        with pytest.raises(ConsentRequired):
+            users.remove_user(repo, auth, uid)  # the first consent prompt stops it
+        assert repo.find_pending_invite_by_email(auth, "gone@egoiq.com") is None

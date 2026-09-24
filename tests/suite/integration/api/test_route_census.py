@@ -43,7 +43,7 @@ def test_public_routes_are_few_and_named():
         # "not now". The browser polls it to know when to take the maintenance
         # screen down.
         "/readyz",
-        "/auth/logout", "/signup/me", "/signup-requests",
+        "/auth/logout",
         "/auth/login/{provider}", "/auth/callback/{provider}", "/auth/providers"})
 
 
@@ -53,7 +53,7 @@ def test_public_routes_are_few_and_named():
 # The browser never talks to the backend directly: vite proxies in dev, nginx
 # in the image, and each has its own hand-maintained list of path prefixes. A
 # prefix missing from either does not fail loudly — the SPA's catch-all answers
-# instead, so `fetch("/signup/me")` gets index.html and the page decides the
+# instead, so `fetch("/auth/providers")` gets index.html and the page decides the
 # call failed. That is how a working feature reached a browser and did nothing.
 
 _DOC_ROUTES = {"/health", "/openapi.json", "/docs", "/redoc"}

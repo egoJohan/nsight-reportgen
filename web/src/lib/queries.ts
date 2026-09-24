@@ -1003,6 +1003,13 @@ export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: api.users.list });
 }
 
+/** Every invitation, for the Users rows' "Resend invitation": an invitation
+ *  creates its account at once, so the row is the user and the invitation is
+ *  looked up by address. */
+export function useInvites() {
+  return useQuery({ queryKey: ["invites"], queryFn: api.users.listInvites });
+}
+
 /** The grant picker's customer list -- admin-only and NOT grant-filtered
  *  (see api.users.listGrantableCustomers). Only the Users screen's
  *  GrantPicker should use this; everywhere else that lists customers wants
@@ -1035,6 +1042,7 @@ export function useUserActions() {
       onSuccess: invalidate,
     }),
     revokeInvite: useMutation({ mutationFn: api.users.revokeInvite, onSuccess: invalidate }),
+    resendInvite: useMutation({ mutationFn: api.users.resendInvite, onSuccess: invalidate }),
   };
 }
 
