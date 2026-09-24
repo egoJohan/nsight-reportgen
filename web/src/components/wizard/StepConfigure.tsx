@@ -708,9 +708,14 @@ function SortWidget({ field, chart, question, onChange }: WidgetProps) {
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
   // Survey order has a direction of its own: Ascending lists the entries as
   // the data has them, Descending reverses them — so a region coded 0/1 can
-  // put its 1 first. Only a DRAGGED order has none: it is the order.
-  const survey = chart.sort.basis === "data_order";
-  const dirDisabled = chart.sort.basis === "manual";
+  // put its 1 first. On a chart split by a classifier that direction is the
+  // GROUPS' order, on every chart type, so it is offered with a dragged order
+  // too: the drag orders the answers, the direction the groups. Unsplit, a
+  // dragged order has no direction — it is the order. (2026-09-24)
+  const split = !!chart.classifying_var;
+  const survey =
+    chart.sort.basis === "data_order" || (chart.sort.basis === "manual" && split);
+  const dirDisabled = chart.sort.basis === "manual" && !split;
   const dirValue = survey
     ? (chart.sort.survey_descending ? "desc" : "asc")
     : (chart.sort.descending ? "desc" : "asc");

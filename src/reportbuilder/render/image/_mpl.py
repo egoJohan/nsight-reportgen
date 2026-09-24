@@ -807,6 +807,20 @@ def place_total(segs, position: str, *, top_is_last: bool = False) -> list:
     return totals + rest if (position == "top") != top_is_last else rest + totals
 
 
+def coded_order(series, segs) -> list:
+    """*segs* in the order their colours are dealt: as coded in the data.
+
+    The same as *segs* unless Survey order Descending reversed the groups, in
+    which case the series carries their coded order and a group keeps the colour
+    it has everywhere else in the report (`SeriesResult.segments_as_coded`)."""
+    coded = getattr(series, "segments_as_coded", ()) or ()
+    if not coded:
+        return list(segs)
+    present = set(segs)
+    order = [s for s in coded if s in present]
+    return order + [s for s in segs if s not in set(order)]
+
+
 def colours_by_series(clrs, default_order, drawn_order) -> list:
     """`clrs`, dealt along `default_order`, handed to the same series in `drawn_order`.
 

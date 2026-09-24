@@ -103,6 +103,11 @@ class SeriesResult:
     # though the chart names a classifier. A group is labelled with its base
     # ("Naiset (n=501)"); a statement is not a group and is not. (2026-09-11)
     segments_are_groups: bool = True
+    #: The groups in the order they are coded, when Survey order Descending has
+    #: drawn them the other way round. A chart colours its series by this order,
+    #: so a group keeps its colour wherever it is drawn — Itäinen Suomi is the
+    #: same colour on every slide of a report, reversed or not. (2026-09-24)
+    segments_as_coded: tuple[str, ...] = ()
 
     def cell(self, category: str, segment: str) -> Cell:
         return self.cells[(category, segment)]

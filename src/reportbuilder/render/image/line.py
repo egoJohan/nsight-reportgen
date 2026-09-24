@@ -16,7 +16,7 @@ from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_background,
     chart_furniture, new_figure, render_png, place_picture, series_values,
     format_value, series_label, style_legend, wrap_label, place_total,
-    colours_by_series, _value_axis, author_label_floor,
+    colours_by_series, coded_order, _value_axis, author_label_floor,
 )
 from reportbuilder.render.house_style import series_colors
 from reportbuilder.render.image._mpl import template_palette
@@ -46,7 +46,7 @@ def build_image_line(ctx) -> None:
     # this did not. (Johan, 2026-09-16)
     cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
     # A line has no top or bottom; its legend has a first and a last.
-    default_segs, segs = segs, place_total(segs, getattr(ctx.spec, "total_position", "auto"))
+    default_segs, segs = coded_order(ctx.series, segs), place_total(segs, getattr(ctx.spec, "total_position", "auto"))
     fig, ax = new_figure(ctx)
     bg = chart_background(ctx)
     ink, muted, grid = chart_furniture(ctx)

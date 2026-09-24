@@ -1145,25 +1145,6 @@ def _single(question: Question, spec: ChartSpec, data: pd.DataFrame,
                 reals.sort(key=lambda b: by_bar.get(b, 0.0), reverse=spec.sort.descending)
             segments = tuple(reals) + (("Total",) if "Total" in segments else ())
 
-    # …and Survey order, DESCENDING: the groups in reverse of the order they are
-    # coded, so "Itäinen Suomi" (1) can lead "Muu Suomi" (0). Total stays last,
-    # and in the side-by-side layout each panel reverses on its own with its own
-    # "· Total" last, as the sorts above keep them. (Johan, 2026-09-23)
-    if (_bars_are_segments and spec.sort.basis == "data_order"
-            and getattr(spec.sort, "survey_descending", False)):
-        reals = [s for s in segments if s != "Total"]
-        if separate is not None:
-            _sp = separate[1]
-            order = []
-            for panel in dict.fromkeys(_sp[s] for s in reals):
-                panel_segs = [s for s in reals if _sp[s] == panel]
-                totals = [s for s in panel_segs if s == f"{_sp[s]} · Total"]
-                order += [s for s in reversed(panel_segs) if s not in totals] + totals
-            reals = order
-        else:
-            reals.reverse()
-        segments = tuple(reals) + (("Total",) if "Total" in segments else ())
-
     base_n = {s: denom.get(s, 0) for s in segments}
     base_n.setdefault("Total", denom_total)
     return SeriesResult(categories=tuple(categories), segments=segments, cells=cells,
@@ -1631,6 +1612,22 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
     mieltä" in the Category labels box changed nothing about the legend, and the
     only way to say what the scale meant was to type it into the subtitle.
     """
+    # Survey order, DESCENDING, on a chart split by a classifier reverses the
+    # GROUPS — on every chart type, not only a stacked bar: "ettei toimi
+    # esimerkiksi Vertical Barissa tai Pie chartissa" … "itäinen suomi pitäisi
+    # saada ennen muu suomi" (2026-09-24). The answers keep the survey's order,
+    # so the paths below compute with the flag off and the groups are reversed
+    # once, here, whatever path drew them. A chart with no classifier reverses
+    # its categories (sorting.sort_categories), as before.
+    # A DRAGGED order counts too: it orders the answers, and the groups are
+    # still in the survey's order — the reported index chart was sorted by hand
+    # and could not put Itäinen Suomi first at all.
+    reverse_groups = (spec.sort.basis in ("data_order", "manual")
+                      and getattr(spec.sort, "survey_descending", False)
+                      and bool(getattr(spec, "classifying_var", None)))
+    if reverse_groups:
+        spec = dataclasses.replace(
+            spec, sort=dataclasses.replace(spec.sort, survey_descending=False))
     rows, applied = _selected_rows(spec, data, model)
     if applied and _total_panel_asked(spec):
         # A pie's Total panel beside some of the groups is the WHOLE study —
@@ -1662,8 +1659,40 @@ def compute(question: Question, spec: ChartSpec, data: pd.DataFrame,
             combinations=bool(getattr(spec, "classifying_var_2", None)))
         renamed_series = frozenset(set(result.segments) - before)
     overrides = spec.label_override_map() if hasattr(spec, "label_override_map") else {}
-    return (_relabelled(result, overrides, keep_segments=renamed_series)
-            if overrides else result)
+    if overrides:
+        result = _relabelled(result, overrides, keep_segments=renamed_series)
+    # Last, so the order recorded is the one of the names the slide shows.
+    return _groups_reversed(result) if reverse_groups else result
+
+
+def _groups_reversed(result: SeriesResult) -> SeriesResult:
+    """The classifier's groups in reverse, every Total staying last.
+
+    Where the groups sit in panels — two classifiers side by side, crossed
+    groups under their primary, a battery's statement with its group bars —
+    `segment_primary` names each one's panel, and each panel reverses on its
+    own with its own "· Total" last; the panels keep their order. A result
+    whose series are not groups at all is left as it is.
+    """
+    def is_total(s: str) -> bool:
+        return s == "Total" or s.endswith(" · Total")
+
+    primary = result.segment_primary or {}
+    if not primary and not result.segments_are_groups:
+        return result
+    blocks: dict[str, list[str]] = {}
+    for s in result.segments:
+        blocks.setdefault(primary.get(s, "" if not is_total(s) or not primary else s),
+                          []).append(s)
+    order: list[str] = []
+    for members in blocks.values():
+        order += [s for s in reversed(members) if not is_total(s)]
+        order += [s for s in members if is_total(s)]
+    if not primary:
+        # One block: the bare "Total" goes after every group.
+        order = [s for s in order if not is_total(s)] + [s for s in order if is_total(s)]
+    return dataclasses.replace(result, segments=tuple(order),
+                               segments_as_coded=tuple(result.segments))
 
 
 def _total_panel_asked(spec) -> bool:

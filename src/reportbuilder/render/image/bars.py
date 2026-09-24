@@ -37,7 +37,7 @@ from reportbuilder.render.image.label_fit import register_category_labels
 import numpy as np
 from reportbuilder.render.image._mpl import (apply_axis_titles, chart_accent,
     chart_furniture, new_figure, new_tall_figure, new_figure_grid, render_png, place_picture,
-    series_label, with_base, place_total, colours_by_series,
+    series_label, with_base, place_total, colours_by_series, coded_order,
     place_picture_square, series_values, format_value, label_floor, default_label_floor,
     author_label_floor, style_legend,
     fit_panel_titles, force_break_token, separate_panel_rows,
@@ -965,8 +965,13 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     _c, _s, data = series_values(series)
     n_cat = len(cats)
     n_sec = max((len(segs) for _p, segs in groups), default=1)
-    clrs = series_colors(n_sec, palette=template_palette(ctx),
-                          accent=chart_accent(ctx))
+    ramp = series_colors(n_sec, palette=template_palette(ctx),
+                         accent=chart_accent(ctx))
+
+    def panel_colours(segs):
+        # Keyed by position in the CODED order, the same in every panel, so a
+        # group reversed by Survey order Descending keeps its colour.
+        return colours_by_series(ramp[:len(segs)], coded_order(series, segs), segs)
     all_vals = [v for _p, segs in groups for s in segs for v in data.get(s, []) if v is not None]
     max_val = max(all_vals, default=0.0)
     ink, _muted, _grid = chart_furniture(ctx)
@@ -978,6 +983,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         drawn: list[tuple] = []
         for ax, (p, segs) in zip(axes, groups):
             n = len(segs)
+            clrs = panel_colours(segs)
             w = 0.82 / n if n > 1 else 0.6
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
@@ -1000,6 +1006,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         drawn = []
         for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
             n = len(segs)
+            clrs = panel_colours(segs)
             h = 0.82 / n if n > 1 else 0.6
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
@@ -1024,6 +1031,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         # the next, and a legend shared by the row can say only one of them.
         # Colours stay keyed by position, the same in every panel.
         for ax, (_p, segs) in zip(axes, groups):
+            clrs = panel_colours(segs)
             names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
             panel_legends.append((ax, handles, names))
@@ -1307,7 +1315,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
         n = len(segs)
         clrs = colours_by_series(series_colors(n, palette=template_palette(ctx),
                                                accent=chart_accent(ctx)),
-                                 default_order.get(p, segs), segs)
+                                 coded_order(series, default_order.get(p, segs)), segs)
         if vertical:
             x = np.arange(n_cat)
             w = 0.82 / n if n > 1 else 0.6
@@ -1435,7 +1443,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     """Internal vertical-bar renderer."""
     cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
     # Columns are read left to right, and a group's bars in the order listed.
-    default_segs, segs = segs, place_total(segs, _total_position(ctx))
+    default_segs, segs = coded_order(ctx.series, segs), place_total(segs, _total_position(ctx))
     cats, data = _place_total_category(cats, data, _total_position(ctx))
     fig, ax = new_figure(ctx)
     clrs = colours_by_series(series_colors(len(segs), palette=template_palette(ctx),
@@ -1541,7 +1549,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # Categories run top to bottom in the order listed, but a group's own bars
     # are stacked from the bottom UP — so there the reader's top is the end of
     # the list, which is why Total, last, has always been each group's top bar.
-    default_segs, segs = segs, place_total(segs, _total_position(ctx), top_is_last=True)
+    default_segs, segs = coded_order(ctx.series, segs), place_total(segs, _total_position(ctx), top_is_last=True)
     cats, data = _place_total_category(cats, data, _total_position(ctx))
     n_cats = len(cats)
     # Reserve as many label lines as the LONGEST label actually needs (2..3), so

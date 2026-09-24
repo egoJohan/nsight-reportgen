@@ -126,3 +126,108 @@ def test_battery_statements_reverse(chart_type):
     desc = _battery(chart_type, survey_descending=True)
     rows_of = (lambda r: r.categories) if chart_type == "horizontal_bar" else (lambda r: r.segments)
     assert list(rows_of(desc)) == list(reversed(rows_of(asc))), (rows_of(asc), rows_of(desc))
+
+
+# ---- every chart split by a group reverses its GROUPS, not its categories ------
+#
+# "Tämä toimii nyt hyvin Stacked Horizontal Barissa, mutta huomasin ettei toimi
+# esimerkiksi Vertical Barissa tai Pie chartissa" … "horizontal bar jossa
+# itäinen suomi pitäisi saada ennen muu suomi". (2026-09-24) The group order is
+# what the author reverses on any chart that is split; the answers keep the
+# survey's order, as they do on the stacked bar.
+
+def _split(chart_type, **sort):
+    q = Variable(name="q", label="Työtilanne", measurement="nominal", missing_values=[],
+                 value_labels=[ValueLabel(value=float(c), label=l)
+                               for c, l in {1: "Kokopäivä", 2: "Osa-aika", 3: "Yrittäjä"}.items()])
+    region = Variable(name="alue", label="Alue", measurement="nominal", missing_values=[],
+                      value_labels=[ValueLabel(value=float(c), label=l) for c, l in _REGION.items()])
+    rows = [{"q": float(1 + i % 3), "alue": float(i % 2)} for i in range(300)]
+    model = QuestionModel(variables={"q": q, "alue": region},
+                          questions=[Question(qid="q", text=q.label, kind="single", variables=("q",))])
+    spec = ChartSpec(question_ref="q", chart_type=chart_type, statistic="pct",
+                     classifying_var="alue", number_format=NumberFormat(),
+                     sort=SortSpec(basis="data_order", **sort), template_slot="s1",
+                     elements=ElementToggles(), show_total="on")
+    return compute(model.question("q"), spec, pd.DataFrame(rows), model)
+
+
+@pytest.mark.parametrize("chart_type", ["vertical_bar", "horizontal_bar", "pie", "line",
+                                        "stacked_vertical_bar", "stacked_horizontal_bar"])
+def test_descending_puts_the_last_group_first_on_every_chart(chart_type):
+    asc, desc = _split(chart_type), _split(chart_type, survey_descending=True)
+    groups = lambda r: [s for s in r.segments if s != "Total"]
+    assert groups(asc) == ["Muu Suomi", "Itäinen Suomi"], asc.segments
+    assert groups(desc) == ["Itäinen Suomi", "Muu Suomi"], desc.segments
+
+
+@pytest.mark.parametrize("chart_type", ["vertical_bar", "horizontal_bar", "pie", "line"])
+def test_split_the_answers_keep_the_surveys_order(chart_type):
+    assert _split(chart_type, survey_descending=True).categories == \
+        _split(chart_type).categories
+
+
+@pytest.mark.parametrize("chart_type", ["vertical_bar", "pie"])
+def test_total_stays_last_on_a_split_chart(chart_type):
+    segs = _split(chart_type, survey_descending=True).segments
+    assert "Total" not in segs or segs[-1] == "Total", segs
+
+
+def test_a_split_battery_reverses_its_groups_not_its_statements():
+    """The reported index chart: statements along the axis, regions as bars."""
+    names = ("v0", "v1", "v2")
+    variables = {n: Variable(name=n, label=f"Indeksi {n}", measurement="ordinal", missing_values=[],
+                             value_labels=[ValueLabel(value=float(c), label=l)
+                                           for c, l in _SCALE.items()]) for n in names}
+    variables["alue"] = Variable(name="alue", label="Alue", measurement="nominal", missing_values=[],
+                                 value_labels=[ValueLabel(value=float(c), label=l)
+                                               for c, l in _REGION.items()])
+    rows = [{**{n: float(1 + (i + j) % 5) for j, n in enumerate(names)}, "alue": float(i % 2)}
+            for i in range(200)]
+    model = QuestionModel(variables=variables, questions=[Question(
+        qid="b", text="Indeksit", kind="battery", variables=names)])
+
+    def run(**sort):
+        spec = ChartSpec(question_ref="b", chart_type="vertical_bar", statistic="mean",
+                         classifying_var="alue", number_format=NumberFormat(),
+                         sort=SortSpec(basis="data_order", **sort), template_slot="s1",
+                         elements=ElementToggles())
+        return compute(model.questions[0], spec, pd.DataFrame(rows), model)
+
+    asc, desc = run(), run(survey_descending=True)
+    assert desc.categories == asc.categories, "the statements moved"
+    groups = lambda r: [s for s in r.segments if s != "Total"]
+    assert groups(desc) == list(reversed(groups(asc))), (asc.segments, desc.segments)
+
+
+def test_a_dragged_order_on_a_split_chart_still_reverses_its_groups():
+    """The reported index chart was sorted by hand: the drag orders the answers,
+    the direction the groups."""
+    q = Variable(name="q", label="Työtilanne", measurement="nominal", missing_values=[],
+                 value_labels=[ValueLabel(value=float(c), label=l)
+                               for c, l in {1: "Kokopäivä", 2: "Osa-aika", 3: "Yrittäjä"}.items()])
+    region = Variable(name="alue", label="Alue", measurement="nominal", missing_values=[],
+                      value_labels=[ValueLabel(value=float(c), label=l) for c, l in _REGION.items()])
+    rows = [{"q": float(1 + i % 3), "alue": float(i % 2)} for i in range(300)]
+    model = QuestionModel(variables={"q": q, "alue": region},
+                          questions=[Question(qid="q", text=q.label, kind="single", variables=("q",))])
+    spec = ChartSpec(question_ref="q", chart_type="vertical_bar", statistic="pct",
+                     classifying_var="alue", number_format=NumberFormat(),
+                     sort=SortSpec(basis="manual", manual_order=("Yrittäjä", "Kokopäivä", "Osa-aika"),
+                                   survey_descending=True),
+                     template_slot="s1", elements=ElementToggles(), show_total="on")
+    got = compute(model.question("q"), spec, pd.DataFrame(rows), model)
+    assert got.categories[:3] == ("Yrittäjä", "Kokopäivä", "Osa-aika"), got.categories
+    assert [s for s in got.segments if s != "Total"] == ["Itäinen Suomi", "Muu Suomi"]
+
+
+def test_a_reversed_group_keeps_its_colour():
+    """Reversed by position, Itäinen Suomi turned light and Muu Suomi dark —
+    the other way round from every other slide of the report."""
+    from reportbuilder.render.image._mpl import coded_order, colours_by_series
+
+    asc, desc = _split("vertical_bar"), _split("vertical_bar", survey_descending=True)
+    ramp = ["#light", "#dark", "#total"]
+    colour = lambda r: dict(zip(r.segments, colours_by_series(
+        ramp[:len(r.segments)], coded_order(r, r.segments), list(r.segments))))
+    assert colour(desc) == colour(asc)
