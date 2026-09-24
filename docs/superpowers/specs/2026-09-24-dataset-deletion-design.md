@@ -43,10 +43,14 @@ remaining one.
 `case.json` gains:
 
 ```json
-"dataset_deleted": {"at": "2026-09-24T18:02:11+00:00", "by": "usr-…", "by_name": "Johan Wessberg"}
+"dataset_deleted": {"at": "2026-09-24T18:02:11+00:00", "by": "usr-…",
+                    "by_name": "Johan Wessberg", "files": ["Q3-2026.sav"],
+                    "completed": true}
 ```
 
-Absent means the study is live. It is the single source of truth: every screen
+Absent means the study is live. `completed` is `false` from the moment the
+study is marked until the last step of the delete has run (§3); `files` names
+what was deleted, for the banner. It is the single source of truth: every screen
 and every user reads it from the server, so no per-user setting can get it
 wrong. `Case` (the repository's case record) exposes it as `dataset_deleted:
 dict | None`; `GET /cases/{id}` and the case list return it.
@@ -73,8 +77,19 @@ also takes `require_case_live`**, except `DELETE /cases/{case_id}`. The
 implementation lists them, and a test walks the app's routes to prove no
 `require_case_write` route was missed.
 
-**Exception:** `DELETE /cases/{case_id}` — deleting the whole study — stays
-allowed, so an archive can be removed completely.
+**Exceptions:**
+
+- `DELETE /cases/{case_id}` — deleting the whole study — stays allowed, so an
+  archive can be removed completely.
+- While `completed` is `false`, `DELETE /cases/{case_id}/materials/{mid}` stays
+  allowed, so an interrupted delete can always be finished (§3). Nothing else
+  does.
+
+Someone who took a lock between the delete's lock check and the marking loses
+nothing already saved; their next save is refused with the read-only message.
+That is accepted: the check makes it a race of seconds, and the alternative —
+holding a study-wide lock across a delete that may wait for consent — would
+block everyone for as long as the consent takes.
 
 Reads stay allowed: the case, the report list, deck downloads.
 
@@ -85,16 +100,23 @@ repeat, so datahive's `consent_required` retries and an interrupted delete both
 converge:
 
 1. **Refuse** with 409 if anyone other than the caller holds a live lock on a
-   report in the study — the same rule as deleting a study.
+   report in the study — the same rule as deleting a study. Skipped when
+   resuming (`completed` is `false`): the study is already read-only.
 2. If this is **not** the study's last dataset: delete `material/{mid}` and
    `material/{mid}.config`, clear that material's caches (step 6), done.
-3. **Mark the study** `dataset_deleted` (write `case.json`) — first, so from
-   here on nothing new is written.
-4. **For each report:** if `report/{rid}.pptx` exists, delete `report/{rid}`
-   (the definition) and rewrite `report/{rid}.meta` to the deck-only form:
-   `{id, name, has_render: true, rendered_at, deck_only: true}` — no
-   `render_key`, no template pin. Otherwise delete `report/{rid}`, `.meta`,
-   `.pptx` and `.lock` entirely.
+3. **Mark the study** `dataset_deleted` with `completed: false` (write
+   `case.json`) — first, so from here on nothing new is written.
+4. **For each report:** if `report/{rid}.pptx` exists **in the store**, delete
+   `report/{rid}` (the definition) and rewrite `report/{rid}.meta` to the
+   deck-only form: `{id, name, has_render: true, rendered_at, deck_only: true}`
+   — no `render_key`, no template pin. Otherwise delete `report/{rid}`,
+   `.meta`, `.pptx` and `.lock` entirely.
+   *What counts as a deck:* the stored `.pptx`, whatever its age. A report
+   edited after its deck was generated keeps that deck — it is what was
+   delivered — shown with the date it was generated. A deck that exists only in
+   one server's local cache (its save to the store failed) does not count: the
+   store is the record, and the warning (§5) uses exactly this rule, so what it
+   says will be kept is what is kept.
 5. **Delete the datasets:** every `material/{mid}` and `.config` in the case.
 6. **Clear derived data:** the material's preview images
    (`preview_root`, the per-material marker), the local deck cache
@@ -102,22 +124,48 @@ converge:
    parsed-file cache entry, the location cache.
 7. **Re-register the tenant's masking terms** without the deleted dataset's
    accepted terms.
+8. **Mark the delete finished:** `completed: true`.
+
+**Interrupted?** Datahive may stop any delete to ask a human for consent
+(`consent_required`, returned as 409 with an approve link), and a process can
+die mid-way. Every step checks what is already done and moves on, so calling
+the same `DELETE` again converges. While `completed` is `false` the study page
+shows *"Deleting the dataset did not finish"* with a **Finish deleting** button
+that makes that call; the study is read-only meanwhile, so nothing is written
+in between.
 
 `GET …/materials/{mid}/usage` returns, for the warning:
-`{"last_dataset": bool, "with_deck": [names…], "without_deck": [names…]}`.
+`{"last_dataset": bool, "remaining": [file names…], "with_deck": [names…],
+"without_deck": [names…]}` — `with_deck`/`without_deck` by the §3 step 4 rule.
 
 ## 4. What the read-only study shows
 
 - **List** (`GET /cases/{id}/reports`): only deck-only reports, each with
   `deck_only: true`, `rendered: true`, `rendered_at`.
-- **Downloads:** for a deck-only report, `preview.pptx` returns the stored
-  `report/{rid}.pptx` with no `render_key` check (there is nothing left to
-  check it against); `preview.pdf` converts that PPTX once and caches the PDF
-  locally.
-- **Study page:** a banner — *"Read only: the dataset was deleted on <date> by
-  <name>. Only the generated decks remain."* No "New report", no Data-tab import
-  or curation.
-- **Report rows:** a "Dataset deleted" label, and only the PDF and PPTX buttons.
+- **Downloads:** for a deck-only report, `preview.pptx` and `preview.pdf`
+  check the deck-only state **before** anything else — before the local deck
+  cache that serves live reports — and serve only the stored
+  `report/{rid}.pptx`, with no `render_key` check (there is nothing left to
+  check it against). The PDF is converted from that PPTX once and cached.
+  Access is the same read grant as today.
+- **Report definition:** `GET …/reports/{rid}` answers 404 for a deck-only
+  report; the UI never opens the report editor in a read-only study, and
+  ignores any dataset a user's workspace still remembers for it.
+- **Study page:** a banner — *"Read only: the dataset <file> was deleted on
+  <date> by <name>. Only the generated decks remain."* No "New report", no
+  Data-tab import or curation.
+- **Study list:** a "Read only" label on the study.
+- **Report rows:** a "Dataset deleted" label, the date the deck was generated,
+  and only the PDF and PPTX buttons.
+
+## 4b. Backups keep the decks of read-only studies
+
+The whole-store backup leaves decks out (`EXCLUDED_LABELS` in
+`store/backup.py`) because a live report's deck can be generated again from its
+definition. A read-only study's decks cannot — they are all that is left. The
+backup includes the `.pptx` of every deck-only report; restore brings it back
+with its label, and a test proves a read-only study round-trips through backup
+and restore with its decks.
 
 ## 5. The warning
 
@@ -135,14 +183,20 @@ When it is the study's last dataset:
 
 The second paragraph appears only when there are such reports.
 
-When other datasets remain, the existing, shorter warning about removing that
-file is kept.
+When other datasets remain, a shorter warning that names what the reports
+will use from then on — reports do not record their dataset, and the study
+picks the remaining one:
+
+> **Delete this dataset?** This removes the file "<name>" and its curation. The
+> study's reports will use "<remaining>" from now on.
 
 ## 6. Testing
 
 - **Repository** (in-memory hive): the delete order; a study with decks and
-  without; the not-last-dataset case; a delete interrupted after each step and
-  retried converges; a lock held elsewhere refuses; the deck-only meta form.
+  without; a stale deck kept; the not-last-dataset case; a delete interrupted
+  after each step and retried converges, and only the dataset delete is allowed
+  while `completed` is `false`; a lock held elsewhere refuses; the deck-only
+  meta form; backup and restore of a read-only study keep its decks.
 - **API**: every write route refuses 409 `study_read_only` on a read-only
   study; deleting the whole study still works; the list returns deck-only
   reports; `preview.pptx`/`preview.pdf` serve the stored deck; a render
@@ -151,6 +205,12 @@ file is kept.
   no-deck list; the read-only banner and report label.
 - **Against a real hive**: the whole flow on a disposable copy of the local hive
   (restored from the Phase 1 archive), as in `docs/local-hive-upgrade.md`.
+
+## Existing data
+
+Checked on staging (read-only, 2026-09-24): 24 studies, none holding reports
+without a dataset (what the old delete left behind) and none with more than one
+dataset. No study needs converting.
 
 ## Out of scope
 
