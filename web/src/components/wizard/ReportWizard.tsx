@@ -991,6 +991,8 @@ export default function ReportWizard({
   // immediately); `dirty` still drives the Save button's state, so it goes
   // back to "Saved" on its own once the autosave lands.
   const AUTOSAVE_DELAY_MS = 1500;
+  /** Set by a rename: save at once, whatever the preview queue is doing. */
+  const saveNow = useRef(false);
   const MAX_AI_SAVE_HOLD_MS = 90_000;
   useEffect(() => {
     // Hold off entirely while the queue is still producing. It lands 60 titles
@@ -1010,10 +1012,11 @@ export default function ReportWizard({
     // save regardless of what the AI passes think they are still doing.
     const held = dirtySince.current !== null
       && Date.now() - dirtySince.current > MAX_AI_SAVE_HOLD_MS;
-    if (!dirty || (queueBusy && !held)) return;
+    if (!dirty || (queueBusy && !held && !saveNow.current)) return;
     const h = setTimeout(() => {
+      saveNow.current = false;
       if (dirtyRef.current) void saveRef.current();
-    }, AUTOSAVE_DELAY_MS);
+    }, saveNow.current ? 0 : AUTOSAVE_DELAY_MS);
     return () => clearTimeout(h);
   }, [dirty, draft, queueBusy]);
 
@@ -1275,6 +1278,11 @@ export default function ReportWizard({
     if (!next || next === draft?.name) return;
     mutate((d) => ({ ...d, name: next }));
     renameReport(reportId, next);
+    // A rename is an instruction, like Save: it is not held back while the
+    // preview queue is busy, which could keep the old name on the server for
+    // up to 90 s — long enough to leave the report and see it listed under
+    // the name it had. (2026-09-24)
+    saveNow.current = true;
   }
 
   // Self-heal a stale/deleted report id out of the workspace, once.

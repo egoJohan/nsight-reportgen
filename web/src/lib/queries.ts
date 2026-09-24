@@ -11,7 +11,8 @@ import { api, ApiError } from "./api";
 import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
 import { noteCacheCleared } from "./previewCacheSignal";
-import type { Substitutions } from "./api";
+import type { CaseReportInfo, Substitutions } from "./api";
+import { caseListIsStale } from "./reportName";
 import type {
   AccessMode,
   ChartSpec,
@@ -934,11 +935,22 @@ export function useUpdateReport(caseId: string) {
     // "none"` keeps the freshness guarantee (anything mounting later, or this
     // query on its next observer, fetches the server's copy) without the round
     // trip behind each save.
-    onSuccess: (_data, vars) =>
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({
         queryKey: qk.report(caseId, vars.reportId),
         refetchType: "none",
-      }),
+      });
+      // The study's list shows each report's NAME, from the server, cached.
+      // A save that renamed the report left it alone, so the study page kept
+      // the old name: "raportin nimi ei vaihdu pysyvästi" (2026-09-24).
+      // Reloaded AFTER the save has landed — a fetch already in flight from
+      // before it is cancelled, so it cannot bring the old name back — and only
+      // when the name actually differs, as the list is costly to build.
+      const list = qc.getQueryData<{ reports: CaseReportInfo[] }>(qk.caseReports(caseId));
+      if (caseListIsStale(list, vars.reportId, vars.report.name)) {
+        qc.invalidateQueries({ queryKey: qk.caseReports(caseId) });
+      }
+    },
   });
 }
 
