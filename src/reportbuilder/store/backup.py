@@ -30,13 +30,16 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from reportbuilder.store import paths as P
 from reportbuilder.store.repository import Repository
-from reportbuilder.store.seam import AuthContext, NotFound
+from reportbuilder.store.seam import AccessDenied, AuthContext, NotFound
+
+log = logging.getLogger(__name__)
 
 FORMAT = "nsight-backup"
 VERSION = 1
@@ -77,6 +80,11 @@ class BackupSummary:
     object_count: int = 0
     total_bytes: int = 0
     skipped: int = 0            # excluded by label (decks, sessions)
+    #: Objects the store would not hand over, by path. NAMED, not counted: an
+    #: archive with a hole in it is still worth having — the alternative was no
+    #: archive at all — but only if whoever restores it can find out what is
+    #: missing. (2026-09-22)
+    unreadable: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -143,6 +151,19 @@ def write(repo: Repository, auth: AuthContext, out) -> BackupSummary:
                 # we reached it.
                 summary.skipped += 1
                 continue
+            except AccessDenied as exc:
+                # The STORE refused to serve it. A hive will not hand over an
+                # object whose path is marked for pseudonymization when its
+                # content type cannot be masked, and one such object used to
+                # end the whole backup with an error about masking — on a local
+                # hive, a 400-byte test fixture (`shared/hr/scan.bin`) meant an
+                # admin could not take a backup at all. One object nobody can
+                # read is not a reason to have no archive; it is a reason to
+                # say which object. (2026-09-22)
+                log.warning("backup: the store would not serve %s (%s); "
+                            "it is not in this archive", info.path, exc)
+                summary.unreadable.append(info.path)
+                continue
             if P.LABEL_REPORT_META in info.labels:
                 data = _strip_render_stamp(data)
 
@@ -165,6 +186,9 @@ def write(repo: Repository, auth: AuthContext, out) -> BackupSummary:
             "object_count": summary.object_count,
             "total_bytes": summary.total_bytes,
             "excluded_labels": sorted(EXCLUDED_LABELS),
+            # In the archive itself, so a restore a year from now says what was
+            # missing when it was taken rather than looking complete.
+            "unreadable": sorted(summary.unreadable),
             "objects": entries,
         }, indent=2).encode("utf-8"))
         z.writestr("README.txt", _README.encode("utf-8"))

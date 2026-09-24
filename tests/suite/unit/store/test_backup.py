@@ -261,3 +261,83 @@ class TestRefusals:
         assert summary.restored == len(manifest["objects"]) - 1
         assert any("Missing from the zip" in p for p in summary.problems)
         assert [x.name for x in fresh.list_customers(auth)] == ["Attendo"]
+
+
+# ── an object the store will not serve ──────────────────────────────────────
+#
+# A hive refuses to hand over an object whose path is marked for
+# pseudonymization when its content type cannot be masked. `write` caught only
+# `NotFound` — the snapshot race — so one such object ended the whole backup
+# with an error about masking, and Settings > Backup produced nothing at all.
+# Found on the local hive, where a 400-byte fixture (`shared/hr/scan.bin`) made
+# every backup impossible. One object nobody can read is not a reason to have
+# no archive; it is a reason to say which object. (2026-09-22)
+
+class _RefusingStore(InMemoryObjectStore):
+    """A store that will not serve one path."""
+
+    def __init__(self, refuse: str):
+        super().__init__()
+        self._refuse = refuse
+
+    def get(self, auth, path):
+        from reportbuilder.store.seam import AccessDenied
+
+        if path == self._refuse:
+            raise AccessDenied(f"{path}: cannot_mask_this_object")
+        return super().get(auth, path)
+
+
+def _one_customer(repo, auth, name="Asiakas"):
+    return repo.create_customer(auth, name)
+
+
+def test_an_unreadable_object_does_not_stop_the_backup():
+    auth = AuthContext(token="t")
+    repo = Repository(_RefusingStore("shared/hr/scan.bin"))
+    _one_customer(repo, auth)
+    repo.store.put(auth, "shared/hr/scan.bin", b"x" * 400, "application/octet-stream")
+    repo.store.put(auth, "shared/public/note", b"readable", "text/plain")
+
+    buf = io.BytesIO()
+    summary = backup.write(repo, auth, buf)
+
+    assert summary.unreadable == ["shared/hr/scan.bin"]
+    assert summary.object_count >= 2, "everything else is still in the archive"
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as z:
+        paths = {e["path"] for e in json.loads(z.read("manifest.json"))["objects"]}
+    assert "shared/public/note" in paths
+    assert "shared/hr/scan.bin" not in paths
+
+
+def test_the_archive_says_which_objects_it_could_not_read():
+    """A year from now, whoever restores this must be able to tell a complete
+    archive from one with a hole in it."""
+    auth = AuthContext(token="t")
+    repo = Repository(_RefusingStore("shared/hr/scan.bin"))
+    _one_customer(repo, auth)
+    repo.store.put(auth, "shared/hr/scan.bin", b"x" * 400, "application/octet-stream")
+
+    buf = io.BytesIO()
+    backup.write(repo, auth, buf)
+
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as z:
+        manifest = json.loads(z.read("manifest.json"))
+    assert manifest["unreadable"] == ["shared/hr/scan.bin"]
+
+
+def test_what_was_refused_restores_from_an_older_archive():
+    """The hole is in this archive, not in the store: an object that was
+    readable when an earlier backup was taken still restores from that one."""
+    auth = AuthContext(token="t")
+    repo = Repository(InMemoryObjectStore())
+    _one_customer(repo, auth)
+    repo.store.put(auth, "shared/hr/scan.bin", b"x" * 400, "application/octet-stream")
+    good = io.BytesIO()
+    backup.write(repo, auth, good)
+
+    fresh = Repository(InMemoryObjectStore())
+    summary = backup.read(fresh, auth, io.BytesIO(good.getvalue()))
+
+    assert summary.problems == []
+    assert fresh.store.get(auth, "shared/hr/scan.bin") == b"x" * 400
