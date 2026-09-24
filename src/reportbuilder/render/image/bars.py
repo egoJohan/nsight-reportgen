@@ -853,6 +853,109 @@ def _panel_legends(fig, legends, *, max_ncol: int, fontsize: float = 9.0) -> Non
             break
 
 
+def _label_panel_bars(fig, ctx, drawn, *, vertical: bool, n_cat: int,
+                      all_vals, max_val: float, ink) -> None:
+    """Value labels for a chart of several panels, by the same rules as one.
+
+    `drawn` is [(ax, positions, values, thickness)] — one entry per series in
+    each panel. The panel layouts drew their bars and nothing else, so a
+    vertical bar split by TWO classifying variables showed no numbers at all,
+    percent or count alike: "Kun vertical barissa laittaa 2 luokittelevaa
+    muuttujaa, niin palkkien numeroarvot katoavat kuvasta." (2026-09-24)
+
+    Called once the panels are laid out, because the room a number has is the
+    width of a bar as drawn. Columns are measured once for the whole chart
+    against the widest number and the narrowest bar — flat, then on their side,
+    then none — so every column is labelled the same way or none is, exactly as
+    `_render_column_v` does. Bars on their side take the rule of
+    `_render_bar_h`: a number sized to the bar's thickness, at its end.
+    """
+    if not drawn or not all_vals:
+        return
+    off = _label_offset(max_val)
+    _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
+
+    def text(v):
+        return format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
+
+    if vertical:
+        widest = max((text(v) for v in all_vals), key=len, default="")
+        narrowest = min(drawn, key=lambda d: d[3])
+        fit = _value_label_layout(fig, narrowest[0], n_cat, narrowest[3], widest)
+        if not fit:
+            note(ctx, "unlabelled", n_cat)
+            return
+        pt, rot = fit
+        for ax, xs, vals, _w in drawn:
+            for xi, v in zip(xs, vals):
+                if v is not None and v >= _floor:
+                    ax.text(xi, v + off, text(v), ha="center", va="bottom", rotation=rot,
+                            fontsize=pt, fontweight="bold", color=ink, zorder=5,
+                            gid=VALUE_GID)
+        return
+    ax0, _ys, _vals, h0 = min(drawn, key=lambda d: d[3])
+    per_bar_pt = (ax0.get_position().height * fig.get_size_inches()[1] * 72.0
+                  / max(n_cat, 1) * h0)
+    if per_bar_pt < _MIN_LABEL_BAR_PT:
+        note(ctx, "unlabelled", n_cat)
+        return
+    value_fs = max(5.5, min(9.5, per_bar_pt * 0.9))
+    # A number at the end of the longest bar needs room INSIDE its panel: the
+    # axis ends at that bar, and the next panel starts right after the gutter —
+    # "80 %" ran into the neighbour's axis. The axis is lengthened by exactly the
+    # widest number, so the ticks stay where they were.
+    widest = max((text(v) for v in all_vals), key=len, default="")
+    label_in = _measure_max_label_width_in([widest], value_fs) + 0.04
+    panel_in = ax0.get_position().width * fig.get_size_inches()[0]
+    if label_in >= 0.5 * panel_in:
+        note(ctx, "unlabelled", n_cat)
+        return
+    for ax in {id(d[0]): d[0] for d in drawn}.values():
+        lo, hi = ax.get_xlim()
+        need = lo + (max_val + off - lo) / (1.0 - label_in / panel_in)
+        if need > hi:
+            ax.set_xlim(lo, need)
+    for ax, ys, vals, _h in drawn:
+        for yi, v in zip(ys, vals):
+            if v is not None and v >= _floor:
+                ax.text(v + off, yi, text(v), va="center", ha="left",
+                        fontsize=value_fs, fontweight="bold", color=ink, zorder=5,
+                        gid=VALUE_GID)
+
+
+def _thin_panel_ticks(fig, axes) -> None:
+    """Keep the value axes' numbers of side-by-side panels from running together.
+
+    On narrow horizontal panels one panel's last number met the next panel's
+    first — "150" and "0" read as "1500" — and within a panel "0 50 100 150"
+    touched as well. Once laid out, the numbers are measured; while any two
+    touch, every other one is dropped on every panel alike (the first stays, so
+    each axis still starts at its zero), down to two. The gridlines keep their
+    places: only the numbers thin.
+    """
+    axes = [ax for ax in axes if ax.get_visible()]
+    if not axes:
+        return
+    r = fig.canvas.get_renderer()
+    for _ in range(4):
+        fig.draw_without_rendering()
+        boxes = sorted((t.get_window_extent(r) for ax in axes
+                        for t in ax.get_xticklabels() if t.get_visible() and t.get_text()),
+                       key=lambda b: b.x0)
+        touching = any(a.x1 + 2 > b.x0 and a.y1 > b.y0 and b.y1 > a.y0
+                       for a, b in zip(boxes, boxes[1:]))
+        if not touching:
+            return
+        for ax in axes:
+            ticks = list(ax.get_xticks())
+            names = [t.get_text() for t in ax.get_xticklabels()]
+            shown = [i for i, n in enumerate(names) if n]
+            if len(shown) <= 2:
+                return
+            keep = set(shown[::2])
+            ax.set_xticks(ticks, [n if i in keep else "" for i, n in enumerate(names)])
+
+
 def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     """Cross-tab SMALL MULTIPLES: one subplot per PRIMARY value, each a clustered bar of
     (answer categories × the SECONDARY classifier). Shared value axis + one legend."""
@@ -872,6 +975,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         fig, axes = new_figure_grid(ctx, len(groups))
         x = np.arange(n_cat)
         titled: list[tuple[object, str]] = []
+        drawn: list[tuple] = []
         for ax, (p, segs) in zip(axes, groups):
             n = len(segs)
             w = 0.82 / n if n > 1 else 0.6
@@ -880,6 +984,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
+                drawn.append((ax, x + off, vals, w))
             titled.append((ax, p))
             ax.set_xticks(x)
             ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
@@ -892,6 +997,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
         fig, axes = new_figure_grid(ctx, len(groups), tall_in=n_cat * 0.42 + 2.0)
         y = np.arange(n_cat)[::-1]
         titled = []
+        drawn = []
         for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
             n = len(segs)
             h = 0.82 / n if n > 1 else 0.6
@@ -900,6 +1006,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
+                drawn.append((ax, y + off, vals, h))
             titled.append((ax, p))
             ax.set_yticks(y)
             _apply_bar_style(ax, ctx, max_val, series.statistic)
@@ -923,6 +1030,10 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
                         left=0.12 if vertical else 0.2)
     # Once the panels are laid out, so both are fitted to the width they have.
+    _label_panel_bars(fig, ctx, drawn, vertical=vertical, n_cat=n_cat,
+                      all_vals=all_vals, max_val=max_val, ink=ink)
+    if not vertical:
+        _thin_panel_ticks(fig, axes)
     fit_panel_titles(fig, titled, colour=ink)
     if panel_legends:
         _panel_legends(fig, panel_legends, max_ncol=3)
@@ -1191,6 +1302,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
 
     titled: list[tuple[object, str]] = []
     panel_legends: list[tuple[object, list, list[str]]] = []
+    drawn: list[tuple] = []
     for k, (ax, (p, segs)) in enumerate(zip(axes, groups)):
         n = len(segs)
         clrs = colours_by_series(series_colors(n, palette=template_palette(ctx),
@@ -1204,6 +1316,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * w if n > 1 else 0.0
                 ax.bar(x + off, [v or 0.0 for v in vals], width=w, color=clrs[i],
                        edgecolor="none", zorder=3)
+                drawn.append((ax, x + off, vals, w))
             ax.set_xticks(x)
             ax.set_xticklabels(_category_ticks(cats, _wrap_xtick_label, series.statistic), fontsize=8.5,
                                color=ink, rotation=_XTICK_ROTATION, ha="right",
@@ -1219,6 +1332,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
                 off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
+                drawn.append((ax, y + off, vals, h))
             ax.set_yticks(y)
             _apply_bar_style(ax, ctx, max_val, series.statistic)
             # The y-axis is SHARED (sharey=True in new_figure_grid), so all axes
@@ -1249,6 +1363,10 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
 
     fig.subplots_adjust(bottom=0.24, wspace=wspace_frac, hspace=0.45, top=0.9,
                         left=left_frac, right=right_frac)
+    _label_panel_bars(fig, ctx, drawn, vertical=vertical, n_cat=n_cat,
+                      all_vals=all_vals, max_val=max_val, ink=ink)
+    if not vertical:
+        _thin_panel_ticks(fig, axes)
     # Fitted once the panels are laid out: both are as wide as their own panel
     # and the half-gutter beside it, and no wider.
     fit_panel_titles(fig, titled, colour=ink)
