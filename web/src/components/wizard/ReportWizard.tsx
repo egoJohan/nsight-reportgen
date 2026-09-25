@@ -47,6 +47,7 @@ import {
   subscribeCacheCleared,
 } from "@/lib/previewCacheSignal";
 import { installProducers, setProducerEnv } from "@/lib/previewProducers";
+import { mayStartEditing } from "@/lib/reportName";
 import { useWorkspace } from "@/lib/workspace";
 import {
   buildDemographicsGrids,
@@ -212,7 +213,7 @@ export default function ReportWizard({
   onClose: () => void;
   onMissing?: () => void;
 }) {
-  const { data: loaded, isLoading, isError } = useReport(caseId, reportId);
+  const { data: loaded, isLoading, isError, isFetchedAfterMount } = useReport(caseId, reportId);
   // Which pohja this report renders with, and what it would inherit without a
   // choice of its own — so the dropdown names the one actually in use.
   // How many slides this backend can usefully draw at once. The queue starts at
@@ -269,9 +270,11 @@ export default function ReportWizard({
   >({});
 
 
-  // Initialise the working draft once the report loads.
+  // Initialise the working draft once the SERVER's copy loads — never from a
+  // cached one, which can be older and would be saved back (mayStartEditing).
   useEffect(() => {
-    if (loaded && !draft) {
+    if (loaded && mayStartEditing({ hasDraft: !!draft, loaded: true,
+                                    fetchedThisVisit: isFetchedAfterMount })) {
       setDraft({
         name: loaded.name,
         render_mode: "image",
@@ -285,7 +288,7 @@ export default function ReportWizard({
         grouping: loaded.grouping ?? { groups: [], singles: [] },
       });
     }
-  }, [loaded, draft]);
+  }, [loaded, draft, isFetchedAfterMount]);
 
   // What the server already holds, as we last sent or received it. A save is a
   // full-document PUT of a 60-chart report, so "did anything actually change?"
