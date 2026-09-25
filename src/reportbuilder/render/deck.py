@@ -202,6 +202,7 @@ def render_report(
     titles: dict | None = None,
     cancel_check=None,
     notes: list | None = None,
+    bases: dict | None = None,
 ) -> Presentation:
     """Open the template, render each ChartSpec into its slot.
 
@@ -273,7 +274,8 @@ def render_report(
         # --- Bullet slides (special slides + themes): render text, no series ---
         if renders_as_bullets(spec):
             render_special_slide(
-                slide, slot, style, spec, heading=_titles.get(spec.question_ref, "")
+                slide, slot, style, spec, heading=_titles.get(spec.question_ref, ""),
+                base_n=(bases or {}).get(spec.question_ref),
             )
             continue
 
@@ -349,10 +351,11 @@ def render_to_file(
     titles: dict | None = None,
     cancel_check=None,
     notes: list | None = None,
+    bases: dict | None = None,
 ) -> str:
     """Render report to *out_path* and return the path (REQ-C-29a)."""
     prs = render_report(report, series_by_ref, style, titles,
-                        cancel_check=cancel_check, notes=notes)
+                        cancel_check=cancel_check, notes=notes, bases=bases)
     prs.save(out_path)
     return out_path
 

@@ -17,7 +17,8 @@ from pptx.oxml.ns import qn
 from reportbuilder.model.report import ChartSpec
 from reportbuilder.render.house_style import PX_INK, PX_TEAL
 from reportbuilder.render.image.slide_chrome import (
-    _FONT, _slide_dims, body_font, content_floor, draw_template_heading,
+    _FONT, _furniture_px, _slide_dims, body_font, content_floor,
+    draw_methodology_line, draw_template_heading, methodology_text,
     template_ground, theme_colours, TITLE_PT,
 )
 
@@ -56,7 +57,8 @@ def _md_runs(text: str) -> list[tuple[str, bool, bool]]:
     return runs or [(text, False, False)]
 
 
-def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "") -> None:
+def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "",
+                         base_n: int | None = None) -> None:
     """Paint a heading + bullet list onto *slide* (house style).
 
     The heading is ``spec.slide_title`` when set, else the ``heading`` fallback
@@ -130,11 +132,25 @@ def render_special_slide(slide, slot, style, spec: ChartSpec, heading: str = "")
                     and not text.startswith("~~~")
                     and re.search(r"[^\s\-•*_:.,–—]", text)):
                 parsed.append((level, text))
+    # 5 — Key themes report their N like every chart slide: the respondents who
+    #     wrote an answer, in the same bottom-left place, same look, same "N"
+    #     toggle and footer note ("Key themes kysymystyypissä ei näy n-lukua",
+    #     2026-09-25). The bullets then stop at the content's bottom, where the
+    #     N line starts. Special slides (overview, conclusions) have no question
+    #     and no N, and are laid out exactly as before.
+    n_text = ""
+    if getattr(spec, "chart_type", "") == "themes":
+        n_text = methodology_text(spec, base_n, getattr(spec, "statistic", ""),
+                                  stat_fallback=False)
+    floor = content_floor(slide, sw, sh)
+    if n_text:
+        floor = min(floor, int(slot.top) + int(slot.height))
     if parsed:
         top = title_bottom + int(Inches(0.28)) if title_bottom else int(Inches(1.55))
-        _bullet_box(slide, sw, sh, parsed, top=top,
-                    floor=content_floor(slide, sw, sh),
+        _bullet_box(slide, sw, sh, parsed, top=top, floor=floor,
                     accent=_theme_accent, ink=theme_ink, font=body_font(style) or _FONT)
+    if n_text:
+        draw_methodology_line(slide, slot, style, n_text, _furniture_px(style)[1])
 
 
 def _heading_size(text: str) -> int:
