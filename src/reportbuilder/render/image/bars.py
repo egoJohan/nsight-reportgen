@@ -312,6 +312,79 @@ def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
     return None
 
 
+#: The share of a category's row (or column slot) its group of bars takes —
+#: normally, and at most when the numbers would not otherwise fit.
+_NORMAL_GROUP: float = 0.7
+_WIDE_GROUP: float = 0.85
+
+
+def _widen_groups(ax, k: float, *, horizontal: bool) -> None:
+    """Scale every bar group about its category's centre by *k*: each bar k
+    times thicker, the groups' gaps narrower. Categories sit on whole numbers,
+    so a bar's category is the nearest one to its centre."""
+    from matplotlib.container import BarContainer
+
+    for c in ax.containers:
+        if not isinstance(c, BarContainer):
+            continue
+        for p in c:
+            if horizontal:
+                mid = p.get_y() + p.get_height() / 2
+                row = round(mid)
+                h = p.get_height() * k
+                p.set_height(h)
+                p.set_y(row + (mid - row) * k - h / 2)
+            else:
+                mid = p.get_x() + p.get_width() / 2
+                col = round(mid)
+                w = p.get_width() * k
+                p.set_width(w)
+                p.set_x(col + (mid - col) * k - w / 2)
+
+
+def _label_thin_bars(fig, ax, ctx, thin, *, bar_h: float, all_vals, off: float,
+                     floor: float, ink) -> bool:
+    """Numbers for horizontal bars the estimate called too thin. True if drawn.
+
+    The estimate (`_hbar_row_pt`) guesses the plot as 80% of the figure and asks
+    for a 5pt-thick bar, while digits at 5pt are about 3.6pt tall — so a chart
+    split by one target group, six groups over six answers, lost every number:
+    "Horizontal ja vertical bareissa ei näy prosenttilukuja kun tuloksia
+    tarkastellaan kohderyhmittäin" (2026-09-25). Here the bar is MEASURED, once
+    the legend has taken its place, and numbers are drawn when their digits fit
+    in it at 5pt or more — the floor numbers on their side have on columns.
+    Charts the estimate already numbered never reach this.
+    """
+    lo, hi = ax.get_ylim()
+    axis_pt = ax.get_position().height * fig.get_size_inches()[1] * 72.0
+    thick_pt = abs(bar_h) * axis_pt / max(abs(hi - lo), 1e-9)
+    widest = max((format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
+                  for v in all_vals), key=len, default="")
+    ink_per_pt = _ink_height_in(widest, 10.0) / 10.0 * 72.0
+    if ink_per_pt <= 0:
+        return False
+    k = 1.0
+    pt = int(min(9.5, thick_pt * 0.85 / ink_per_pt) * 2) / 2.0
+    if pt < _VALUE_LABEL_SIDE_MIN_PT and len(thin) > 1:
+        # Still too thin: let each answer's bars take more of its row, as far as
+        # `_WIDE_GROUP` — only on a chart that would otherwise lose its numbers.
+        k = _WIDE_GROUP / _NORMAL_GROUP
+        pt = int(min(9.5, thick_pt * k * 0.85 / ink_per_pt) * 2) / 2.0
+    if pt < _VALUE_LABEL_SIDE_MIN_PT:
+        return False
+    if k != 1.0:
+        _widen_groups(ax, k, horizontal=True)
+        thin = [([round(yi) + (yi - round(yi)) * k for yi in ys], vals) for ys, vals in thin]
+    for ys, vals in thin:
+        for yi, v in zip(ys, vals):
+            if v is not None and v >= floor:
+                ax.text(v + off, yi,
+                        format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                        va="center", ha="left", fontsize=pt, fontweight="bold",
+                        color=ink, zorder=5, gid=VALUE_GID)
+    return True
+
+
 def _ink_height_in(text: str, pt: float) -> float:
     """How tall *text*'s glyphs are, in inches, drawn at *pt* in the chart font —
     what a number on its side takes across its column. Measured, not assumed:
@@ -1560,7 +1633,15 @@ def _label_columns(fig, ax, ctx, to_label, *, n_cats: int, all_vals, max_val: fl
         return
     widest = max((format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
                   for v in all_vals), key=len, default="")
-    fit = _value_label_layout(fig, ax, n_cats, min(w for _b, _v, w in to_label), widest)
+    narrowest = min(w for _b, _v, w in to_label)
+    fit = _value_label_layout(fig, ax, n_cats, narrowest, widest)
+    if not fit and len(to_label) > 1:
+        # Too thin even on their side: let each group take more of its slot, as
+        # far as `_WIDE_GROUP` — only on a chart that would otherwise lose them.
+        k = _WIDE_GROUP / _NORMAL_GROUP
+        fit = _value_label_layout(fig, ax, n_cats, narrowest * k, widest)
+        if fit:
+            _widen_groups(ax, k, horizontal=False)
     if not fit:
         # Said, like every other layout that drops them: this one gave the
         # author a chart with no numbers and no reason (2026-09-25).
@@ -1688,17 +1769,22 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # The note reaches them in the editor; nothing is printed on the slide.
     # (Johan, 2026-09-16)
     labelled = per_bar_pt >= _MIN_LABEL_BAR_PT
-    if not labelled and all_vals:
-        note(ctx, "unlabelled", n_cats)
+    # Where that rule already numbers the bars, nothing below changes them. Where
+    # it gives up, the numbers are tried again once the plot has its final
+    # height — see `_label_thin_bars` after the legend.
 
     off = _label_offset(max_val)
+    _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
+    thin: list = []
     for i, seg in enumerate(segs):
         vals = data[seg]
         offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
         ys = y + offset
-        _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
+        if not labelled:
+            thin.append((ys, vals))
+            continue
         for yi, v in zip(ys, vals):
-            if v is not None and labelled and v >= _floor:
+            if v is not None and v >= _floor:
                 ax.text(
                     v + off, yi,
                     format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
@@ -1720,6 +1806,13 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
 
     if ctx.spec.elements.legend and n_segs > 1:
         _place_series_legend(fig, ax, segs, ctx, vertical=False)
+
+    if thin and all_vals and not _label_thin_bars(
+            fig, ax, ctx, thin, bar_h=height, all_vals=all_vals, off=off,
+            floor=_floor, ink=ink):
+        # Decided once, for the whole chart, and RECORDED: the author is told
+        # in the editor; nothing is printed on the slide. (Johan, 2026-09-16)
+        note(ctx, "unlabelled", n_cats)
 
     png = render_png(fig)
     # Aspect-preserving placement, top-aligned so the chart hugs the question
