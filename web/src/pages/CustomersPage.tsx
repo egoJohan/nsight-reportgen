@@ -22,11 +22,13 @@ import { EMPTY, ERROR, PAGE, PAGE_HEADER, PAGE_TITLE, ROW } from "@/lib/surfaces
  *  counts belong to the studies list, where a report is one row away — here
  *  they were a second number competing with the one that matters.
  *
- *  One owner, the creator; a customer from before ownership was recorded has
- *  none and simply omits the clause. */
+ *  One owner, the creator. A customer from before ownership was recorded, or
+ *  whose owner's account was removed, says "No owner". */
 function customerSubtitle(c: Customer): string {
   const parts = [`${c.case_count} ${c.case_count === 1 ? "study" : "studies"}`];
-  if (c.owner) parts.push(`Owned by ${c.owner.name}`);
+  // "No owner" said out loud: an admin looks for exactly these, to give them
+  // one (the customer page's Set owner).
+  parts.push(c.owner ? `Owned by ${c.owner.name}` : "No owner");
   return parts.join(" · ");
 }
 
