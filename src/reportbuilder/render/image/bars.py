@@ -264,6 +264,9 @@ _LEGEND_BELOW_MAX: int = 5
 #: to before turning on its side. Below ~7pt a number on a slide is decoration.
 _VALUE_LABEL_PT: float = 9.5
 _VALUE_LABEL_MIN_PT: float = 7.5
+#: The smallest a number standing on its side may be — the floor horizontal
+#: bars' numbers already have (`_MIN_LABEL_BAR_PT`). Below it, none.
+_VALUE_LABEL_SIDE_MIN_PT: float = 5.0
 
 
 def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
@@ -294,10 +297,35 @@ def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
     for pt in (_VALUE_LABEL_PT, _VALUE_LABEL_MIN_PT):
         if _measure_max_label_width_in([widest], pt) <= per_bar_in * 0.92:
             return pt, 0.0
-    # On its side the number needs only its LINE HEIGHT across the column.
-    if (_VALUE_LABEL_MIN_PT / 72.0) * 1.35 <= per_bar_in:
-        return _VALUE_LABEL_MIN_PT, 90.0
+    # On its side a number needs the height of its own DIGITS across the
+    # column, and it shrinks with the column down to _VALUE_LABEL_SIDE_MIN_PT.
+    # It used to ask for a full line of text at 7.5pt — about 10pt, twice what
+    # the digits take — so two classifiers' thin columns lost every number on
+    # the chart: "palkkien numeroarvot katoavat kuvasta" (2026-09-25).
+    ink_per_pt = _ink_height_in(widest, 10.0) / 10.0
+    if ink_per_pt <= 0:
+        return None
+    pt = min(_VALUE_LABEL_MIN_PT, per_bar_in * 0.85 / ink_per_pt)
+    pt = int(pt * 2) / 2.0  # whole and half points, like every other size here
+    if pt >= _VALUE_LABEL_SIDE_MIN_PT:
+        return pt, 90.0
     return None
+
+
+def _ink_height_in(text: str, pt: float) -> float:
+    """How tall *text*'s glyphs are, in inches, drawn at *pt* in the chart font —
+    what a number on its side takes across its column. Measured, not assumed:
+    the chart font is a Settings choice, and digits' height varies by face."""
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.textpath import TextPath
+
+    if not text:
+        return 0.0
+    try:
+        ext = TextPath((0, 0), text, size=pt, prop=FontProperties()).get_extents()
+    except Exception:  # noqa: BLE001 — a glyph the font lacks: assume a cap height
+        return 0.72 * pt / 72.0
+    return max(ext.height, 0.0) / 72.0
 
 
 def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
@@ -886,6 +914,22 @@ def _label_panel_bars(fig, ctx, drawn, *, vertical: bool, n_cat: int,
             note(ctx, "unlabelled", n_cat)
             return
         pt, rot = fit
+        # Room above the tallest column for its number. A panel's title sits
+        # right above its plot, and "100 %" standing on a full-height column ran
+        # into it (2026-09-25). The axis is lengthened by exactly the number's
+        # length — the same rule the horizontal panels follow — and the ticks
+        # are pinned first, so no "120" appears on a percentage axis.
+        tall_in = (_measure_max_label_width_in([widest], pt) if rot
+                   else _ink_height_in(widest, pt) * 1.4) + 0.03
+        for ax in {id(d[0]): d[0] for d in drawn}.values():
+            lo, hi = ax.get_ylim()
+            axis_in = ax.get_position().height * fig.get_size_inches()[1]
+            if axis_in <= tall_in:
+                continue
+            need = lo + (max_val + off - lo) / (1.0 - tall_in / axis_in)
+            if need > hi:
+                ax.set_yticks([t for t in ax.get_yticks() if lo <= t <= hi])
+                ax.set_ylim(lo, need)
         for ax, xs, vals, _w in drawn:
             for xi, v in zip(xs, vals):
                 if v is not None and v >= _floor:
@@ -1461,7 +1505,8 @@ def _render_column_v(ctx, cats, segs, data) -> None:
 
     # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
     grouped = _grouped_offsets(segs, ctx.series.segment_primary)
-    _value_fit: tuple[float, float] | tuple[()] | None = None
+    # Numbered after the legend has taken its place — see below.
+    _to_label: list = []
 
     for i, seg in enumerate(segs):
         vals = data[seg]
@@ -1477,34 +1522,7 @@ def _render_column_v(ctx, cats, segs, data) -> None:
             label=series_label(ctx, seg), color=bar_clrs,
             edgecolor="none", zorder=3,
         )
-        off = _label_offset(max_val)
-        # Measured once for the whole chart, against the WIDEST number it will
-        # draw, so every column is labelled the same way or none is — a row
-        # where some carry a number and others do not reads as a fault.
-        if _value_fit is None:
-            _widest = max((format_value(v, ctx.series.statistic,
-                                        ctx.spec.number_format, all_vals)
-                           for v in all_vals), key=len, default="")
-            _value_fit = _value_label_layout(fig, ax, n_cats, bwidth, _widest) or ()
-        _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
-        for bar, v in zip(bars, vals):
-            if v is not None and _value_fit and v >= _floor:
-                _pt, _rot = _value_fit
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + off,
-                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
-                    # Aligned AFTER turning (matplotlib's default mode): the
-                    # turned number's box stands on the bar, centred on it.
-                    # `rotation_mode="anchor"` aligned it before turning, so
-                    # "center" put the MIDDLE of the upright number on the bar
-                    # top and "bottom" pushed it left — half of "43 %" inside a
-                    # dark bar, reported as "pylväiden numeroiden formaatissa on
-                    # jotain outoa". (2026-09-19)
-                    ha="center", va="bottom", rotation=_rot,
-                    fontsize=_pt, fontweight="bold", color=ink, zorder=5,
-                    gid=VALUE_GID,
-                )
+        _to_label.append((bars, vals, bwidth))
 
     # Wrap + rotate x-axis labels so they are shown in full and never overlap.
     display_cats = _category_ticks(cats, _wrap_xtick_label, ctx.series.statistic)
@@ -1520,8 +1538,55 @@ def _render_column_v(ctx, cats, segs, data) -> None:
     if ctx.spec.elements.legend and n_segs > 1:
         _place_series_legend(fig, ax, segs, ctx, vertical=True)
 
+    _label_columns(fig, ax, ctx, _to_label, n_cats=n_cats, all_vals=all_vals,
+                   max_val=max_val, ink=ink)
+
     png = render_png(fig)
     place_picture(ctx, png)
+
+
+def _label_columns(fig, ax, ctx, to_label, *, n_cats: int, all_vals, max_val: float,
+                   ink) -> None:
+    """Each column's number, once the plot has its final width.
+
+    AFTER the legend: a legend at the right shrinks the plot to 72% of its
+    width, and numbers measured before that were sized for columns 40% wider
+    than drawn — side by side on their sides, neighbours' digits touched
+    (2026-09-25). Measured once for the whole chart, against the WIDEST number
+    and the narrowest column, so every column is labelled the same way or none
+    is — a row where some carry a number and others do not reads as a fault.
+    """
+    if not to_label:
+        return
+    widest = max((format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
+                  for v in all_vals), key=len, default="")
+    fit = _value_label_layout(fig, ax, n_cats, min(w for _b, _v, w in to_label), widest)
+    if not fit:
+        # Said, like every other layout that drops them: this one gave the
+        # author a chart with no numbers and no reason (2026-09-25).
+        note(ctx, "unlabelled", n_cats)
+        return
+    pt, rot = fit
+    off = _label_offset(max_val)
+    floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
+    for bars, vals, _w in to_label:
+        for bar, v in zip(bars, vals):
+            if v is not None and v >= floor:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + off,
+                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                    # Aligned AFTER turning (matplotlib's default mode): the
+                    # turned number's box stands on the bar, centred on it.
+                    # `rotation_mode="anchor"` aligned it before turning, so
+                    # "center" put the MIDDLE of the upright number on the bar
+                    # top and "bottom" pushed it left — half of "43 %" inside a
+                    # dark bar, reported as "pylväiden numeroiden formaatissa on
+                    # jotain outoa". (2026-09-19)
+                    ha="center", va="bottom", rotation=rot,
+                    fontsize=pt, fontweight="bold", color=ink, zorder=5,
+                    gid=VALUE_GID,
+                )
 
 
 # ---------------------------------------------------------------------------
