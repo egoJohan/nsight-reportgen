@@ -37,3 +37,43 @@ describe("caseListIsStale", () => {
     expect(caseListIsStale(undefined, "rep-a", "Mikä tahansa")).toBe(false);
   });
 });
+
+/**
+ * Still reverting, 2026-09-25: the editor started from the CACHED report, and
+ * after a save that cache still held the old document (only marked stale). So
+ * reopening a just-renamed report showed the old name, and its next autosave
+ * wrote the old name back to the server.
+ */
+describe("after a save, the cached report is what was saved", () => {
+  it("holds the new name, not the one it was opened with", async () => {
+    const { QueryClient } = await import("@tanstack/react-query");
+    const { qk } = await import("./queries");
+    const { rememberSavedReport } = await import("./reportName");
+    const qc = new QueryClient();
+    const key = qk.report("case-1", "rep-a");
+    qc.setQueryData(key, { name: "Kevät 2026", charts: [], template_ref: "t" });
+
+    rememberSavedReport(qc, "case-1", "rep-a", {
+      name: "Kevät 2026 — lopullinen", charts: [], template_ref: "t",
+    } as never);
+
+    expect(qc.getQueryData<{ name: string }>(key)?.name).toBe("Kevät 2026 — lopullinen");
+  });
+});
+
+describe("mayStartEditing", () => {
+  it("never starts from a copy fetched before this visit", async () => {
+    const { mayStartEditing } = await import("./reportName");
+    expect(mayStartEditing({ hasDraft: false, loaded: true, fetchedThisVisit: false })).toBe(false);
+  });
+
+  it("starts from the server's copy fetched on opening", async () => {
+    const { mayStartEditing } = await import("./reportName");
+    expect(mayStartEditing({ hasDraft: false, loaded: true, fetchedThisVisit: true })).toBe(true);
+  });
+
+  it("never re-seeds a draft already being edited", async () => {
+    const { mayStartEditing } = await import("./reportName");
+    expect(mayStartEditing({ hasDraft: true, loaded: true, fetchedThisVisit: true })).toBe(false);
+  });
+});

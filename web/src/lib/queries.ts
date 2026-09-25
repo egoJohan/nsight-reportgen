@@ -12,7 +12,7 @@ import { imageFingerprint, type RenderContext } from "./previewFingerprint";
 import * as previewQueue from "./previewQueue";
 import { noteCacheCleared } from "./previewCacheSignal";
 import type { CaseReportInfo, Substitutions } from "./api";
-import { caseListIsStale } from "./reportName";
+import { caseListIsStale, rememberSavedReport } from "./reportName";
 import type {
   AccessMode,
   ChartSpec,
@@ -844,6 +844,9 @@ export function useReport(caseId: string, reportId: string | null) {
     queryKey: qk.report(caseId, reportId ?? ""),
     queryFn: () => api.reports.get(caseId, reportId!),
     enabled: !!reportId,
+    // Every opening reads the server's copy: the editor starts only from a
+    // copy fetched on this visit (`mayStartEditing`), never from the cache.
+    refetchOnMount: "always",
   });
 }
 
@@ -927,19 +930,12 @@ export function useUpdateReport(caseId: string) {
       reportId: string;
       report: ReportDoc;
     }) => api.reports.update(caseId, reportId, report),
-    // Mark the cached document stale, but do NOT pull it back right now.
-    //
-    // The saver already holds the authoritative version — it is what we just
-    // sent — so refetching teaches us nothing, and a plain invalidate made every
-    // save of a 60-chart report cost a PUT *and* a full GET. `refetchType:
-    // "none"` keeps the freshness guarantee (anything mounting later, or this
-    // query on its next observer, fetches the server's copy) without the round
-    // trip behind each save.
+    // The cache now holds exactly what was sent — what the server holds —
+    // with no extra GET behind each save of a 60-chart report. Only marking it
+    // stale left the OLD document there, and reopening the report started the
+    // editor from it (see rememberSavedReport).
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({
-        queryKey: qk.report(caseId, vars.reportId),
-        refetchType: "none",
-      });
+      rememberSavedReport(qc, caseId, vars.reportId, vars.report);
       // The study's list shows each report's NAME, from the server, cached.
       // A save that renamed the report left it alone, so the study page kept
       // the old name: "raportin nimi ei vaihdu pysyvästi" (2026-09-24).
