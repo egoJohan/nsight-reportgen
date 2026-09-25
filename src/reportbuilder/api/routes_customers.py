@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from reportbuilder.api.deps_auth import (
     current_user, require_case, require_case_in_customer,
     require_case_in_customer_write, require_case_write, require_customer,
-    require_customer_write, require_material,
+    require_admin, require_customer_write, require_material,
 )
 from reportbuilder.api.deps_store import get_auth, get_repository
 from reportbuilder.auth import session
@@ -58,6 +58,18 @@ def _name(body: NameBody) -> str:
     return name
 
 
+def _living_owner(repo: Repository, auth: AuthContext, customer) -> str:
+    """The owner's id while their account exists, else "".
+
+    A customer whose owner was REMOVED counts as having none. It kept the
+    removed id, which the page already read as "no owner" — offering an admin
+    the controls — while every check here still waited for that user, so
+    nobody could manage or delete the customer ever again. (Johan, 2026-09-25)
+    """
+    oid = customer.owner_id or ""
+    return oid if oid and repo.get_user(auth, oid) is not None else ""
+
+
 def _managing(repo: Repository, auth: AuthContext, customer_id: str, user: User):
     """The customer, if *user* may administer who reaches it — else 404/403.
 
@@ -69,11 +81,15 @@ def _managing(repo: Repository, auth: AuthContext, customer_id: str, user: User)
     refusing everybody would leave it unmanageable for ever with no way back
     through the UI. Those fall back to an admin — narrow, and closed as soon as
     such a customer is given an owner. (Johan, 2026-09-14)
+
+    The same holds for a customer whose owner's account was removed
+    (`_living_owner`): an admin acts for it, and can give it a new owner.
     """
     customer = repo.find_customer(auth, customer_id)
     if customer is None:
         raise HTTPException(404, f"Customer '{customer_id}' not found")
-    allowed = (user.id == customer.owner_id) if customer.owner_id else bool(user.is_admin)
+    owner = _living_owner(repo, auth, customer)
+    allowed = (user.id == owner) if owner else bool(user.is_admin)
     if not allowed:
         raise HTTPException(
             403, "Only this customer's owner can manage its permissions")
@@ -211,6 +227,24 @@ def list_customers(auth: AuthContext = Depends(get_auth),
 # different disclosure from the whole roster unasked.
 
 
+@customers_router.get("/customers/without-owner")
+def customers_without_owner(auth: AuthContext = Depends(get_auth),
+                            repo: Repository = Depends(get_repository),
+                            user: User = Depends(require_admin)) -> list[dict]:
+    """Every customer with no owner — its owner's account removed, or from
+    before ownership — for an admin to give one (`set_customer_owner`).
+
+    Across ALL customers, grant or not: nobody else can act for these, and an
+    admin without a grant on one could not otherwise even find it. Only what
+    the decision needs — id, name, study count — never its contents.
+    """
+    counts = repo.count_cases_by_customer(auth)
+    return sorted(({"id": c.id, "name": c.name, "case_count": counts.get(c.id, 0)}
+                   for c in repo.list_customers(auth)
+                   if not _living_owner(repo, auth, c)),
+                  key=lambda r: r["name"].lower())
+
+
 @customers_router.get("/customers/{customer_id}")
 def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
                  repo: Repository = Depends(get_repository),
@@ -219,9 +253,18 @@ def get_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
         c = repo.get_customer(auth, customer_id)
     except NotFound:
         raise HTTPException(404, f"Customer '{customer_id}' not found") from None
+    # The owner too, as the list gives it: the customer page decides from it
+    # who sees Manage permissions and Delete customer. Without it every admin
+    # was offered them on customers somebody else owns (and refused), and an
+    # owner who is not an admin never saw them on their own. A removed owner
+    # is none (`_living_owner`). (2026-09-25)
+    owner_id = _living_owner(repo, auth, c)
+    owner = repo.get_user(auth, owner_id) if owner_id else None
     return {"id": c.id, "name": c.name, "template_id": c.template_id,
             "can_edit": may_write(user, c.id),
-            "permission_mode": repo.customer_modes(auth).get(c.id, "inherit")}
+            "permission_mode": repo.customer_modes(auth).get(c.id, "inherit"),
+            "owner": ({"id": owner.id, "name": owner.name or owner.email}
+                      if owner is not None else None)}
 
 
 @customers_router.get("/customers/{customer_id}/name")
@@ -349,18 +392,19 @@ def get_customer_access(customer_id: str, auth: AuthContext = Depends(get_auth),
     stranger: here the caller already owns the customer they are asking about.
     """
     customer = _managing(repo, auth, customer_id, user)
+    owner = _living_owner(repo, auth, customer)
     people, candidates = [], []
     for u in repo.list_users(auth):
         grant = next((g for g in u.grants if g.scope == customer_id), None)
         row = {"id": u.id, "email": u.email, "name": u.name,
-               "is_owner": bool(customer.owner_id) and u.id == customer.owner_id}
+               "is_owner": bool(owner) and u.id == owner}
         if grant is None:
             candidates.append(row)
         else:
             people.append({**row, "mode": grant.mode})
     return {"id": customer_id,
             "permission_mode": repo.customer_modes(auth).get(customer_id, "inherit"),
-            "owner_id": customer.owner_id or None,
+            "owner_id": owner or None,
             "people": people, "candidates": candidates}
 
 
@@ -385,7 +429,8 @@ def set_customer_access(customer_id: str, body: CustomerAccessBody,
     if target is None:
         raise HTTPException(404, f"User '{body.user_id}' not found")
 
-    if customer.owner_id and body.user_id == customer.owner_id and body.mode != EDIT:
+    owner = _living_owner(repo, auth, customer)
+    if owner and body.user_id == owner and body.mode != EDIT:
         raise HTTPException(
             409, "The owner always keeps edit access to their own customer")
 
@@ -396,6 +441,45 @@ def set_customer_access(customer_id: str, body: CustomerAccessBody,
     # that matters, the same reasoning as `PUT /users/{id}/grants`.
     session.forget_user(target.id)
     return {"id": customer_id, "user_id": target.id, "mode": body.mode}
+
+
+class OwnerBody(BaseModel):
+    user_id: str = Field(min_length=1)
+
+
+@customers_router.put("/customers/{customer_id}/owner")
+def set_customer_owner(customer_id: str, body: OwnerBody,
+                       auth: AuthContext = Depends(get_auth),
+                       repo: Repository = Depends(get_repository),
+                       user: User = Depends(current_user)) -> dict:
+    """Give a customer a new owner — ONLY when it has none any more: its owner's
+    account was removed, or it predates ownership. An admin does it.
+
+    Never while the owner exists, by anyone: an admin who could reassign a
+    living owner's customer could name themselves on it, which is what the
+    14 Sep rule forbids ("Only when the old owner does not exist anymore",
+    Johan, 2026-09-25). The new owner is given edit on it, as an owner always
+    has, so the customer never ends up owned by somebody who cannot open it.
+    """
+    customer = repo.find_customer(auth, customer_id)
+    if customer is None:
+        raise HTTPException(404, f"Customer '{customer_id}' not found")
+    if _living_owner(repo, auth, customer):
+        raise HTTPException(
+            409, "This customer still has an owner; it can only be given a new "
+                 "one once that account no longer exists")
+    if not user.is_admin:
+        raise HTTPException(403, "Only an admin can give this customer a new owner")
+    target = repo.get_user(auth, body.user_id)
+    if target is None:
+        raise HTTPException(404, f"User '{body.user_id}' not found")
+    repo.set_customer_owner(auth, customer.id, target.id)
+    if not any(g.scope == customer.id and g.mode == EDIT for g in target.grants):
+        rest = tuple(g for g in target.grants if g.scope != customer.id)
+        repo.set_grants(auth, target.id, rest + (Grant(customer.id, EDIT),))
+    session.forget_user(target.id)
+    return {"id": customer.id,
+            "owner": {"id": target.id, "name": target.name or target.email}}
 
 
 @customers_router.put("/customers/{customer_id}/permission-mode")
@@ -430,7 +514,7 @@ def set_permission_mode(customer_id: str, body: PermissionModeBody,
     if body.mode == "manual":
         # Whoever must still be able to reach it afterwards: the owner when
         # there is one, otherwise the admin making the decision.
-        keeper_id = customer.owner_id or user.id
+        keeper_id = _living_owner(repo, auth, customer) or user.id
         keeper = repo.get_user(auth, keeper_id)
         if keeper is not None and not any(g.scope == customer_id and g.mode == EDIT
                                           for g in keeper.grants):

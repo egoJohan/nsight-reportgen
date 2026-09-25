@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   PlusIcon, FolderIcon, ArrowRightIcon, UsersIcon, LockIcon,
-  PencilIcon, CheckIcon, XIcon, Trash2Icon,
+  PencilIcon, CheckIcon, XIcon, Trash2Icon, UserCogIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +22,7 @@ import TemplatePicker from "@/components/TemplatePicker";
 import TemplateUploadButton from "@/components/TemplateUploadButton";
 import ManagePermissionsDialog from "@/components/ManagePermissionsDialog";
 import DeleteCustomerDialog from "@/components/DeleteCustomerDialog";
+import SetOwnerDialog from "@/components/SetOwnerDialog";
 import NoAccessCustomer from "@/components/NoAccessCustomer";
 import { RequestAccessDialog } from "@/components/RequestAccessDialog";
 import type { AccessMode } from "@/lib/api";
@@ -119,6 +120,7 @@ export default function CustomerCasesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [managingAccess, setManagingAccess] = useState(false);
   const [deletingCustomer, setDeletingCustomer] = useState(false);
+  const [settingOwner, setSettingOwner] = useState(false);
   const [requestingPermissions, setRequestingPermissions] = useState(false);
 
   // A customer the caller holds no grant on 404s (spec §5, deps_auth._check)
@@ -226,6 +228,13 @@ export default function CustomerCasesPage() {
           {canManagePermissions && (
             <Button variant="outline" onClick={() => setManagingAccess(true)}>
               <UsersIcon className="mr-2 size-4" />Manage permissions</Button>
+          )}
+          {/* An ownerless customer — its owner's account removed — is the
+              admin's to give an owner, and only then (server:
+              routes_customers.set_customer_owner). */}
+          {customer && !customer.owner && me?.is_admin && (
+            <Button variant="outline" onClick={() => setSettingOwner(true)}>
+              <UserCogIcon className="mr-2 size-4" />Set owner</Button>
           )}
           {/* Deleting the customer takes every study in it — the owner's
               call, the same person as Manage permissions (server:
@@ -361,6 +370,14 @@ export default function CustomerCasesPage() {
           onOpenChange={setManagingAccess}
           customerId={customerId}
           customerName={customer?.name ?? ""}
+        />
+      )}
+      {customerId && customer && !customer.owner && me?.is_admin && (
+        <SetOwnerDialog
+          open={settingOwner}
+          onOpenChange={setSettingOwner}
+          customerId={customerId}
+          customerName={customer.name}
         />
       )}
       {customerId && canManagePermissions && (

@@ -316,7 +316,8 @@ class Repository:
 
     def create_customer(self, auth: AuthContext, name: str,
                         owner_id: str = "") -> Customer:
-        """*owner_id* is the creating user, stamped once and never rewritten.
+        """*owner_id* is the creating user. Rewritten only when that account no
+        longer exists, by an admin (`set_customer_owner`).
 
         Optional because the store is also driven by tests and scripts with no
         signed-in user behind them; the API route always passes one.
@@ -384,6 +385,17 @@ class Repository:
         return Customer(id=customer_id, name=name,
                         template_id=d.get("template_id", ""),
                         owner_id=d.get("owner_id", ""))
+
+    def set_customer_owner(self, auth: AuthContext, customer_id: str,
+                           owner_id: str) -> Customer:
+        """Record a new owner. Only for a customer whose owner no longer
+        exists — the route (`routes_customers.set_customer_owner`) decides
+        that; this is the metadata write."""
+        d = self._read_json(auth, P.customer_meta_path(customer_id))
+        d["owner_id"] = owner_id
+        self._write_json(auth, P.customer_meta_path(customer_id), d, [P.LABEL_CUSTOMER])
+        return Customer(id=customer_id, name=d.get("name", ""),
+                        template_id=d.get("template_id", ""), owner_id=owner_id)
 
     # -- Case -------------------------------------------------------------
 

@@ -962,6 +962,22 @@ export const api = {
             jsonPut({ user_id: userId, mode }))
         .then((r) => detailedJson<{ id: string; user_id: string; mode: AccessMode | null }>(r)),
 
+    /** Admin-only: every customer with no owner — its owner's account
+     *  removed, or from before ownership — to give one. Across all customers,
+     *  grant or not; id, name and study count only. */
+    withoutOwner: (): Promise<{ id: string; name: string; case_count: number }[]> =>
+      fetch(`${API_BASE}/customers/without-owner`).then((r) =>
+        json<{ id: string; name: string; case_count: number }[]>(r)
+      ),
+
+    /** Give a customer a new owner — an admin's, and only while it has none:
+     *  its owner's account was removed, or it predates ownership. */
+    setOwner: (
+      customerId: string, userId: string,
+    ): Promise<{ id: string; owner: { id: string; name: string } }> =>
+      fetch(`${API_BASE}/customers/${customerId}/owner`, jsonPut({ user_id: userId }))
+        .then((r) => detailedJson<{ id: string; owner: { id: string; name: string } }>(r)),
+
     /** Switch between inheriting the Domains policy and managing this
      *  customer's access by hand. The OWNER's call, not any admin's. */
     setPermissionMode: (

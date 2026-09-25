@@ -39,6 +39,9 @@ import BackupTab from "@/components/settings/BackupTab";
 import DefaultTemplateTab from "@/components/settings/DefaultTemplateTab";
 import DomainAccessTab from "@/components/settings/DomainAccessTab";
 import ProfileTab from "@/components/settings/ProfileTab";
+import SetOwnerDialog from "@/components/SetOwnerDialog";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { formatReportDate } from "@/lib/utils";
 import type { InstalledFont, MissingFont, StudioUser, AccessRequest, Invite } from "@/lib/api";
 
@@ -536,6 +539,47 @@ function PermissionRequestsTab() {
   );
 }
 
+/** Customers nobody owns any more — the owner's account was removed, or they
+ *  predate ownership. Nobody but an admin can act for them, and an admin with
+ *  no grant on one could not otherwise find it, so they are listed here, each
+ *  with Set owner. Hidden while there are none. (2026-09-25) */
+function CustomersWithoutOwner() {
+  const { data: rows } = useQuery({
+    queryKey: ["customers-without-owner"],
+    queryFn: api.customers.withoutOwner,
+  });
+  const [picking, setPicking] = useState<{ id: string; name: string } | null>(null);
+  if (!rows?.length) return null;
+  return (
+    <div className="space-y-2">
+      <div className={SECTION_HEADER}>
+        <h3 className={PANEL_TITLE}>Customers without an owner</h3>
+      </div>
+      {rows.map((c) => (
+        <div key={c.id} className={`${ROW} gap-3`}>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{c.name}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {c.case_count} {c.case_count === 1 ? "study" : "studies"} · No owner
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setPicking(c)}>
+            Set owner
+          </Button>
+        </div>
+      ))}
+      {picking && (
+        <SetOwnerDialog
+          open={!!picking}
+          onOpenChange={(v) => !v && setPicking(null)}
+          customerId={picking.id}
+          customerName={picking.name}
+        />
+      )}
+    </div>
+  );
+}
+
 /** Users, then pending/past invitations. The grant editor on each user row is
  *  the point of this whole screen: a colleague who signs in with no grants
  *  lands in an empty app, so this is where that gets fixed. */
@@ -576,6 +620,7 @@ function UsersTab() {
       </div>
 
       <InviteDialog open={inviting} onOpenChange={setInviting} />
+      <CustomersWithoutOwner />
     </div>
   );
 }
