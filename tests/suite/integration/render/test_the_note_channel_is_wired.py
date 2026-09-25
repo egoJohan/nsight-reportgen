@@ -57,6 +57,9 @@ def test_a_note_raised_while_drawing_reaches_the_caller(monkeypatch):
     from reportbuilder.render.image import bars
 
     monkeypatch.setattr(bars, "_MIN_LABEL_BAR_PT", 10_000.0)
+    # And the second chance a thin bar now gets, once measured (2026-09-25):
+    # without this the chart is numbered after all and nothing is raised.
+    monkeypatch.setattr(bars, "_VALUE_LABEL_SIDE_MIN_PT", 10_000.0)
 
     model, df = tiny_model_and_data()
     notes: list[RenderNote] = []
@@ -72,6 +75,9 @@ def test_nobody_collecting_is_still_fine(monkeypatch):
     from reportbuilder.render.image import bars
 
     monkeypatch.setattr(bars, "_MIN_LABEL_BAR_PT", 10_000.0)
+    # And the second chance a thin bar now gets, once measured (2026-09-25):
+    # without this the chart is numbered after all and nothing is raised.
+    monkeypatch.setattr(bars, "_VALUE_LABEL_SIDE_MIN_PT", 10_000.0)
     model, df = tiny_model_and_data()
     build_presentation(_report(), model, df)   # must not raise
 

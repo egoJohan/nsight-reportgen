@@ -96,6 +96,8 @@ CASES = [
     pytest.param(_REGION, "separate", _SEX2, id="2-separate-x5x7"),
     # images 4-5: four genders x can/cannot, eight combinations in ONE panel
     pytest.param(_CAN, "grouped", _SEX, id="8-combos-one-panel"),
+    # twelve in one panel: numbered once each group may take 85% of its slot
+    pytest.param(_THREE, "grouped", _SEX, id="12-combos-one-panel"),
 ]
 
 
@@ -130,7 +132,6 @@ def test_neighbouring_numbers_do_not_overlap(second, layout, first, statistic):
 @pytest.mark.parametrize("layout,first,second", [
     ("small_multiples", _SEX, _REGION),   # four panels of five: 3.6pt-wide bars
     ("grouped", _SEX, _REGION),           # twenty combinations in one panel
-    ("grouped", _SEX, _THREE),            # twelve in one panel, legend at the right
 ])
 def test_too_thin_to_number_says_so(layout, first, second):
     """Past a point the columns are too thin for any number a reader could read
