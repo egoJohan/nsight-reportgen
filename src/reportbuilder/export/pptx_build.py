@@ -12,7 +12,7 @@ from reportbuilder.model.question import QuestionModel
 from reportbuilder.render.base import StyleSpec
 from reportbuilder.render.deck import series_key, render_report, render_to_file, RenderCancelled
 from reportbuilder.render.image._mpl import series_is_empty
-from reportbuilder.stats.engine import compute
+from reportbuilder.stats.engine import compute, text_respondents
 from reportbuilder.stats.series import SeriesResult
 
 
@@ -63,6 +63,7 @@ def _build(report: Report, model: QuestionModel, data, style, cancel_check,
         style = StyleSpec()   # generic base style (no template); deck synthesizes slides
     series_by_ref: dict = {}
     titles: dict = {}
+    bases: dict = {}
     for spec in report.charts:
         if getattr(spec, "excluded", False):
             continue          # unticked in Select — kept in the report, off the deck
@@ -85,7 +86,13 @@ def _build(report: Report, model: QuestionModel, data, style, cancel_check,
         # themes slide can use it as its heading.
         if renders_as_bullets(spec):
             try:
-                titles[spec.question_ref] = model.question(spec.question_ref).text
+                q = model.question(spec.question_ref)
+                titles[spec.question_ref] = q.text
+                # A key-themes slide reports its N like every other slide: the
+                # respondents who wrote an answer ("Key themes kysymystyypissä
+                # ei näy n-lukua", 2026-09-25). Special slides have no question.
+                if spec.chart_type == "themes":
+                    bases[spec.question_ref] = text_respondents(q, data)
             except Exception:
                 pass
             continue
@@ -108,6 +115,6 @@ def _build(report: Report, model: QuestionModel, data, style, cancel_check,
             empty_out.append(series_key(spec))
     if out_path is None:
         return render_report(report, series_by_ref, style, titles=titles,
-                             cancel_check=cancel_check, notes=notes)
+                             cancel_check=cancel_check, notes=notes, bases=bases)
     return render_to_file(report, series_by_ref, style, out_path, titles=titles,
-                          cancel_check=cancel_check, notes=notes)
+                          cancel_check=cancel_check, notes=notes, bases=bases)

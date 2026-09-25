@@ -323,6 +323,18 @@ _WORDCLOUD_MIN_LEN: int = 3
 _WORDCLOUD_TOP_N: int = 60
 
 
+def text_respondents(question: Question, data: pd.DataFrame) -> int:
+    """How many respondents wrote any answer to an open question — the base a
+    word cloud reports, and the one a key-themes slide reports too, so the two
+    slides about the same question never disagree about its N."""
+    answered = pd.Series(False, index=data.index)
+    for name in question.variables:
+        if name in data.columns:
+            answered = answered | data[name].map(
+                lambda x: isinstance(x, str) and x.strip() != "")
+    return int(answered.sum())
+
+
 def _wordcloud(question: Question, spec: ChartSpec, data: pd.DataFrame,
                model: QuestionModel) -> SeriesResult:
     """Word-frequency SeriesResult for a free-text question (Task J.1).

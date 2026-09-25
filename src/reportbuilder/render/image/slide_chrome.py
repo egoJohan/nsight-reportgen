@@ -454,13 +454,59 @@ def ink_colour(hex_or_none: str, fallback):
 def _footer_font(ctx) -> str:
     """The face the methodology line is drawn in: its own when an author stated
     one, otherwise the body font every other piece of slide text uses."""
-    style = getattr(ctx, "style", None)
+    return _footer_font_of(getattr(ctx, "style", None))
+
+
+def _footer_font_of(style) -> str:
     return (getattr(style, "footer_font", "") or "").strip() or body_font(style)
 
 
 def _footer_ink(style, fallback):
     chosen = getattr(style, "footer_colour", "")
     return ink_colour(chosen, fallback)
+
+
+def methodology_text(spec, base_n, statistic: str, *, stat_fallback: bool = True) -> str:
+    """The methodology line's words. "N = <base>" by default; an author's
+    `footer_note` wins ("{n}" expands to the base, "{stat}" to the statistic's
+    label); `elements.n` off gives none — no N and no note, since the note is
+    that line's template. Without a base, the statistic's label, unless
+    *stat_fallback* is off (a slide with no statistic to name, like key themes).
+    Shared by chart slides and key-themes slides, so both read the same way."""
+    wants = getattr(getattr(spec, "elements", None), "n", True)
+    stat_label = _STAT_FOOTER.get(statistic, statistic)
+    override = (getattr(spec, "footer_note", None) or "").strip()
+    if not wants:
+        return ""
+    if override:
+        return override.replace("{n}", str(base_n if base_n is not None else "")) \
+                       .replace("{stat}", stat_label)
+    if base_n is not None:
+        return f"N = {base_n}"
+    return stat_label if stat_fallback else ""
+
+
+def draw_methodology_line(slide, slot, style, text: str, muted) -> tuple[int, int, int]:
+    """Draw the methodology line right below the content, in its bottom-left
+    corner, and return (left, top, width) for anything sharing its row.
+
+    Below the content and left-aligned with it — the same edge the question
+    above starts from — and the content's bottom does not move for it. (Johan,
+    2026-09-24: "Footer (n=) is positioned bottom left corner under content,
+    not moving its bottom".)"""
+    foot_top = int(slot.top) + int(slot.height) + int(_CONTENT_MARGIN)
+    foot_left = int(slot.left)
+    foot_right = int(slot.left) + int(slot.width)
+    foot_w = min(int(Inches(4.0)), max(int(Inches(1.0)), foot_right - foot_left))
+    _textbox(
+        slide,
+        foot_left, foot_top,
+        foot_w, Inches(0.40),
+        [(text, _footer_pt(style), _footer_ink(style, muted), False)],
+        align=PP_ALIGN.LEFT,
+        font=_footer_font_of(style),
+    )
+    return foot_left, foot_top, foot_w
 
 
 def footer_top(slide, sh: int, sw: int) -> int:
@@ -1184,19 +1230,8 @@ def add_image_slide_chrome(ctx: RenderContext) -> int | None:
     #     disclosures below are appended regardless: they are not decoration,
     #     and an author hiding the base does not thereby get to stop saying
     #     which groups the slide left out or was drawn on. (Johan, 2026-09-07)
-    wants_footer = getattr(getattr(ctx.spec, "elements", None), "n", True)
-    base_n = ctx.series.base_n.get("Total")
-    stat_label = _STAT_FOOTER.get(ctx.series.statistic, ctx.series.statistic)
-    override = (getattr(ctx.spec, "footer_note", None) or "").strip()
-    if not wants_footer:
-        footer_text = ""
-    elif override:
-        footer_text = override.replace("{n}", str(base_n if base_n is not None else "")) \
-                              .replace("{stat}", stat_label)
-    elif base_n is not None:
-        footer_text = f"N = {base_n}"
-    else:
-        footer_text = stat_label
+    footer_text = methodology_text(ctx.spec, ctx.series.base_n.get("Total"),
+                                   ctx.series.statistic)
     # A pie/doughnut/funnel split into panels can drop a group (too thin a base,
     # or more groups than the page holds) — the editor's warning stays in the
     # editor, so this is the ONLY record of it that travels with the deck. Image
@@ -1234,18 +1269,9 @@ def add_image_slide_chrome(ctx: RenderContext) -> int | None:
     # bottom-right corner of 2026-09-18.) Room for it above a template's own
     # foot furniture is made where the content area is DEFINED — the layout
     # the editor shows — not by moving the content here.
-    foot_top = int(ctx.slot.top) + int(ctx.slot.height) + int(_CONTENT_MARGIN)
-    foot_left = int(ctx.slot.left)
+    foot_left, foot_top, foot_w = draw_methodology_line(
+        slide, ctx.slot, ctx.style, footer_text, _muted)
     foot_right = int(ctx.slot.left) + int(ctx.slot.width)
-    foot_w = min(int(Inches(4.0)), max(int(Inches(1.0)), foot_right - foot_left))
-    _textbox(
-        slide,
-        foot_left, foot_top,
-        foot_w, Inches(0.40),
-        [(footer_text, _footer_pt(ctx.style), _footer_ink(ctx.style, _muted), False)],
-        align=PP_ALIGN.LEFT,
-        font=_footer_font(ctx),
-    )
     # Scale endpoint legend for a partially-labelled numeric scale (e.g. "1 = täysin
     # eri mieltä · 7 = täysin samaa mieltä") — a small caption just above the footer,
     # so the numeric axis (1..7) reads cleanly and the text isn't lost. (REQ-C-24c)
