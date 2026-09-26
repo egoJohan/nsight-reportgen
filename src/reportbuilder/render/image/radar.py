@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from matplotlib import patheffects
 import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure  # noqa: E402
@@ -76,6 +77,11 @@ def _rings_cross_a_name(fig, ax) -> bool:
     r = fig.canvas.get_renderer()
     rings = [t.get_window_extent(r) for t in ax.get_yticklabels() if t.get_text()]
     names = [t.get_window_extent(r) for t in ax.get_xticklabels() if t.get_text()]
+    # And the points' own values, since radars print them (2026-09-26): the
+    # scale printed "40" onto "25 %". A radar without values is unaffected.
+    from reportbuilder.render.image._mpl import VALUE_GID
+    names += [t.get_window_extent(r) for t in ax.texts
+              if t.get_gid() == VALUE_GID and t.get_visible()]
     for a in rings:
         for b in names:
             if (min(a.x1, b.x1) - max(a.x0, b.x0) > 0.5
@@ -108,6 +114,106 @@ def _place_ring_labels(fig, ax, angles: list[float], segs, data,
             return angle
     ax.set_rlabel_position(candidates[0])
     return candidates[0]
+
+
+#: The most groups a radar prints its values for.
+_MAX_NUMBERED = 3
+
+
+def _readable(colour, ink):
+    """The group's colour for its numbers, unless it is too pale to read on the
+    slide — then the ink colour."""
+    from matplotlib.colors import to_rgb
+
+    try:
+        r, g, b = to_rgb(colour)
+    except ValueError:
+        return ink
+    return ink if 0.299 * r + 0.587 * g + 0.114 * b > 0.72 else colour
+
+
+def _point_values(fig, ax, ctx, angles, segs, data, clrs, all_vals, r_max, ink,
+                  bg="#FFFFFF") -> bool:
+    """Each point's value beside it, in its group's colour. True if drawn.
+
+    Placed where it is measured to fit, in display space: for each value the
+    positions are tried in order — just outside the point along its spoke, to
+    either side of the point, just inside it — and the first that overlaps no
+    value already placed, no spoke name and stays inside the ring wins. Pushing
+    values outward along the spoke alone packed wide numbers end to end on a
+    horizontal spoke and ran the last into the spoke's name. If any value finds
+    no place, none are drawn: a radar with some numbers and not others reads as
+    a fault. The caller tells the author.
+    """
+    from reportbuilder.render.image._mpl import VALUE_GID, format_value
+    from reportbuilder.render.image.bars import _measure_max_label_width_in
+
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    dpi = fig.dpi
+    names = [t.get_window_extent(rend) for t in ax.get_xticklabels() if t.get_text()]
+    cx, cy = ax.transData.transform((0.0, 0.0))
+    ring_px = math.hypot(*(np.array(ax.transData.transform((0.0, r_max))) - (cx, cy)))
+    radius_in = ring_px / dpi
+    # Sized to the radar: 8pt on a large one, down to 6pt on a small one.
+    pt = max(6.0, min(8.0, radius_in * 3.2))
+    gap = 2.5 / 72.0 * dpi
+    h = pt / 72.0 * dpi * 1.15
+
+    def free(box, placed):
+        x0, y0, x1, y1 = box
+        # Its centre within the ring: the names are outside it and are checked
+        # as boxes below, which is the real guard.
+        if math.hypot((x0 + x1) / 2 - cx, (y0 + y1) / 2 - cy) > ring_px:
+            return False
+        for o in placed + [(n.x0, n.y0, n.x1, n.y1) for n in names]:
+            if min(x1, o[2]) - max(x0, o[0]) > 0 and min(y1, o[3]) - max(y0, o[1]) > 0:
+                return False
+        return True
+
+    chosen, placed = [], []
+    for k, ang in enumerate(angles):
+        # Highest value first: it is the one nearest the ring, with least room.
+        order = sorted((i for i, seg in enumerate(segs) if data[seg][k] is not None),
+                       key=lambda i: -data[segs[i]][k])
+        for i in order:
+            v = data[segs[i]][k]
+            text = format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
+            w = _measure_max_label_width_in([text], pt) * dpi
+            px, py = ax.transData.transform((ang, v))
+            ux, uy = math.cos(ang), math.sin(ang)          # outward on screen
+            qx, qy = -uy, ux                               # across the spoke
+            along = abs(ux) * w / 2 + abs(uy) * h / 2
+            across = abs(qx) * w / 2 + abs(qy) * h / 2
+            out_ = gap + along
+            side = gap + across
+            spots = [(px + ux * out_, py + uy * out_),
+                     (px + qx * side, py + qy * side),
+                     (px - qx * side, py - qy * side),
+                     (px + ux * out_ + qx * side, py + uy * out_ + qy * side),
+                     (px + ux * out_ - qx * side, py + uy * out_ - qy * side),
+                     (px - ux * out_, py - uy * out_),
+                     (px + qx * 2 * side, py + qy * 2 * side),
+                     (px - qx * 2 * side, py - qy * 2 * side),
+                     (px - ux * out_ + qx * side, py - uy * out_ + qy * side),
+                     (px - ux * out_ - qx * side, py - uy * out_ - qy * side)]
+            for sx, sy in spots:
+                box = (sx - w / 2, sy - h / 2, sx + w / 2, sy + h / 2)
+                if free(box, placed):
+                    placed.append(box)
+                    chosen.append((sx, sy, text, i))
+                    break
+            else:
+                return False
+    inv = ax.transData.inverted()
+    for sx, sy, text, i in chosen:
+        th, rr = inv.transform((sx, sy))
+        t = ax.text(th, rr, text, ha="center", va="center", fontsize=pt, fontweight="bold",
+                    color=_readable(clrs[i], ink), zorder=6, gid=VALUE_GID, clip_on=False)
+        # A thin outline in the slide's own background colour, so a number
+        # that lands on the polygon's edge is not crossed out by it.
+        t.set_path_effects([patheffects.withStroke(linewidth=2.2, foreground=bg)])
+    return True
 
 
 def build_image_radar(ctx) -> None:
@@ -184,6 +290,14 @@ def build_image_radar(ctx) -> None:
     ax.set_yticklabels(
         [str(int(v)) if float(v).is_integer() else f"{v:g}" for v in r_ticks],
         fontsize=8.0, color=muted)
+    # The value at each point — "Voisiko varmistaa, että kaikissa kaaviotyypeissä
+    # näkyy prosentit" (2026-09-25): a radar printed none. Up to three groups;
+    # with more they bury the shape a radar is read by. (Johan, 2026-09-26)
+    if getattr(ctx.spec.elements, "data_labels", True) and 0 < len(segs) <= _MAX_NUMBERED:
+        if not _point_values(fig, ax, ctx, angles, segs, data, clrs, all_vals, r_max, ink, bg):
+            from reportbuilder.render.base import note
+            note(ctx, "unlabelled", n_cats)
+
     _place_ring_labels(fig, ax, angles, segs, data)
     ax.grid(color=grid, linewidth=0.8)
     ax.spines["polar"].set_color("#C9C1B4")

@@ -1448,6 +1448,7 @@ function ChartControls({
       <AxisTitleFields chart={chart} onChange={onChange} />
       <FooterNoteField chart={chart} onChange={onChange} />
       <GroupBaseField chart={chart} onChange={onChange} />
+      <NumbersField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
         chart={chart}
@@ -1649,6 +1650,53 @@ function GroupBaseField({
           checked={shown}
           onChange={(v) =>
             onChange({ elements: { ...chart.elements, group_base: v } })
+          }
+        />
+      }
+    />
+  );
+}
+
+// ── Numbers: the values printed on the chart ────────────────────────────────
+/** Slides that print no values: text, not a chart. */
+const NO_NUMBERS = new Set(["wordcloud", "themes"]);
+
+function NumbersField({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  // The setting has always existed (`elements.data_labels`) and every picture
+  // chart honours it; it simply had no switch. (Johan, 2026-09-26)
+  if (NO_NUMBERS.has(chart.chart_type) || chart.chart_type.startsWith("special_")) {
+    return null;
+  }
+  const shown = chart.elements?.data_labels !== false;
+  const radar = chart.chart_type === "radar";
+  return (
+    <Field
+      label="Numbers"
+      hint={
+        radar ? (
+          <>
+            The value at each point, in its group’s colour. Drawn with up to
+            three groups — with more, the numbers would bury the shape the
+            radar is read by.
+          </>
+        ) : (
+          <>
+            The values printed on the chart. Where the bars are too thin for
+            them the chart says so; untick to leave them off on purpose.
+          </>
+        )
+      }
+      action={
+        <ShowToggle
+          checked={shown}
+          onChange={(v) =>
+            onChange({ elements: { ...chart.elements, data_labels: v } })
           }
         />
       }
