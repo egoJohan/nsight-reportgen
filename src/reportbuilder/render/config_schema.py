@@ -289,13 +289,19 @@ _XTAB_LAYOUT_LABELS: dict[str, str] = {
     # produces. (Johan, 2026-09-14)
     "auto": "Combined panel",
     "grouped": "Grouped bars",
-    "small_multiples": "Small multiples",
+    # One panel per group of the first variable, in one row or in a grid of
+    # two rows — the grid gives each panel twice the width, so thin columns
+    # get room for their numbers, at the cost of height. The author's choice,
+    # never automatic: on a wide, low chart area the grid shrinks the chart.
+    # (Johan, 2026-09-26)
+    "small_multiples": "Small multiples, one row",
+    "small_multiples_grid": "Small multiples, grid",
     "separate": "Separate panels (one per variable)",
 }
 
 
 def xtab_layout_field(*, values: tuple[str, ...] = (
-        "auto", "grouped", "small_multiples", "separate")) -> ConfigField:
+        "grouped", "small_multiples", "small_multiples_grid", "separate")) -> ConfigField:
     """The two-variable layout control, offering only the values the chart type in
     question actually ACTS on.
 
@@ -306,15 +312,19 @@ def xtab_layout_field(*, values: tuple[str, ...] = (
     crossed = "grouped" in values
     help_text = "With a second classifying variable: "
     if crossed:
+        # No "Combined panel" here any more: on clustered bars it was a rule
+        # that drew one of the other two, so the author could not tell what the
+        # slide would look like. A slide saved with it keeps drawing exactly as
+        # before, and the editor shows the layout it draws. (Johan, 2026-09-26)
         help_text += ("'Grouped bars' pulls the bars apart into groups by the first "
                       "variable; 'Small multiples' draws one panel per value of the "
-                      "first variable; ")
+                      "first variable, in one row or in a grid of two rows — the "
+                      "grid gives each panel more width for its numbers; ")
     help_text += ("'Separate panels' does NOT cross them — one panel per variable, "
-                  "each an ordinary split. 'Combined panel' ")
-    help_text += ("groups when it fits, else panels, and never chooses Separate on "
-                  "its own." if crossed else
-                  "crosses the two variables into one set of grouped bars, and never "
-                  "chooses Separate on its own.")
+                  "each an ordinary split.")
+    if not crossed:
+        help_text += (" 'Combined panel' crosses the two variables into one set of "
+                      "grouped bars.")
     return ConfigField(
         "xtab_layout", "select", "Variable layout",
         options=tuple((v, _XTAB_LAYOUT_LABELS[v]) for v in values),

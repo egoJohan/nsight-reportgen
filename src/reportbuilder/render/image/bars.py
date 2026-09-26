@@ -269,6 +269,58 @@ _VALUE_LABEL_MIN_PT: float = 7.5
 _VALUE_LABEL_SIDE_MIN_PT: float = 5.0
 
 
+def _bare_fmt(ctx):
+    """The slide's number format with its "%" sign taken off — what numbers are
+    printed in when there is no room for the sign ("remove the percentage from
+    the number when we are short in space", Johan, 2026-09-26). None when there
+    is no sign to drop: not a percentage, or the author already turned it off."""
+    import dataclasses
+
+    fmt = ctx.spec.number_format
+    if ctx.series.statistic != "pct" or not getattr(fmt, "show_pct_sign", True):
+        return None
+    return dataclasses.replace(fmt, show_pct_sign=False)
+
+
+def _widest_text(values, ctx, fmt) -> str:
+    return max((format_value(v, ctx.series.statistic, fmt, values) for v in values),
+               key=len, default="")
+
+
+def _value_label_fit(fig, ax, n_cats: int, bar_w: float, widest: str,
+                     widest_bare: str | None) -> tuple[float, float, bool] | None:
+    """(fontsize, rotation, drop the % sign) for a column's numbers, or None.
+
+    At each step the numbers keep their "%" if they fit with it, and lose it
+    only if that is what makes them fit: flat with it, flat without it, on their
+    side with it, on their side without it. A chart that fits today with its
+    sign is drawn exactly as before."""
+    plot_w_in = ax.get_position().width * fig.get_size_inches()[0]
+    per_bar_in = bar_w * plot_w_in / max(n_cats, 1)
+    texts = [(widest, False)] + ([(widest_bare, True)] if widest_bare else [])
+    for text, bare in texts:
+        for pt in (_VALUE_LABEL_PT, _VALUE_LABEL_MIN_PT):
+            if _measure_max_label_width_in([text], pt) <= per_bar_in * 0.92:
+                return pt, 0.0, bare
+    for text, bare in texts:
+        side = _side_pt(text, per_bar_in)
+        if side:
+            return side, 90.0, bare
+    return None
+
+
+def _side_pt(text: str, per_bar_in: float) -> float | None:
+    """The size a number standing on its side takes in a column *per_bar_in*
+    wide — the height of its own digits, shrinking with the column down to
+    _VALUE_LABEL_SIDE_MIN_PT — or None below that."""
+    ink_per_pt = _ink_height_in(text, 10.0) / 10.0
+    if ink_per_pt <= 0:
+        return None
+    pt = min(_VALUE_LABEL_MIN_PT, per_bar_in * 0.85 / ink_per_pt)
+    pt = int(pt * 2) / 2.0  # whole and half points, like every other size here
+    return pt if pt >= _VALUE_LABEL_SIDE_MIN_PT else None
+
+
 def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
                         widest: str) -> tuple[float, float] | None:
     """(fontsize, rotation) for a column's value label, or None if it cannot fit.
@@ -292,24 +344,8 @@ def _value_label_layout(fig, ax, n_cats: int, bar_w: float,
     # while the arithmetic says they fit. `bar_w` is in data units and one
     # category slot is 1, so this converts exactly, and it is right for the
     # cross-tab layout too, where the widths differ.
-    plot_w_in = ax.get_position().width * fig.get_size_inches()[0]
-    per_bar_in = bar_w * plot_w_in / max(n_cats, 1)
-    for pt in (_VALUE_LABEL_PT, _VALUE_LABEL_MIN_PT):
-        if _measure_max_label_width_in([widest], pt) <= per_bar_in * 0.92:
-            return pt, 0.0
-    # On its side a number needs the height of its own DIGITS across the
-    # column, and it shrinks with the column down to _VALUE_LABEL_SIDE_MIN_PT.
-    # It used to ask for a full line of text at 7.5pt — about 10pt, twice what
-    # the digits take — so two classifiers' thin columns lost every number on
-    # the chart: "palkkien numeroarvot katoavat kuvasta" (2026-09-25).
-    ink_per_pt = _ink_height_in(widest, 10.0) / 10.0
-    if ink_per_pt <= 0:
-        return None
-    pt = min(_VALUE_LABEL_MIN_PT, per_bar_in * 0.85 / ink_per_pt)
-    pt = int(pt * 2) / 2.0  # whole and half points, like every other size here
-    if pt >= _VALUE_LABEL_SIDE_MIN_PT:
-        return pt, 90.0
-    return None
+    fit = _value_label_fit(fig, ax, n_cats, bar_w, widest, None)
+    return (fit[0], fit[1]) if fit else None
 
 
 #: The share of a category's row (or column slot) its group of bars takes —
@@ -358,20 +394,21 @@ def _label_thin_bars(fig, ax, ctx, thin, *, bar_h: float, all_vals, off: float,
     lo, hi = ax.get_ylim()
     axis_pt = ax.get_position().height * fig.get_size_inches()[1] * 72.0
     thick_pt = abs(bar_h) * axis_pt / max(abs(hi - lo), 1e-9)
-    widest = max((format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
-                  for v in all_vals), key=len, default="")
-    ink_per_pt = _ink_height_in(widest, 10.0) / 10.0 * 72.0
-    if ink_per_pt <= 0:
+    bare_fmt = _bare_fmt(ctx)
+    options = [ctx.spec.number_format] + ([bare_fmt] if bare_fmt else [])
+
+    def size(fmt, k):
+        ink = _ink_height_in(_widest_text(all_vals, ctx, fmt), 10.0) / 10.0 * 72.0
+        return int(min(9.5, thick_pt * k * 0.85 / ink) * 2) / 2.0 if ink > 0 else 0.0
+
+    # As drawn — with the "%" if it fits, else without — and only then with each
+    # answer's bars taking more of its row, as far as `_WIDE_GROUP`.
+    widen = [1.0] + ([_WIDE_GROUP / _NORMAL_GROUP] if len(thin) > 1 else [])
+    choice = next(((k, fmt, size(fmt, k)) for k in widen for fmt in options
+                   if size(fmt, k) >= _VALUE_LABEL_SIDE_MIN_PT), None)
+    if choice is None:
         return False
-    k = 1.0
-    pt = int(min(9.5, thick_pt * 0.85 / ink_per_pt) * 2) / 2.0
-    if pt < _VALUE_LABEL_SIDE_MIN_PT and len(thin) > 1:
-        # Still too thin: let each answer's bars take more of its row, as far as
-        # `_WIDE_GROUP` — only on a chart that would otherwise lose its numbers.
-        k = _WIDE_GROUP / _NORMAL_GROUP
-        pt = int(min(9.5, thick_pt * k * 0.85 / ink_per_pt) * 2) / 2.0
-    if pt < _VALUE_LABEL_SIDE_MIN_PT:
-        return False
+    k, fmt, pt = choice
     if k != 1.0:
         _widen_groups(ax, k, horizontal=True)
         thin = [([round(yi) + (yi - round(yi)) * k for yi in ys], vals) for ys, vals in thin]
@@ -379,7 +416,7 @@ def _label_thin_bars(fig, ax, ctx, thin, *, bar_h: float, all_vals, off: float,
         for yi, v in zip(ys, vals):
             if v is not None and v >= floor:
                 ax.text(v + off, yi,
-                        format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                        format_value(v, ctx.series.statistic, fmt, all_vals),
                         va="center", ha="left", fontsize=pt, fontweight="bold",
                         color=ink, zorder=5, gid=VALUE_GID)
     return True
@@ -871,7 +908,7 @@ def _resolve_xtab_layout(ctx):
     # panel per statement. (2026-09-11)
     if mode == "separate" and not getattr(ctx.spec, "classifying_var_2", None):
         mode = "auto"
-    if mode in ("grouped", "small_multiples", "separate"):
+    if mode in ("grouped", "small_multiples", "small_multiples_grid", "separate"):
         return mode
     n_combos = len(ctx.series.segments)
     n_primary = len(set(sp.values()))
@@ -976,17 +1013,24 @@ def _label_panel_bars(fig, ctx, drawn, *, vertical: bool, n_cat: int,
     off = _label_offset(max_val)
     _floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
 
+    bare_fmt = _bare_fmt(ctx)
+    fmt_box = [ctx.spec.number_format]
+
     def text(v):
-        return format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
+        return format_value(v, ctx.series.statistic, fmt_box[0], all_vals)
 
     if vertical:
-        widest = max((text(v) for v in all_vals), key=len, default="")
+        widest = _widest_text(all_vals, ctx, ctx.spec.number_format)
+        widest_bare = _widest_text(all_vals, ctx, bare_fmt) if bare_fmt else None
         narrowest = min(drawn, key=lambda d: d[3])
-        fit = _value_label_layout(fig, narrowest[0], n_cat, narrowest[3], widest)
+        fit = _value_label_fit(fig, narrowest[0], n_cat, narrowest[3], widest, widest_bare)
         if not fit:
             note(ctx, "unlabelled", n_cat)
             return
-        pt, rot = fit
+        pt, rot, bare = fit
+        if bare:
+            fmt_box[0] = bare_fmt
+            widest = widest_bare
         # Room above the tallest column for its number. A panel's title sits
         # right above its plot, and "100 %" standing on a full-height column ran
         # into it (2026-09-25). The axis is lengthened by exactly the number's
@@ -1021,9 +1065,15 @@ def _label_panel_bars(fig, ctx, drawn, *, vertical: bool, n_cat: int,
     # axis ends at that bar, and the next panel starts right after the gutter —
     # "80 %" ran into the neighbour's axis. The axis is lengthened by exactly the
     # widest number, so the ticks stay where they were.
-    widest = max((text(v) for v in all_vals), key=len, default="")
+    widest = _widest_text(all_vals, ctx, ctx.spec.number_format)
     label_in = _measure_max_label_width_in([widest], value_fs) + 0.04
     panel_in = ax0.get_position().width * fig.get_size_inches()[0]
+    # Too long with its "%": tried without it before being given up.
+    if label_in >= 0.5 * panel_in and bare_fmt:
+        widest = _widest_text(all_vals, ctx, bare_fmt)
+        label_in = _measure_max_label_width_in([widest], value_fs) + 0.04
+        if label_in < 0.5 * panel_in:
+            fmt_box[0] = bare_fmt
     if label_in >= 0.5 * panel_in:
         note(ctx, "unlabelled", n_cat)
         return
@@ -1073,7 +1123,7 @@ def _thin_panel_ticks(fig, axes) -> None:
             ax.set_xticks(ticks, [n if i in keep else "" for i, n in enumerate(names)])
 
 
-def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
+def _render_small_multiples(ctx, cats, *, vertical: bool, grid: bool = False) -> None:
     """Cross-tab SMALL MULTIPLES: one subplot per PRIMARY value, each a clustered bar of
     (answer categories × the SECONDARY classifier). Shared value axis + one legend."""
     from matplotlib.patches import Patch
@@ -1093,8 +1143,13 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
     max_val = max(all_vals, default=0.0)
     ink, _muted, _grid = chart_furniture(ctx)
 
+    # "Small multiples, grid": the panels in two rows, so each is twice as wide
+    # (the figure's height stays capped by the slot's shape — see
+    # `new_figure_grid`). One or two panels have nothing to gain from it.
+    rows = 2 if grid and len(groups) >= 3 else 1
     if vertical:
-        fig, axes = new_figure_grid(ctx, len(groups))
+        fig, axes = new_figure_grid(ctx, len(groups), rows=rows,
+                                    tall_in=4.5 * 1.6 if rows == 2 else None)
         x = np.arange(n_cat)
         titled: list[tuple[object, str]] = []
         drawn: list[tuple] = []
@@ -1117,7 +1172,8 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
                                      wrap=_wrap_label, width=_XLABEL_WRAP_WIDTH)
             _apply_column_style(ax, ctx, max_val, series.statistic)
     else:
-        fig, axes = new_figure_grid(ctx, len(groups), tall_in=n_cat * 0.42 + 2.0)
+        fig, axes = new_figure_grid(ctx, len(groups), rows=rows,
+                                    tall_in=(n_cat * 0.42 + 2.0) * (1.6 if rows == 2 else 1.0))
         y = np.arange(n_cat)[::-1]
         titled = []
         drawn = []
@@ -1152,8 +1208,11 @@ def _render_small_multiples(ctx, cats, *, vertical: bool) -> None:
             names = [_group_name(series, s, show_base=wants_group_base(ctx)) for s in segs]
             handles = [Patch(facecolor=clrs[i], edgecolor="none") for i in range(len(names))]
             panel_legends.append((ax, handles, names))
-    fig.subplots_adjust(bottom=0.24, wspace=0.12, top=0.9,
-                        left=0.12 if vertical else 0.2)
+    fig.subplots_adjust(bottom=0.24 if rows == 1 else 0.14, wspace=0.12, top=0.9,
+                        left=0.12 if vertical else 0.2,
+                        # A grid's top row has its legends below it, between
+                        # the rows; a single row has none.
+                        **({"hspace": 0.75} if rows == 2 else {}))
     # Once the panels are laid out, so both are fitted to the width they have.
     _label_panel_bars(fig, ctx, drawn, vertical=vertical, n_cat=n_cat,
                       all_vals=all_vals, max_val=max_val, ink=ink)
@@ -1528,8 +1587,9 @@ def build_image_column(ctx) -> None:
     if layout == "separate":
         _render_variable_panels(ctx, cats, vertical=True)
         return
-    if layout == "small_multiples":
-        _render_small_multiples(ctx, cats, vertical=True)
+    if layout in ("small_multiples", "small_multiples_grid"):
+        _render_small_multiples(ctx, cats, vertical=True,
+                                grid=layout == "small_multiples_grid")
         return
     _render_column_v(ctx, cats, segs, data)
 
@@ -1631,15 +1691,16 @@ def _label_columns(fig, ax, ctx, to_label, *, n_cats: int, all_vals, max_val: fl
     """
     if not to_label:
         return
-    widest = max((format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals)
-                  for v in all_vals), key=len, default="")
+    bare_fmt = _bare_fmt(ctx)
+    widest = _widest_text(all_vals, ctx, ctx.spec.number_format)
+    widest_bare = _widest_text(all_vals, ctx, bare_fmt) if bare_fmt else None
     narrowest = min(w for _b, _v, w in to_label)
-    fit = _value_label_layout(fig, ax, n_cats, narrowest, widest)
+    fit = _value_label_fit(fig, ax, n_cats, narrowest, widest, widest_bare)
     if not fit and len(to_label) > 1:
         # Too thin even on their side: let each group take more of its slot, as
         # far as `_WIDE_GROUP` — only on a chart that would otherwise lose them.
         k = _WIDE_GROUP / _NORMAL_GROUP
-        fit = _value_label_layout(fig, ax, n_cats, narrowest * k, widest)
+        fit = _value_label_fit(fig, ax, n_cats, narrowest * k, widest, widest_bare)
         if fit:
             _widen_groups(ax, k, horizontal=False)
     if not fit:
@@ -1647,7 +1708,8 @@ def _label_columns(fig, ax, ctx, to_label, *, n_cats: int, all_vals, max_val: fl
         # author a chart with no numbers and no reason (2026-09-25).
         note(ctx, "unlabelled", n_cats)
         return
-    pt, rot = fit
+    pt, rot, bare = fit
+    fmt = bare_fmt if bare else ctx.spec.number_format
     off = _label_offset(max_val)
     floor = author_label_floor(ctx.spec, ctx.series.statistic, all_vals)
     for bars, vals, _w in to_label:
@@ -1656,7 +1718,7 @@ def _label_columns(fig, ax, ctx, to_label, *, n_cats: int, all_vals, max_val: fl
                 ax.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + off,
-                    format_value(v, ctx.series.statistic, ctx.spec.number_format, all_vals),
+                    format_value(v, ctx.series.statistic, fmt, all_vals),
                     # Aligned AFTER turning (matplotlib's default mode): the
                     # turned number's box stands on the bar, centred on it.
                     # `rotation_mode="anchor"` aligned it before turning, so
@@ -1681,8 +1743,9 @@ def build_image_bar(ctx) -> None:
     if layout == "separate":
         _render_variable_panels(ctx, cats, vertical=False)
         return
-    if layout == "small_multiples":
-        _render_small_multiples(ctx, cats, vertical=False)
+    if layout in ("small_multiples", "small_multiples_grid"):
+        _render_small_multiples(ctx, cats, vertical=False,
+                                grid=layout == "small_multiples_grid")
         return
     _render_bar_h(ctx, cats, segs, data)
 

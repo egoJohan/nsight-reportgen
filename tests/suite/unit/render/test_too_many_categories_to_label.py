@@ -56,10 +56,19 @@ def _notes(n_cats: int, height_in: float, chart_type: str = "horizontal_bar"):
 
 
 def test_a_short_slot_records_what_it_could_not_label():
-    """The reported case: the default template's chart area."""
-    notes = _notes(25, 3.0)
+    """The default template's chart area, too many categories even for numbers
+    without their "%". (The reported 25 now fit once the sign is dropped — see
+    the next test — so the warning is pinned on 30.)"""
+    notes = _notes(30, 3.0)
     assert [n.kind for n in notes] == ["unlabelled"]
-    assert notes[0].count == 25
+    assert notes[0].count == 30
+
+
+def test_the_reported_25_are_numbered_without_their_sign():
+    """25 categories at 3.0in: "43 %" is too tall for the bars, "43" is not —
+    so they are numbered, without the sign, and nothing is raised. ("Remove the
+    percentage from the number when we are short in space", 2026-09-26.)"""
+    assert _notes(25, 3.0) == []
 
 
 def test_the_same_chart_on_a_taller_slot_says_nothing():

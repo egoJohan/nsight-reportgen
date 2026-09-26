@@ -37,6 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { shownXtabLayout } from "@/lib/xtabLayout";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import {
@@ -342,9 +343,11 @@ function patchField(
 function SelectWidget({ field, chart, variables, onChange }: WidgetProps) {
   const opts = field.options ?? [];
   const items = Object.fromEntries(opts.map((o) => [o.value, o.label]));
-  const value = String(
-    readField(chart, field.key) ?? field.default ?? opts[0]?.value ?? ""
-  );
+  const value =
+    field.key === "xtab_layout"
+      ? shownXtabLayout(chart, opts.map((o) => o.value), (name) =>
+          (variables ?? []).find((v) => v.name === name)?.n_values)
+      : String(readField(chart, field.key) ?? field.default ?? opts[0]?.value ?? "");
   // A banner classifier's groups come from separate columns and can overlap, so
   // it cannot be CROSSED with a second variable — only the crossed layouts
   // ("Combined panel" / "Grouped bars" / "Small multiples") are disabled here;
@@ -2293,12 +2296,12 @@ export function renderProblems(facts: previewQueue.ChartFacts): SlideProblem[] {
       id: "unlabelled",
       title: `${facts.unlabelled} categories, too many to label`,
       detail:
-        `Each bar is under 5pt tall in this template's chart area, and a number ` +
-        `printed there would overlap the bars either side of it — so the ` +
-        `percentages were left off and the reader has only the axis. This is ` +
-        `about the ROOM, not the question: the same chart carries its numbers ` +
-        `in a taller chart area. Sort the slide and keep the largest few ` +
-        `categories, or give the chart area more height in the template.`,
+        `The bars are too thin in this template's chart area for a readable ` +
+        `number, even without its % sign — so the numbers were left off and the ` +
+        `reader has only the axis. This is about the ROOM, not the question. ` +
+        `What helps: fewer groups (keep the ones that matter), "Small ` +
+        `multiples, grid" as the variable layout (each panel gets twice the ` +
+        `width), horizontal bars, or fewer categories.`,
     });
   }
   return out;

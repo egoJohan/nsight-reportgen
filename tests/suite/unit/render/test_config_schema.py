@@ -235,14 +235,16 @@ def test_stacked_horizontal_row_summary_fields():
 def test_xtab_layout_offers_separate_panels():
     from reportbuilder.render.config_schema import xtab_layout_field
     values = [v for v, _label in xtab_layout_field().options]
-    assert values == ["auto", "grouped", "small_multiples", "separate"]
+    # No "Combined panel" ("auto") on clustered bars: it was a rule, not a
+    # layout. Small multiples come in one row or as a grid. (Johan, 2026-09-26)
+    assert values == ["grouped", "small_multiples", "small_multiples_grid", "separate"]
 
 
 def test_clustered_schema_keeps_all_four_layouts():
     from reportbuilder.render.config_schema import clustered_bar_schema
     fld = next(f for f in clustered_bar_schema("vertical") if f.key == "xtab_layout")
     assert [v for v, _ in fld.options] == [
-        "auto", "grouped", "small_multiples", "separate"]
+        "grouped", "small_multiples", "small_multiples_grid", "separate"]
 
 
 @pytest.mark.parametrize("with_row_summary", [False, True])
