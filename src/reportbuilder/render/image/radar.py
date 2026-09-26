@@ -116,10 +116,6 @@ def _place_ring_labels(fig, ax, angles: list[float], segs, data,
     return candidates[0]
 
 
-#: The most groups a radar prints its values for.
-_MAX_NUMBERED = 3
-
-
 def _readable(colour, ink):
     """The group's colour for its numbers, unless it is too pale to read on the
     slide — then the ink colour."""
@@ -291,9 +287,12 @@ def build_image_radar(ctx) -> None:
         [str(int(v)) if float(v).is_integer() else f"{v:g}" for v in r_ticks],
         fontsize=8.0, color=muted)
     # The value at each point — "Voisiko varmistaa, että kaikissa kaaviotyypeissä
-    # näkyy prosentit" (2026-09-25): a radar printed none. Up to three groups;
-    # with more they bury the shape a radar is read by. (Johan, 2026-09-26)
-    if getattr(ctx.spec.elements, "data_labels", True) and 0 < len(segs) <= _MAX_NUMBERED:
+    # näkyy prosentit" (2026-09-25): a radar printed none. Drawn whenever every
+    # value finds room without overlapping another or a spoke name; when they
+    # do not, none are drawn and the author is TOLD. A fixed three-group limit
+    # dropped them silently: "no effect with Show for number" (Johan,
+    # 2026-09-26) — a radar of four groups, the switch on, no numbers, no reason.
+    if getattr(ctx.spec.elements, "data_labels", True) and segs:
         if not _point_values(fig, ax, ctx, angles, segs, data, clrs, all_vals, r_max, ink, bg):
             from reportbuilder.render.base import note
             note(ctx, "unlabelled", n_cats)

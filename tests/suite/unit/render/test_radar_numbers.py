@@ -42,7 +42,8 @@ def _series(n_groups: int, close: bool = False) -> SeriesResult:
                         base_n={g: 200 for g in groups}, statistic="pct")
 
 
-def _draw(n_groups: int, *, close: bool = False, numbers: bool = True, save: str = ""):
+def _draw(n_groups: int, *, close: bool = False, numbers: bool = True, save: str = "",
+          notes: list | None = None):
     spec = ChartSpec(question_ref="q", chart_type="radar", statistic="pct",
                      classifying_var="ryhma" if n_groups > 1 else None,
                      number_format=NumberFormat(), sort=SortSpec(basis="data_order"),
@@ -54,7 +55,7 @@ def _draw(n_groups: int, *, close: bool = False, numbers: bool = True, save: str
         slot=Slot(slide_index=0, left=Inches(0.5), top=Inches(1.4),
                   width=Inches(9.0), height=Inches(5.0), name="s1"),
         style=StyleSpec(), spec=spec, series=_series(n_groups, close),
-        fmt=spec.number_format, notes=[])
+        fmt=spec.number_format, notes=notes if notes is not None else [])
     seen, names = [], []
     orig = Figure.savefig
 
@@ -94,8 +95,20 @@ def test_values_on_one_spoke_do_not_overlap():
             assert not (overlap_x > 1 and overlap_y > 1), (a, b)
 
 
-def test_four_groups_print_none():
-    assert _draw(4) == []
+def test_four_groups_are_numbered_when_they_fit():
+    """No fixed group limit: a large radar with four well-separated groups has
+    room for every value, and gets them."""
+    assert len(_draw(4)) == len(_ATTRS) * 4
+
+
+def test_too_many_to_fit_draw_none_and_say_so():
+    """Many close groups: no arrangement avoids overlaps — so none are drawn,
+    and the author is told (the fixed limit dropped them silently)."""
+    from reportbuilder.render.image import IMAGE_BUILDERS as B  # noqa: F401
+    notes: list = []
+    labels = _draw(8, close=True, notes=notes)
+    assert labels == []
+    assert any(getattr(n, "kind", "") == "unlabelled" for n in notes)
 
 
 def test_the_numbers_switch_turns_them_off():

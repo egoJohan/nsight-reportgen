@@ -1681,9 +1681,9 @@ function NumbersField({
       hint={
         radar ? (
           <>
-            The value at each point, in its group’s colour. Drawn with up to
-            three groups — with more, the numbers would bury the shape the
-            radar is read by.
+            The value at each point, in its group’s colour — drawn when every
+            one finds room without overlapping another. When they do not (many
+            groups on a small radar), the slide says so.
           </>
         ) : (
           <>
@@ -2344,12 +2344,13 @@ export function renderProblems(facts: previewQueue.ChartFacts): SlideProblem[] {
       id: "unlabelled",
       title: `${facts.unlabelled} categories, too many to label`,
       detail:
-        `The bars are too thin in this template's chart area for a readable ` +
-        `number, even without its % sign — so the numbers were left off and the ` +
-        `reader has only the axis. This is about the ROOM, not the question. ` +
-        `What helps: fewer groups (keep the ones that matter), "Small ` +
-        `multiples, grid" as the variable layout (each panel gets twice the ` +
-        `width), horizontal bars, or fewer categories.`,
+        `There is not room in this template's chart area for a readable number ` +
+        `on every bar or point, even without its % sign — so the numbers were ` +
+        `left off and the reader has only the axis. This is about the ROOM, not ` +
+        `the question. What helps: fewer groups (keep the ones that matter), ` +
+        `fewer categories, "Small multiples, grid" as the variable layout, or ` +
+        `horizontal bars instead of columns. A radar with many groups is ` +
+        `usually clearer as bars.`,
     });
   }
   return out;
