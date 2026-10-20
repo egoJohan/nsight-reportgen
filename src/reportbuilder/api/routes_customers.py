@@ -366,7 +366,7 @@ def delete_customer(customer_id: str, auth: AuthContext = Depends(get_auth),
                      if g.scope != scope and not g.scope.startswith(scope + "/"))
         if len(kept) != len(u.grants):
             repo.set_grants(auth, u.id, kept)
-    modes = repo.customer_modes(auth)
+    modes = repo.customer_modes(auth, fresh=True)  # written back below
     if scope in modes:
         del modes[scope]
         repo.set_setting(auth, "customer-access.json", {"modes": modes})

@@ -544,12 +544,13 @@ class Repository:
         return sorted(out, key=lambda m: m.name.lower())
 
     def load_material_config(self, auth: AuthContext, customer_id: str, case_id: str,
-                             material_id: str) -> dict:
+                             material_id: str, *, fresh: bool = False) -> dict:
         """Curation for a material. Absent config is an empty dict, not an error:
         a freshly uploaded material legitimately has none."""
         try:
             return self._read_json(
-                auth, P.material_config_path(customer_id, case_id, material_id)
+                auth, P.material_config_path(customer_id, case_id, material_id),
+                fresh=fresh,
             ).get("config") or {}
         except (NotFound, ValueError, UnicodeDecodeError):
             return {}
@@ -583,7 +584,8 @@ class Repository:
         """
         path = P.material_config_path(customer_id, case_id, material_id)
         with self._config_lock(path):
-            cfg = self.load_material_config(auth, customer_id, case_id, material_id)
+            cfg = self.load_material_config(auth, customer_id, case_id, material_id,
+                                            fresh=True)
             updated = mutate(cfg)
             if updated is None:
                 updated = cfg
@@ -599,7 +601,7 @@ class Repository:
         """
         path = P.material_config_path(customer_id, case_id, material_id)
         try:
-            d = self._read_json(auth, path)
+            d = self._read_json(auth, path, fresh=True)
         except (NotFound, ValueError, UnicodeDecodeError):
             d = {"id": material_id, "case_id": case_id, "customer_id": customer_id}
         d["config"] = config
@@ -1442,10 +1444,14 @@ class Repository:
         except Exception:  # noqa: BLE001, S110 — a timestamp is never worth
             pass                # refusing somebody a session over
 
-    def customer_modes(self, auth: AuthContext) -> dict:
+    def customer_modes(self, auth: AuthContext, *, fresh: bool = False) -> dict:
         """{customer id: "inherit"|"manual"} for the customers given one.
         A customer absent from the map inherits the domain policy."""
-        stored = self.get_setting(auth, "customer-access.json") or {}
+        try:
+            stored = self._read_json(auth, P.settings_path("customer-access.json"),
+                                     fresh=fresh) or {}
+        except (NotFound, ValueError, UnicodeDecodeError):
+            stored = {}
         modes = stored.get("modes")
         return dict(modes) if isinstance(modes, dict) else {}
 
@@ -1459,7 +1465,7 @@ class Repository:
         dropped, so a customer deliberately returned to the domain policy reads
         differently from one nobody has decided about. (Johan, 2026-09-14)
         """
-        modes = self.customer_modes(auth)
+        modes = self.customer_modes(auth, fresh=True)
         modes[customer_id] = mode
         self.set_setting(auth, "customer-access.json", {"modes": modes})
         return modes
@@ -2508,5 +2514,9 @@ class Repository:
                        json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                        _JSON, labels=labels)
 
-    def _read_json(self, auth: AuthContext, path: str) -> dict:
-        return json.loads(self.store.get(auth, path).decode("utf-8"))
+    def _read_json(self, auth: AuthContext, path: str, *, fresh: bool = False) -> dict:
+        """*fresh* for a read that will be modified and written back: past any
+        cache in front of the store (store/caching_objects.py), so a change made
+        behind it is built on rather than overwritten."""
+        get = getattr(self.store, "get_fresh", self.store.get) if fresh else self.store.get
+        return json.loads(get(auth, path).decode("utf-8"))

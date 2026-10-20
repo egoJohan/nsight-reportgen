@@ -18,6 +18,7 @@ import os
 
 from fastapi import HTTPException
 
+from reportbuilder.store.caching_objects import CachingObjectStore
 from reportbuilder.store.datahive_objects import DataHiveObjectStore
 from reportbuilder.store.memory_objects import InMemoryObjectStore
 from reportbuilder.store.repository import Repository
@@ -51,8 +52,11 @@ def service_auth() -> AuthContext | None:
 def build_repository() -> Repository:
     """Datahive when configured, otherwise in-memory so the app still runs."""
     url = os.environ.get("NSIGHT_DATAHIVE_URL")
-    store = DataHiveObjectStore(url) if url else InMemoryObjectStore()
-    return Repository(store)
+    if not url:
+        return Repository(InMemoryObjectStore())
+    # The hot reads (a material's .sav and .config, the access settings) from
+    # memory: see store/caching_objects.py for what is held and how long.
+    return Repository(CachingObjectStore(DataHiveObjectStore(url)))
 
 
 def get_repository() -> Repository:
