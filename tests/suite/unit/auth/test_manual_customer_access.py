@@ -152,6 +152,33 @@ def test_an_unreadable_setting_denies_nothing_new(repo, auth):
     assert effective_user(repo, auth, user).grants == (Grant(OPEN, VIEW),)
 
 
+def test_a_failed_read_of_the_modes_does_not_open_a_manual_customer(repo, auth,
+                                                                    monkeypatch):
+    """Absent is "nothing is manual"; FAILED is "we do not know". Treating the
+    second like the first handed the domain grant every customer an admin had
+    closed off, for as long as the session cache held the result — and a hive
+    timing out under load is exactly when the read fails. Unknown takes the
+    derived grant away for that resolve, as an unreadable access.json does;
+    grants given by name still admit."""
+    from reportbuilder.store.seam import StoreError
+    user = maija(repo, auth, grants=[Grant(OPEN, VIEW)])
+    configure(repo, auth, manual=[CLOSED])
+    real = repo.get_setting
+
+    def flaky(a, key, default=None):
+        if key == CUSTOMER_ACCESS_KEY:
+            raise StoreError("hive timed out", status_code=504)
+        return real(a, key, default)
+
+    monkeypatch.setattr(repo, "get_setting", flaky)
+    monkeypatch.setattr(repo, "customer_modes",
+                        lambda a, **k: flaky(a, CUSTOMER_ACCESS_KEY))
+    seen = effective_user(repo, auth, user)
+
+    assert not may_read(seen, CLOSED)
+    assert may_read(seen, OPEN)
+
+
 def test_the_mode_is_never_written_onto_the_account(repo, auth):
     """Like the tenant grant: it describes a setting, not the person."""
     user = maija(repo, auth)

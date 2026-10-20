@@ -154,23 +154,28 @@ def effective_user(repo: Repository, auth: AuthContext, user: User) -> User:
     # setting and at the same cost, because it answers the same question: what
     # does this person's DOMAIN reach this request. A customer listing would
     # answer it too and cost one object read per customer on every request.
-    return replace(user, tenant_grants=(grant,),
-                   denied_scopes=manual_customers(repo, auth))
+    try:
+        denied = manual_customers(repo, auth)
+    except Exception:  # noqa: BLE001 — unknown is not "none are manual"
+        # Which customers are closed off cannot be known, so the domain grant
+        # cannot be narrowed — and an un-narrowed one reaches every customer an
+        # admin closed. Withhold it for this resolve, as an unreadable
+        # access.json does; grants given by name are untouched.
+        return user
+    return replace(user, tenant_grants=(grant,), denied_scopes=denied)
 
 
 def manual_customers(repo: Repository, auth: AuthContext) -> tuple[str, ...]:
     """Customer ids whose access is managed by hand, or ().
 
-    A setting that cannot be read yields NOTHING rather than everything: this
-    runs on every request, and a hive briefly away must not silently widen a
-    domain grant across customers an admin has closed off. The cost of the
-    other direction is a customer that keeps working for thirty seconds; the
-    cost of this one is a leak. (Johan, 2026-09-14)
+    A setting never written means none are manual. One that cannot be READ
+    raises: this runs on every request, and a hive briefly away must not
+    silently widen a domain grant across customers an admin has closed off —
+    which is what answering () did, since () closes nothing. The caller,
+    `effective_user`, withholds the domain grant instead. (Johan, 2026-09-14;
+    the fail-open found 2026-10-20)
     """
-    try:
-        stored = repo.get_setting(auth, CUSTOMER_ACCESS_KEY) or {}
-    except Exception:                              # pragma: no cover - defensive
-        return ()
+    stored = repo.get_setting(auth, CUSTOMER_ACCESS_KEY) or {}
     modes = stored.get("modes") or {}
     if not isinstance(modes, dict):
         return ()
