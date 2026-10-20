@@ -76,6 +76,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    # A real PID 1 that reaps orphans. Without it the server IS PID 1, and the
+    # helpers LibreOffice starts (gpgconf, gpg, gpgsm) are reparented to it when
+    # soffice exits and never reaped: staging held 975 zombies after three
+    # weeks, on the way to running the container out of process ids.
+    init: true
     environment:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
@@ -136,6 +141,11 @@ services:
       EGOHIVE_MODEL: "${EGOHIVE_MODEL:-}"
       EGOHIVE_EMAIL: "${EGOHIVE_EMAIL:-}"
       EGOHIVE_PASSWORD: "${EGOHIVE_PASSWORD:-}"
+      # Two malloc arenas, not one per thread. Each request thread otherwise
+      # keeps its own 64 MB heap with whatever it freed still mapped: staging
+      # held 24 of them, 1.28 GB. Under the same 30-way preview load the process
+      # levelled at ~1.05 GB with this against ~1.3 GB without (2026-10-20).
+      MALLOC_ARENA_MAX: "2"
     volumes:
       # egoHive credentials (base_url + endpoint_id). Read-only. The container's
       # default creds path is /app/work/egohive_creds.json. Place the file at
@@ -162,6 +172,12 @@ services:
     expose:
       - "8200"
     restart: always
+    # A ceiling for THIS container, so a runaway backend is the one killed and
+    # restarted. Without it the kernel ran out of memory for the whole VM (no
+    # swap) and picked the backend on 2026-09-29 only by luck — Caddy, sshd or
+    # the frontend were as eligible. The VM has 7.7 GB; LibreOffice renders
+    # run inside this limit too.
+    mem_limit: 5g
 
   frontend:
     build:

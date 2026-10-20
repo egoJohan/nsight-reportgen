@@ -79,6 +79,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    # A real PID 1 that reaps orphans. Without it the server IS PID 1, and the
+    # helpers LibreOffice starts (gpgconf, gpg, gpgsm) are reparented to it when
+    # soffice exits and never reaped: staging held 975 zombies after three
+    # weeks, on the way to running the container out of process ids.
+    init: true
     environment:
       NSIGHT_HOST: "0.0.0.0"
       NSIGHT_PORT: "8200"
