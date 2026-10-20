@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from reportbuilder.api.deps import get_client
 from reportbuilder.api.routes_access_requests import access_requests_router
 from reportbuilder.api.routes_backup import backup_router
+from reportbuilder.api import process_health
+from reportbuilder.api.routes_process import process_router
 from reportbuilder.api.routes_ai import ai_router
 from reportbuilder.api.routes_auth import auth_router
 from reportbuilder.api.routes_cases import cases_router
@@ -163,13 +165,17 @@ def create_app(client=None) -> FastAPI:
         # deletes files is noise at best.
         if os.environ.get("NSIGHT_DISABLE_CLEANUP") != "1":
             task = asyncio.create_task(_janitor())
+        # Not behind the cleanup opt-out: it deletes nothing and touches no
+        # store, and a warning nobody is running is the failure it exists for.
+        watch = asyncio.create_task(process_health.watch())
         try:
             yield
         finally:
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            for t in (task, watch):
+                if t is not None:
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
 
     app = FastAPI(lifespan=_lifespan)
 
@@ -279,6 +285,7 @@ def create_app(client=None) -> FastAPI:
     app.include_router(users_router)
     app.include_router(access_requests_router)
     app.include_router(backup_router)
+    app.include_router(process_router)
 
     # Inject the client if provided
     if client is not None:
