@@ -18,7 +18,7 @@ Returns None.
 """
 from __future__ import annotations
 
-from reportbuilder.render.image._mpl import VALUE_GID
+from reportbuilder.render.image._mpl import VALUE_GID, wants_legend_frame, frame_legend
 from reportbuilder.render.image import label_fit
 from reportbuilder.render.image.label_fit import register_category_labels
 
@@ -637,9 +637,7 @@ def build_image_combo(ctx) -> None:
                 # last marker and its value — matplotlib picks the emptiest
                 # corner, and on this chart the emptiest corner is still data.
                 leg = _legend_that_fits(fig, ax, handles, labels)
-                leg.get_frame().set_facecolor(bg)
-                leg.get_frame().set_edgecolor(grid)
-                leg.get_frame().set_linewidth(0.8)
+                frame_legend(leg, framed=wants_legend_frame(ctx), face=bg, edge=grid)
                 for t in leg.get_texts():
                     t.set_color(ink)
     # Bars-only combo (no secondary line) → no legend: the question is in the subtitle.

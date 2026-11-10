@@ -449,25 +449,57 @@ def _place_series_legend(fig, ax, segs, ctx, *, vertical: bool) -> None:
     if n <= _LEGEND_BELOW_MAX:
         _legend_below(ax, n, ctx, y=-0.22 if vertical else -0.08)
         return
-    # Right-side vertical legend. Labels are WRAPPED + ellipsised to a bounded width
-    # so long combo labels (e.g. gender × a long life-situation label) can't balloon
-    # the legend column and shrink the plot. The axes shrink to make room within the
-    # figure; the font steps down as the series count grows so a long list still fits.
+    # Right-side vertical legend. The column is as wide as its longest label
+    # needs, up to what is left once the plot keeps 72 % of its width (the share
+    # it always had); only a label wider than that wraps. The plot takes every inch the legend does not, so the legend
+    # ends at the figure's right edge. (A fixed 26-character wrap and a fixed 72 %
+    # plot used to leave short labels on two lines with the space beside them
+    # empty: "Why doesn't legend box use all space available to the right?",
+    # 2026-11-10.) The font steps down as the series count grows.
     handles, labels = ax.get_legend_handles_labels()
-    wrapped = [_wrap_legend_label(lbl) for lbl in labels]
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0, box.width * 0.72, box.height])
     fs = 9.0 if n <= 12 else (8.0 if n <= 20 else 7.0)
+    fig_w = fig.bbox.width
+    box = ax.get_position()
+    right = 1.0 - _RIGHT_LEGEND_EDGE_PAD
+    floor = box.width * _PLOT_KEEPS
+    # handle + pad (1.0 + 0.5 em) and the legend's own border, in px
+    chrome_px = (1.0 + 0.5 + 2 * 0.4) * fs * fig.dpi / 72.0
+    text_cap = max((right - box.x0 - 1.02 * floor) * fig_w - chrome_px, 40.0)
+    fitted = [_fit_legend_label(fig, lbl, fs, text_cap) for lbl in labels]
     leg = ax.legend(
-        handles, wrapped,
+        handles, fitted,
         loc="center left", bbox_to_anchor=(1.02, 0.5),
         ncol=1, frameon=False, fontsize=fs,
         handlelength=1.0, handletextpad=0.5, labelspacing=0.4,
     )
-    if leg is not None:
-        ink, _muted, _grid = chart_furniture(ctx)
-        for t in leg.get_texts():
-            t.set_color(ink)
+    if leg is None:
+        return
+    ink, _muted, _grid = chart_furniture(ctx)
+    for t in leg.get_texts():
+        t.set_color(ink)
+    leg_w = leg.get_window_extent(fig.canvas.get_renderer()).width / fig_w
+    # x0 + 1.02·w + leg_w = right. Never narrower than the old fixed 72 %, so a
+    # legend at its cap leaves the bars the room they always had.
+    width = max((right - box.x0 - leg_w) / 1.02, floor)
+    ax.set_position([box.x0, box.y0, width, box.height])
+
+
+#: The least share of its width the plot keeps beside a right-hand legend.
+_PLOT_KEEPS: float = 0.72
+#: The gap kept between the legend's right end and the figure edge.
+_RIGHT_LEGEND_EDGE_PAD: float = 0.01
+
+
+def _fit_legend_label(fig, label: str, fs: float, cap_px: float) -> str:
+    """`label` as it is when it fits `cap_px`; else wrapped at word boundaries to
+    the widest line count that fits. Full text, never cut."""
+    if _text_extent_px(fig, label, fs)[0] <= cap_px:
+        return label
+    for chars in range(max(len(label) - 1, 1), 7, -1):
+        wrapped = "\n".join(textwrap.wrap(label, width=chars)) or label
+        if max(_text_extent_px(fig, ln, fs)[0] for ln in wrapped.split("\n")) <= cap_px:
+            return wrapped
+    return "\n".join(textwrap.wrap(label, width=8)) or label
 
 
 def _wrap_legend_label(label: str, width: int = 26, max_lines: int = 2) -> str:
@@ -648,6 +680,26 @@ def _grouped_offsets(segs, segment_primary, cluster_w: float = 0.82):
     return offsets, scale * 0.9, groups
 
 
+def _hbar_offsets(n: int, height: float, grouped=None) -> list[float]:
+    """Where each of a category's *n* horizontal bars sits, FIRST SERIES ON TOP.
+
+    The legend reads its series first to last, left to right or top to bottom;
+    the bars used to be stacked from the bottom up, so on every horizontal bar
+    chart the legend ran the opposite way to the bars ("horizontal barissa
+    legendin arvon esitysjärjestys menee päinvastoin kuin kuvassa"). Columns
+    read left to right and always matched; now the horizontal forms read top
+    to bottom and match too.
+
+    *grouped* is `_grouped_offsets`' result for a cross-tab, whose offsets
+    ascend with the series and so are mirrored the same way. Every horizontal
+    builder takes its positions here — the bars AND their value labels, which
+    used to recompute a plain offset and miss the cross-tab gaps. (2026-11-10)
+    """
+    if grouped:
+        return [-o for o in grouped[0]]
+    return [((n - 1) / 2 - i) * height for i in range(n)] if n > 1 else [0.0]
+
+
 def _grouped_stacked_positions(cats, segment_primary):
     """Stacked cross-tab: absolute bar positions for each cat (= a combo) grouped by
     primary with a gap, plus [(primary_label, group_centre), …] for group labels.
@@ -679,6 +731,18 @@ def _secondary_tick(cat: str) -> str:
 def _total_position(ctx) -> str:
     """The author's "Total position": "top", "bottom" or "auto" (as always)."""
     return getattr(ctx.spec, "total_position", "auto") or "auto"
+
+
+def _hbar_total_position(ctx) -> str:
+    """`_total_position` for grouped horizontal bars: "auto" is "top".
+
+    Those bars were stacked bottom up, so Total — last in the list — was each
+    group's TOP bar. They now run top down to read the way their legend does
+    (`_hbar_offsets`); "auto" keeps Total where every saved slide has it, and
+    the legend follows, since it lists the series in drawn order. (2026-11-10)
+    """
+    position = _total_position(ctx)
+    return position if position in ("top", "bottom") else "top"
 
 
 def _place_total_category(cats, data, position: str):
@@ -1183,7 +1247,7 @@ def _render_small_multiples(ctx, cats, *, vertical: bool, grid: bool = False) ->
             h = 0.82 / n if n > 1 else 0.6
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
-                off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
+                off = _hbar_offsets(n, h)[i]
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
                 drawn.append((ax, y + off, vals, h))
@@ -1425,9 +1489,10 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
     # its panel is omitted rather than rendered as titled, legended 0 % bars.
     groups = _drawable_panels(_primary_groups(series), data)
     default_order = dict(groups)          # colours are dealt along this, per panel
-    # Each panel keeps its own "<variable> · Total". A horizontal panel stacks a
-    # group's bars from the bottom up, so there the reader's top is the list's end.
-    groups = [(p, place_total(segs, _total_position(ctx), top_is_last=not vertical))
+    # Each panel keeps its own "<variable> · Total". Horizontal bars run top to
+    # bottom in list order (`_hbar_offsets`); see `_hbar_total_position`.
+    groups = [(p, place_total(segs, _total_position(ctx) if vertical
+                              else _hbar_total_position(ctx)))
               for p, segs in groups]
     n_cat = len(cats)
     fig_w_in = max(9.0, ctx.slot.width / _EMU_PER_IN)
@@ -1513,7 +1578,7 @@ def _render_variable_panels(ctx, cats, *, vertical: bool) -> None:
             h = 0.82 / n if n > 1 else 0.6
             for i, seg in enumerate(segs):
                 vals = data.get(seg, [None] * n_cat)
-                off = (i - n / 2 + 0.5) * h if n > 1 else 0.0
+                off = _hbar_offsets(n, h)[i]
                 ax.barh(y + off, [v or 0.0 for v in vals], height=h, color=clrs[i],
                         edgecolor="none", zorder=3)
                 drawn.append((ax, y + off, vals, h))
@@ -1755,10 +1820,10 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     # Same transposition as the vertical form: one value per group is a chart
     # of GROUPS, whichever way its bars run.
     cats, segs, data = _as_one_series_per_group(ctx, cats, segs, data)
-    # Categories run top to bottom in the order listed, but a group's own bars
-    # are stacked from the bottom UP — so there the reader's top is the end of
-    # the list, which is why Total, last, has always been each group's top bar.
-    default_segs, segs = coded_order(ctx.series, segs), place_total(segs, _total_position(ctx), top_is_last=True)
+    # Categories run top to bottom in the order listed, and so do a group's own
+    # bars (`_hbar_offsets`) — the order the legend reads. Under "auto" Total
+    # stays each group's top bar, where it has always been drawn.
+    default_segs, segs = coded_order(ctx.series, segs), place_total(segs, _hbar_total_position(ctx))
     cats, data = _place_total_category(cats, data, _total_position(ctx))
     n_cats = len(cats)
     # Reserve as many label lines as the LONGEST label actually needs (2..3), so
@@ -1785,14 +1850,13 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
 
     # Cross-tab: pull the bars apart into primary-classifier groups (gap between groups).
     grouped = _grouped_offsets(segs, ctx.series.segment_primary)
+    if grouped:
+        height = grouped[1]
+    offsets = _hbar_offsets(n_segs, height, grouped)
 
     for i, seg in enumerate(segs):
         vals = data[seg]
-        if grouped:
-            offset, height = grouped[0][i], grouped[1]
-        else:
-            offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
-        ys = y + offset
+        ys = y + offsets[i]
         # R4.2: "Not answered" bar gets MUTED grey; all others get the series colour.
         bar_clrs = [MUTED if c == NOT_ANSWERED_LABEL else clrs[i] for c in cats]
         ax.barh(
@@ -1841,8 +1905,7 @@ def _render_bar_h(ctx, cats, segs, data) -> None:
     thin: list = []
     for i, seg in enumerate(segs):
         vals = data[seg]
-        offset = (i - n_segs / 2 + 0.5) * height if n_segs > 1 else 0.0
-        ys = y + offset
+        ys = y + offsets[i]
         if not labelled:
             thin.append((ys, vals))
             continue

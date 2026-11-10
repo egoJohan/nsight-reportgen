@@ -7,9 +7,10 @@ näkyykö Total alimpana vai ylimpänä kaaviossa?"
 "top" (Total first as the reader meets it: the top row of a horizontal chart,
 the left column of a vertical one, the first entry of a line's legend) or
 "bottom" (last). It is checked on the drawn figure, not in the data, because
-the two orders differ: a grouped horizontal bar stacks its series from the
-bottom up, so there the FIRST series is the LOWEST bar — and Total, last in
-the data, has always been drawn on top.
+the two orders differ: a grouped horizontal bar has always drawn Total as
+each group's TOP bar, though it is last in the data — so there "auto" puts it
+first (the bars, which used to stack bottom up, now read top down like their
+legend; 2026-11-10).
 
 The editor offers the control only while a Total is actually drawn. It works
 that out from the chart's own settings, with a copy of the engine's rule; both

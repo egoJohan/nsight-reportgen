@@ -206,6 +206,9 @@ export interface ChartElements {
    *  own base in the footer. Optional: reports saved before it exists have no
    *  such key, and their behaviour was on. */
   group_base?: boolean;
+  /** The thin line round a pie's, combo's or line's legend. Optional: reports
+   *  saved before it exists have no such key, and their legend was framed. */
+  legend_frame?: boolean;
 }
 
 // Where the template puts its title, read off the fast preview's response

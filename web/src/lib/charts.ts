@@ -445,6 +445,7 @@ export const DEFAULT_ELEMENTS: ChartElements = {
   filter_var: true,
   data_labels: true,
   group_base: true,
+  legend_frame: true,
 };
 
 // Survey order by default: the SAV's own category order is the order the

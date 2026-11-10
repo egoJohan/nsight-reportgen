@@ -68,7 +68,7 @@ import {
   defaultRowSummaryLabel,
 } from "@/lib/charts";
 import { drawsTotal } from "@/lib/totalPosition";
-import { legendNamesKey, legendRows, withSeriesOverride } from "@/lib/legendLabels";
+import { isRename, legendNamesKey, legendRows, withSeriesOverride } from "@/lib/legendLabels";
 
 // The report's grouping override, shared with the leaf preview components so a
 // chart on a manually-grouped question previews the way it renders.
@@ -1448,6 +1448,7 @@ function ChartControls({
       <AxisTitleFields chart={chart} onChange={onChange} />
       <FooterNoteField chart={chart} onChange={onChange} />
       <GroupBaseField chart={chart} onChange={onChange} />
+      <LegendFrameField chart={chart} onChange={onChange} />
       <NumbersField chart={chart} onChange={onChange} />
       <ConfigForm
         schema={schema}
@@ -1650,6 +1651,39 @@ function GroupBaseField({
           checked={shown}
           onChange={(v) =>
             onChange({ elements: { ...chart.elements, group_base: v } })
+          }
+        />
+      }
+    />
+  );
+}
+
+// ── Legend frame: the thin line round the legend ────────────────────────────
+/** The chart types whose legend is drawn in a frame. The bars, radar and the
+ *  rest never framed theirs, so the switch would change nothing there. */
+const FRAMED_LEGEND = new Set(["pie", "doughnut", "combo", "line"]);
+
+function LegendFrameField({
+  chart,
+  onChange,
+}: {
+  chart: ChartSpec;
+  onChange: (patch: Partial<ChartSpec>) => void;
+}) {
+  if (!FRAMED_LEGEND.has(chart.chart_type)) return null;
+  // No legend, no frame to switch.
+  if (chart.elements?.legend === false) return null;
+  // Older reports have no such field; their legend was framed.
+  const shown = chart.elements?.legend_frame !== false;
+  return (
+    <Field
+      label="Legend frame"
+      hint={<>The thin line drawn round the legend.</>}
+      action={
+        <ShowToggle
+          checked={shown}
+          onChange={(v) =>
+            onChange({ elements: { ...chart.elements, legend_frame: v } })
           }
         />
       }
@@ -1880,6 +1914,10 @@ function LabelOverrideInput({
       onBlur={() => {
         focused.current = false;
         if (local !== value) onCommit(local);
+        // A cleared box restores the original name, and must SAY so: the
+        // stored value does not change, so the sync above never fires and the
+        // box would stay empty while the chart shows the original.
+        if (local === "") setLocal(full);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -1965,11 +2003,11 @@ function CategoryLabelEditor({
     return m;
   }, [chart.category_label_overrides]);
 
-  // Write/update a single [full, short] override; empty or == full removes it.
+  // Write/update a single [full, short] override; `isRename` decides — empty or
+  // == full removes it, spaces blank the label.
   const setOverride = (full: string, short: string) => {
-    const trimmed = short.trim();
     const pairs = chart.category_label_overrides.filter(([f]) => f !== full);
-    if (trimmed && trimmed !== full) pairs.push([full, short]);
+    if (isRename(full, short)) pairs.push([full, short]);
     onChange({ category_label_overrides: pairs });
   };
 

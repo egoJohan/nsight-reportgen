@@ -192,13 +192,47 @@ def _crossed_masks(spec, data: pd.DataFrame, model: QuestionModel):
         # One of them resolved to nothing — a stale variable, or a column the
         # material no longer has. Fall back rather than lose the split entirely.
         return None
-    out: dict[str, pd.Series] = {}
+    combos: list[tuple[str, str, pd.Series]] = []
     for l1, m1 in g1.items():
         for l2, m2 in g2.items():
             both = m1 & m2
             if bool(both.any()):
-                out[f"{l1} · {l2}"] = both
+                combos.append((l1, l2, both))
+    # One asked group of the first classifier: every combo would open with the
+    # same word, so it is left off and the filter line names it. See
+    # `_one_asked_primary`.
+    sole = _one_asked_primary(spec, [l1 for l1, _l2, _m in combos])
+    out = {(l2 if sole else f"{l1} · {l2}"): m for l1, l2, m in combos}
     return out or None
+
+
+def _one_asked_primary(spec, primaries) -> bool:
+    """True when a cross-tab's first classifier is down to the ONE group the
+    slide asked for, so naming it on every series says nothing.
+
+    "Ajankohta = 2026" crossed with a segment drew "2026 · Laatua arvostavat",
+    "2026 · Muut segmentit": the year on every legend entry, and a customer who
+    could not get rid of it. The one-classifier battery path already left an
+    asked-for sole group off its bars (`sole_group`); this is the same rule for
+    the cross-tab paths, single, multi and battery alike.
+
+    Keyed on what was asked AND what survived. A stale group narrows nothing
+    (`_selected_rows`), every year is drawn, and then the year is the only thing
+    telling the series apart — so it stays. (2026-11-10)
+
+    A slide whose author already gave that group a name of their own ("2026" →
+    "Vuosi 2026") meant it to be read, and keeps it: dropping it would take away
+    text the author put there. Only a blank rename (spaces) asks for it gone,
+    and that the rename itself already does.
+    """
+    asked = tuple(getattr(spec, "classifying_values", ()) or ())
+    survived = set(primaries)
+    if not (len(asked) == 1 and len(survived) == 1 and survived <= set(asked)):
+        return False
+    renames = (spec.series_label_override_map()
+               if hasattr(spec, "series_label_override_map") else {})
+    own = renames.get(next(iter(survived)), "")
+    return not own.strip() or own == next(iter(survived))
 
 
 def _numeric_like(values: pd.Series) -> bool:
@@ -1303,7 +1337,7 @@ def _code_label_map(var: Variable, seg_codes: set[str]) -> dict[str, str]:
 
 
 def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
-                            cv1: str, cv2: str) -> SeriesResult:
+                            cv1: str, cv2: str, spec=None) -> SeriesResult:
     """Relabel cross-tab combo segments "<c1>|<c2>" → "<label1> · <label2>" using both
     classifiers' value labels, and tag each with its PRIMARY group so the renderer can
     group the bars. The cross-tab Total BAR is DROPPED (a total across both classifiers is
@@ -1318,11 +1352,16 @@ def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
     m1 = _code_label_map(var1, {p[0] for p in parts})
     m2 = _code_label_map(var2, {p[1] for p in parts})
 
+    # The slide asked for one group of the first classifier and only that group
+    # is drawn: name each series by the second classifier alone, and do not
+    # group the bars under a single heading. See `_one_asked_primary`.
+    sole = _one_asked_primary(spec, [m1.get(p[0], p[0]) for p in parts])
+
     def rl(seg: str) -> str:
         if seg == "Total" or "|" not in seg:
             return seg
         a, b = seg.split("|", 1)
-        return f"{m1.get(a, a)} · {m2.get(b, b)}"
+        return m2.get(b, b) if sole else f"{m1.get(a, a)} · {m2.get(b, b)}"
 
     # Segments WITHOUT the Total bar (kept in base_n via rl("Total") == "Total").
     new_segs = tuple(rl(s) for s in result.segments if s != "Total")
@@ -1336,7 +1375,7 @@ def _relabel_combo_segments(result: SeriesResult, model: QuestionModel,
         cells={(cat, rl(seg)): cell for (cat, seg), cell in result.cells.items()
                if seg != "Total"},
         base_n={rl(s): n for s, n in result.base_n.items()},
-        segment_primary=segment_primary or None,
+        segment_primary=(segment_primary or None) if not sole else None,
         row_summary_keys=tuple(rl(s) for s in result.row_summary_keys),
     )
 
@@ -1846,9 +1885,17 @@ def _series_relabelled(result: SeriesResult, overrides: dict[str, str],
 
     A rename that would give two series one name is not applied to either — the
     same rule, and the same renamer, as the category labels. (2026-09-17)
+
+    A name that is only spaces means "show nothing here" and is honoured, not
+    discarded: a customer typed a space over "2026" in the legend to get rid of
+    it, the editor showed the space, and the chart kept drawing "2026" because
+    this filter threw the rename away as if it were empty. On a combination the
+    blanked part leaves with its separator ("2026 · Muut" → "Muut"). An EMPTY
+    name is no rename — the editor clears it to restore the original.
+    (2026-11-10)
     """
-    wanted = {k: v for k, v in overrides.items()
-              if k != "Total" and v and v.strip() and v != k}
+    wanted = {k: (v if v.strip() else "") for k, v in overrides.items()
+              if k != "Total" and v and v != k}
     if not wanted:
         return result
     if result.segment_primary or combinations:
@@ -1894,7 +1941,10 @@ def _combination_parts_relabelled(result: SeriesResult,
     (2026-09-17)
     """
     def rename(seg: str) -> str:
-        return _PART_JOIN.join(wanted.get(p, p) for p in seg.split(_PART_JOIN))
+        # A part renamed to nothing goes with its separator; see
+        # `_series_relabelled`.
+        parts = (wanted.get(p, p) for p in seg.split(_PART_JOIN))
+        return _PART_JOIN.join(p for p in parts if p)
 
     segs = tuple(rename(sg) for sg in result.segments)
     if segs == result.segments or len(set(segs)) != len(segs):
@@ -2021,7 +2071,7 @@ def _finish_series(result: SeriesResult, spec: ChartSpec,
     if _separate_layout(spec):
         pass
     elif spec.classifying_var and cv2:
-        result = _relabel_combo_segments(result, model, spec.classifying_var, cv2)
+        result = _relabel_combo_segments(result, model, spec.classifying_var, cv2, spec)
     elif spec.classifying_var:
         result = _relabel_segments(result, model, spec.classifying_var)
     # Resolve whether the "Total" reference series is drawn (ChartSpec.show_total +

@@ -48,7 +48,7 @@ from reportbuilder.render.house_style import (
 )
 from reportbuilder.stats.engine import NOT_ANSWERED_LABEL
 from reportbuilder.render.image._mpl import VALUE_GID, template_palette
-from reportbuilder.render.image._mpl import wants_group_base
+from reportbuilder.render.image._mpl import wants_group_base, wants_legend_frame, frame_legend
 from reportbuilder.render.panels import panel_segments
 
 _EMU_PER_IN = 914400.0
@@ -171,7 +171,7 @@ def _legend_height_frac(fig, leg) -> float:
 
 
 def _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
-                          bg: str, ink: str, grid: str) -> None:
+                          bg: str, ink: str, grid: str, framed: bool = True) -> None:
     """Add a house-style category legend to the right of the pie (no overlap, full text).
     Category names ONLY — the percentages live on the slices, so repeating them in the
     legend is redundant."""
@@ -182,9 +182,7 @@ def _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
         frameon=True, fontsize=10.5, labelspacing=0.8, handlelength=1.2,
         borderpad=0.8, handletextpad=0.7,
     )
-    leg.get_frame().set_facecolor(bg)
-    leg.get_frame().set_edgecolor(grid)
-    leg.get_frame().set_linewidth(0.8)
+    frame_legend(leg, framed=framed, face=bg, edge=grid)
     for t in leg.get_texts():
         t.set_color(ink)
 
@@ -405,7 +403,7 @@ def _build_pie_figure(ctx, *, donut: bool):
             # and on what.
             _panel_heading(ax, _wrap_legend_label(seg), _panel_base(seg), ink)
         _add_category_legend(fig, ax, wedges, cats, statistic, fmt,
-                              bg, ink, grid)
+                              bg, ink, grid, framed=wants_legend_frame(ctx))
         return fig
 
     fig, axes = _make_panel_axes(ctx, bg, len(sel.labels))
@@ -421,9 +419,7 @@ def _build_pie_figure(ctx, *, donut: bool):
         leg = fig.legend(handles, [_wrap_legend_label(c) for c in cats],
                          loc="lower center", ncol=min(len(cats), 4),
                          frameon=True, fontsize=10.5, bbox_to_anchor=(0.5, 0.01))
-        leg.get_frame().set_facecolor(bg)
-        leg.get_frame().set_edgecolor(grid)
-        leg.get_frame().set_linewidth(0.8)
+        frame_legend(leg, framed=wants_legend_frame(ctx), face=bg, edge=grid)
         for t in leg.get_texts():
             t.set_color(ink)
 

@@ -1645,6 +1645,7 @@ class _ElementTogglesBody(BaseModel):
     filter_var: bool = True
     data_labels: bool = True
     group_base: bool = True
+    legend_frame: bool = True
 
 
 class ChartSpecBody(BaseModel):

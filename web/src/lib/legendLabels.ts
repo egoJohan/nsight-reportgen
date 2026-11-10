@@ -18,16 +18,25 @@ export function legendRows(names: string[], answerLabels: string[]): string[] {
   return names.filter((n) => !answers.has(n));
 }
 
-/** Store, change or remove one rename. Empty, or the name itself, removes it —
- *  the same rule the category labels follow. */
+/** Whether *shown* is a rename of *full* worth storing.
+ *
+ *  Empty, or the name itself, is not: clearing the box restores the original.
+ *  Only spaces IS a rename — to nothing. A customer typed a space over "2026"
+ *  to take it off a legend; the old rule trimmed it to empty and dropped it,
+ *  so the box showed a space and the chart kept "2026". (2026-11-10) */
+export function isRename(full: string, shown: string): boolean {
+  return shown !== "" && shown !== full;
+}
+
+/** Store, change or remove one rename, by `isRename` — the same rule the
+ *  category labels follow. */
 export function withSeriesOverride(
   pairs: [string, string][] | undefined,
   full: string,
   shown: string,
 ): [string, string][] {
   const rest = (pairs ?? []).filter(([f]) => f !== full);
-  const trimmed = shown.trim();
-  return trimmed && trimmed !== full ? [...rest, [full, shown]] : rest;
+  return isRename(full, shown) ? [...rest, [full, shown]] : rest;
 }
 
 /** Settings that cannot change WHICH names the slide draws. Everything else is

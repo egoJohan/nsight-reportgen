@@ -96,9 +96,11 @@ def test_short_of_room_the_sign_goes_before_the_number_turns():
 
 
 def test_on_its_side_a_number_keeps_its_sign_if_it_fits():
-    """Seven answers x six groups: not even "17" fits upright, and on its side
-    "17 %" fits — so it stands, sign and all. The sign goes last."""
-    f = _draw(7, {i: f"R{i}" for i in range(1, 7)})
+    """Nine answers x six groups: not even "12" fits upright, and on its side
+    "12 %" fits — so it stands, sign and all. The sign goes last.
+    (Nine, not seven, since 2026-11-10: the right-hand legend now takes only the
+    width its short labels need, and at seven the wider plot fits "15" upright.)"""
+    f = _draw(9, {i: f"R{i}" for i in range(1, 7)})
     assert f["labels"]
     assert f["rotations"] == {90.0}
     assert all(t.endswith("%") for t in f["labels"]), f["labels"][:6]

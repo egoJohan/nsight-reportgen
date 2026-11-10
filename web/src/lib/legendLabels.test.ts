@@ -22,8 +22,13 @@ describe("withSeriesOverride", () => {
     expect(withSeriesOverride([["Mies", "M"]], "Mies", "Miehet")).toEqual([["Mies", "Miehet"]]);
   });
   it("removes it when cleared or set back to the name itself", () => {
-    expect(withSeriesOverride([["Mies", "M"]], "Mies", "  ")).toEqual([]);
+    expect(withSeriesOverride([["Mies", "M"]], "Mies", "")).toEqual([]);
     expect(withSeriesOverride([["Mies", "M"]], "Mies", "Mies")).toEqual([]);
+  });
+  it("keeps a rename to spaces — that is a rename to nothing", () => {
+    // A space typed over "2026" to take it off the legend. (2026-11-10)
+    expect(withSeriesOverride([], "2026", " ")).toEqual([["2026", " "]]);
+    expect(withSeriesOverride([["2026", "26"]], "2026", "  ")).toEqual([["2026", "  "]]);
   });
   it("keeps the other renames", () => {
     expect(withSeriesOverride([["Nainen", "Naiset"]], "Mies", "Miehet"))

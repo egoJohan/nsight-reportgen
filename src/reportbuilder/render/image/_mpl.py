@@ -790,21 +790,21 @@ def is_total(seg: str) -> bool:
     return seg == "Total" or seg.endswith(" · Total")
 
 
-def place_total(segs, position: str, *, top_is_last: bool = False) -> list:
+def place_total(segs, position: str) -> list:
     """`segs` with its Total(s) moved to where the author asked for them.
 
     `position` is the chart's `total_position`: "top" puts Total first as the
     reader meets it, "bottom" last, and anything else ("auto") leaves the order
-    exactly as it was. `top_is_last` is for a builder that draws its list from
-    the bottom up — a grouped horizontal bar stacks the series of each group
-    upwards, so the reader's top is the END of the list there. (2026-09-11)
+    exactly as it was. Every builder draws its list in reading order (a grouped
+    horizontal bar top down since 2026-11-10), so "top" is always first.
+    (2026-09-11)
     """
     segs = list(segs)
     if position not in ("top", "bottom"):
         return segs
     totals = [s for s in segs if is_total(s)]
     rest = [s for s in segs if not is_total(s)]
-    return totals + rest if (position == "top") != top_is_last else rest + totals
+    return totals + rest if position == "top" else rest + totals
 
 
 def coded_order(series, segs) -> list:
@@ -1148,6 +1148,29 @@ def place_picture_square(ctx, png_path: str, valign: str = "center") -> None:
             pass
 
 
+def wants_legend_frame(ctx) -> bool:
+    """Whether this slide's legend is drawn in a frame (`ElementToggles.legend_frame`)."""
+    return bool(getattr(getattr(ctx.spec, "elements", None), "legend_frame", True))
+
+
+def frame_legend(leg, *, framed: bool, face: str, edge: str) -> None:
+    """The house frame round *leg*, or none when the author switched it off.
+
+    ONE place for every image builder that frames its legend — a pie's, a row
+    of pies', a combo's, a line's — so the "legend frame" switch reaches all of
+    them and a new builder gets it by calling this. (2026-11-10)
+    """
+    if leg is None:
+        return
+    if not framed:
+        leg.set_frame_on(False)
+        return
+    frame = leg.get_frame()
+    frame.set_facecolor(face)
+    frame.set_edgecolor(edge)
+    frame.set_linewidth(0.8)
+
+
 def style_legend(ax, ctx, loc: str = "best") -> None:
     """Apply house-style formatting to an axes legend (shared by all image builders).
 
@@ -1160,9 +1183,7 @@ def style_legend(ax, ctx, loc: str = "best") -> None:
         return
     # Transparent to match the figure: an opaque pill would reintroduce exactly
     # the panel the transparent save exists to avoid.
-    leg.get_frame().set_facecolor("none")
-    leg.get_frame().set_edgecolor(grid)
-    leg.get_frame().set_linewidth(0.8)
+    frame_legend(leg, framed=wants_legend_frame(ctx), face="none", edge=grid)
     for t in leg.get_texts():
         t.set_color(ink)
 

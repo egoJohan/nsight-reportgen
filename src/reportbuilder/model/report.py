@@ -74,6 +74,10 @@ class ElementToggles:
     #: noise. ("Onko meillä mitään tapaa haluttaessa poistaa legendiin tulevat
     #: N-luvut?", 2026-09-16)
     group_base: bool = True
+    #: The thin line round a legend (pies, combos, lines — the bars never drew
+    #: one). Off draws the legend's entries alone. ("Voisiko legendin ympärillä
+    #: olevan reunaviivan jättää pois tick boxilla?", 2026-11-10)
+    legend_frame: bool = True
 
 
 @dataclass(frozen=True)
