@@ -779,9 +779,27 @@ def load_model_for_material(material_id: str, client: DataHiveClient) -> Questio
     return model_for_material(material_id, client)
 
 
-def _load_df_model(material_id: str, client: DataHiveClient):
-    """Like load_model_for_material but also returns the DataFrame (for stats)."""
-    return df_model_for_material(material_id, client)
+def _load_df_model(material_id: str, client: DataHiveClient,
+                   grouping: str | dict | None = None):
+    """Like load_model_for_material but also returns the DataFrame (for stats).
+
+    *grouping* is the report's grouping override (JSON text, as a query
+    parameter carries it, or already parsed). It is applied to the FILE's model,
+    before curation, exactly as the renderer applies it. Laying it over the
+    finished model instead loses the author's groups whose members the automatic
+    pass had already put into a battery: the group never forms and its question
+    404s. That hid the "Groups on this slide" picker on Synsam's brand tick-boxes
+    (staging, 2026-11-13). A malformed grouping falls back to the file's own.
+    """
+    override = None
+    if grouping:
+        try:
+            override = json.loads(grouping) if isinstance(grouping, str) else grouping
+        except (ValueError, TypeError):
+            override = None
+        if not isinstance(override, dict):
+            override = None
+    return df_model_for_material(material_id, client, override)
 
 
 def _question_measurement(model: QuestionModel, q) -> str:
@@ -946,12 +964,7 @@ def question_summary(
     `grouping` is a JSON-encoded GroupingOverride so a GROUPED qid (battery/multi) —
     which exists only after the report's grouping is applied — resolves instead of 404ing.
     """
-    df, model = _load_df_model(material_id, client)
-    if grouping:
-        try:
-            model = apply_grouping_override(model, json.loads(grouping), df=df)
-        except (ValueError, TypeError):
-            pass  # malformed grouping → fall back to the base model
+    df, model = _load_df_model(material_id, client, grouping)
     try:
         q = model.question(qid)
     except KeyError as exc:
@@ -1208,12 +1221,7 @@ def split_groups(
 
     from reportbuilder.stats.engine import _classifier_masks
 
-    df, model = _load_df_model(material_id, client)
-    if grouping:
-        try:
-            model = apply_grouping_override(model, json.loads(grouping), df=df)
-        except (ValueError, TypeError):
-            pass  # malformed grouping → fall back to the base model
+    df, model = _load_df_model(material_id, client, grouping)
 
     spec = ChartSpec(
         question_ref="", chart_type="horizontal_bar", statistic="pct",
@@ -1412,12 +1420,7 @@ def question_segments(
     Degrades to an empty list rather than a 500 — a picker that cannot be
     filled must not stop somebody configuring the rest of the slide.
     """
-    df, model = _load_df_model(material_id, client)
-    if grouping:
-        try:
-            model = apply_grouping_override(model, json.loads(grouping), df=df)
-        except (ValueError, TypeError):
-            pass
+    df, model = _load_df_model(material_id, client, grouping)
     try:
         q = model.question(qid)
     except KeyError as exc:
@@ -1462,12 +1465,7 @@ def question_panels(
     """
     from reportbuilder.render.panels import panel_segments
 
-    df, model = _load_df_model(material_id, client)
-    if grouping:
-        try:
-            model = apply_grouping_override(model, json.loads(grouping), df=df)
-        except (ValueError, TypeError):
-            pass
+    df, model = _load_df_model(material_id, client, grouping)
     try:
         q = model.question(qid)
     except KeyError as exc:

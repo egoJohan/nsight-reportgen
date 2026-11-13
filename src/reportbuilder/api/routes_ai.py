@@ -38,7 +38,6 @@ from reportbuilder.api.deps import get_auth, get_client
 from reportbuilder.api.deps_auth import require_material
 from reportbuilder.api.routes_questions import _category_labels
 from reportbuilder.auth.permissions import User
-from reportbuilder.ingest.grouping_override import apply_grouping_override
 
 log = logging.getLogger(__name__)
 from reportbuilder.api.model_loader import (
@@ -135,9 +134,10 @@ def _reference_labels() -> ReferenceLabels:
     return ReferenceLabels.load(_reference_paths())
 
 
-def _load_df_model(material_id: str, client: DataHiveClient):
-    """Fetch (df, model) with auto-detection AND any manual grouping override applied."""
-    return df_model_for_material(material_id, client)
+def _load_df_model(material_id: str, client: DataHiveClient, override: dict | None = None):
+    """Fetch (df, model) with auto-detection AND the report's grouping *override*
+    applied -- to the file's model, before curation, as the renderer does."""
+    return df_model_for_material(material_id, client, override)
 
 
 def _load_df_model_labeled(material_id: str, client: DataHiveClient):
@@ -551,11 +551,11 @@ def ai_slide_title(
     started = time.monotonic()
     loaded = started
     try:
-        df, model = _load_df_model(material_id, client)
-        # Apply the report's grouping so battery/multi qids resolve (REQ: AI titles for
-        # combined questions). No-op when the caller sends no grouping.
-        if body.grouping:
-            model = apply_grouping_override(model, body.grouping, df=df)
+        # The report's grouping, so battery/multi qids resolve (REQ: AI titles for
+        # combined questions) -- applied to the file's model before curation, as
+        # the renderer does; laid over the finished model it lost every author
+        # group whose members an automatic battery had taken. No-op without one.
+        df, model = _load_df_model(material_id, client, body.grouping or None)
         loaded = time.monotonic()
     except HTTPException:
         raise
